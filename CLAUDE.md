@@ -43,6 +43,10 @@ ADRs are records of validated decisions, not speculative ones.
 - Use it to resume context across sessions
 - Clean up as things get decided/validated/completed
 
+Claude should:
+- Read TODO.md when deciding what to do next (don't rely only on conversation memory)
+- Update TODO.md as work progresses, decisions are made, or new questions arise
+
 ## Git
 
 - Never mention Claude in commit messages
