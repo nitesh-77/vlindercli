@@ -1,4 +1,6 @@
-# Claude Working Guidelines for VlinderAI
+# Claude Working Guidelines
+
+Keep this file general - reusable across projects. Project-specific context goes in TODO.md.
 
 ## Workflow
 
@@ -31,7 +33,15 @@ ADRs are records of validated decisions, not speculative ones.
 - Red: write failing test
 - Green: minimal code to make it pass
 - Refactor: clean up if needed
-- Run `cargo test` to verify
+- Run tests to verify
+
+## TODO.md
+
+- Ungoverned scratchpad for raw thoughts
+- Serialize not-fully-formed ideas
+- Keep it small - not a backlog, just working memory
+- Use it to resume context across sessions
+- Clean up as things get decided/validated/completed
 
 ## Git
 
