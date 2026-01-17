@@ -3,11 +3,12 @@
 ## Workflow
 
 1. Discuss the next domain concept
-2. Write ADR (minimal, one decision)
-3. Commit ADR
-4. Write tests (TDD red phase)
-5. Implement (TDD green phase)
-6. Commit code
+2. Draft ADR (minimal, one decision) - do not commit yet
+3. Write code to validate the decision
+4. Update ADR based on what we learned
+5. Commit ADR + code together
+
+ADRs are records of validated decisions, not speculative ones.
 
 ## Decision Making
 
