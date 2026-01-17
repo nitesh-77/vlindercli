@@ -2,6 +2,8 @@
 
 Keep this file general - reusable across projects. Project-specific context goes in TODO.md.
 
+Git history of this file captures how the working style evolved.
+
 ## Workflow
 
 1. Discuss the next domain concept
