@@ -63,3 +63,26 @@ fn agent_has_name_model_and_behavior() {
     assert_eq!(agent.model.path, "models/llama.gguf");
     assert_eq!(agent.behavior.system_prompt, "Be concise.");
 }
+
+/// Reader agent:
+/// 1. Input: URL
+/// 2. Agent fetches URL directly (Extism HTTP)
+/// 3. Calls infer("Extract...") → runtime returns "[inferred] ..."
+/// 4. Wasm trims whitespace
+/// 5. Calls infer("3 key takeaways...") → runtime returns "[inferred] ..."
+/// 6. Returns formatted output
+#[test]
+fn reader_agent_fetches_and_infers() {
+    let runtime = Runtime::new();
+    let agent = runtime.spawn_agent(
+        "reader-agent",
+        "agents/reader-agent/target/wasm32-unknown-unknown/release/reader_agent.wasm",
+        test_model(),
+        test_behavior(),
+    ).unwrap();
+
+    let result = runtime.execute(&agent, "https://httpbin.org/html");
+
+    // Verify output contains inferred content (runtime echoes prompts with [inferred] prefix)
+    assert!(result.contains("[inferred]"));
+}

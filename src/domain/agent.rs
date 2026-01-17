@@ -1,5 +1,4 @@
-use extism::{Plugin, Manifest, Wasm};
-use std::sync::Mutex;
+use extism::{Plugin, Manifest, Wasm, Function};
 
 pub struct Model {
     pub path: String,
@@ -13,7 +12,7 @@ pub struct Agent {
     pub name: String,
     pub model: Model,
     pub behavior: Behavior,
-    plugin: Mutex<Plugin>,
+    wasm_path: String,
 }
 
 #[derive(Debug)]
@@ -41,20 +40,35 @@ impl Agent {
         model: Model,
         behavior: Behavior,
     ) -> Result<Agent, LoadError> {
-        let wasm = Wasm::file(wasm_path);
-        let manifest = Manifest::new([wasm]);
-        let plugin = Plugin::new(&manifest, [], true)?;
+        // TODO: validate wasm with runtime-provided functions
+        // For now, just check file exists
+        if !std::path::Path::new(wasm_path).exists() {
+            return Err(LoadError::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "wasm not found",
+            )));
+        }
 
         Ok(Agent {
             name: name.to_string(),
             model,
             behavior,
-            plugin: Mutex::new(plugin),
+            wasm_path: wasm_path.to_string(),
         })
     }
 
     pub fn execute(&self, input: &str) -> String {
-        let mut plugin = self.plugin.lock().unwrap();
+        self.execute_with_functions(input, [])
+    }
+
+    pub fn execute_with_functions(
+        &self,
+        input: &str,
+        functions: impl IntoIterator<Item = Function>,
+    ) -> String {
+        let wasm = Wasm::file(&self.wasm_path);
+        let manifest = Manifest::new([wasm]).with_allowed_host("*");
+        let mut plugin = Plugin::new(&manifest, functions, true).unwrap();
         plugin.call("process", input).unwrap()
     }
 }
