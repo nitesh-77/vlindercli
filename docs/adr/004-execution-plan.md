@@ -1,4 +1,4 @@
-# ADR 004: ExecutionPlan is a DAG
+# ADR 004: ExecutionPlan Yields Operations
 
 ## Status
 
@@ -6,23 +6,22 @@ Accepted
 
 ## Context
 
-Agents may need to specify what happens next - call another agent, chain operations, or run things in parallel.
+Agents may produce work for the runtime to execute - calling other agents, chaining operations, running things in parallel.
 
 ## Domain Decision
 
-An ExecutionPlan is a DAG (directed acyclic graph) of operations.
+An ExecutionPlan is something that yields operations.
 
-- Single operation: trivial DAG with one node
-- Sequence: linear DAG (A → B → C)
-- Complex workflow: DAG with branches and dependencies
+Given previous results, it decides what to run next. It controls the iteration. The runtime just executes what it's given.
 
-AgentOutput can include an ExecutionPlan:
+- Yields nothing: done
+- Yields one operation: run it
+- Yields many operations: run in parallel
 
-```rust
-struct AgentOutput {
-    response: Option<String>,
-    next: Option<ExecutionPlan>,
-}
-```
+This separates concerns:
+- **Plan**: decides WHAT to run next
+- **Runtime**: decides HOW to execute
 
-The specific data structure is an implementation detail. The domain concept is: it's a DAG.
+The plan is an iterator. The runtime consumes it.
+
+AgentOutput can include an ExecutionPlan. This is how agents produce work for the runtime.
