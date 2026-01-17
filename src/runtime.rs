@@ -12,10 +12,10 @@ impl Runtime {
         &self,
         name: &str,
         wasm_path: &str,
-        model: Model,
+        models: Vec<Model>,
         behavior: Behavior,
     ) -> Result<Agent, LoadError> {
-        Agent::load(name, wasm_path, model, behavior)
+        Agent::load(name, wasm_path, models, behavior)
     }
 
     pub fn execute(&self, agent: &Agent, input: &str) -> String {

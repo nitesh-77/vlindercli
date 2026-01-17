@@ -1,5 +1,5 @@
 use std::io::{self, Write};
-use vlindercli::domain::{Model, Behavior};
+use vlindercli::domain::{Model, ModelType, Behavior};
 use vlindercli::runtime::Runtime;
 
 fn main() {
@@ -9,7 +9,10 @@ fn main() {
     let agent = runtime.spawn_agent(
         "reader-agent",
         "agents/reader-agent/target/wasm32-unknown-unknown/release/reader_agent.wasm",
-        Model { path: "models/default.gguf".to_string() },
+        vec![Model {
+            model_type: ModelType::Inference,
+            path: "models/default.gguf".to_string(),
+        }],
         Behavior { system_prompt: "You are helpful.".to_string() },
     ).expect("Failed to load agent");
 

@@ -1,6 +1,14 @@
 use extism::{Plugin, Manifest, Wasm, Function};
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum ModelType {
+    Inference,
+    Embedding,
+}
+
+#[derive(Clone, Debug)]
 pub struct Model {
+    pub model_type: ModelType,
     pub path: String,
 }
 
@@ -10,7 +18,7 @@ pub struct Behavior {
 
 pub struct Agent {
     pub name: String,
-    pub model: Model,
+    pub models: Vec<Model>,
     pub behavior: Behavior,
     wasm_path: String,
 }
@@ -37,11 +45,9 @@ impl Agent {
     pub fn load(
         name: &str,
         wasm_path: &str,
-        model: Model,
+        models: Vec<Model>,
         behavior: Behavior,
     ) -> Result<Agent, LoadError> {
-        // TODO: validate wasm with runtime-provided functions
-        // For now, just check file exists
         if !std::path::Path::new(wasm_path).exists() {
             return Err(LoadError::Io(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
@@ -49,9 +55,11 @@ impl Agent {
             )));
         }
 
+        // TODO: validate model paths exist
+
         Ok(Agent {
             name: name.to_string(),
-            model,
+            models,
             behavior,
             wasm_path: wasm_path.to_string(),
         })

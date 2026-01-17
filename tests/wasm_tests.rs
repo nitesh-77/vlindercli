@@ -1,8 +1,11 @@
-use vlindercli::domain::{Model, Behavior};
+use vlindercli::domain::{Model, ModelType, Behavior};
 use vlindercli::runtime::Runtime;
 
-fn test_model() -> Model {
-    Model { path: "models/test.gguf".to_string() }
+fn test_models() -> Vec<Model> {
+    vec![Model {
+        model_type: ModelType::Inference,
+        path: "models/test.gguf".to_string(),
+    }]
 }
 
 fn test_behavior() -> Behavior {
@@ -15,7 +18,7 @@ fn agent_echo() {
     let agent = runtime.spawn_agent(
         "echo-agent",
         "agents/echo-agent/target/wasm32-unknown-unknown/release/echo_agent.wasm",
-        test_model(),
+        test_models(),
         test_behavior(),
     ).unwrap();
 
@@ -29,7 +32,7 @@ fn agent_upper() {
     let agent = runtime.spawn_agent(
         "upper-agent",
         "agents/upper-agent/target/wasm32-unknown-unknown/release/upper_agent.wasm",
-        test_model(),
+        test_models(),
         test_behavior(),
     ).unwrap();
 
@@ -43,24 +46,30 @@ fn spawn_fails_for_missing_wasm() {
     let result = runtime.spawn_agent(
         "missing",
         "does/not/exist.wasm",
-        test_model(),
+        test_models(),
         test_behavior(),
     );
     assert!(result.is_err());
 }
 
 #[test]
-fn agent_has_name_model_and_behavior() {
+fn agent_has_name_models_and_behavior() {
     let runtime = Runtime::new();
     let agent = runtime.spawn_agent(
         "echo-agent",
         "agents/echo-agent/target/wasm32-unknown-unknown/release/echo_agent.wasm",
-        Model { path: "models/llama.gguf".to_string() },
+        vec![
+            Model { model_type: ModelType::Inference, path: "models/llama.gguf".to_string() },
+            Model { model_type: ModelType::Embedding, path: "models/e5.gguf".to_string() },
+        ],
         Behavior { system_prompt: "Be concise.".to_string() },
     ).unwrap();
 
     assert_eq!(agent.name, "echo-agent");
-    assert_eq!(agent.model.path, "models/llama.gguf");
+    assert_eq!(agent.models.len(), 2);
+    assert_eq!(agent.models[0].model_type, ModelType::Inference);
+    assert_eq!(agent.models[0].path, "models/llama.gguf");
+    assert_eq!(agent.models[1].model_type, ModelType::Embedding);
     assert_eq!(agent.behavior.system_prompt, "Be concise.");
 }
 
@@ -77,7 +86,7 @@ fn reader_agent_fetches_and_infers() {
     let agent = runtime.spawn_agent(
         "reader-agent",
         "agents/reader-agent/target/wasm32-unknown-unknown/release/reader_agent.wasm",
-        test_model(),
+        test_models(),
         test_behavior(),
     ).unwrap();
 
