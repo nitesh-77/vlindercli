@@ -13,6 +13,10 @@ struct Agent {
     behavior: Behavior,
 }
 
+struct AgentOutput {
+    response: String,
+}
+
 fn main() {
     println!("Hello, world!");
 }
@@ -115,5 +119,14 @@ mod tests {
         assert_eq!(note_taker.model.path, podcast_agent.model.path);
         // Different behavior
         assert_ne!(note_taker.behavior.system_prompt, podcast_agent.behavior.system_prompt);
+    }
+
+    #[test]
+    fn agent_output_has_response() {
+        let output = AgentOutput {
+            response: "Here are your notes.".to_string(),
+        };
+
+        assert_eq!(output.response, "Here are your notes.");
     }
 }
