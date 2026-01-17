@@ -138,6 +138,7 @@ Packaged as a Vlinderbox containing:
 - Self-contained: owns full domain workflow, constructs own prompts
 - Black box: receives text, returns text, no shared state with other agents
 - Standalone: works without orchestrator
+- Single responsibility: does one thing; when in doubt, split into two agents
 
 **Inheritance:** Vlinderbox can specify parent and override parts (like Vagrant/Docker).
 
