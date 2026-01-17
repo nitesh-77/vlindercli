@@ -1,4 +1,4 @@
-use vlindercli::domain::{Model, Behavior, Executable};
+use vlindercli::domain::{Model, Behavior};
 use vlindercli::runtime::Runtime;
 
 fn test_model() -> Model {
@@ -19,7 +19,7 @@ fn agent_echo() {
         test_behavior(),
     ).unwrap();
 
-    let result = agent.execute(runtime.engine(), "hello");
+    let result = agent.execute("hello");
     assert_eq!(result, "echo: hello");
 }
 
@@ -33,7 +33,7 @@ fn agent_upper() {
         test_behavior(),
     ).unwrap();
 
-    let result = agent.execute(runtime.engine(), "hello");
+    let result = agent.execute("hello");
     assert_eq!(result, "HELLO");
 }
 

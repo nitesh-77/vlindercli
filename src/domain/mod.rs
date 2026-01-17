@@ -1,3 +1,3 @@
 mod agent;
 
-pub use agent::{Agent, Model, Behavior, Executable, LoadError};
+pub use agent::{Agent, Model, Behavior, LoadError};

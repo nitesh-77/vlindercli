@@ -1,15 +1,10 @@
-use wasmtime::Engine;
 use crate::domain::{Agent, Model, Behavior, LoadError};
 
-pub struct Runtime {
-    engine: Engine,
-}
+pub struct Runtime;
 
 impl Runtime {
     pub fn new() -> Self {
-        Runtime {
-            engine: Engine::default(),
-        }
+        Runtime
     }
 
     pub fn spawn_agent(
@@ -19,10 +14,6 @@ impl Runtime {
         model: Model,
         behavior: Behavior,
     ) -> Result<Agent, LoadError> {
-        Agent::load(name, wasm_path, model, behavior, &self.engine)
-    }
-
-    pub fn engine(&self) -> &Engine {
-        &self.engine
+        Agent::load(name, wasm_path, model, behavior)
     }
 }
