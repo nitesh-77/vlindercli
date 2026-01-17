@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Superseded by ADR 005
 
 ## Context
 
@@ -25,3 +25,15 @@ This separates concerns:
 The plan is an iterator. The runtime consumes it.
 
 AgentOutput can include an ExecutionPlan. This is how agents produce work for the runtime.
+
+## Why Superseded
+
+This decision assumed ExecutionPlan could be a closure at runtime level. But:
+
+1. **Agents are wasm.** Closures can't cross the wasm boundary.
+2. **Memory efficiency.** A closure requires the agent to stay loaded while operations execute. Agents should be unloadable.
+3. **Orchestrator is just an agent.** The orchestrator is wasm too - same constraints apply.
+
+The "iterator that yields operations" concept is correct. But the implementation must be a suspended wasm coroutine, not a runtime closure.
+
+See ADR 005.

@@ -1,93 +1,89 @@
 use wasmtime::*;
 use std::sync::{Arc, Mutex};
 
-#[test]
-fn wasm_can_load_and_run() {
-    // Simple wasm that adds two numbers
-    let engine = Engine::default();
-    let module = Module::new(&engine, r#"
-        (module
-            (func (export "add") (param i32 i32) (result i32)
-                local.get 0
-                local.get 1
-                i32.add
-            )
-        )
-    "#).unwrap();
-
-    let mut store = Store::new(&engine, ());
-    let instance = Instance::new(&mut store, &module, &[]).unwrap();
-    let add = instance.get_typed_func::<(i32, i32), i32>(&mut store, "add").unwrap();
-
-    let result = add.call(&mut store, (2, 3)).unwrap();
-    assert_eq!(result, 5);
-}
-
-#[test]
-fn wasm_can_call_host_function() {
-    let yielded = Arc::new(Mutex::new(Vec::new()));
-    let yielded_clone = yielded.clone();
-
-    let engine = Engine::default();
-    let mut linker = Linker::new(&engine);
-
-    // Host function that wasm can call to "yield"
-    linker.func_wrap("host", "yield_op", move |agent: i32| {
-        yielded_clone.lock().unwrap().push(agent);
-    }).unwrap();
-
-    let module = Module::new(&engine, r#"
-        (module
-            (import "host" "yield_op" (func $yield_op (param i32)))
-            (func (export "run")
-                i32.const 42
-                call $yield_op
-                i32.const 43
-                call $yield_op
-            )
-        )
-    "#).unwrap();
-
-    let mut store = Store::new(&engine, ());
-    let instance = linker.instantiate(&mut store, &module).unwrap();
-    let run = instance.get_typed_func::<(), ()>(&mut store, "run").unwrap();
-
-    run.call(&mut store, ()).unwrap();
-
-    assert_eq!(*yielded.lock().unwrap(), vec![42, 43]);
-}
-
 #[tokio::test]
-async fn wasm_can_suspend_and_resume() {
-    // Track the sequence of events
-    let events = Arc::new(Mutex::new(Vec::new()));
-    let events_clone = events.clone();
+async fn wasm_yield_to_with_text_protocol() {
+    // Track what agent was called with what input
+    let calls = Arc::new(Mutex::new(Vec::<(String, String)>::new()));
+    let calls_clone = calls.clone();
 
     let mut config = Config::new();
     config.async_support(true);
     let engine = Engine::new(&config).unwrap();
 
-    let mut linker = Linker::new(&engine);
+    let mut linker = Linker::<()>::new(&engine);
 
-    // Host function that suspends wasm and lets runtime do work
-    linker.func_wrap_async("host", "yield_op", move |_caller: Caller<'_, ()>, (op,): (i32,)| {
-        let events = events_clone.clone();
-        Box::new(async move {
-            events.lock().unwrap().push(format!("wasm yielded: {}", op));
-            // Simulate runtime doing work while wasm is suspended
-            events.lock().unwrap().push("runtime working".to_string());
-            events.lock().unwrap().push(format!("resuming wasm after: {}", op));
-        })
-    }).unwrap();
+    // yield_to(agent_ptr, agent_len, input_ptr, input_len, response_buf_ptr, response_buf_len) -> response_len
+    // Host reads strings from wasm memory, simulates agent call, writes response to provided buffer
+    linker.func_wrap_async(
+        "host",
+        "yield_to",
+        move |mut caller: Caller<'_, ()>,
+              (agent_ptr, agent_len, input_ptr, input_len, resp_buf_ptr, resp_buf_len): (i32, i32, i32, i32, i32, i32)| {
+            let calls = calls_clone.clone();
+            Box::new(async move {
+                // Read agent name from wasm memory
+                let memory = caller.get_export("memory").unwrap().into_memory().unwrap();
+                let data = memory.data(&caller);
 
+                let agent = std::str::from_utf8(
+                    &data[agent_ptr as usize..(agent_ptr + agent_len) as usize]
+                ).unwrap().to_string();
+
+                let input = std::str::from_utf8(
+                    &data[input_ptr as usize..(input_ptr + input_len) as usize]
+                ).unwrap().to_string();
+
+                // Record the call
+                calls.lock().unwrap().push((agent.clone(), input.clone()));
+
+                // Simulate agent response
+                let response = format!("response from {} for: {}", agent, input);
+                let response_bytes = response.as_bytes();
+                let write_len = std::cmp::min(response_bytes.len(), resp_buf_len as usize);
+
+                // Write response to provided buffer
+                let memory = caller.get_export("memory").unwrap().into_memory().unwrap();
+                memory.data_mut(&mut caller)[resp_buf_ptr as usize..resp_buf_ptr as usize + write_len]
+                    .copy_from_slice(&response_bytes[..write_len]);
+
+                // Return actual response length
+                write_len as i32
+            })
+        },
+    ).unwrap();
+
+    // WAT module that calls yield_to and captures the response
     let module = Module::new(&engine, r#"
         (module
-            (import "host" "yield_op" (func $yield_op (param i32)))
+            (import "host" "yield_to" (func $yield_to (param i32 i32 i32 i32 i32 i32) (result i32)))
+
+            (memory (export "memory") 1)
+
+            ;; Response buffer at offset 256, size 256
+            ;; Store actual response length
+            (global $last_response_len (mut i32) (i32.const 0))
+            (func (export "get_last_response") (result i32 i32)
+                (i32.const 256)  ;; response buffer ptr
+                (global.get $last_response_len)
+            )
+
+            ;; Data section: agent name and input at known offsets
+            (data (i32.const 0) "note-taker")      ;; 10 bytes at offset 0
+            (data (i32.const 16) "get all notes")  ;; 13 bytes at offset 16
+
             (func (export "run")
-                i32.const 1
-                call $yield_op
-                i32.const 2
-                call $yield_op
+                ;; Call yield_to("note-taker", "get all notes", response_buf, buf_size)
+                (global.set $last_response_len
+                    (call $yield_to
+                        (i32.const 0)    ;; agent_ptr
+                        (i32.const 10)   ;; agent_len
+                        (i32.const 16)   ;; input_ptr
+                        (i32.const 13)   ;; input_len
+                        (i32.const 256)  ;; response_buf_ptr
+                        (i32.const 256)  ;; response_buf_len
+                    )
+                )
             )
         )
     "#).unwrap();
@@ -96,17 +92,22 @@ async fn wasm_can_suspend_and_resume() {
     let instance = linker.instantiate_async(&mut store, &module).await.unwrap();
     let run = instance.get_typed_func::<(), ()>(&mut store, "run").unwrap();
 
-    events.lock().unwrap().push("starting wasm".to_string());
     run.call_async(&mut store, ()).await.unwrap();
-    events.lock().unwrap().push("wasm completed".to_string());
 
-    let events = events.lock().unwrap();
-    assert_eq!(events[0], "starting wasm");
-    assert_eq!(events[1], "wasm yielded: 1");
-    assert_eq!(events[2], "runtime working");
-    assert_eq!(events[3], "resuming wasm after: 1");
-    assert_eq!(events[4], "wasm yielded: 2");
-    assert_eq!(events[5], "runtime working");
-    assert_eq!(events[6], "resuming wasm after: 2");
-    assert_eq!(events[7], "wasm completed");
+    // Verify the call was made with correct strings
+    let calls = calls.lock().unwrap();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].0, "note-taker");
+    assert_eq!(calls[0].1, "get all notes");
+
+    // Verify response was written back
+    let get_last_response = instance.get_typed_func::<(), (i32, i32)>(&mut store, "get_last_response").unwrap();
+    let (resp_ptr, resp_len) = get_last_response.call_async(&mut store, ()).await.unwrap();
+
+    let memory = instance.get_memory(&mut store, "memory").unwrap();
+    let response = std::str::from_utf8(
+        &memory.data(&store)[resp_ptr as usize..(resp_ptr + resp_len) as usize]
+    ).unwrap();
+
+    assert_eq!(response, "response from note-taker for: get all notes");
 }

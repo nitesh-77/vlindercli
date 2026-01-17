@@ -17,10 +17,3 @@ pub struct Operation {
     pub agent: String,
     pub input: String,
 }
-
-pub type ExecutionPlan = Box<dyn FnMut(Vec<AgentOutput>) -> Vec<Operation>>;
-
-pub struct AgentOutput {
-    pub response: Option<String>,
-    pub plan: Option<ExecutionPlan>,
-}

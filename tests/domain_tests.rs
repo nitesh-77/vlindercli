@@ -97,16 +97,6 @@ fn same_model_different_behavior_different_agent() {
 }
 
 #[test]
-fn agent_output_has_response() {
-    let output = AgentOutput {
-        response: Some("Here are your notes.".to_string()),
-        plan: None,
-    };
-
-    assert_eq!(output.response, Some("Here are your notes.".to_string()));
-}
-
-#[test]
 fn operation_specifies_agent_and_input() {
     let op = Operation {
         agent: "note-taker".to_string(),
@@ -115,68 +105,4 @@ fn operation_specifies_agent_and_input() {
 
     assert_eq!(op.agent, "note-taker");
     assert_eq!(op.input, "get all notes");
-}
-
-#[test]
-fn execution_plan_yields_operations() {
-    let mut done = false;
-    let mut plan: ExecutionPlan = Box::new(move |_results| {
-        if done {
-            return vec![];
-        }
-        done = true;
-        vec![Operation {
-            agent: "note-taker".to_string(),
-            input: "get notes".to_string(),
-        }]
-    });
-
-    let ops = plan(vec![]);
-    assert_eq!(ops.len(), 1);
-    assert_eq!(ops[0].agent, "note-taker");
-
-    // After yielding, plan is done
-    let ops = plan(vec![]);
-    assert_eq!(ops.len(), 0);
-}
-
-#[test]
-fn execution_plan_can_yield_parallel_operations() {
-    let mut done = false;
-    let mut plan: ExecutionPlan = Box::new(move |_results| {
-        if done {
-            return vec![];
-        }
-        done = true;
-        vec![
-            Operation {
-                agent: "agent-a".to_string(),
-                input: "task a".to_string(),
-            },
-            Operation {
-                agent: "agent-b".to_string(),
-                input: "task b".to_string(),
-            },
-        ]
-    });
-
-    let ops = plan(vec![]);
-    assert_eq!(ops.len(), 2); // Both at once = parallel
-}
-
-#[test]
-fn agent_output_can_include_execution_plan() {
-    let plan: ExecutionPlan = Box::new(|_results| {
-        vec![Operation {
-            agent: "note-taker".to_string(),
-            input: "get notes".to_string(),
-        }]
-    });
-
-    let output = AgentOutput {
-        response: Some("Let me check your notes...".to_string()),
-        plan: Some(plan),
-    };
-
-    assert!(output.plan.is_some());
 }
