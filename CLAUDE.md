@@ -49,6 +49,13 @@ Claude should:
 - Read TODO.md when deciding what to do next (don't rely only on conversation memory)
 - Update TODO.md as work progresses, decisions are made, or new questions arise
 
+## Prototyping
+
+- Write throwaway code to learn, not to keep
+- Prototypes reveal consequences you couldn't see upfront
+- Once you understand, delete and take a small confident step forward
+- The value is in what you learned, not the code itself
+
 ## Git
 
 - Never mention Claude in commit messages
