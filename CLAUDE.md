@@ -1,11 +1,20 @@
 # Claude Working Guidelines for VlinderAI
 
+## Workflow
+
+1. Discuss the next domain concept
+2. Write ADR (minimal, one decision)
+3. Commit ADR
+4. Write tests (TDD red phase)
+5. Implement (TDD green phase)
+6. Commit code
+
 ## Decision Making
 
 - Whittle decisions down to the smallest possible increment
 - One ADR captures one domain decision
 - Don't overreach - focus on what's needed now
-- Implementation details come later, domain insights come first
+- Domain insights first, implementation details later
 
 ## ADRs
 
@@ -13,13 +22,6 @@
 - Strip out anything that can be deferred
 - If an ADR mentions multiple decisions, split them
 - Future decisions get their own ADRs when we actually need to make them
-
-## Building
-
-- Start with the smallest thing that proves the domain model
-- Don't optimize before writing code
-- Preserve optionality - avoid lock-in to specific implementations
-- Extend later when needed, not before
 
 ## Implementation (TDD)
 
