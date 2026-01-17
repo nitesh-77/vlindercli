@@ -1,6 +1,10 @@
 [package]
 name = "vlindercli"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
+wasmtime = "27"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
