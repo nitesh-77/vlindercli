@@ -1,14 +1,7 @@
 use extism::{Plugin, Manifest, Wasm, Function};
 
-#[derive(Clone, Debug, PartialEq)]
-pub enum ModelType {
-    Inference,
-    Embedding,
-}
-
 #[derive(Clone, Debug)]
 pub struct Model {
-    pub model_type: ModelType,
     pub name: String,
 }
 

@@ -1,11 +1,8 @@
-use vlindercli::domain::{Model, ModelType, Behavior};
+use vlindercli::domain::{Model, Behavior};
 use vlindercli::runtime::Runtime;
 
 fn test_models() -> Vec<Model> {
-    vec![Model {
-        model_type: ModelType::Inference,
-        name: "phi3".to_string(),
-    }]
+    vec![Model { name: "phi3".to_string() }]
 }
 
 fn test_behavior() -> Behavior {
@@ -59,17 +56,16 @@ fn agent_has_name_models_and_behavior() {
         "echo-agent",
         "agents/echo-agent/target/wasm32-unknown-unknown/release/echo_agent.wasm",
         vec![
-            Model { model_type: ModelType::Inference, name: "llama3".to_string() },
-            Model { model_type: ModelType::Embedding, name: "nomic-embed".to_string() },
+            Model { name: "llama3".to_string() },
+            Model { name: "nomic-embed".to_string() },
         ],
         Behavior { system_prompt: "Be concise.".to_string() },
     ).unwrap();
 
     assert_eq!(agent.name, "echo-agent");
     assert_eq!(agent.models.len(), 2);
-    assert_eq!(agent.models[0].model_type, ModelType::Inference);
     assert_eq!(agent.models[0].name, "llama3");
-    assert_eq!(agent.models[1].model_type, ModelType::Embedding);
+    assert_eq!(agent.models[1].name, "nomic-embed");
     assert_eq!(agent.behavior.system_prompt, "Be concise.");
 }
 

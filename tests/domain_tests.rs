@@ -1,12 +1,8 @@
-use vlindercli::domain::{Model, ModelType, Behavior};
+use vlindercli::domain::{Model, Behavior};
 
 #[test]
-fn model_has_type_and_name() {
-    let model = Model {
-        model_type: ModelType::Inference,
-        name: "llama3".to_string(),
-    };
-    assert_eq!(model.model_type, ModelType::Inference);
+fn model_has_name() {
+    let model = Model { name: "llama3".to_string() };
     assert_eq!(model.name, "llama3");
 }
 
