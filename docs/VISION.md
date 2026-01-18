@@ -2,6 +2,54 @@
 
 Local-first AI agent runtime with portable agent packaging.
 
+## The Bet
+
+A handful of good models can power an exponential number of agents.
+
+Model building requires massive resources - data, compute, expertise. But agent building should be accessible to many. The ecosystem grows when more people can build agents on top of fewer, well-optimized models.
+
+## Target Hardware
+
+Consumer machines:
+- Mac (Apple Silicon)
+- Gaming rigs (NVIDIA GPU)
+- Mini PCs (Beelink, Intel NUC)
+- NAS with compute
+
+Initial audience: homelab enthusiasts, r/selfhosted, r/LocalLLaMA types.
+
+This constraint shapes everything. We optimize for local, not cloud. Constrained memory, not infinite scale.
+
+## Abstraction Levels
+
+```
+Model builders     (few)      → train and optimize models
+Agent builders     (many)     → compose agents using models
+Users              (most)     → use agents to accomplish goals
+```
+
+VlinderAI focuses on the **agent builder**. We make it easy to build agents by:
+- Abstracting away model loading, GPU scheduling, memory management
+- Letting agent builders focus on business logic, prompts, and behavior
+- Handling the hard local-hardware problems in the runtime
+
+**Agent builders think in:** model names, system prompts, temperatures.
+
+**Agent builders don't think about:** Rust crates, C++ bindings, GGUF formats, quantization.
+
+```rust
+// What agent builders write:
+Model::inference("phi3")
+    .system_prompt("You summarize articles concisely")
+    .temperature(0.7)
+
+// What they DON'T write:
+LlamaEngine::load(Path::new("models/phi-3-mini-4k-instruct-q4.gguf"))
+    .with_context_params(...)
+```
+
+The runtime handles the translation from "phi3" to the actual model file, loader, and hardware configuration.
+
 ## Problem
 
 Hugging Face is npm without package.json — all libraries, no applications. Users can download models, but a model does nothing on its own. There's no composability, no way to download something and just run it, no way to chain inputs and outputs without writing code.
@@ -190,13 +238,6 @@ Different capabilities need different models (language, vision, speech).
 - DAG lookahead: preload next model while current inference runs
 - Overlap compute and I/O
 
-### Backend
-
-TBD. Requirements:
-- Control model loading/unloading
-- Cross-platform: Mac (Metal), Windows (CUDA/DirectML), Linux (CUDA)
-- Likely custom implementation — packaging format and model management are tightly coupled
-
 ---
 
 ## Storage
@@ -353,18 +394,6 @@ Orchestrator's vector store accumulates over time. Preferences, ideas, history. 
 
 ---
 
-## Target Hardware
-
-Consumer machines:
-- Mac (Apple Silicon)
-- Gaming rigs (NVIDIA GPU)
-- Mini PCs (Beelink, Intel NUC)
-- NAS with compute
-
-Initial audience: homelab enthusiasts, r/selfhosted, r/LocalLLaMA types.
-
----
-
 ## Implementation Language
 
 Rust.
@@ -378,17 +407,6 @@ Rust.
 - Conversational agent authoring
 - Advanced scheduling optimizations
 - Threaded CLI conversations
-
----
-
-## Open Questions
-
-| Question | Status |
-|----------|--------|
-| Wasm-to-runtime inference overhead | Believed negligible, verify with spike |
-| Intent matching reliability | Test off-the-shelf models before custom training |
-| Inference backend approach | Custom likely needed; packaging and model management tightly coupled |
-| Vlinderbox format specifics | Emerges from building real agents |
 
 ---
 
