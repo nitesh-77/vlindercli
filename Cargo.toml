@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 extism = "1"
+llama-cpp-2 = { version = "0.1", features = ["metal"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

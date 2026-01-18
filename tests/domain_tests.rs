@@ -1,15 +1,23 @@
-use vlindercli::domain::{Model, Behavior};
+use vlindercli::domain::{Agent, Model};
 
 #[test]
-fn model_has_name() {
-    let model = Model { name: "llama3".to_string() };
-    assert_eq!(model.name, "llama3");
+fn agent_load_derives_wasm_path() {
+    let agent = Agent::load("echo-agent", vec![]).unwrap();
+    assert_eq!(agent.name, "echo-agent");
 }
 
 #[test]
-fn behavior_has_system_prompt() {
-    let behavior = Behavior {
-        system_prompt: "You are helpful.".to_string(),
-    };
-    assert_eq!(behavior.system_prompt, "You are helpful.");
+fn agent_load_fails_for_unknown() {
+    let result = Agent::load("unknown-agent", vec![]);
+    assert!(result.is_err());
+}
+
+#[test]
+fn agent_has_model_validation() {
+    let agent = Agent::load("echo-agent", vec![
+        Model { name: "phi3".to_string() },
+    ]).unwrap();
+
+    assert!(agent.has_model("phi3"));
+    assert!(!agent.has_model("llama3"));
 }

@@ -1,4 +1,5 @@
-use crate::domain::{Agent, Model, Behavior, LoadError};
+use crate::domain::Agent;
+use crate::inference::load_engine;
 use extism::{Function, UserData};
 
 pub struct Runtime;
@@ -8,32 +9,33 @@ impl Runtime {
         Runtime
     }
 
-    pub fn spawn_agent(
-        &self,
-        name: &str,
-        wasm_path: &str,
-        models: Vec<Model>,
-        behavior: Behavior,
-    ) -> Result<Agent, LoadError> {
-        Agent::load(name, wasm_path, models, behavior)
-    }
-
     pub fn execute(&self, agent: &Agent, input: &str) -> String {
-        agent.execute_with_functions(input, [make_infer_function()])
+        agent.execute_with_functions(input, [make_infer_function(agent.clone())])
     }
 }
 
-fn make_infer_function() -> Function {
+fn make_infer_function(agent: Agent) -> Function {
     Function::new(
         "infer",
+        [extism::PTR, extism::PTR],  // model_name, prompt
         [extism::PTR],
-        [extism::PTR],
-        UserData::new(()),
-        |plugin, inputs, outputs, _| {
-            let prompt: String = plugin.memory_get_val(&inputs[0])?;
+        UserData::new(agent),        // attach agent for validation
+        |plugin, inputs, outputs, user_data| {
+            let model_name: String = plugin.memory_get_val(&inputs[0])?;
+            let prompt: String = plugin.memory_get_val(&inputs[1])?;
 
-            // TODO: call actual LLM (llama.cpp, ollama, etc.)
-            let response = format!("[inferred] {}", prompt);
+            let agent = user_data.get().unwrap();
+            let agent = agent.lock().unwrap();
+
+            let response = if !agent.has_model(&model_name) {
+                format!("[error] model '{}' not declared by agent", model_name)
+            } else {
+                match load_engine(&model_name) {
+                    Ok(engine) => engine.infer(&prompt, 512)
+                        .unwrap_or_else(|e| format!("[error] {}", e)),
+                    Err(e) => format!("[error] failed to load '{}': {}", model_name, e),
+                }
+            };
 
             let handle = plugin.memory_new(&response)?;
             outputs[0] = extism::Val::I64(handle.offset() as i64);
@@ -41,3 +43,4 @@ fn make_infer_function() -> Function {
         },
     )
 }
+

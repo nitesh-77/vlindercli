@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (supersedes ADR 009 on identifier)
+Accepted (supersedes ADR 009, updated by ADR 011)
 
 ## Context
 

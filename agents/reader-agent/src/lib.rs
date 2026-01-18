@@ -2,7 +2,7 @@ use extism_pdk::*;
 
 #[host_fn]
 extern "ExtismHost" {
-    fn infer(prompt: String) -> String;
+    fn infer(model: String, prompt: String) -> String;
 }
 
 #[plugin_fn]
@@ -14,7 +14,7 @@ pub fn process(url: String) -> FnResult<String> {
 
     // Step 2: infer to extract clean content
     let clean = unsafe {
-        infer(format!("Extract main article text, remove navigation/ads: {}", html))?
+        infer("phi3".to_string(), format!("Extract main article text, remove navigation/ads: {}", html))?
     };
 
     // wasm: trim whitespace
@@ -22,7 +22,7 @@ pub fn process(url: String) -> FnResult<String> {
 
     // Step 3: infer to generate takeaways
     let takeaways = unsafe {
-        infer(format!("3 key takeaways from: {}", trimmed))?
+        infer("phi3".to_string(), format!("3 key takeaways from: {}", trimmed))?
     };
 
     // wasm: format output

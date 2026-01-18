@@ -5,14 +5,10 @@ pub struct Model {
     pub name: String,
 }
 
-pub struct Behavior {
-    pub system_prompt: String,
-}
-
+#[derive(Clone)]
 pub struct Agent {
     pub name: String,
     pub models: Vec<Model>,
-    pub behavior: Behavior,
     wasm_path: String,
 }
 
@@ -35,27 +31,27 @@ impl From<extism::Error> for LoadError {
 }
 
 impl Agent {
-    pub fn load(
-        name: &str,
-        wasm_path: &str,
-        models: Vec<Model>,
-        behavior: Behavior,
-    ) -> Result<Agent, LoadError> {
-        if !std::path::Path::new(wasm_path).exists() {
+    pub fn load(name: &str, models: Vec<Model>) -> Result<Agent, LoadError> {
+        // Convention: agent_wasm/{name_with_underscores}.wasm
+        let wasm_name = name.replace('-', "_");
+        let wasm_path = format!("agent_wasm/{}.wasm", wasm_name);
+
+        if !std::path::Path::new(&wasm_path).exists() {
             return Err(LoadError::Io(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
-                "wasm not found",
+                format!("wasm not found: {}", wasm_path),
             )));
         }
-
-        // TODO: validate model paths exist
 
         Ok(Agent {
             name: name.to_string(),
             models,
-            behavior,
-            wasm_path: wasm_path.to_string(),
+            wasm_path,
         })
+    }
+
+    pub fn has_model(&self, name: &str) -> bool {
+        self.models.iter().any(|m| m.name == name)
     }
 
     pub fn execute(&self, input: &str) -> String {

@@ -1,2 +1,5 @@
 /target
 agents/*/target/
+agent_wasm/
+models/
+test_content/
