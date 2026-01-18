@@ -11,7 +11,7 @@ fn main() {
         "agents/reader-agent/target/wasm32-unknown-unknown/release/reader_agent.wasm",
         vec![Model {
             model_type: ModelType::Inference,
-            path: "models/default.gguf".to_string(),
+            name: "phi3".to_string(),
         }],
         Behavior { system_prompt: "You are helpful.".to_string() },
     ).expect("Failed to load agent");

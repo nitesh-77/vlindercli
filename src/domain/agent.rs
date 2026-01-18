@@ -9,7 +9,7 @@ pub enum ModelType {
 #[derive(Clone, Debug)]
 pub struct Model {
     pub model_type: ModelType,
-    pub path: String,
+    pub name: String,
 }
 
 pub struct Behavior {

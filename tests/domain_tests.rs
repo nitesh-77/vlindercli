@@ -1,13 +1,13 @@
 use vlindercli::domain::{Model, ModelType, Behavior};
 
 #[test]
-fn model_has_type_and_path() {
+fn model_has_type_and_name() {
     let model = Model {
         model_type: ModelType::Inference,
-        path: "models/llama-2-7b.gguf".to_string(),
+        name: "llama3".to_string(),
     };
     assert_eq!(model.model_type, ModelType::Inference);
-    assert_eq!(model.path, "models/llama-2-7b.gguf");
+    assert_eq!(model.name, "llama3");
 }
 
 #[test]
