@@ -1,5 +1,4 @@
 /target
 agents/*/target/
-agent_wasm/
-models/
+.vlinder/
 test_content/

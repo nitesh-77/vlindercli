@@ -1,3 +1,4 @@
+use crate::config;
 use extism::{Plugin, Manifest, Wasm, Function};
 
 #[derive(Clone, Debug)]
@@ -32,21 +33,19 @@ impl From<extism::Error> for LoadError {
 
 impl Agent {
     pub fn load(name: &str, models: Vec<Model>) -> Result<Agent, LoadError> {
-        // Convention: agent_wasm/{name_with_underscores}.wasm
-        let wasm_name = name.replace('-', "_");
-        let wasm_path = format!("agent_wasm/{}.wasm", wasm_name);
+        let wasm_path = config::agent_wasm_path(name);
 
-        if !std::path::Path::new(&wasm_path).exists() {
+        if !wasm_path.exists() {
             return Err(LoadError::Io(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
-                format!("wasm not found: {}", wasm_path),
+                format!("wasm not found: {}", wasm_path.display()),
             )));
         }
 
         Ok(Agent {
             name: name.to_string(),
             models,
-            wasm_path,
+            wasm_path: wasm_path.to_string_lossy().to_string(),
         })
     }
 

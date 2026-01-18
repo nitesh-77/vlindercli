@@ -1,3 +1,4 @@
+use crate::config;
 use llama_cpp_2::context::params::LlamaContextParams;
 use llama_cpp_2::llama_backend::LlamaBackend;
 use llama_cpp_2::llama_batch::LlamaBatch;
@@ -100,8 +101,7 @@ impl InferenceEngine for LlamaEngine {
 }
 
 pub fn load_engine(model_name: &str) -> Result<Box<dyn InferenceEngine>, String> {
-    // Convention: models/{name}.gguf
-    let path = format!("models/{}.gguf", model_name);
-    let engine = LlamaEngine::load(Path::new(&path))?;
+    let path = config::model_path(model_name);
+    let engine = LlamaEngine::load(&path)?;
     Ok(Box::new(engine))
 }

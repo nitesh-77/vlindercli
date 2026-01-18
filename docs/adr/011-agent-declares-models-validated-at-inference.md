@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (updates ADR 007, 008, 010)
+Accepted (updates ADR 007, 008, 010; path conventions updated by ADR 012)
 
 ## Context
 
