@@ -5,7 +5,7 @@
 use extism_pdk::*;
 
 use crate::config::CHUNK_SIZE;
-use crate::host::{embed, get_file, list_files, search_by_vector};
+use crate::host::{embed, get_file, infer, list_files, search_by_vector};
 use crate::persistence::{embed_and_store_chunks, get_or_process_content, url_to_key};
 use crate::summarize::{chunk_text, generate_summary};
 use crate::util::truncate;
@@ -173,10 +173,57 @@ pub fn handle_get_memory(url: &str) -> FnResult<String> {
     ))
 }
 
+/// Expand a short query into a more descriptive search query
+///
+/// This improves semantic search by giving the embedding model more context.
+fn expand_query(query: &str) -> FnResult<String> {
+    let prompt = format!(
+        r#"You are a query expansion assistant. Your job is to transform short, ambiguous search queries into richer, more descriptive questions that will help find relevant content.
+
+Rules:
+- Expand the query into a descriptive question or phrase (1-2 sentences max)
+- Include related concepts, synonyms, and aspects of the topic
+- Keep it focused - don't add unrelated tangents
+- Output ONLY the expanded query, nothing else
+
+Examples:
+User: work
+Expanded: What are the key aspects of meaningful work, career development, professional growth, and finding purpose in one's labor?
+
+User: AI
+Expanded: What are the concepts, applications, and implications of artificial intelligence, machine learning, and automated systems?
+
+User: writing
+Expanded: What are effective techniques for writing, composition, prose style, and communicating ideas clearly through text?
+
+User: startups
+Expanded: What are the principles of building startups, entrepreneurship, company formation, and growing early-stage businesses?
+
+User: productivity
+Expanded: What are strategies for personal productivity, time management, focus, and getting important work done efficiently?
+
+User: {query}
+Expanded:"#
+    );
+
+    let expanded = unsafe { infer("phi3".to_string(), prompt)? };
+    let expanded = expanded.trim();
+
+    // If expansion failed or is empty, fall back to original query
+    if expanded.is_empty() || expanded.starts_with("[error]") {
+        return Ok(query.to_string());
+    }
+
+    Ok(expanded.to_string())
+}
+
 /// Handle SEARCH intent: probe all memories for connections on a topic
 pub fn handle_search(query: &str) -> FnResult<String> {
-    // Generate embedding for the query
-    let query_embedding = unsafe { embed("nomic-embed".to_string(), query.to_string())? };
+    // Step 1: Expand the query for better semantic matching
+    let expanded_query = expand_query(query)?;
+
+    // Step 2: Generate embedding for the expanded query
+    let query_embedding = unsafe { embed("nomic-embed".to_string(), expanded_query.clone())? };
 
     if query_embedding.starts_with("[error]") {
         return Ok(format!(
@@ -186,7 +233,7 @@ pub fn handle_search(query: &str) -> FnResult<String> {
         ));
     }
 
-    // Search for similar vectors (top 10 results)
+    // Step 3: Search for similar vectors (top 10 results)
     let results_json = unsafe { search_by_vector(query_embedding, 10)? };
 
     if results_json.starts_with("[error]") {
@@ -216,17 +263,21 @@ pub fn handle_search(query: &str) -> FnResult<String> {
 
     if results.is_empty() {
         return Ok(format!(
-            "🔍 Search: \"{}\"\n\n\
+            "🔍 Search: \"{}\"\n\
+             Expanded to: \"{}\"\n\n\
              No relevant memories found for this query.",
-            query
+            query,
+            truncate(&expanded_query, 100)
         ));
     }
 
     // Format results
     let mut output = format!(
         "🔍 Search: \"{}\"\n\
+         Expanded to: \"{}\"\n\
          Found {} relevant passages\n\n",
         query,
+        truncate(&expanded_query, 100),
         results.len()
     );
 
