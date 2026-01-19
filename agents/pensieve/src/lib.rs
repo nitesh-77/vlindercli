@@ -243,7 +243,7 @@ fn map_summarize_chunks(chunks: &[String]) -> FnResult<Vec<String>> {
     Ok(summaries)
 }
 
-/// Reduce step: synthesize chunk summaries
+/// Reduce step: synthesize chunk summaries into structured briefing
 fn reduce_summaries(chunk_summaries: &[String]) -> FnResult<String> {
     let numbered: Vec<String> = chunk_summaries
         .iter()
@@ -253,7 +253,26 @@ fn reduce_summaries(chunk_summaries: &[String]) -> FnResult<String> {
     let combined = numbered.join("\n");
 
     let prompt = format!(
-        "These are key points from an article:\n\n{}\n\nWrite a 3-5 bullet point summary:",
+        r#"You are an expert analyst. Based on these key points from an article, create a structured briefing.
+
+KEY POINTS:
+{}
+
+Generate a briefing with these sections:
+
+## Core Argument
+State the article's central thesis in 2-3 sentences.
+
+## Key Insights
+List 3-5 most important takeaways as bullet points.
+
+## Practical Applications
+How can a reader apply these ideas? Give 2-3 actionable suggestions.
+
+## Questions Raised
+What 2-3 thought-provoking questions does this article raise for further exploration?
+
+Be concise but insightful."#,
         combined
     );
 
