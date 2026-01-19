@@ -4,8 +4,9 @@ use vlindercli::runtime::Runtime;
 
 fn main() {
     let runtime = Runtime::new();
-    let agent = Agent::load("pensieve", vec![])
-        .expect("Failed to load agent");
+    let agent = Agent::load("pensieve", vec![
+        Model { name: "phi3".to_string() },
+    ]).expect("Failed to load agent");
 
     loop {
         print!("> ");
