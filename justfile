@@ -26,3 +26,7 @@ clean:
     cargo clean
     rm -rf agents/*/target
     rm -rf {{vlinder_dir}}/agents
+
+# Check license compliance (fails on GPL/copyleft)
+license-check:
+    cargo deny check licenses

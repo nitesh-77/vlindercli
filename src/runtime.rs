@@ -1,6 +1,8 @@
 use crate::domain::Agent;
 use crate::inference::load_engine;
+use crate::storage::Storage;
 use extism::{Function, UserData};
+use std::sync::Arc;
 
 pub struct Runtime;
 
@@ -10,7 +12,19 @@ impl Runtime {
     }
 
     pub fn execute(&self, agent: &Agent, input: &str) -> String {
-        agent.execute_with_functions(input, [make_infer_function(agent.clone())])
+        // Open storage for this agent
+        let storage = match Storage::open(&agent.name) {
+            Ok(s) => Arc::new(s),
+            Err(e) => return format!("[error] failed to open storage: {}", e),
+        };
+
+        agent.execute_with_functions(input, [
+            make_infer_function(agent.clone()),
+            make_put_file_function(storage.clone()),
+            make_get_file_function(storage.clone()),
+            make_delete_file_function(storage.clone()),
+            make_list_files_function(storage.clone()),
+        ])
     }
 }
 
@@ -35,6 +49,106 @@ fn make_infer_function(agent: Agent) -> Function {
                         .unwrap_or_else(|e| format!("[error] {}", e)),
                     Err(e) => format!("[error] failed to load '{}': {}", model_name, e),
                 }
+            };
+
+            let handle = plugin.memory_new(&response)?;
+            outputs[0] = extism::Val::I64(handle.offset() as i64);
+            Ok(())
+        },
+    )
+}
+
+fn make_put_file_function(storage: Arc<Storage>) -> Function {
+    Function::new(
+        "put_file",
+        [extism::PTR, extism::PTR],  // path, content
+        [extism::PTR],               // returns "ok" or error
+        UserData::new(storage),
+        |plugin, inputs, outputs, user_data| {
+            let path: String = plugin.memory_get_val(&inputs[0])?;
+            let content: Vec<u8> = plugin.memory_get_val(&inputs[1])?;
+
+            let storage = user_data.get().unwrap();
+            let storage = storage.lock().unwrap();
+
+            let response = match storage.put_file(&path, &content) {
+                Ok(()) => "ok".to_string(),
+                Err(e) => format!("[error] {}", e),
+            };
+
+            let handle = plugin.memory_new(&response)?;
+            outputs[0] = extism::Val::I64(handle.offset() as i64);
+            Ok(())
+        },
+    )
+}
+
+fn make_get_file_function(storage: Arc<Storage>) -> Function {
+    Function::new(
+        "get_file",
+        [extism::PTR],    // path
+        [extism::PTR],    // returns content or error
+        UserData::new(storage),
+        |plugin, inputs, outputs, user_data| {
+            let path: String = plugin.memory_get_val(&inputs[0])?;
+
+            let storage = user_data.get().unwrap();
+            let storage = storage.lock().unwrap();
+
+            let response: Vec<u8> = match storage.get_file(&path) {
+                Ok(Some(content)) => content,
+                Ok(None) => "[error] file not found".as_bytes().to_vec(),
+                Err(e) => format!("[error] {}", e).into_bytes(),
+            };
+
+            let handle = plugin.memory_new(&response)?;
+            outputs[0] = extism::Val::I64(handle.offset() as i64);
+            Ok(())
+        },
+    )
+}
+
+fn make_delete_file_function(storage: Arc<Storage>) -> Function {
+    Function::new(
+        "delete_file",
+        [extism::PTR],    // path
+        [extism::PTR],    // returns "ok" or "not_found"
+        UserData::new(storage),
+        |plugin, inputs, outputs, user_data| {
+            let path: String = plugin.memory_get_val(&inputs[0])?;
+
+            let storage = user_data.get().unwrap();
+            let storage = storage.lock().unwrap();
+
+            let response = match storage.delete_file(&path) {
+                Ok(true) => "ok".to_string(),
+                Ok(false) => "not_found".to_string(),
+                Err(e) => format!("[error] {}", e),
+            };
+
+            let handle = plugin.memory_new(&response)?;
+            outputs[0] = extism::Val::I64(handle.offset() as i64);
+            Ok(())
+        },
+    )
+}
+
+fn make_list_files_function(storage: Arc<Storage>) -> Function {
+    Function::new(
+        "list_files",
+        [extism::PTR],    // dir_path
+        [extism::PTR],    // returns JSON array of paths
+        UserData::new(storage),
+        |plugin, inputs, outputs, user_data| {
+            let dir_path: String = plugin.memory_get_val(&inputs[0])?;
+
+            let storage = user_data.get().unwrap();
+            let storage = storage.lock().unwrap();
+
+            let response = match storage.list_files(&dir_path) {
+                Ok(files) => serde_json::to_string(&files)
+                    .unwrap_or_else(|e| format!("[error] {}", e)),
+                Err(e) => format!("[error] {}", e),
             };
 
             let handle = plugin.memory_new(&response)?;

@@ -2,10 +2,17 @@
 name = "vlindercli"
 version = "0.1.0"
 edition = "2021"
+publish = false
 
 [dependencies]
 extism = "1"
 llama-cpp-2 = { version = "0.1", features = ["metal"] }
+serde_json = "1"
+
+# Storage stack (no GPL contamination)
+libsql = { version = "0.6", default-features = false, features = ["core"] }
+sqlite-vec = "0.1"
+tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
