@@ -122,7 +122,7 @@ pub fn process(url: String) -> FnResult<String> {
 
 /// Pre-process HTML to remove boilerplate before readability extraction
 fn preprocess_html(raw_html: &str) -> String {
-    let document = Html::parse_document(raw_html);
+    let mut document = Html::parse_document(raw_html);
 
     // Strategy 1: Try to find main content container
     for selector_str in CONTENT_SELECTORS {
@@ -134,21 +134,25 @@ fn preprocess_html(raw_html: &str) -> String {
         }
     }
 
-    // Strategy 2: Remove boilerplate elements by collecting non-boilerplate content
-    // Since scraper doesn't support mutation, we remove tags via string replacement
-    let mut result = raw_html.to_string();
+    // Strategy 2: Remove boilerplate elements directly from the DOM tree
+    let mut nodes_to_remove = Vec::new();
 
     for selector_str in BOILERPLATE_SELECTORS {
         if let Ok(selector) = Selector::parse(selector_str) {
             for element in document.select(&selector) {
-                let element_html = element.html();
-                // Remove this element from the result
-                result = result.replace(&element_html, "");
+                nodes_to_remove.push(element.id());
             }
         }
     }
 
-    result
+    // Detach nodes from the tree (surgical removal)
+    for node_id in nodes_to_remove {
+        if let Some(mut node) = document.tree.get_mut(node_id) {
+            node.detach();
+        }
+    }
+
+    document.html()
 }
 
 // --- Summarization (ADR 003) ---
