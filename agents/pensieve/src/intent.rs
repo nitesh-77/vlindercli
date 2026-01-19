@@ -16,8 +16,10 @@ pub enum Intent {
     ListMemories,
     /// Recall a specific memory in its entirety
     GetMemory { url: String },
-    /// Probe all memories for connections on a topic
+    /// Probe all memories for connections on a topic (shows raw passages)
     Search { query: String },
+    /// Ask a question and get a synthesized answer from memories
+    Question { query: String },
     /// Unable to determine intent with confidence
     Unknown,
 }
@@ -51,15 +53,20 @@ pub fn determine_intent(input: &str) -> FnResult<Intent> {
 
 Analyze the user's request and respond with ONLY a JSON object (no markdown, no explanation).
 
-The five possible intents are:
+The six possible intents are:
 1. "PROCESS_URL" - User wants to save/commit a web page to memory. Must contain a URL.
 2. "LIST_MEMORIES" - User wants to see all stored memories/articles.
 3. "GET_MEMORY" - User wants to retrieve a specific stored memory by URL.
-4. "SEARCH" - User wants to search across all memories for a topic/concept.
-5. "UNKNOWN" - The request doesn't clearly match any of the above intents.
+4. "SEARCH" - User wants to browse/explore source passages about a topic. Keywords: search, find, show passages, what's in my memories about.
+5. "QUESTION" - User wants a direct answer synthesized from their memories. Keywords: questions with "?", explain, tell me, what is, how does, why.
+6. "UNKNOWN" - The request doesn't clearly match any of the above intents.
+
+SEARCH vs QUESTION:
+- SEARCH: User wants to SEE the raw source material ("search for X", "find passages about X", "what do I have on X")
+- QUESTION: User wants a direct ANSWER based on memories ("what is X?", "explain X", "how does X work?", "tell me about X")
 
 Response format:
-{{"intent": "INTENT_NAME", "url": "extracted_url_if_any", "query": "search_query_if_any", "confidence": 0.0_to_1.0}}
+{{"intent": "INTENT_NAME", "url": "extracted_url_if_any", "query": "search_or_question_query", "confidence": 0.0_to_1.0}}
 
 IMPORTANT: Set confidence to how certain you are (0.0 = guess, 1.0 = certain).
 Use "UNKNOWN" when:
@@ -73,7 +80,13 @@ Examples:
 - "save https://blog.com/post" → {{"intent": "PROCESS_URL", "url": "https://blog.com/post", "confidence": 0.95}}
 - "what have I saved?" → {{"intent": "LIST_MEMORIES", "confidence": 0.9}}
 - "show my memories" → {{"intent": "LIST_MEMORIES", "confidence": 0.95}}
-- "what do I know about machine learning?" → {{"intent": "SEARCH", "query": "machine learning", "confidence": 0.85}}
+- "search for machine learning" → {{"intent": "SEARCH", "query": "machine learning", "confidence": 0.9}}
+- "find passages about productivity" → {{"intent": "SEARCH", "query": "productivity", "confidence": 0.9}}
+- "what do I have on startups?" → {{"intent": "SEARCH", "query": "startups", "confidence": 0.85}}
+- "what is great work?" → {{"intent": "QUESTION", "query": "what is great work?", "confidence": 0.9}}
+- "how can I be more productive?" → {{"intent": "QUESTION", "query": "how can I be more productive?", "confidence": 0.9}}
+- "explain the key ideas about writing" → {{"intent": "QUESTION", "query": "explain the key ideas about writing", "confidence": 0.85}}
+- "tell me about entrepreneurship" → {{"intent": "QUESTION", "query": "tell me about entrepreneurship", "confidence": 0.85}}
 - "hello" → {{"intent": "UNKNOWN", "confidence": 0.9}}
 - "asdfghjkl" → {{"intent": "UNKNOWN", "confidence": 1.0}}
 - "what's the weather?" → {{"intent": "UNKNOWN", "confidence": 0.85}}
@@ -131,6 +144,12 @@ fn parse_intent_response(response: &str, original_input: &str) -> FnResult<Inten
                         .query
                         .unwrap_or_else(|| original_input.trim().to_string());
                     Ok(Intent::Search { query })
+                }
+                "QUESTION" => {
+                    let query = parsed
+                        .query
+                        .unwrap_or_else(|| original_input.trim().to_string());
+                    Ok(Intent::Question { query })
                 }
                 "UNKNOWN" | _ => Ok(Intent::Unknown),
             }
@@ -195,14 +214,30 @@ fn fallback_intent_detection(input: &str) -> FnResult<Intent> {
         }
     }
 
-    // Check for search-like keywords
+    // Check for explicit search keywords (user wants raw passages)
+    // Note: "what do i know" specifically requests stored info, so it's SEARCH not QUESTION
     if lower.contains("search")
-        || lower.contains("find")
+        || lower.contains("find passages")
+        || lower.contains("what do i have")
+        || lower.contains("what's in my memories")
         || lower.contains("what do i know")
-        || lower.contains("what have i learned")
-        || lower.contains("connections")
     {
         return Ok(Intent::Search {
+            query: input.trim().to_string(),
+        });
+    }
+
+    // Check for question patterns (user wants a synthesized answer)
+    // Questions typically end with "?" or start with question words
+    if lower.ends_with('?')
+        || lower.starts_with("what is")
+        || lower.starts_with("what are")
+        || lower.starts_with("how")
+        || lower.starts_with("why")
+        || lower.starts_with("explain")
+        || lower.starts_with("tell me")
+    {
+        return Ok(Intent::Question {
             query: input.trim().to_string(),
         });
     }
@@ -378,6 +413,40 @@ mod tests {
     fn parse_intent_response_case_insensitive_intent() {
         let json = r#"{"intent": "search", "query": "test", "confidence": 0.9}"#;
         let result = parse_intent_response(json, "search test").unwrap();
+        assert!(matches!(result, Intent::Search { .. }));
+    }
+
+    // --- QUESTION intent tests ---
+
+    #[test]
+    fn parse_intent_response_handles_question() {
+        let json = r#"{"intent": "QUESTION", "query": "what is great work?", "confidence": 0.9}"#;
+        let result = parse_intent_response(json, "what is great work?").unwrap();
+        assert!(matches!(result, Intent::Question { query } if query == "what is great work?"));
+    }
+
+    #[test]
+    fn fallback_detects_question_with_question_mark() {
+        let result = fallback_intent_detection("how can I be more productive?").unwrap();
+        assert!(matches!(result, Intent::Question { .. }));
+    }
+
+    #[test]
+    fn fallback_detects_question_with_explain() {
+        let result = fallback_intent_detection("explain the key ideas").unwrap();
+        assert!(matches!(result, Intent::Question { .. }));
+    }
+
+    #[test]
+    fn fallback_detects_question_with_tell_me() {
+        let result = fallback_intent_detection("tell me about startups").unwrap();
+        assert!(matches!(result, Intent::Question { .. }));
+    }
+
+    #[test]
+    fn fallback_prefers_search_over_question_for_what_do_i_know() {
+        // "what do I know" is explicitly a SEARCH intent (user wants to see what's stored)
+        let result = fallback_intent_detection("what do I know about AI?").unwrap();
         assert!(matches!(result, Intent::Search { .. }));
     }
 }

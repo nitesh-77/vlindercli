@@ -24,7 +24,8 @@ mod text;
 mod util;
 
 use handlers::{
-    handle_get_memory, handle_list_memories, handle_process_url, handle_search, handle_unknown,
+    handle_get_memory, handle_list_memories, handle_process_url, handle_question, handle_search,
+    handle_unknown,
 };
 use intent::{determine_intent, Intent};
 
@@ -40,6 +41,7 @@ pub fn process(input: String) -> FnResult<String> {
         Intent::ListMemories => handle_list_memories(),
         Intent::GetMemory { url } => handle_get_memory(&url),
         Intent::Search { query } => handle_search(&query),
+        Intent::Question { query } => handle_question(&query),
         Intent::Unknown => handle_unknown(),
     }
 }

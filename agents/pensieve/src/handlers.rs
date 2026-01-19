@@ -217,84 +217,219 @@ Expanded:"#
     Ok(expanded.to_string())
 }
 
-/// Handle SEARCH intent: probe all memories for connections on a topic
-pub fn handle_search(query: &str) -> FnResult<String> {
+/// Result of finding relevant chunks - includes expanded query for display
+struct ChunkSearchResult {
+    chunks: Vec<SearchResult>,
+    expanded_query: String,
+}
+
+/// Error types for chunk retrieval
+enum ChunkSearchError {
+    EmbeddingFailed(String),
+    SearchFailed,
+    ParseFailed { error: String, raw: String },
+}
+
+/// Core retrieval logic: expand query, embed, and search vector store
+///
+/// This is the shared foundation for both SEARCH (show passages) and QUESTION (synthesize answer).
+fn find_relevant_chunks(query: &str, limit: u32) -> Result<ChunkSearchResult, ChunkSearchError> {
     // Step 1: Expand the query for better semantic matching
-    let expanded_query = expand_query(query)?;
+    let expanded_query = expand_query(query).map_err(|_| ChunkSearchError::SearchFailed)?;
 
     // Step 2: Generate embedding for the expanded query
-    let query_embedding = unsafe { embed("nomic-embed".to_string(), expanded_query.clone())? };
+    let query_embedding = unsafe {
+        embed("nomic-embed".to_string(), expanded_query.clone())
+            .map_err(|_| ChunkSearchError::SearchFailed)?
+    };
 
     if query_embedding.starts_with("[error]") {
-        return Ok(format!(
-            "❌ Failed to process search query: {}\n\
-             Error: {}",
-            query, query_embedding
-        ));
+        return Err(ChunkSearchError::EmbeddingFailed(query_embedding));
     }
 
-    // Step 3: Search for similar vectors (top 10 results)
-    let results_json = unsafe { search_by_vector(query_embedding, 10)? };
+    // Step 3: Search for similar vectors
+    let results_json = unsafe {
+        search_by_vector(query_embedding, limit).map_err(|_| ChunkSearchError::SearchFailed)?
+    };
 
     if results_json.starts_with("[error]") {
-        return Ok(format!(
+        return Err(ChunkSearchError::SearchFailed);
+    }
+
+    // Step 4: Parse search results
+    let chunks = parse_search_results(&results_json).map_err(|e| ChunkSearchError::ParseFailed {
+        error: e,
+        raw: results_json,
+    })?;
+
+    Ok(ChunkSearchResult {
+        chunks,
+        expanded_query,
+    })
+}
+
+/// Handle SEARCH intent: probe all memories for connections on a topic
+pub fn handle_search(query: &str) -> FnResult<String> {
+    let result = find_relevant_chunks(query, 10);
+
+    match result {
+        Err(ChunkSearchError::EmbeddingFailed(err)) => Ok(format!(
+            "❌ Failed to process search query: {}\n\
+             Error: {}",
+            query, err
+        )),
+        Err(ChunkSearchError::SearchFailed) => Ok(format!(
             "🔍 Search: \"{}\"\n\n\
              No relevant memories found. Try:\n\
              - Committing more articles to memory\n\
              - Using different search terms",
             query
-        ));
-    }
-
-    // Parse search results
-    let results = match parse_search_results(&results_json) {
-        Ok(r) => r,
-        Err(e) => {
-            return Ok(format!(
-                "🔍 Search: \"{}\"\n\n\
-                 ⚠️ Error parsing results: {}\n\
-                 Raw response: {}",
-                query,
-                e,
-                truncate(&results_json, 200)
-            ));
-        }
-    };
-
-    if results.is_empty() {
-        return Ok(format!(
-            "🔍 Search: \"{}\"\n\
-             Expanded to: \"{}\"\n\n\
-             No relevant memories found for this query.",
+        )),
+        Err(ChunkSearchError::ParseFailed { error, raw }) => Ok(format!(
+            "🔍 Search: \"{}\"\n\n\
+             ⚠️ Error parsing results: {}\n\
+             Raw response: {}",
             query,
-            truncate(&expanded_query, 100)
-        ));
-    }
+            error,
+            truncate(&raw, 200)
+        )),
+        Ok(ChunkSearchResult {
+            chunks,
+            expanded_query,
+        }) => {
+            if chunks.is_empty() {
+                return Ok(format!(
+                    "🔍 Search: \"{}\"\n\
+                     Expanded to: \"{}\"\n\n\
+                     No relevant memories found for this query.",
+                    query,
+                    truncate(&expanded_query, 100)
+                ));
+            }
 
-    // Format results
-    let mut output = format!(
-        "🔍 Search: \"{}\"\n\
-         Expanded to: \"{}\"\n\
-         Found {} relevant passages\n\n",
-        query,
-        truncate(&expanded_query, 100),
-        results.len()
+            // Format results
+            let mut output = format!(
+                "🔍 Search: \"{}\"\n\
+                 Expanded to: \"{}\"\n\
+                 Found {} relevant passages\n\n",
+                query,
+                truncate(&expanded_query, 100),
+                chunks.len()
+            );
+
+            for (i, result) in chunks.iter().enumerate() {
+                output.push_str(&format!(
+                    "---\n\
+                     **Result {}** (score: {:.2})\n\
+                     Source: {}\n\n\
+                     {}\n\n",
+                    i + 1,
+                    result.score,
+                    result.source,
+                    result.preview
+                ));
+            }
+
+            Ok(output)
+        }
+    }
+}
+
+/// Handle QUESTION intent: synthesize an answer from stored memories
+pub fn handle_question(query: &str) -> FnResult<String> {
+    let result = find_relevant_chunks(query, 5);
+
+    match result {
+        Err(ChunkSearchError::EmbeddingFailed(err)) => Ok(format!(
+            "❌ Failed to process question: {}\n\
+             Error: {}",
+            query, err
+        )),
+        Err(ChunkSearchError::SearchFailed) => Ok(format!(
+            "❓ Question: \"{}\"\n\n\
+             I don't have any relevant memories to answer this question.\n\
+             Try committing some articles to memory first!",
+            query
+        )),
+        Err(ChunkSearchError::ParseFailed { error, raw }) => Ok(format!(
+            "❓ Question: \"{}\"\n\n\
+             ⚠️ Error retrieving memories: {}\n\
+             Raw response: {}",
+            query,
+            error,
+            truncate(&raw, 200)
+        )),
+        Ok(ChunkSearchResult {
+            chunks,
+            expanded_query: _,
+        }) => {
+            if chunks.is_empty() {
+                return Ok(format!(
+                    "❓ Question: \"{}\"\n\n\
+                     I don't have any relevant memories to answer this question.\n\
+                     Try committing some articles about this topic!",
+                    query
+                ));
+            }
+
+            // Build context from relevant chunks
+            let context = chunks
+                .iter()
+                .map(|c| format!("[From {}]\n{}", c.source, c.preview))
+                .collect::<Vec<_>>()
+                .join("\n\n---\n\n");
+
+            // Generate synthesized answer
+            let answer = generate_answer(query, &context)?;
+
+            // Format output with sources
+            let sources: Vec<_> = chunks.iter().map(|c| c.source.clone()).collect();
+            let unique_sources: Vec<_> = sources
+                .into_iter()
+                .collect::<std::collections::HashSet<_>>()
+                .into_iter()
+                .collect();
+
+            Ok(format!(
+                "❓ Question: \"{}\"\n\n\
+                 {}\n\n\
+                 ---\n\
+                 📚 Sources: {}",
+                query,
+                answer,
+                unique_sources.join(", ")
+            ))
+        }
+    }
+}
+
+/// Generate a synthesized answer from context using the LLM
+fn generate_answer(question: &str, context: &str) -> FnResult<String> {
+    let prompt = format!(
+        r#"You are a helpful assistant answering questions based on the user's stored memories (articles they've saved).
+
+CONTEXT (from user's saved articles):
+{context}
+
+QUESTION: {question}
+
+Instructions:
+- Answer the question using ONLY the information from the context above
+- If the context doesn't contain enough information, say so honestly
+- Be concise but thorough (2-4 paragraphs for complex topics, 1-2 for simple ones)
+- Don't mention "the context" or "the passages" - speak naturally as if you know this information
+- If there are multiple perspectives or ideas, synthesize them coherently
+
+ANSWER:"#
     );
 
-    for (i, result) in results.iter().enumerate() {
-        output.push_str(&format!(
-            "---\n\
-             **Result {}** (score: {:.2})\n\
-             Source: {}\n\n\
-             {}\n\n",
-            i + 1,
-            result.score,
-            result.source,
-            result.preview
-        ));
+    let answer = unsafe { infer("phi3".to_string(), prompt)? };
+
+    if answer.starts_with("[error]") {
+        return Ok("I encountered an error while generating the answer.".to_string());
     }
 
-    Ok(output)
+    Ok(answer.trim().to_string())
 }
 
 /// Handle UNKNOWN intent: explain what the agent can do
@@ -313,9 +448,14 @@ I'm Pensieve, a memory system for web articles. I can help you:
 📖 **Recall a specific memory**
    "get <url>" or "recall the article from example.com"
 
-🔍 **Search across all memories**
-   "what do I know about <topic>?"
+🔍 **Search across all memories** (shows raw passages)
    "search for <concept>"
+   "find passages about <topic>"
+
+❓ **Ask a question** (synthesized answer)
+   "what is great work?"
+   "how can I be more productive?"
+   "explain the key ideas about writing"
 
 Try one of these, or paste a URL to get started!"#
         .to_string())
