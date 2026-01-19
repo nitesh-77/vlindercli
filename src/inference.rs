@@ -34,6 +34,9 @@ impl InferenceEngine for LlamaEngine {
         let ctx_size: u32 = 8192;
         let batch_size: u32 = 2048;
 
+        // Apply phi3 chat template
+        let formatted_prompt = format!("<|user|>\n{}<|end|>\n<|assistant|>\n", prompt);
+
         let ctx_params = LlamaContextParams::default()
             .with_n_ctx(NonZeroU32::new(ctx_size))
             .with_n_batch(batch_size);
@@ -42,7 +45,7 @@ impl InferenceEngine for LlamaEngine {
 
         // Tokenize prompt
         let mut tokens = self.model
-            .str_to_token(prompt, llama_cpp_2::model::AddBos::Always)
+            .str_to_token(&formatted_prompt, llama_cpp_2::model::AddBos::Always)
             .map_err(|e| e.to_string())?;
 
         // Truncate if too long (leave room for generation)

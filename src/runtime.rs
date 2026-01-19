@@ -48,7 +48,7 @@ fn make_infer_function(agent: Agent) -> Function {
                 format!("[error] model '{}' not declared by agent", model_name)
             } else {
                 match load_engine(&model_name) {
-                    Ok(engine) => engine.infer(&prompt, 512)
+                    Ok(engine) => engine.infer(&prompt, 256)
                         .unwrap_or_else(|e| format!("[error] {}", e)),
                     Err(e) => format!("[error] failed to load '{}': {}", model_name, e),
                 }
