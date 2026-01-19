@@ -9,6 +9,7 @@ crate-type = ["cdylib"]
 [dependencies]
 extism-pdk = "1"
 readability = { version = "0.3", default-features = false }
+scraper = "0.18"
 url = "2"
 
 [profile.release]

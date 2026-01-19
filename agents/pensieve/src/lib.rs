@@ -4,6 +4,7 @@
 
 use extism_pdk::*;
 use readability::extractor;
+use scraper::{Html, Selector};
 
 #[host_fn]
 extern "ExtismHost" {
@@ -17,6 +18,36 @@ const MIN_PARAGRAPH_CHARS: usize = 150;
 // Summarization settings (ADR 003)
 const CHUNK_SIZE: usize = 1000;
 const MAX_CHUNKS_TO_SUMMARIZE: usize = 15;
+
+// HTML pre-processing selectors (ADR 004)
+/// Selectors for main content areas (try to extract just this)
+const CONTENT_SELECTORS: &[&str] = &[
+    "article",
+    "main",
+    "[role=\"main\"]",
+    ".post-content",
+    ".article-content",
+    ".entry-content",
+    ".content",
+];
+
+/// Selectors for boilerplate elements to remove
+const BOILERPLATE_SELECTORS: &[&str] = &[
+    "nav",
+    "header",
+    "footer",
+    "aside",
+    "[role=\"navigation\"]",
+    "[role=\"banner\"]",
+    "[role=\"contentinfo\"]",
+    ".sidebar",
+    ".nav",
+    ".menu",
+    ".advertisement",
+    ".social-share",
+    ".comments",
+    "#comments",
+];
 
 /// Common boilerplate patterns found in extracted web content
 const BOILERPLATE_PATTERNS: &[&str] = &[
@@ -52,13 +83,16 @@ pub fn process(url: String) -> FnResult<String> {
     // Fetch the page
     let req = HttpRequest::new(&url);
     let res = http::request::<()>(&req, None)?;
-    let html = String::from_utf8(res.body().to_vec())?;
+    let raw_html = String::from_utf8(res.body().to_vec())?;
+
+    // Pre-process HTML to remove boilerplate (ADR 004)
+    let clean_html = preprocess_html(&raw_html);
 
     // Extract article content using Mozilla Readability algorithm (ADR 001)
     let url_parsed = url::Url::parse(&url)
         .unwrap_or_else(|_| url::Url::parse("http://example.com").unwrap());
 
-    let extracted = match extractor::extract(&mut html.as_bytes(), &url_parsed) {
+    let extracted = match extractor::extract(&mut clean_html.as_bytes(), &url_parsed) {
         Ok(product) => {
             format!("{}\n\n{}", product.title, product.text)
         }
@@ -82,6 +116,39 @@ pub fn process(url: String) -> FnResult<String> {
         summary,
         truncate(&content, 2000)
     ))
+}
+
+// --- HTML Pre-processing (ADR 004) ---
+
+/// Pre-process HTML to remove boilerplate before readability extraction
+fn preprocess_html(raw_html: &str) -> String {
+    let document = Html::parse_document(raw_html);
+
+    // Strategy 1: Try to find main content container
+    for selector_str in CONTENT_SELECTORS {
+        if let Ok(selector) = Selector::parse(selector_str) {
+            if let Some(element) = document.select(&selector).next() {
+                // Found main content - return just this element's HTML
+                return element.html();
+            }
+        }
+    }
+
+    // Strategy 2: Remove boilerplate elements by collecting non-boilerplate content
+    // Since scraper doesn't support mutation, we remove tags via string replacement
+    let mut result = raw_html.to_string();
+
+    for selector_str in BOILERPLATE_SELECTORS {
+        if let Ok(selector) = Selector::parse(selector_str) {
+            for element in document.select(&selector) {
+                let element_html = element.html();
+                // Remove this element from the result
+                result = result.replace(&element_html, "");
+            }
+        }
+    }
+
+    result
 }
 
 // --- Summarization (ADR 003) ---
