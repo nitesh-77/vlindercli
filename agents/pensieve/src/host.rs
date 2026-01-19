@@ -16,9 +16,15 @@ extern "ExtismHost" {
     /// Write a file to the persistence layer (ADR 005)
     pub fn put_file(path: String, content: Vec<u8>) -> String;
 
+    /// List files in a directory (ADR 005)
+    pub fn list_files(path: String) -> String;
+
     /// Generate embeddings for text (ADR 005)
     pub fn embed(model: String, text: String) -> String;
 
     /// Store an embedding vector with metadata (ADR 005)
     pub fn store_embedding(key: String, vector: String, metadata: String) -> String;
+
+    /// Search for similar vectors (ADR 005)
+    pub fn search_by_vector(vector: String, limit: u32) -> String;
 }

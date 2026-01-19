@@ -568,6 +568,8 @@ dependencies = [
  "extism-pdk",
  "readability",
  "scraper",
+ "serde",
+ "serde_json",
  "url",
 ]
 

@@ -1,47 +1,45 @@
 //! Pensieve Agent - Extract and recall web content
 //!
 //! Like Dumbledore's pensieve: store memories (articles) for later review.
-//! Now with persistent memory via caching and embeddings (ADR 005).
+//! An intent-driven agent that understands what you want to do with your memories.
+//!
+//! ## Supported Intents
+//!
+//! - **PROCESS_URL**: Commit a new web page to memory
+//! - **LIST_MEMORIES**: Review the index of all stored memories
+//! - **GET_MEMORY**: Recall a specific memory in its entirety
+//! - **SEARCH**: Probe all memories for connections on a topic
+//! - **UNKNOWN**: Request clarification when intent is unclear
 
 use extism_pdk::*;
 
 mod config;
+mod handlers;
 mod host;
 mod html;
+mod intent;
 mod persistence;
 mod summarize;
 mod text;
 mod util;
 
-use config::CHUNK_SIZE;
-use persistence::{embed_and_store_chunks, get_or_process_content, url_to_key};
-use summarize::{chunk_text, generate_summary};
-use util::truncate;
+use handlers::{
+    handle_get_memory, handle_list_memories, handle_process_url, handle_search, handle_unknown,
+};
+use intent::{determine_intent, Intent};
 
-/// Fetch and process a URL with caching and persistence (ADR 005)
+/// Process user input by determining intent and dispatching to the appropriate handler
 #[plugin_fn]
-pub fn process(url: String) -> FnResult<String> {
-    let url_key = url_to_key(&url);
+pub fn process(input: String) -> FnResult<String> {
+    // Step 1: Determine what the user wants to do
+    let intent = determine_intent(&input)?;
 
-    // Step 1: Get clean text (from cache or fetch+process)
-    let content = get_or_process_content(&url, &url_key)?;
-
-    // Step 2: Chunk the content
-    let chunks = chunk_text(&content, CHUNK_SIZE);
-
-    // Step 3: Embed and store chunks for semantic search (ADR 005)
-    let embedded_count = embed_and_store_chunks(&url_key, &chunks)?;
-
-    // Step 4: Generate summary (ADR 003)
-    let summary = generate_summary(&chunks)?;
-
-    Ok(format!(
-        "Source: {}\nLength: {} chars | {} chunks | {} embedded\n\n---\nSummary:\n{}\n\n---\nContent preview:\n{}",
-        url,
-        content.len(),
-        chunks.len(),
-        embedded_count,
-        summary,
-        truncate(&content, 2000)
-    ))
+    // Step 2: Dispatch to the appropriate handler
+    match intent {
+        Intent::ProcessUrl { url } => handle_process_url(&url),
+        Intent::ListMemories => handle_list_memories(),
+        Intent::GetMemory { url } => handle_get_memory(&url),
+        Intent::Search { query } => handle_search(&query),
+        Intent::Unknown => handle_unknown(),
+    }
 }
