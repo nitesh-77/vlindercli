@@ -34,22 +34,23 @@ fn agent_has_name_and_models() {
     assert!(!agent.has_model("unknown"));
 }
 
-/// Reader agent:
+/// Pensieve agent:
 /// 1. Input: URL
-/// 2. Agent fetches URL directly (Extism HTTP)
-/// 3. Calls infer("phi3", "Extract...") → runtime validates & runs inference
-/// 4. Wasm trims whitespace
-/// 5. Calls infer("phi3", "3 key takeaways...") → runtime validates & runs inference
-/// 6. Returns formatted output
+/// 2. Fetches URL, strips HTML (pure Rust), caches both raw and clean text
+/// 3. Chunks content and stores embeddings for semantic search
+/// 4. Calls infer("phi3", "Summarize...") → runtime validates & runs inference
+/// 5. Returns formatted output with stats, content preview, and summary
 #[test]
-fn reader_agent_fetches_and_infers() {
+fn pensieve_agent_fetches_and_summarizes() {
     let runtime = Runtime::new();
-    let agent = Agent::load("reader-agent", vec![
+    let agent = Agent::load("pensieve", vec![
         Model { name: "phi3".to_string() },
+        Model { name: "nomic-embed".to_string() },
     ]).unwrap();
 
     let result = runtime.execute(&agent, "https://httpbin.org/html");
 
     // Verify output contains the formatted sections from the agent
-    assert!(result.contains("Key takeaways"));
+    assert!(result.contains("Source:"), "Expected 'Source:' in output");
+    assert!(result.contains("Summary:"), "Expected 'Summary:' in output");
 }
