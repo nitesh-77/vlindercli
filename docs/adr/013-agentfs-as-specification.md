@@ -29,12 +29,12 @@ CREATE TABLE IF NOT EXISTS files (
 
 ```toml
 # Cargo.toml
-libsql = { version = "0.6", default-features = false, features = ["core"] }
-tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
 ```
 
-- `libsql` with `default-features = false` uses only the MIT-licensed core
+- `rusqlite` with `bundled` feature embeds SQLite (MIT/public domain)
 - WAL mode for concurrency
+- Sync API (simpler than async, matches our usage pattern)
 
 **Host functions exposed to WASM agents:**
 
