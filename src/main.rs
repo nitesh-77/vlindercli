@@ -1,13 +1,10 @@
 use std::io::{self, Write};
-use vlindercli::domain::{Agent, Model};
+use vlindercli::domain::Agent;
 use vlindercli::runtime::Runtime;
 
 fn main() {
     let runtime = Runtime::new();
-    let agent = Agent::load("pensieve", vec![
-        Model { name: "phi3".to_string() },
-        Model { name: "nomic-embed".to_string() },
-    ]).expect("Failed to load agent");
+    let agent = Agent::load("pensieve").expect("Failed to load agent");
 
     loop {
         print!("> ");

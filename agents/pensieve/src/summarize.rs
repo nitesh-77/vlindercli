@@ -4,7 +4,10 @@
 
 use extism_pdk::*;
 
-use crate::config::MAX_CHUNKS_TO_SUMMARIZE;
+use crate::config::{
+    get_prompt, Prompts, DEFAULT_DIRECT_SUMMARIZE, DEFAULT_MAP_SUMMARIZE, DEFAULT_REDUCE_SUMMARIES,
+    MAX_CHUNKS_TO_SUMMARIZE,
+};
 use crate::host::infer;
 
 /// Split text into chunks at word boundaries
@@ -66,16 +69,14 @@ pub fn sample_chunks_evenly(chunks: &[String], target_count: usize) -> Vec<Strin
 /// Map phase: summarize each chunk individually
 fn map_summarize_chunks(chunks: &[String]) -> FnResult<Vec<String>> {
     let mut summaries = Vec::with_capacity(chunks.len());
+    let template = get_prompt(|p: &Prompts| &p.map_summarize, DEFAULT_MAP_SUMMARIZE);
 
     for chunk in chunks.iter() {
         if chunk.len() < 100 {
             continue;
         }
 
-        let prompt = format!(
-            "What is the main point? Answer in 1-2 sentences:\n\n{}",
-            chunk
-        );
+        let prompt = template.replace("{chunk}", chunk);
 
         let summary = unsafe { infer("phi3".to_string(), prompt)? };
         let cleaned = summary.trim();
@@ -96,29 +97,8 @@ fn reduce_summaries(chunk_summaries: &[String]) -> FnResult<String> {
         .collect();
     let combined = numbered.join("\n");
 
-    let prompt = format!(
-        r#"You are an expert analyst. Based on these key points from an article, create a structured briefing.
-
-KEY POINTS:
-{}
-
-Generate a briefing with these sections:
-
-## Core Argument
-State the article's central thesis in 2-3 sentences.
-
-## Key Insights
-List 3-5 most important takeaways as bullet points.
-
-## Practical Applications
-How can a reader apply these ideas? Give 2-3 actionable suggestions.
-
-## Questions Raised
-What 2-3 thought-provoking questions does this article raise for further exploration?
-
-Be concise but insightful."#,
-        combined
-    );
+    let template = get_prompt(|p: &Prompts| &p.reduce_summaries, DEFAULT_REDUCE_SUMMARIES);
+    let prompt = template.replace("{points}", &combined);
 
     let result = unsafe { infer("phi3".to_string(), prompt)? };
     Ok(result)
@@ -126,7 +106,8 @@ Be concise but insightful."#,
 
 /// Summarize short content directly without map-reduce
 fn summarize_directly(text: &str) -> FnResult<String> {
-    let prompt = format!("Summarize this article in 3-5 bullet points:\n\n{}", text);
+    let template = get_prompt(|p: &Prompts| &p.direct_summarize, DEFAULT_DIRECT_SUMMARIZE);
+    let prompt = template.replace("{text}", text);
     let result = unsafe { infer("phi3".to_string(), prompt)? };
     Ok(result)
 }

@@ -1,36 +1,33 @@
-use vlindercli::domain::{Agent, Model};
+use vlindercli::domain::Agent;
 use vlindercli::runtime::Runtime;
 
 #[test]
 fn agent_echo() {
-    let agent = Agent::load("echo-agent", vec![]).unwrap();
+    let agent = Agent::load("echo-agent").unwrap();
     let result = agent.execute("hello");
     assert_eq!(result, "echo: hello");
 }
 
 #[test]
 fn agent_upper() {
-    let agent = Agent::load("upper-agent", vec![]).unwrap();
+    let agent = Agent::load("upper-agent").unwrap();
     let result = agent.execute("hello");
     assert_eq!(result, "HELLO");
 }
 
 #[test]
 fn load_fails_for_missing_agent() {
-    let result = Agent::load("nonexistent-agent", vec![]);
+    let result = Agent::load("nonexistent-agent");
     assert!(result.is_err());
 }
 
 #[test]
-fn agent_has_name_and_models() {
-    let agent = Agent::load("echo-agent", vec![
-        Model { name: "phi3".to_string() },
-        Model { name: "llama3".to_string() },
-    ]).unwrap();
-    assert_eq!(agent.name, "echo-agent");
-    assert_eq!(agent.models.len(), 2);
+fn agent_loads_requirements_from_vlinderfile() {
+    let agent = Agent::load("pensieve").unwrap();
+    assert_eq!(agent.name, "pensieve");
+    assert_eq!(agent.requirements.models.len(), 2);
     assert!(agent.has_model("phi3"));
-    assert!(agent.has_model("llama3"));
+    assert!(agent.has_model("nomic-embed"));
     assert!(!agent.has_model("unknown"));
 }
 
@@ -43,10 +40,7 @@ fn agent_has_name_and_models() {
 #[test]
 fn pensieve_agent_fetches_and_summarizes() {
     let runtime = Runtime::new();
-    let agent = Agent::load("pensieve", vec![
-        Model { name: "phi3".to_string() },
-        Model { name: "nomic-embed".to_string() },
-    ]).unwrap();
+    let agent = Agent::load("pensieve").unwrap();
 
     let result = runtime.execute(&agent, "https://httpbin.org/html");
 

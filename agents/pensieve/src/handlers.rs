@@ -4,7 +4,9 @@
 
 use extism_pdk::*;
 
-use crate::config::CHUNK_SIZE;
+use crate::config::{
+    get_prompt, Prompts, CHUNK_SIZE, DEFAULT_ANSWER_GENERATION, DEFAULT_QUERY_EXPANSION,
+};
 use crate::host::{embed, get_file, infer, list_files, search_by_vector};
 use crate::persistence::{embed_and_store_chunks, get_or_process_content, url_to_key};
 use crate::summarize::{chunk_text, generate_summary};
@@ -177,34 +179,8 @@ pub fn handle_get_memory(url: &str) -> FnResult<String> {
 ///
 /// This improves semantic search by giving the embedding model more context.
 fn expand_query(query: &str) -> FnResult<String> {
-    let prompt = format!(
-        r#"You are a query expansion assistant. Your job is to transform short, ambiguous search queries into richer, more descriptive questions that will help find relevant content.
-
-Rules:
-- Expand the query into a descriptive question or phrase (1-2 sentences max)
-- Include related concepts, synonyms, and aspects of the topic
-- Keep it focused - don't add unrelated tangents
-- Output ONLY the expanded query, nothing else
-
-Examples:
-User: work
-Expanded: What are the key aspects of meaningful work, career development, professional growth, and finding purpose in one's labor?
-
-User: AI
-Expanded: What are the concepts, applications, and implications of artificial intelligence, machine learning, and automated systems?
-
-User: writing
-Expanded: What are effective techniques for writing, composition, prose style, and communicating ideas clearly through text?
-
-User: startups
-Expanded: What are the principles of building startups, entrepreneurship, company formation, and growing early-stage businesses?
-
-User: productivity
-Expanded: What are strategies for personal productivity, time management, focus, and getting important work done efficiently?
-
-User: {query}
-Expanded:"#
-    );
+    let template = get_prompt(|p: &Prompts| &p.query_expansion, DEFAULT_QUERY_EXPANSION);
+    let prompt = template.replace("{query}", query);
 
     let expanded = unsafe { infer("phi3".to_string(), prompt)? };
     let expanded = expanded.trim();
@@ -405,23 +381,10 @@ pub fn handle_question(query: &str) -> FnResult<String> {
 
 /// Generate a synthesized answer from context using the LLM
 fn generate_answer(question: &str, context: &str) -> FnResult<String> {
-    let prompt = format!(
-        r#"You are a helpful assistant answering questions based on the user's stored memories (articles they've saved).
-
-CONTEXT (from user's saved articles):
-{context}
-
-QUESTION: {question}
-
-Instructions:
-- Answer the question using ONLY the information from the context above
-- If the context doesn't contain enough information, say so honestly
-- Be concise but thorough (2-4 paragraphs for complex topics, 1-2 for simple ones)
-- Don't mention "the context" or "the passages" - speak naturally as if you know this information
-- If there are multiple perspectives or ideas, synthesize them coherently
-
-ANSWER:"#
-    );
+    let template = get_prompt(|p: &Prompts| &p.answer_generation, DEFAULT_ANSWER_GENERATION);
+    let prompt = template
+        .replace("{context}", context)
+        .replace("{question}", question);
 
     let answer = unsafe { infer("phi3".to_string(), prompt)? };
 

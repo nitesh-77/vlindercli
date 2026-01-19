@@ -5,6 +5,7 @@
 use extism_pdk::*;
 use serde::Deserialize;
 
+use crate::config::{get_prompt, Prompts, DEFAULT_INTENT_RECOGNITION};
 use crate::host::infer;
 
 /// The supported user intents
@@ -48,54 +49,12 @@ pub fn determine_intent(input: &str) -> FnResult<Intent> {
         });
     }
 
-    let prompt = format!(
-        r#"You are an intent classifier for a memory system called Pensieve.
-
-Analyze the user's request and respond with ONLY a JSON object (no markdown, no explanation).
-
-The six possible intents are:
-1. "PROCESS_URL" - User wants to save/commit a web page to memory. Must contain a URL.
-2. "LIST_MEMORIES" - User wants to see all stored memories/articles.
-3. "GET_MEMORY" - User wants to retrieve a specific stored memory by URL.
-4. "SEARCH" - User wants to browse/explore source passages about a topic. Keywords: search, find, show passages, what's in my memories about.
-5. "QUESTION" - User wants a direct answer synthesized from their memories. Keywords: questions with "?", explain, tell me, what is, how does, why.
-6. "UNKNOWN" - The request doesn't clearly match any of the above intents.
-
-SEARCH vs QUESTION:
-- SEARCH: User wants to SEE the raw source material ("search for X", "find passages about X", "what do I have on X")
-- QUESTION: User wants a direct ANSWER based on memories ("what is X?", "explain X", "how does X work?", "tell me about X")
-
-Response format:
-{{"intent": "INTENT_NAME", "url": "extracted_url_if_any", "query": "search_or_question_query", "confidence": 0.0_to_1.0}}
-
-IMPORTANT: Set confidence to how certain you are (0.0 = guess, 1.0 = certain).
-Use "UNKNOWN" when:
-- The input is gibberish or random text
-- The input is a greeting or casual conversation
-- The input asks about something unrelated to memory/articles
-- You're less than 60% confident about the intent
-
-Examples:
-- "https://example.com/article" → {{"intent": "PROCESS_URL", "url": "https://example.com/article", "confidence": 1.0}}
-- "save https://blog.com/post" → {{"intent": "PROCESS_URL", "url": "https://blog.com/post", "confidence": 0.95}}
-- "what have I saved?" → {{"intent": "LIST_MEMORIES", "confidence": 0.9}}
-- "show my memories" → {{"intent": "LIST_MEMORIES", "confidence": 0.95}}
-- "search for machine learning" → {{"intent": "SEARCH", "query": "machine learning", "confidence": 0.9}}
-- "find passages about productivity" → {{"intent": "SEARCH", "query": "productivity", "confidence": 0.9}}
-- "what do I have on startups?" → {{"intent": "SEARCH", "query": "startups", "confidence": 0.85}}
-- "what is great work?" → {{"intent": "QUESTION", "query": "what is great work?", "confidence": 0.9}}
-- "how can I be more productive?" → {{"intent": "QUESTION", "query": "how can I be more productive?", "confidence": 0.9}}
-- "explain the key ideas about writing" → {{"intent": "QUESTION", "query": "explain the key ideas about writing", "confidence": 0.85}}
-- "tell me about entrepreneurship" → {{"intent": "QUESTION", "query": "tell me about entrepreneurship", "confidence": 0.85}}
-- "hello" → {{"intent": "UNKNOWN", "confidence": 0.9}}
-- "asdfghjkl" → {{"intent": "UNKNOWN", "confidence": 1.0}}
-- "what's the weather?" → {{"intent": "UNKNOWN", "confidence": 0.85}}
-- "delete everything" → {{"intent": "UNKNOWN", "confidence": 0.8}}
-
-User request: {input}
-
-JSON response:"#
+    // Get prompt template (Vlinderfile override or compiled-in default)
+    let template = get_prompt(
+        |p: &Prompts| &p.intent_recognition,
+        DEFAULT_INTENT_RECOGNITION,
     );
+    let prompt = template.replace("{input}", input);
 
     let response = unsafe { infer("phi3".to_string(), prompt)? };
 

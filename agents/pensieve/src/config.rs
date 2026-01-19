@@ -1,26 +1,91 @@
-//! Configuration constants for the Pensieve agent
+//! Configuration for the Pensieve agent
 //!
-//! Centralizes all tunable parameters, organized by ADR.
+//! Loads the Vlinderfile at runtime for prompt overrides.
+//! Default prompts are embedded from src/prompts/*.txt at compile time.
 
-// --- Text cleaning thresholds (ADR 002) ---
+use once_cell::sync::Lazy;
+use serde::Deserialize;
 
-/// Minimum words required for a line to be considered substantive content
+use crate::host::get_vlinderfile;
+
+// =============================================================================
+// Vlinderfile Structs
+// =============================================================================
+
+/// Root configuration from Vlinderfile
+#[derive(Debug, Deserialize)]
+pub struct Vlinderfile {
+    pub name: String,
+    pub description: String,
+    #[serde(default)]
+    pub source: Option<String>,
+    pub requirements: Requirements,
+    #[serde(default)]
+    pub prompts: Option<Prompts>,
+}
+
+/// Runtime requirements
+#[derive(Debug, Deserialize)]
+pub struct Requirements {
+    pub models: Vec<String>,
+    pub host_capabilities: Vec<String>,
+}
+
+/// Optional prompt overrides
+#[derive(Debug, Default, Deserialize)]
+pub struct Prompts {
+    pub intent_recognition: Option<String>,
+    pub query_expansion: Option<String>,
+    pub answer_generation: Option<String>,
+    pub map_summarize: Option<String>,
+    pub reduce_summaries: Option<String>,
+    pub direct_summarize: Option<String>,
+}
+
+// =============================================================================
+// Config Loader
+// =============================================================================
+
+/// Global config, loaded lazily
+pub static CONFIG: Lazy<Vlinderfile> = Lazy::new(|| {
+    let content = unsafe { get_vlinderfile().expect("Failed to load Vlinderfile") };
+    toml::from_str(&content).expect("Failed to parse Vlinderfile")
+});
+
+/// Get prompt: Vlinderfile override if present, else compiled-in default
+pub fn get_prompt(getter: fn(&Prompts) -> &Option<String>, default: &str) -> String {
+    CONFIG
+        .prompts
+        .as_ref()
+        .and_then(|p| getter(p).as_ref())
+        .cloned()
+        .unwrap_or_else(|| default.to_string())
+}
+
+// =============================================================================
+// Default Prompts (embedded at compile time)
+// =============================================================================
+
+pub const DEFAULT_INTENT_RECOGNITION: &str = include_str!("prompts/intent_recognition.txt");
+pub const DEFAULT_QUERY_EXPANSION: &str = include_str!("prompts/query_expansion.txt");
+pub const DEFAULT_ANSWER_GENERATION: &str = include_str!("prompts/answer_generation.txt");
+pub const DEFAULT_MAP_SUMMARIZE: &str = include_str!("prompts/map_summarize.txt");
+pub const DEFAULT_REDUCE_SUMMARIES: &str = include_str!("prompts/reduce_summaries.txt");
+pub const DEFAULT_DIRECT_SUMMARIZE: &str = include_str!("prompts/direct_summarize.txt");
+
+// =============================================================================
+// Compile-time Constants
+// =============================================================================
+
+// --- Text cleaning (ADR 002) ---
 pub const MIN_WORDS_PER_LINE: usize = 5;
-
-/// Minimum characters for a line to be considered a real paragraph
 pub const MIN_PARAGRAPH_CHARS: usize = 150;
 
-// --- Summarization settings (ADR 003) ---
-
-/// Target size for text chunks (in characters)
+// --- Summarization (ADR 003) ---
 pub const CHUNK_SIZE: usize = 1000;
-
-/// Maximum chunks to process for summarization (to control LLM costs)
 pub const MAX_CHUNKS_TO_SUMMARIZE: usize = 15;
 
-// --- HTML pre-processing selectors (ADR 004) ---
-
-/// CSS selectors for finding main content containers
+// --- HTML selectors (ADR 004) ---
 pub const CONTENT_SELECTORS: &[&str] = &[
     "article",
     "main",
@@ -31,7 +96,6 @@ pub const CONTENT_SELECTORS: &[&str] = &[
     ".content",
 ];
 
-/// CSS selectors for boilerplate elements to remove
 pub const BOILERPLATE_SELECTORS: &[&str] = &[
     "nav",
     "header",
@@ -49,7 +113,6 @@ pub const BOILERPLATE_SELECTORS: &[&str] = &[
     "#comments",
 ];
 
-/// Text patterns that indicate boilerplate content
 pub const BOILERPLATE_PATTERNS: &[&str] = &[
     "sign in",
     "sign up",

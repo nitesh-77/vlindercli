@@ -31,6 +31,10 @@ pub fn agent_wasm_path(name: &str) -> PathBuf {
     agent_dir(name).join(format!("{}.wasm", wasm_name))
 }
 
+pub fn agent_vlinderfile_path(name: &str) -> PathBuf {
+    agent_dir(name).join("Vlinderfile")
+}
+
 pub fn agent_db_path(name: &str) -> PathBuf {
     agent_dir(name).join(format!("{}.db", name))
 }

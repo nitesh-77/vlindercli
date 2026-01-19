@@ -2284,8 +2284,10 @@ dependencies = [
  "extism",
  "llama-cpp-2",
  "rusqlite",
+ "serde",
  "serde_json",
  "sqlite-vec",
+ "toml 0.8.23",
  "zerocopy 0.7.35",
 ]
 

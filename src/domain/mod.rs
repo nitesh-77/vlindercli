@@ -1,3 +1,3 @@
 mod agent;
 
-pub use agent::{Agent, Model, LoadError};
+pub use agent::{Agent, LoadError, Prompts, Requirements};
