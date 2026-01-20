@@ -244,9 +244,17 @@ fn find_relevant_chunks(query: &str, limit: u32) -> Result<ChunkSearchResult, Ch
     })
 }
 
-/// Handle SEARCH intent: probe all memories for connections on a topic
+/// An article with its best matching chunk
+struct ArticleMatch {
+    source: String,
+    best_score: f32,
+    snippet: String,
+}
+
+/// Handle SEARCH intent: find relevant articles on a topic
 pub fn handle_search(query: &str) -> FnResult<String> {
-    let result = find_relevant_chunks(query, 10);
+    // Get more chunks to ensure good article coverage
+    let result = find_relevant_chunks(query, 20);
 
     match result {
         Err(ChunkSearchError::EmbeddingFailed(err)) => Ok(format!(
@@ -256,7 +264,7 @@ pub fn handle_search(query: &str) -> FnResult<String> {
         )),
         Err(ChunkSearchError::SearchFailed) => Ok(format!(
             "🔍 Search: \"{}\"\n\n\
-             No relevant memories found. Try:\n\
+             No relevant articles found. Try:\n\
              - Committing more articles to memory\n\
              - Using different search terms",
             query
@@ -275,36 +283,56 @@ pub fn handle_search(query: &str) -> FnResult<String> {
         }) => {
             if chunks.is_empty() {
                 return Ok(format!(
-                    "🔍 Search: \"{}\"\n\
-                     Expanded to: \"{}\"\n\n\
-                     No relevant memories found for this query.",
-                    query,
-                    truncate(&expanded_query, 100)
+                    "🔍 Search: \"{}\"\n\n\
+                     No relevant articles found for this query.",
+                    query
                 ));
             }
 
-            // Format results
+            // Aggregate chunks by article, keeping best score and snippet
+            let mut articles: std::collections::HashMap<String, ArticleMatch> =
+                std::collections::HashMap::new();
+
+            for chunk in chunks {
+                articles
+                    .entry(chunk.source.clone())
+                    .and_modify(|existing| {
+                        if chunk.score > existing.best_score {
+                            existing.best_score = chunk.score;
+                            existing.snippet = truncate(&chunk.preview, 150);
+                        }
+                    })
+                    .or_insert(ArticleMatch {
+                        source: chunk.source,
+                        best_score: chunk.score,
+                        snippet: truncate(&chunk.preview, 150),
+                    });
+            }
+
+            // Sort by score descending
+            let mut sorted: Vec<_> = articles.into_values().collect();
+            sorted.sort_by(|a, b| b.best_score.partial_cmp(&a.best_score).unwrap());
+
+            // Format output
             let mut output = format!(
                 "🔍 Search: \"{}\"\n\
-                 Expanded to: \"{}\"\n\
-                 Found {} relevant passages\n\n",
+                 Found {} relevant article{}\n\n",
                 query,
-                truncate(&expanded_query, 100),
-                chunks.len()
+                sorted.len(),
+                if sorted.len() == 1 { "" } else { "s" }
             );
 
-            for (i, result) in chunks.iter().enumerate() {
+            for (i, article) in sorted.iter().enumerate() {
                 output.push_str(&format!(
-                    "---\n\
-                     **Result {}** (score: {:.2})\n\
-                     Source: {}\n\n\
-                     {}\n\n",
+                    "{}. {} (relevance: {:.0}%)\n   {}\n\n",
                     i + 1,
-                    result.score,
-                    result.source,
-                    result.preview
+                    article.source,
+                    article.best_score * 100.0,
+                    article.snippet
                 ));
             }
+
+            output.push_str("💡 Use \"get <url>\" to read the full article");
 
             Ok(output)
         }
@@ -411,9 +439,9 @@ I'm Pensieve, a memory system for web articles. I can help you:
 📖 **Recall a specific memory**
    "get <url>" or "recall the article from example.com"
 
-🔍 **Search across all memories** (shows raw passages)
-   "search for <concept>"
-   "find passages about <topic>"
+🔍 **Find relevant articles**
+   "search for <topic>" or "what do I have on <topic>?"
+   Returns a ranked list of articles to explore
 
 ❓ **Ask a question** (synthesized answer)
    "what is great work?"
