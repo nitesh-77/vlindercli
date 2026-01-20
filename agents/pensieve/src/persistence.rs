@@ -63,7 +63,7 @@ pub fn get_or_fetch_html(url: &str, url_key: &str) -> FnResult<String> {
     // Fetch from network
     let req = HttpRequest::new(url);
     let res = http::request::<()>(&req, None)?;
-    let html = String::from_utf8(res.body().to_vec())?;
+    let html = String::from_utf8_lossy(&res.body()).into_owned();
 
     // Cache the HTML
     unsafe {
