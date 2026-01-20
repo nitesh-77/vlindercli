@@ -34,15 +34,28 @@ pub fn chunk_text(text: &str, chunk_size: usize) -> Vec<String> {
     chunks
 }
 
+/// Result of summarization
+pub struct SummaryResult {
+    pub briefing: String,
+    pub key_points: Vec<String>,
+}
+
 /// Generate a summary using map-reduce strategy
-pub fn generate_summary(chunks: &[String]) -> FnResult<String> {
+pub fn generate_summary(chunks: &[String]) -> FnResult<SummaryResult> {
     if chunks.is_empty() {
-        return Ok("No content to summarize.".to_string());
+        return Ok(SummaryResult {
+            briefing: "No content to summarize.".to_string(),
+            key_points: vec![],
+        });
     }
 
     if chunks.len() <= 2 {
         let combined = chunks.join(" ");
-        return summarize_directly(&combined);
+        let briefing = summarize_directly(&combined)?;
+        return Ok(SummaryResult {
+            briefing,
+            key_points: vec![],
+        });
     }
 
     let chunks_to_process = if chunks.len() > MAX_CHUNKS_TO_SUMMARIZE {
@@ -51,8 +64,10 @@ pub fn generate_summary(chunks: &[String]) -> FnResult<String> {
         chunks.to_vec()
     };
 
-    let chunk_summaries = map_summarize_chunks(&chunks_to_process)?;
-    reduce_summaries(&chunk_summaries)
+    let key_points = map_summarize_chunks(&chunks_to_process)?;
+    let briefing = reduce_summaries(&key_points)?;
+
+    Ok(SummaryResult { briefing, key_points })
 }
 
 /// Sample chunks evenly across the content

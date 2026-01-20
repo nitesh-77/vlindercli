@@ -7,9 +7,9 @@ use extism_pdk::*;
 use crate::config::{
     get_prompt, Prompts, CHUNK_SIZE, DEFAULT_ANSWER_GENERATION, DEFAULT_QUERY_EXPANSION,
 };
-use crate::host::{embed, get_file, infer, list_files, search_by_vector};
+use crate::host::{embed, get_file, infer, list_files, search_by_vector, store_embedding};
 use crate::persistence::{embed_and_store_chunks, get_or_process_content, url_to_key};
-use crate::summarize::{chunk_text, generate_summary};
+use crate::summarize::{chunk_text, generate_summary, SummaryResult};
 use crate::util::truncate;
 
 /// Normalize a URL by ensuring it has a scheme
@@ -85,7 +85,12 @@ pub fn handle_process_url(url: &str) -> FnResult<String> {
     let embedded_count = embed_and_store_chunks(&url_key, &chunks)?;
 
     // Step 4: Generate summary
-    let summary = generate_summary(&chunks)?;
+    let SummaryResult { briefing, .. } = generate_summary(&chunks)?;
+
+    // Step 5: Store article-level embedding with Core Argument only
+    let article_summary = extract_core_argument(&briefing)
+        .unwrap_or_else(|| truncate(&content, 300));
+    store_article_embedding(&url_key, &url, &article_summary)?;
 
     Ok(format!(
         "📥 Memory committed\n\
@@ -99,9 +104,45 @@ pub fn handle_process_url(url: &str) -> FnResult<String> {
         content.len(),
         chunks.len(),
         embedded_count,
-        summary,
+        briefing,
         truncate(&content, 2000)
     ))
+}
+
+/// Extract just the Core Argument section from the briefing
+fn extract_core_argument(briefing: &str) -> Option<String> {
+    // Find "## Core Argument" section
+    let start_marker = "## Core Argument";
+    let start = briefing.find(start_marker)?;
+    let after_header = &briefing[start + start_marker.len()..];
+
+    // Find where the next section starts (or end of string)
+    let end = after_header.find("\n## ").unwrap_or(after_header.len());
+    let content = after_header[..end].trim();
+
+    if content.is_empty() {
+        return None;
+    }
+
+    Some(content.to_string())
+}
+
+/// Store an article-level embedding for search
+fn store_article_embedding(url_key: &str, url: &str, summary: &str) -> FnResult<()> {
+    let key = format!("article:{}", url_key);
+    let embedding = unsafe { embed("nomic-embed".to_string(), summary.to_string())? };
+
+    if embedding.starts_with("[error]") {
+        return Ok(()); // Silently skip if embedding fails
+    }
+
+    let metadata = serde_json::json!({
+        "url": url,
+        "summary": summary
+    }).to_string();
+
+    unsafe { store_embedding(key, embedding, metadata)?; }
+    Ok(())
 }
 
 /// Handle LIST_MEMORIES intent: review the index of all stored memories
@@ -193,10 +234,9 @@ fn expand_query(query: &str) -> FnResult<String> {
     Ok(expanded.to_string())
 }
 
-/// Result of finding relevant chunks - includes expanded query for display
+/// Result of finding relevant chunks
 struct ChunkSearchResult {
     chunks: Vec<SearchResult>,
-    expanded_query: String,
 }
 
 /// Error types for chunk retrieval
@@ -238,23 +278,96 @@ fn find_relevant_chunks(query: &str, limit: u32) -> Result<ChunkSearchResult, Ch
         raw: results_json,
     })?;
 
-    Ok(ChunkSearchResult {
-        chunks,
-        expanded_query,
-    })
+    Ok(ChunkSearchResult { chunks })
 }
 
-/// An article with its best matching chunk
-struct ArticleMatch {
-    source: String,
-    best_score: f32,
-    snippet: String,
+/// An article search result with URL and summary from metadata
+struct ArticleSearchResult {
+    url: String,
+    summary: String,
+    score: f32,
+}
+
+/// Find relevant articles by searching article-level embeddings
+fn find_relevant_articles(query: &str, limit: u32) -> Result<Vec<ArticleSearchResult>, ChunkSearchError> {
+    // Step 1: Expand the query for better semantic matching
+    let expanded_query = expand_query(query).map_err(|_| ChunkSearchError::SearchFailed)?;
+
+    // Step 2: Generate embedding for the expanded query
+    let query_embedding = unsafe {
+        embed("nomic-embed".to_string(), expanded_query.clone())
+            .map_err(|_| ChunkSearchError::SearchFailed)?
+    };
+
+    if query_embedding.starts_with("[error]") {
+        return Err(ChunkSearchError::EmbeddingFailed(query_embedding));
+    }
+
+    // Step 3: Search for similar vectors (request more to filter out chunk results)
+    let results_json = unsafe {
+        search_by_vector(query_embedding, limit * 3).map_err(|_| ChunkSearchError::SearchFailed)?
+    };
+
+    if results_json.starts_with("[error]") {
+        return Err(ChunkSearchError::SearchFailed);
+    }
+
+    // Step 4: Parse and filter to article-level results only
+    parse_article_search_results(&results_json, limit as usize)
+        .map_err(|e| ChunkSearchError::ParseFailed {
+            error: e,
+            raw: results_json,
+        })
+}
+
+/// Parse search results filtering for article-level embeddings only
+fn parse_article_search_results(json: &str, limit: usize) -> Result<Vec<ArticleSearchResult>, String> {
+    #[derive(serde::Deserialize)]
+    struct RawResult {
+        #[serde(default)]
+        distance: f32,
+        #[serde(default)]
+        key: String,
+        #[serde(default)]
+        metadata: Option<String>,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct ArticleMetadata {
+        url: String,
+        summary: String,
+    }
+
+    match serde_json::from_str::<Vec<RawResult>>(json) {
+        Ok(raw_results) => {
+            let results: Vec<ArticleSearchResult> = raw_results
+                .into_iter()
+                // Only include article-level embeddings
+                .filter(|r| r.key.starts_with("article:"))
+                .filter_map(|r| {
+                    r.metadata.and_then(|meta_str| {
+                        serde_json::from_str::<ArticleMetadata>(&meta_str).ok().map(|m| {
+                            // Convert distance to similarity score
+                            let score = 1.0 / (1.0 + r.distance);
+                            ArticleSearchResult {
+                                url: m.url,
+                                summary: m.summary,
+                                score,
+                            }
+                        })
+                    })
+                })
+                .take(limit)
+                .collect();
+            Ok(results)
+        }
+        Err(e) => Err(format!("Failed to parse article results: {}", e)),
+    }
 }
 
 /// Handle SEARCH intent: find relevant articles on a topic
 pub fn handle_search(query: &str) -> FnResult<String> {
-    // Get more chunks to ensure good article coverage
-    let result = find_relevant_chunks(query, 20);
+    let result = find_relevant_articles(query, 10);
 
     match result {
         Err(ChunkSearchError::EmbeddingFailed(err)) => Ok(format!(
@@ -277,58 +390,33 @@ pub fn handle_search(query: &str) -> FnResult<String> {
             error,
             truncate(&raw, 200)
         )),
-        Ok(ChunkSearchResult {
-            chunks,
-            expanded_query,
-        }) => {
-            if chunks.is_empty() {
+        Ok(articles) => {
+            if articles.is_empty() {
                 return Ok(format!(
                     "🔍 Search: \"{}\"\n\n\
-                     No relevant articles found for this query.",
+                     No relevant articles found for this query.\n\n\
+                     💡 Note: Only articles committed after this update have searchable summaries.\n\
+                     Try re-committing your articles to enable article-level search.",
                     query
                 ));
             }
 
-            // Aggregate chunks by article, keeping best score and snippet
-            let mut articles: std::collections::HashMap<String, ArticleMatch> =
-                std::collections::HashMap::new();
-
-            for chunk in chunks {
-                articles
-                    .entry(chunk.source.clone())
-                    .and_modify(|existing| {
-                        if chunk.score > existing.best_score {
-                            existing.best_score = chunk.score;
-                            existing.snippet = truncate(&chunk.preview, 150);
-                        }
-                    })
-                    .or_insert(ArticleMatch {
-                        source: chunk.source,
-                        best_score: chunk.score,
-                        snippet: truncate(&chunk.preview, 150),
-                    });
-            }
-
-            // Sort by score descending
-            let mut sorted: Vec<_> = articles.into_values().collect();
-            sorted.sort_by(|a, b| b.best_score.partial_cmp(&a.best_score).unwrap());
-
-            // Format output
+            // Format output with article summaries
             let mut output = format!(
                 "🔍 Search: \"{}\"\n\
                  Found {} relevant article{}\n\n",
                 query,
-                sorted.len(),
-                if sorted.len() == 1 { "" } else { "s" }
+                articles.len(),
+                if articles.len() == 1 { "" } else { "s" }
             );
 
-            for (i, article) in sorted.iter().enumerate() {
+            for (i, article) in articles.iter().enumerate() {
                 output.push_str(&format!(
                     "{}. {} (relevance: {:.0}%)\n   {}\n\n",
                     i + 1,
-                    article.source,
-                    article.best_score * 100.0,
-                    article.snippet
+                    article.url,
+                    article.score * 100.0,
+                    article.summary
                 ));
             }
 
@@ -363,10 +451,7 @@ pub fn handle_question(query: &str) -> FnResult<String> {
             error,
             truncate(&raw, 200)
         )),
-        Ok(ChunkSearchResult {
-            chunks,
-            expanded_query: _,
-        }) => {
+        Ok(ChunkSearchResult { chunks }) => {
             if chunks.is_empty() {
                 return Ok(format!(
                     "❓ Question: \"{}\"\n\n\
@@ -589,5 +674,64 @@ mod tests {
         let url = key_to_display_url(key);
         assert!(url.starts_with("https://"));
         assert!(url.contains("paulgraham.com"));
+    }
+
+    #[test]
+    fn parse_article_search_results_filters_by_prefix() {
+        // Mix of article and chunk results - should only return articles
+        let json = r#"[
+            {"distance": 1.0, "key": "article:https___example_com", "metadata": "{\"url\":\"https://example.com\",\"summary\":\"A great article about testing.\"}"},
+            {"distance": 2.0, "key": "https___example_com:chunk:0", "metadata": "{\"url_key\":\"https___example_com\",\"preview\":\"chunk text\"}"},
+            {"distance": 1.5, "key": "article:https___other_com", "metadata": "{\"url\":\"https://other.com\",\"summary\":\"Another summary.\"}"}
+        ]"#;
+        let results = parse_article_search_results(json, 10).unwrap();
+
+        // Should only include the 2 article results, not the chunk
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].url, "https://example.com");
+        assert_eq!(results[0].summary, "A great article about testing.");
+        assert_eq!(results[1].url, "https://other.com");
+    }
+
+    #[test]
+    fn parse_article_search_results_respects_limit() {
+        let json = r#"[
+            {"distance": 1.0, "key": "article:a", "metadata": "{\"url\":\"a\",\"summary\":\"a\"}"},
+            {"distance": 2.0, "key": "article:b", "metadata": "{\"url\":\"b\",\"summary\":\"b\"}"},
+            {"distance": 3.0, "key": "article:c", "metadata": "{\"url\":\"c\",\"summary\":\"c\"}"}
+        ]"#;
+        let results = parse_article_search_results(json, 2).unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn parse_article_search_results_handles_empty() {
+        let results = parse_article_search_results("[]", 10).unwrap();
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn extract_core_argument_finds_section() {
+        let briefing = r#"## Core Argument
+The article argues that great work requires dedication.
+
+## Key Insights
+- Point one"#;
+        let result = extract_core_argument(briefing);
+        assert!(result.is_some());
+        let summary = result.unwrap();
+        assert!(summary.contains("great work"));
+        assert!(!summary.contains("Key Insights"));
+    }
+
+    #[test]
+    fn extract_core_argument_returns_none_for_missing() {
+        let briefing = "Just some text without sections.";
+        assert!(extract_core_argument(briefing).is_none());
+    }
+
+    #[test]
+    fn extract_core_argument_returns_none_for_empty() {
+        assert!(extract_core_argument("").is_none());
     }
 }
