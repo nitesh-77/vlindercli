@@ -5,8 +5,12 @@ edition = "2021"
 publish = false
 
 [dependencies]
+dirs = "6"
 extism = "1"
+indicatif = "0.17"
 llama-cpp-2 = { version = "0.1", features = ["metal"] }
+reedline = "0.37"
+termimad = "0.30"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
