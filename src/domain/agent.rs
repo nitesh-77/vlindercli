@@ -1,6 +1,7 @@
 use crate::config;
 use extism::{Function, Manifest, Plugin, Wasm};
 use serde::Deserialize;
+use std::path::{Path, PathBuf};
 
 /// Agent runtime requirements
 #[derive(Clone, Debug, Deserialize)]
@@ -20,6 +21,19 @@ pub struct Prompts {
     pub direct_summarize: Option<String>,
 }
 
+/// Filesystem mount declaration for WASI access
+#[derive(Clone, Debug, Deserialize)]
+pub struct Mount {
+    pub host_path: String,
+    pub guest_path: String,
+    #[serde(default = "default_mount_mode")]
+    pub mode: String,
+}
+
+fn default_mount_mode() -> String {
+    "rw".to_string()
+}
+
 /// An agent is a Vlinderfile, deserialized
 #[derive(Clone, Debug, Deserialize)]
 pub struct Agent {
@@ -30,6 +44,8 @@ pub struct Agent {
     pub requirements: Requirements,
     #[serde(default)]
     pub prompts: Option<Prompts>,
+    #[serde(default)]
+    pub mounts: Vec<Mount>,
 
     /// Path to WASM binary (derived, not in Vlinderfile)
     #[serde(skip)]
@@ -101,6 +117,49 @@ impl Agent {
         &self.vlinderfile_raw
     }
 
+    /// Resolve mounts to Extism allowed_paths format.
+    /// Returns Vec<(host_path_with_ro_prefix, guest_path)>.
+    /// If no mounts are declared, returns the default mount: mnt -> /
+    pub fn resolve_mounts(&self) -> Vec<(String, PathBuf)> {
+        let mounts = if self.mounts.is_empty() {
+            // Default mount: agent's mnt dir -> /
+            vec![Mount {
+                host_path: "mnt".to_string(),
+                guest_path: "/".to_string(),
+                mode: "rw".to_string(),
+            }]
+        } else {
+            self.mounts.clone()
+        };
+
+        mounts
+            .iter()
+            .filter_map(|m| {
+                // Resolve host path: relative paths against agent dir, absolute as-is
+                let host_path = if Path::new(&m.host_path).is_absolute() {
+                    PathBuf::from(&m.host_path)
+                } else {
+                    config::agent_dir(&self.name).join(&m.host_path)
+                };
+
+                // Skip if host path doesn't exist
+                if !host_path.exists() {
+                    tracing::warn!("Mount host_path does not exist: {:?}", host_path);
+                    return None;
+                }
+
+                // Build key with ro: prefix if read-only
+                let key = if m.mode == "ro" {
+                    format!("ro:{}", host_path.display())
+                } else {
+                    host_path.display().to_string()
+                };
+
+                Some((key, PathBuf::from(&m.guest_path)))
+            })
+            .collect()
+    }
+
     pub fn execute(&self, input: &str) -> String {
         self.execute_with_functions(input, [])
     }
@@ -111,7 +170,15 @@ impl Agent {
         functions: impl IntoIterator<Item = Function>,
     ) -> String {
         let wasm = Wasm::file(&self.wasm_path);
-        let manifest = Manifest::new([wasm]).with_allowed_host("*");
+
+        // Build manifest with WASI allowed paths from mounts
+        let mut manifest = Manifest::new([wasm]).with_allowed_host("*");
+
+        for (host_path, guest_path) in self.resolve_mounts() {
+            manifest = manifest.with_allowed_path(host_path, guest_path);
+        }
+
+        // Plugin::new third param (true) enables WASI
         let mut plugin = match Plugin::new(&manifest, functions, true) {
             Ok(p) => p,
             Err(e) => return format!("[error] failed to create plugin: {}", e),

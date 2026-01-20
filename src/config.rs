@@ -102,6 +102,10 @@ pub fn agent_db_path(name: &str) -> PathBuf {
     agent_dir(name).join(format!("{}.db", name))
 }
 
+pub fn agent_mnt_path(name: &str) -> PathBuf {
+    agent_dir(name).join("mnt")
+}
+
 pub fn model_path(model_name: &str) -> PathBuf {
     models_dir().join(format!("{}.gguf", model_name))
 }

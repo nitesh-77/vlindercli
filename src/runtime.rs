@@ -1,3 +1,4 @@
+use crate::config;
 use crate::domain::Agent;
 use crate::inference::{load_embedding_engine, load_engine};
 use crate::storage::Storage;
@@ -12,6 +13,14 @@ impl Runtime {
     }
 
     pub fn execute(&self, agent: &Agent, input: &str) -> String {
+        // Ensure default mount directory exists
+        let mnt_path = config::agent_mnt_path(&agent.name);
+        if !mnt_path.exists() {
+            if let Err(e) = std::fs::create_dir_all(&mnt_path) {
+                tracing::warn!("Failed to create mount directory: {}", e);
+            }
+        }
+
         // Open storage for this agent
         let storage = match Storage::open(&agent.name) {
             Ok(s) => Arc::new(s),

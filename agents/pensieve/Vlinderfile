@@ -79,6 +79,24 @@ host_capabilities = [
 
 
 # -----------------------------------------------------------------------------
+# 2.5. FILESYSTEM MOUNTS
+# -----------------------------------------------------------------------------
+# WASI filesystem mounts allow the agent to access real host directories.
+# Coexists with SQLite storage - use mounts for real files, storage for data.
+#
+# host_path: Relative paths resolved against .vlinder/agents/<name>/, absolute paths as-is
+# guest_path: Must be absolute (start with /)
+# mode: "ro" (read-only) or "rw" (read-write), defaults to "rw"
+#
+# Default: If no [[mounts]] declared, auto-adds mnt -> / (rw)
+
+[[mounts]]
+host_path = "mnt"
+guest_path = "/"
+mode = "rw"
+
+
+# -----------------------------------------------------------------------------
 # 3. PROMPTS (Optional Overrides)
 # -----------------------------------------------------------------------------
 # The agent has sensible defaults hardcoded in the WASM. This section documents
