@@ -10,9 +10,11 @@ The six possible intents are:
 5. "QUESTION" - User wants a direct answer synthesized from their memories. Keywords: questions with "?", explain, tell me, what is, how does, why.
 6. "UNKNOWN" - The request doesn't clearly match any of the above intents.
 
-SEARCH vs QUESTION:
-- SEARCH: User wants to SEE the raw source material ("search for X", "find passages about X", "what do I have on X")
-- QUESTION: User wants a direct ANSWER based on memories ("what is X?", "explain X", "how does X work?", "tell me about X")
+SEARCH vs QUESTION (IMPORTANT - read carefully):
+- SEARCH: User explicitly wants to SEE/BROWSE raw passages. Look for: "search", "find", "show", "what do I have", "what's in my memories"
+- QUESTION: User asks a QUESTION or wants an EXPLANATION. Look for: ends with "?", "explain", "tell me about", "how", "why", "what is", "what are"
+
+DEFAULT RULE: If the input looks like a question (ends with "?" or starts with who/what/when/where/why/how), use QUESTION. Only use SEARCH if user explicitly asks to "search" or "find passages".
 
 Response format:
 {{"intent": "INTENT_NAME", "url": "extracted_url_if_any", "query": "search_or_question_query", "confidence": 0.0_to_1.0}}
@@ -32,10 +34,14 @@ Examples:
 - "search for machine learning" → {{"intent": "SEARCH", "query": "machine learning", "confidence": 0.9}}
 - "find passages about productivity" → {{"intent": "SEARCH", "query": "productivity", "confidence": 0.9}}
 - "what do I have on startups?" → {{"intent": "SEARCH", "query": "startups", "confidence": 0.85}}
-- "what is great work?" → {{"intent": "QUESTION", "query": "what is great work?", "confidence": 0.9}}
-- "how can I be more productive?" → {{"intent": "QUESTION", "query": "how can I be more productive?", "confidence": 0.9}}
-- "explain the key ideas about writing" → {{"intent": "QUESTION", "query": "explain the key ideas about writing", "confidence": 0.85}}
-- "tell me about entrepreneurship" → {{"intent": "QUESTION", "query": "tell me about entrepreneurship", "confidence": 0.85}}
+- "search productivity" → {{"intent": "SEARCH", "query": "productivity", "confidence": 0.9}}
+- "what is great work?" → {{"intent": "QUESTION", "query": "what is great work?", "confidence": 0.95}}
+- "how can I be more productive?" → {{"intent": "QUESTION", "query": "how can I be more productive?", "confidence": 0.95}}
+- "explain the key ideas about writing" → {{"intent": "QUESTION", "query": "explain the key ideas about writing", "confidence": 0.9}}
+- "tell me about entrepreneurship" → {{"intent": "QUESTION", "query": "tell me about entrepreneurship", "confidence": 0.9}}
+- "why is focus important?" → {{"intent": "QUESTION", "query": "why is focus important?", "confidence": 0.95}}
+- "productivity" → {{"intent": "QUESTION", "query": "productivity", "confidence": 0.7}}
+- "what's the meaning of life?" → {{"intent": "QUESTION", "query": "what's the meaning of life?", "confidence": 0.8}}
 - "hello" → {{"intent": "UNKNOWN", "confidence": 0.9}}
 - "asdfghjkl" → {{"intent": "UNKNOWN", "confidence": 1.0}}
 - "what's the weather?" → {{"intent": "UNKNOWN", "confidence": 0.85}}
