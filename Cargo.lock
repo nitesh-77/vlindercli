@@ -2288,6 +2288,8 @@ dependencies = [
  "serde_json",
  "sqlite-vec",
  "toml 0.8.23",
+ "tracing",
+ "tracing-subscriber",
  "zerocopy 0.7.35",
 ]
 
