@@ -112,7 +112,13 @@ impl Agent {
     ) -> String {
         let wasm = Wasm::file(&self.wasm_path);
         let manifest = Manifest::new([wasm]).with_allowed_host("*");
-        let mut plugin = Plugin::new(&manifest, functions, true).unwrap();
-        plugin.call("process", input).unwrap()
+        let mut plugin = match Plugin::new(&manifest, functions, true) {
+            Ok(p) => p,
+            Err(e) => return format!("[error] failed to create plugin: {}", e),
+        };
+        match plugin.call::<_, Vec<u8>>("process", input) {
+            Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
+            Err(e) => format!("[error] plugin execution failed: {}", e),
+        }
     }
 }
