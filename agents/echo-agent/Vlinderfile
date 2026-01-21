@@ -1,0 +1,6 @@
+name = "echo-agent"
+description = "Test agent that echoes input"
+
+[requirements]
+models = []
+host_capabilities = []

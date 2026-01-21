@@ -68,10 +68,11 @@ fn agent_explicit_mounts_from_vlinderfile() {
 
 #[test]
 fn agent_resolve_mounts_skips_nonexistent_paths() {
-    let agent = Agent::load("echo-agent").unwrap();
+    // Use upper-agent to avoid race with other tests that use echo-agent
+    let agent = Agent::load("upper-agent").unwrap();
 
     // Remove mnt directory if it exists to test skipping behavior
-    let mnt_path = vlindercli::config::agent_mnt_path("echo-agent");
+    let mnt_path = vlindercli::config::agent_mnt_path("upper-agent");
     let _ = std::fs::remove_dir_all(&mnt_path);
 
     // resolve_mounts should return empty vec when path doesn't exist
