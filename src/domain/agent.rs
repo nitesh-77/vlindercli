@@ -34,7 +34,7 @@ fn default_mount_mode() -> String {
     "rw".to_string()
 }
 
-/// An agent is a Vlinderfile, deserialized
+/// An agent is its manifest, deserialized
 #[derive(Clone, Debug, Deserialize)]
 pub struct Agent {
     pub name: String,
@@ -47,13 +47,13 @@ pub struct Agent {
     #[serde(default)]
     pub mounts: Vec<Mount>,
 
-    /// Path to WASM binary (derived, not in Vlinderfile)
+    /// Path to WASM binary (derived, not in manifest)
     #[serde(skip)]
     wasm_path: String,
 
-    /// Raw Vlinderfile content (for passing to plugin)
+    /// Raw manifest content (for passing to plugin)
     #[serde(skip)]
-    vlinderfile_raw: String,
+    manifest_raw: String,
 }
 
 #[derive(Debug)]
@@ -83,13 +83,13 @@ impl From<extism::Error> for LoadError {
 
 impl Agent {
     pub fn load(name: &str) -> Result<Agent, LoadError> {
-        let vlinderfile_path = config::agent_vlinderfile_path(name);
+        let manifest_path = config::agent_manifest_path(name);
         let wasm_path = config::agent_wasm_path(name);
 
-        if !vlinderfile_path.exists() {
+        if !manifest_path.exists() {
             return Err(LoadError::Io(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
-                format!("Vlinderfile not found: {}", vlinderfile_path.display()),
+                format!("manifest not found: {}", manifest_path.display()),
             )));
         }
 
@@ -100,11 +100,11 @@ impl Agent {
             )));
         }
 
-        let vlinderfile_raw = std::fs::read_to_string(&vlinderfile_path)?;
-        let mut agent: Agent = toml::from_str(&vlinderfile_raw)?;
+        let manifest_raw = std::fs::read_to_string(&manifest_path)?;
+        let mut agent: Agent = toml::from_str(&manifest_raw)?;
 
         agent.wasm_path = wasm_path.to_string_lossy().to_string();
-        agent.vlinderfile_raw = vlinderfile_raw;
+        agent.manifest_raw = manifest_raw;
 
         Ok(agent)
     }
@@ -113,8 +113,8 @@ impl Agent {
         self.requirements.models.iter().any(|m| m == name)
     }
 
-    pub fn vlinderfile(&self) -> &str {
-        &self.vlinderfile_raw
+    pub fn manifest(&self) -> &str {
+        &self.manifest_raw
     }
 
     /// Resolve mounts to Extism allowed_paths format.

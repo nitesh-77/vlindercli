@@ -22,7 +22,7 @@ fn load_fails_for_missing_agent() {
 }
 
 #[test]
-fn agent_loads_requirements_from_vlinderfile() {
+fn agent_loads_requirements_from_manifest() {
     let agent = Agent::load("pensieve").unwrap();
     assert_eq!(agent.name, "pensieve");
     assert_eq!(agent.requirements.models.len(), 2);

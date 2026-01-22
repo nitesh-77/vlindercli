@@ -54,9 +54,9 @@ pub fn process(input: String) -> FnResult<String> {
     }
 }
 
-/// Return the default Vlinderfile configuration with all compiled-in prompts.
+/// Return the default manifest configuration with all compiled-in prompts.
 ///
-/// Safety net for users - if they mess up their Vlinderfile, this returns
+/// Safety net for users - if they mess up their manifest, this returns
 /// a working configuration with all defaults exposed.
 #[plugin_fn]
 pub fn get_default_config(_input: String) -> FnResult<String> {

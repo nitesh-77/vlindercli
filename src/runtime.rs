@@ -28,7 +28,7 @@ impl Runtime {
         };
 
         agent.execute_with_functions(input, [
-            make_get_vlinderfile_function(agent.clone()),
+            make_get_manifest_function(agent.clone()),
             make_infer_function(agent.clone()),
             make_embed_function(agent.clone()),
             make_put_file_function(storage.clone()),
@@ -41,17 +41,17 @@ impl Runtime {
     }
 }
 
-fn make_get_vlinderfile_function(agent: Agent) -> Function {
+fn make_get_manifest_function(agent: Agent) -> Function {
     Function::new(
-        "get_vlinderfile",
+        "get_manifest",
         [],           // no inputs
-        [extism::PTR], // returns vlinderfile content
+        [extism::PTR], // returns manifest content
         UserData::new(agent),
         |plugin, _inputs, outputs, user_data| {
             let agent = user_data.get().unwrap();
             let agent = agent.lock().unwrap();
 
-            let handle = plugin.memory_new(agent.vlinderfile())?;
+            let handle = plugin.memory_new(agent.manifest())?;
             outputs[0] = extism::Val::I64(handle.offset() as i64);
             Ok(())
         },

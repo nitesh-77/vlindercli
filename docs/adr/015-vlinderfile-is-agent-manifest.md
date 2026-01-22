@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (updates ADR 011)
+Superseded by ADR 017
 
 ## Context
 

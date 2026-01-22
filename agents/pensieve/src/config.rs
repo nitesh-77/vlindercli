@@ -1,20 +1,20 @@
 //! Configuration for the Pensieve agent
 //!
-//! Loads the Vlinderfile at runtime for prompt overrides.
+//! Loads the agent manifest at runtime for prompt overrides.
 //! Default prompts are embedded from src/prompts/*.txt at compile time.
 
 use once_cell::sync::Lazy;
 use serde::Deserialize;
 
-use crate::host::get_vlinderfile;
+use crate::host::get_manifest;
 
 // =============================================================================
-// Vlinderfile Structs
+// Manifest Structs
 // =============================================================================
 
-/// Root configuration from Vlinderfile
+/// Root configuration from agent manifest
 #[derive(Debug, Deserialize)]
-pub struct Vlinderfile {
+pub struct Manifest {
     pub name: String,
     pub description: String,
     #[serde(default)]
@@ -47,12 +47,12 @@ pub struct Prompts {
 // =============================================================================
 
 /// Global config, loaded lazily
-pub static CONFIG: Lazy<Vlinderfile> = Lazy::new(|| {
-    let content = unsafe { get_vlinderfile().expect("Failed to load Vlinderfile") };
-    toml::from_str(&content).expect("Failed to parse Vlinderfile")
+pub static CONFIG: Lazy<Manifest> = Lazy::new(|| {
+    let content = unsafe { get_manifest().expect("Failed to load manifest") };
+    toml::from_str(&content).expect("Failed to parse manifest")
 });
 
-/// Get prompt: Vlinderfile override if present, else compiled-in default
+/// Get prompt: manifest override if present, else compiled-in default
 pub fn get_prompt(getter: fn(&Prompts) -> &Option<String>, default: &str) -> String {
     CONFIG
         .prompts

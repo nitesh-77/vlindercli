@@ -16,7 +16,7 @@ We need a way for agents to access host filesystem directories while maintaining
 
 ## Decision
 
-**Declare filesystem mounts in Vlinderfile, expose via WASI preopened directories.**
+**Declare filesystem mounts in agent manifest, expose via WASI preopened directories.**
 
 ```toml
 [[mounts]]

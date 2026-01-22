@@ -49,7 +49,7 @@ pub fn determine_intent(input: &str) -> FnResult<Intent> {
         });
     }
 
-    // Get prompt template (Vlinderfile override or compiled-in default)
+    // Get prompt template (manifest override or compiled-in default)
     let template = get_prompt(
         |p: &Prompts| &p.intent_recognition,
         DEFAULT_INTENT_RECOGNITION,

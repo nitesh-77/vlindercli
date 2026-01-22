@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use vlindercli::domain::Agent;
 
 #[test]
-fn agent_load_parses_vlinderfile() {
+fn agent_load_parses_manifest() {
     let agent = Agent::load("echo-agent").unwrap();
     assert_eq!(agent.name, "echo-agent");
     assert_eq!(agent.description, "Test agent that echoes input");
@@ -15,8 +15,8 @@ fn agent_load_fails_for_unknown() {
 }
 
 #[test]
-fn agent_has_model_from_vlinderfile() {
-    // Pensieve declares phi3 and nomic-embed in its Vlinderfile
+fn agent_has_model_from_manifest() {
+    // Pensieve declares phi3 and nomic-embed in its manifest
     let agent = Agent::load("pensieve").unwrap();
 
     assert!(agent.has_model("phi3"));
@@ -48,7 +48,7 @@ fn agent_default_mount_when_none_declared() {
 }
 
 #[test]
-fn agent_explicit_mounts_from_vlinderfile() {
+fn agent_explicit_mounts_from_manifest() {
     // mount-test-agent has explicit [[mounts]] section
     let agent = Agent::load("mount-test-agent").unwrap();
 

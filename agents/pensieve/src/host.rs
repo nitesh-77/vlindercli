@@ -7,8 +7,8 @@ use extism_pdk::*;
 
 #[host_fn]
 extern "ExtismHost" {
-    /// Load the agent's Vlinderfile configuration from the runtime
-    pub fn get_vlinderfile() -> String;
+    /// Load the agent's manifest configuration from the runtime
+    pub fn get_manifest() -> String;
 
     /// Call a local LLM for inference
     pub fn infer(model: String, prompt: String) -> String;
