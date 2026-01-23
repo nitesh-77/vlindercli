@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 #[derive(Clone, Debug, Deserialize)]
 pub struct Requirements {
     pub models: Vec<String>,
-    pub host_capabilities: Vec<String>,
+    pub services: Vec<String>,
 }
 
 /// Optional prompt overrides

@@ -3,4 +3,4 @@ description = "Test agent that uppercases input"
 
 [requirements]
 models = []
-host_capabilities = []
+services = []

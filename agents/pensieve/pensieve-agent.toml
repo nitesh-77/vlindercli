@@ -51,8 +51,8 @@ source = "https://github.com/vlindercli/pensieve"
 # Want to try a different model? Change the name here and update prompts below.
 models = ["phi3", "nomic-embed"]
 
-# Host functions this agent imports from the runtime.
-# These form the agent's "syscall" interface to the outside world.
+# Services this agent requires from the runtime.
+# These form the agent's interface to the outside world.
 #
 # Inference & Embeddings:
 #   - infer: Call an LLM with a prompt, get text back
@@ -67,7 +67,7 @@ models = ["phi3", "nomic-embed"]
 #   - store_embedding: Save a vector with metadata
 #   - search_by_vector: Find similar vectors
 #
-host_capabilities = [
+services = [
     "infer",
     "embed",
     "get_file",
