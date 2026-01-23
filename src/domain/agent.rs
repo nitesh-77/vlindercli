@@ -41,13 +41,15 @@ pub struct Agent {
     pub description: String,
     #[serde(default)]
     pub source: Option<String>,
+    #[serde(default)]
+    pub code: Option<String>,
     pub requirements: Requirements,
     #[serde(default)]
     pub prompts: Option<Prompts>,
     #[serde(default)]
     pub mounts: Vec<Mount>,
 
-    /// Path to WASM binary (derived, not in manifest)
+    /// Resolved path to WASM binary
     #[serde(skip)]
     wasm_path: String,
 
@@ -84,7 +86,6 @@ impl From<extism::Error> for LoadError {
 impl Agent {
     pub fn load(name: &str) -> Result<Agent, LoadError> {
         let manifest_path = config::agent_manifest_path(name);
-        let wasm_path = config::agent_wasm_path(name);
 
         if !manifest_path.exists() {
             return Err(LoadError::Io(std::io::Error::new(
@@ -93,15 +94,28 @@ impl Agent {
             )));
         }
 
+        let manifest_raw = std::fs::read_to_string(&manifest_path)?;
+        let mut agent: Agent = toml::from_str(&manifest_raw)?;
+
+        // Resolve code path: explicit `code` field or convention (<name>.wasm)
+        let wasm_path = match &agent.code {
+            Some(code_ref) => {
+                // Relative paths resolved against agent dir
+                if Path::new(code_ref).is_absolute() {
+                    PathBuf::from(code_ref)
+                } else {
+                    config::agent_dir(name).join(code_ref)
+                }
+            }
+            None => config::agent_wasm_path(name),
+        };
+
         if !wasm_path.exists() {
             return Err(LoadError::Io(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
                 format!("wasm not found: {}", wasm_path.display()),
             )));
         }
-
-        let manifest_raw = std::fs::read_to_string(&manifest_path)?;
-        let mut agent: Agent = toml::from_str(&manifest_raw)?;
 
         agent.wasm_path = wasm_path.to_string_lossy().to_string();
         agent.manifest_raw = manifest_raw;

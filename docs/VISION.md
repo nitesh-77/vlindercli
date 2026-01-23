@@ -21,16 +21,15 @@ Agent systems today are messy. VlinderCLI aims to provide a domain specific voca
 ### Separation of Concerns
 
 The **agent manifest** declares what an agent is and how it runs. It is composed of:
-- **Identity**: Name and description — how the agent identifies itself
-- **Code**: The agent's logic
-- **Packaging**: How the code is bundled (WASM, Firecracker, container)
+- **Identity**: Name, description, and source — how the agent identifies itself
+- **Code**: Reference to the agent's logic (default: `<name>.wasm`)
 - **Models**: Which models the agent needs
   - phi3 (generation)
   - nomic-embed (embedding)
   - whisper (transcription)
   - llava (vision)
+- **Services**: Which runtime services the agent needs (infer, embed, storage, vectors)
 - **Prompts**: Behavior, personality, constraints
-- **Services**: Which runtime services the agent needs (fetch, store, embed, infer)
 - **Mounts**: Filesystem access and persistence
 
 The **fleet manifest** declares where and how to deploy a collection of agents.
