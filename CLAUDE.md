@@ -61,3 +61,17 @@ Claude should:
 - Never mention Claude in commit messages
 - No "Co-Authored-By" lines
 - Commit messages should read as if written by the user
+
+### Commit Message Format
+
+```
+<short summary in imperative mood>
+
+<why this change matters - 1-2 sentences>
+<what was changed - if not obvious from summary>
+```
+
+- First line: imperative mood, ~50 chars ("Add X", "Fix Y", "Rename A to B")
+- Body: explain *why*, not just *what*
+- If aligning with Vision/ADR, mention it
+- Keep it concise but meaningful
