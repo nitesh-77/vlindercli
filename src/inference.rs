@@ -7,6 +7,16 @@ use llama_cpp_2::model::LlamaModel;
 use llama_cpp_2::sampling::LlamaSampler;
 use std::num::NonZeroU32;
 use std::path::Path;
+use std::sync::Once;
+
+/// One-time initialization for llama.cpp backend
+static LLAMA_INIT: Once = Once::new();
+
+fn init_llama() {
+    LLAMA_INIT.call_once(|| {
+        llama_cpp_2::send_logs_to_tracing(llama_cpp_2::LogOptions::default());
+    });
+}
 
 pub trait InferenceEngine: Send + Sync {
     fn infer(&self, prompt: &str, max_tokens: u32) -> Result<String, String>;
@@ -19,6 +29,7 @@ pub struct LlamaEngine {
 
 impl LlamaEngine {
     pub fn load(model_path: &Path) -> Result<Self, String> {
+        init_llama();
         let backend = LlamaBackend::init().map_err(|e| e.to_string())?;
 
         let model_params = LlamaModelParams::default();
@@ -121,6 +132,7 @@ pub struct LlamaEmbeddingEngine {
 
 impl LlamaEmbeddingEngine {
     pub fn load(model_path: &Path) -> Result<Self, String> {
+        init_llama();
         let backend = LlamaBackend::init().map_err(|e| e.to_string())?;
 
         let model_params = LlamaModelParams::default();
