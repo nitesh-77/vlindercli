@@ -9,6 +9,10 @@ not generalized capability. For that, you don't need frontier models or hypersca
 infrastructure. Small, efficient models — Phi-3, Mistral 7B, Qwen, Whisper,
 Nomic Embed — on infrastructure you control, can deliver outsized value.
 
+Local models are immutable artifacts. Same weights + same input = same output.
+Execution traces become reproducible proofs. API providers can silently change
+models; you cannot verify. Local models you can hash, replay, and debug.
+
 ### The Value Proposal
 
 Agent systems today are messy. VlinderCLI aims to provide a domain specific vocabulary that makes them tractable: building blocks that map to how you think about agents.
