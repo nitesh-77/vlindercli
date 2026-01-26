@@ -1,14 +1,15 @@
 //! Inference services - model inference and embedding.
 
 use crate::domain::Agent;
-use crate::inference::{load_embedding_engine, load_engine};
+use crate::embedding::load_embedding_engine;
+use crate::inference::load_inference_engine;
 
 pub fn infer(agent: &Agent, model: &str, prompt: &str) -> Result<String, Error> {
     if !agent.has_model(model) {
         return Err(Error::ModelNotDeclared(model.to_string()));
     }
 
-    let engine = load_engine(model)
+    let engine = load_inference_engine(model)
         .map_err(|e| Error::ModelLoad {
             model: model.to_string(),
             reason: e,

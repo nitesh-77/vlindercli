@@ -2,6 +2,7 @@
 
 use std::num::NonZeroU32;
 use std::path::Path;
+use std::sync::Once;
 
 use llama_cpp_2::context::params::LlamaContextParams;
 use llama_cpp_2::llama_backend::LlamaBackend;
@@ -11,7 +12,13 @@ use llama_cpp_2::model::LlamaModel;
 
 use crate::config;
 
-use super::init_llama;
+static LLAMA_INIT: Once = Once::new();
+
+fn init_llama() {
+    LLAMA_INIT.call_once(|| {
+        llama_cpp_2::send_logs_to_tracing(llama_cpp_2::LogOptions::default());
+    });
+}
 
 pub trait EmbeddingEngine: Send + Sync {
     fn embed(&self, text: &str) -> Result<Vec<f32>, String>;
@@ -48,12 +55,10 @@ impl EmbeddingEngine for LlamaEmbeddingEngine {
         let mut ctx = self.model.new_context(&self.backend, ctx_params)
             .map_err(|e| e.to_string())?;
 
-        // Tokenize text
         let tokens = self.model
             .str_to_token(text, llama_cpp_2::model::AddBos::Always)
             .map_err(|e| e.to_string())?;
 
-        // Process in a single batch
         let mut batch = LlamaBatch::new(batch_size as usize, 1);
         for (i, &token) in tokens.iter().enumerate() {
             let is_last = i == tokens.len() - 1;
@@ -62,7 +67,6 @@ impl EmbeddingEngine for LlamaEmbeddingEngine {
 
         ctx.decode(&mut batch).map_err(|e| e.to_string())?;
 
-        // Get embeddings from sequence
         let embeddings = ctx.embeddings_seq_ith(0)
             .map_err(|e| format!("failed to get embeddings: {}", e))?;
 
