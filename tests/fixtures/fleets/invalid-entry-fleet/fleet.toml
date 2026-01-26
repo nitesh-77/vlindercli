@@ -1,0 +1,5 @@
+name = "invalid-entry-fleet"
+entry = "nonexistent"
+
+[agents.echo]
+path = "agents/echo-agent"

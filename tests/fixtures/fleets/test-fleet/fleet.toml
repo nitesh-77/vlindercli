@@ -1,0 +1,8 @@
+name = "test-fleet"
+entry = "echo"
+
+[agents.echo]
+path = "agents/echo-agent"
+
+[agents.upper]
+path = "agents/upper-agent"

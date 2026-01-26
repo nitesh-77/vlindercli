@@ -1,0 +1,5 @@
+name = "missing-agent-fleet"
+entry = "missing"
+
+[agents.missing]
+path = "agents/does-not-exist"
