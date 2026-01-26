@@ -23,7 +23,7 @@ impl AgentManifest {
     /// Load an agent manifest from a file path.
     ///
     /// Resolves `code` to a URI and validates the file exists.
-    pub fn load(path: &Path) -> Result<(AgentManifest, String), ParseError> {
+    pub fn load(path: &Path) -> Result<AgentManifest, ParseError> {
         let content = std::fs::read_to_string(path)?;
         let mut manifest: AgentManifest = toml::from_str(&content)?;
 
@@ -33,7 +33,7 @@ impl AgentManifest {
         // Resolve code to URI
         manifest.code = resolve_code_uri(&manifest.code, agent_dir)?;
 
-        Ok((manifest, content))
+        Ok(manifest)
     }
 }
 

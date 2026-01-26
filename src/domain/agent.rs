@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 
+use serde::Serialize;
+
 use super::agent_manifest::{AgentManifest, MountConfig, ParseError, PromptsConfig, RequirementsConfig};
 
 /// An agent with resolved paths, ready for execution.
@@ -16,18 +18,13 @@ pub struct Agent {
     pub agent_dir: PathBuf,
     /// URI pointing to the agent's executable code (e.g., "file:///path/to/agent.wasm")
     pub code: String,
-    manifest_raw: String,
 }
 
 impl Agent {
     /// Create an agent from a manifest, resolving mounts against agent_dir.
     ///
     /// The manifest's `code` field is already a resolved URI.
-    pub fn from_manifest(
-        manifest: AgentManifest,
-        manifest_raw: String,
-        agent_dir: &Path,
-    ) -> Result<Agent, LoadError> {
+    pub fn from_manifest(manifest: AgentManifest, agent_dir: &Path) -> Result<Agent, LoadError> {
         let agent_dir = agent_dir.to_path_buf();
 
         // Resolve and validate mounts
@@ -45,7 +42,6 @@ impl Agent {
             mounts,
             agent_dir,
             code: manifest.code,
-            manifest_raw,
         })
     }
 
@@ -63,8 +59,8 @@ impl Agent {
             )));
         }
 
-        let (manifest, raw) = AgentManifest::load(&manifest_path)?;
-        Self::from_manifest(manifest, raw, &agent_dir)
+        let manifest = AgentManifest::load(&manifest_path)?;
+        Self::from_manifest(manifest, &agent_dir)
     }
 
     pub fn db_path(&self) -> PathBuf {
@@ -73,10 +69,6 @@ impl Agent {
 
     pub fn has_model(&self, name: &str) -> bool {
         self.requirements.models.iter().any(|m| m == name)
-    }
-
-    pub fn manifest(&self) -> &str {
-        &self.manifest_raw
     }
 }
 
@@ -120,7 +112,7 @@ impl From<RequirementsConfig> for Requirements {
 }
 
 /// Prompt overrides (validated)
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct Prompts {
     pub intent_recognition: Option<String>,
     pub query_expansion: Option<String>,

@@ -1,35 +1,16 @@
 //! Configuration for the Pensieve agent
 //!
-//! Loads the agent manifest at runtime for prompt overrides.
+//! Loads prompt overrides from the runtime.
 //! Default prompts are embedded from src/prompts/*.txt at compile time.
 
 use once_cell::sync::Lazy;
 use serde::Deserialize;
 
-use crate::host::get_manifest;
+use crate::host::get_prompts;
 
 // =============================================================================
-// Manifest Structs
+// Prompts
 // =============================================================================
-
-/// Root configuration from agent manifest
-#[derive(Debug, Deserialize)]
-pub struct Manifest {
-    pub name: String,
-    pub description: String,
-    #[serde(default)]
-    pub source: Option<String>,
-    pub requirements: Requirements,
-    #[serde(default)]
-    pub prompts: Option<Prompts>,
-}
-
-/// Runtime requirements
-#[derive(Debug, Deserialize)]
-pub struct Requirements {
-    pub models: Vec<String>,
-    pub services: Vec<String>,
-}
 
 /// Optional prompt overrides
 #[derive(Debug, Default, Deserialize)]
@@ -46,16 +27,15 @@ pub struct Prompts {
 // Config Loader
 // =============================================================================
 
-/// Global config, loaded lazily
-pub static CONFIG: Lazy<Manifest> = Lazy::new(|| {
-    let content = unsafe { get_manifest().expect("Failed to load manifest") };
-    toml::from_str(&content).expect("Failed to parse manifest")
+/// Global prompts, loaded lazily from runtime
+pub static PROMPTS: Lazy<Option<Prompts>> = Lazy::new(|| {
+    let json = unsafe { get_prompts().ok()? };
+    serde_json::from_str(&json).ok()
 });
 
-/// Get prompt: manifest override if present, else compiled-in default
+/// Get prompt: runtime override if present, else compiled-in default
 pub fn get_prompt(getter: fn(&Prompts) -> &Option<String>, default: &str) -> String {
-    CONFIG
-        .prompts
+    PROMPTS
         .as_ref()
         .and_then(|p| getter(p).as_ref())
         .cloned()

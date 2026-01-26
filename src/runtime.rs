@@ -76,7 +76,7 @@ impl Runtime {
         };
 
         let functions = [
-            make_get_manifest_function(agent.clone()),
+            make_get_prompts_function(agent.clone()),
             make_infer_function(agent.clone()),
             make_embed_function(agent.clone()),
             make_put_file_function(object_storage.clone()),
@@ -123,16 +123,18 @@ impl Runtime {
 // Host Function Definitions
 // ============================================================================
 
-fn make_get_manifest_function(agent: Agent) -> Function {
+fn make_get_prompts_function(agent: Agent) -> Function {
     Function::new(
-        "get_manifest",
+        "get_prompts",
         [],
         [extism::PTR],
         UserData::new(agent),
         |plugin, _inputs, outputs, user_data| {
             let agent = user_data.get().unwrap();
             let agent = agent.lock().unwrap();
-            write_output(plugin, outputs, agent.manifest().as_bytes())
+            let json = serde_json::to_string(&agent.prompts)
+                .unwrap_or_else(|_| "null".to_string());
+            write_output(plugin, outputs, json.as_bytes())
         },
     )
 }
