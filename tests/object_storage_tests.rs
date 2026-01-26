@@ -1,8 +1,8 @@
-use vlindercli::storage::Storage;
+use vlindercli::storage::ObjectStorage;
 
 #[test]
 fn storage_open_creates_db() {
-    let storage = Storage::open("test-agent-open").unwrap();
+    let storage = ObjectStorage::open("test-agent-open").unwrap();
     // If we got here, the DB was created successfully
     drop(storage);
 
@@ -12,7 +12,7 @@ fn storage_open_creates_db() {
 
 #[test]
 fn storage_put_and_get_file() {
-    let storage = Storage::open("test-agent-files").unwrap();
+    let storage = ObjectStorage::open("test-agent-files").unwrap();
 
     // Write a file
     let content = b"Hello, AgentFS!";
@@ -29,7 +29,7 @@ fn storage_put_and_get_file() {
 
 #[test]
 fn storage_get_nonexistent_file() {
-    let storage = Storage::open("test-agent-nofile").unwrap();
+    let storage = ObjectStorage::open("test-agent-nofile").unwrap();
 
     let result = storage.get_file("/does/not/exist.txt").unwrap();
     assert_eq!(result, None);
@@ -41,7 +41,7 @@ fn storage_get_nonexistent_file() {
 
 #[test]
 fn storage_delete_file() {
-    let storage = Storage::open("test-agent-delete").unwrap();
+    let storage = ObjectStorage::open("test-agent-delete").unwrap();
 
     // Write and verify
     storage.put_file("/temp/data.bin", b"temporary").unwrap();
@@ -63,7 +63,7 @@ fn storage_delete_file() {
 
 #[test]
 fn storage_list_files() {
-    let storage = Storage::open("test-agent-list").unwrap();
+    let storage = ObjectStorage::open("test-agent-list").unwrap();
 
     // Create files in different directories
     storage.put_file("/notes/day1.md", b"day 1").unwrap();
@@ -88,7 +88,7 @@ fn storage_list_files() {
 
 #[test]
 fn storage_overwrite_file() {
-    let storage = Storage::open("test-agent-overwrite").unwrap();
+    let storage = ObjectStorage::open("test-agent-overwrite").unwrap();
 
     // Write initial content
     storage.put_file("/config.yaml", b"version: 1").unwrap();
@@ -107,7 +107,7 @@ fn storage_overwrite_file() {
 
 #[test]
 fn storage_binary_content() {
-    let storage = Storage::open("test-agent-binary").unwrap();
+    let storage = ObjectStorage::open("test-agent-binary").unwrap();
 
     // Store binary data with null bytes
     let binary: Vec<u8> = (0..=255).collect();
@@ -127,7 +127,7 @@ fn storage_binary_content() {
 /// not real filesystem paths.
 #[test]
 fn storage_cannot_read_host_filesystem() {
-    let storage = Storage::open("test-agent-security").unwrap();
+    let storage = ObjectStorage::open("test-agent-security").unwrap();
 
     // Attempt to read host files - should return None
     // because these are just database keys, not real paths
@@ -148,8 +148,8 @@ fn storage_cannot_read_host_filesystem() {
 /// Security test: Each agent's storage is isolated
 #[test]
 fn storage_agent_isolation() {
-    let storage_a = Storage::open("test-agent-isolated-a").unwrap();
-    let storage_b = Storage::open("test-agent-isolated-b").unwrap();
+    let storage_a = ObjectStorage::open("test-agent-isolated-a").unwrap();
+    let storage_b = ObjectStorage::open("test-agent-isolated-b").unwrap();
 
     // Agent A writes a secret
     storage_a.put_file("/secret.txt", b"agent-a-secret").unwrap();
@@ -175,98 +175,4 @@ fn storage_agent_isolation() {
     drop(storage_b);
     let _ = std::fs::remove_dir_all(".vlinder/agents/test-agent-isolated-a");
     let _ = std::fs::remove_dir_all(".vlinder/agents/test-agent-isolated-b");
-}
-
-// --- Vector storage tests ---
-
-/// Create a 768-dim test vector
-fn make_test_vector(seed: f32) -> Vec<f32> {
-    (0..768).map(|i| (i as f32 * seed).sin()).collect()
-}
-
-#[test]
-fn storage_store_and_search_embedding() {
-    let storage = Storage::open("test-agent-vec").unwrap();
-
-    // Store some embeddings
-    let vec1 = make_test_vector(1.0);
-    let vec2 = make_test_vector(2.0);
-    let vec3 = make_test_vector(1.1); // Similar to vec1
-
-    storage.store_embedding("doc1", &vec1, "first document").unwrap();
-    storage.store_embedding("doc2", &vec2, "second document").unwrap();
-    storage.store_embedding("doc3", &vec3, "third document").unwrap();
-
-    // Search with vec1 - should find doc1 first (exact match), then doc3 (similar)
-    let results = storage.search_by_vector(&vec1, 3).unwrap();
-    assert_eq!(results.len(), 3);
-    assert_eq!(results[0].0, "doc1"); // Exact match first
-    assert_eq!(results[0].1, "first document");
-
-    // Cleanup
-    drop(storage);
-    let _ = std::fs::remove_dir_all(".vlinder/agents/test-agent-vec");
-}
-
-#[test]
-fn storage_embedding_wrong_dimensions() {
-    let storage = Storage::open("test-agent-vec-dim").unwrap();
-
-    // Try to store wrong dimension vector
-    let wrong_vec: Vec<f32> = vec![1.0, 2.0, 3.0]; // Only 3 dims
-    let result = storage.store_embedding("bad", &wrong_vec, "");
-    assert!(result.is_err());
-    assert!(result.unwrap_err().contains("768"));
-
-    // Cleanup
-    drop(storage);
-    let _ = std::fs::remove_dir_all(".vlinder/agents/test-agent-vec-dim");
-}
-
-#[test]
-fn storage_delete_embedding() {
-    let storage = Storage::open("test-agent-vec-del").unwrap();
-
-    let vec1 = make_test_vector(1.0);
-    storage.store_embedding("to-delete", &vec1, "temp").unwrap();
-
-    // Verify it exists via search
-    let results = storage.search_by_vector(&vec1, 1).unwrap();
-    assert_eq!(results.len(), 1);
-
-    // Delete it
-    let deleted = storage.delete_embedding("to-delete").unwrap();
-    assert!(deleted);
-
-    // Verify it's gone
-    let results = storage.search_by_vector(&vec1, 1).unwrap();
-    assert_eq!(results.len(), 0);
-
-    // Cleanup
-    drop(storage);
-    let _ = std::fs::remove_dir_all(".vlinder/agents/test-agent-vec-del");
-}
-
-#[test]
-fn storage_overwrite_embedding() {
-    let storage = Storage::open("test-agent-vec-overwrite").unwrap();
-
-    let vec1 = make_test_vector(1.0);
-    let vec2 = make_test_vector(2.0);
-
-    // Store initial
-    storage.store_embedding("doc", &vec1, "original").unwrap();
-
-    // Overwrite with different vector and metadata
-    storage.store_embedding("doc", &vec2, "updated").unwrap();
-
-    // Search with vec2 should find it
-    let results = storage.search_by_vector(&vec2, 1).unwrap();
-    assert_eq!(results.len(), 1);
-    assert_eq!(results[0].0, "doc");
-    assert_eq!(results[0].1, "updated");
-
-    // Cleanup
-    drop(storage);
-    let _ = std::fs::remove_dir_all(".vlinder/agents/test-agent-vec-overwrite");
 }
