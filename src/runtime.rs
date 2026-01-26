@@ -6,7 +6,7 @@ use crate::config;
 use crate::domain::Agent;
 use crate::loader;
 use crate::services::{embedding, inference, object_storage, vector_storage};
-use crate::storage::{ObjectStorage, VectorStorage};
+use crate::storage::{ObjectStorage, VectorStorage, open_object_storage};
 
 // ============================================================================
 // Helper Functions
@@ -65,8 +65,8 @@ impl Runtime {
         }
 
         // Open storage for this agent
-        let object_storage = match ObjectStorage::open(&agent.name) {
-            Ok(s) => Arc::new(s),
+        let object_storage = match open_object_storage(&agent) {
+            Ok(s) => s,
             Err(e) => return format!("[error] failed to open object storage: {}", e),
         };
 
@@ -175,7 +175,7 @@ fn make_embed_function(agent: Agent) -> Function {
     )
 }
 
-fn make_put_file_function(storage: Arc<ObjectStorage>) -> Function {
+fn make_put_file_function(storage: Arc<dyn ObjectStorage>) -> Function {
     Function::new(
         "put_file",
         [extism::PTR, extism::PTR],
@@ -187,13 +187,13 @@ fn make_put_file_function(storage: Arc<ObjectStorage>) -> Function {
             let storage = user_data.get().unwrap();
             let storage = storage.lock().unwrap();
 
-            let response = to_response(object_storage::put_file(&storage, &path, &content));
+            let response = to_response(object_storage::put_file(storage.as_ref(), &path, &content));
             write_output(plugin, outputs, response.as_bytes())
         },
     )
 }
 
-fn make_get_file_function(storage: Arc<ObjectStorage>) -> Function {
+fn make_get_file_function(storage: Arc<dyn ObjectStorage>) -> Function {
     Function::new(
         "get_file",
         [extism::PTR],
@@ -204,13 +204,13 @@ fn make_get_file_function(storage: Arc<ObjectStorage>) -> Function {
             let storage = user_data.get().unwrap();
             let storage = storage.lock().unwrap();
 
-            let response = to_response_bytes(object_storage::get_file(&storage, &path));
+            let response = to_response_bytes(object_storage::get_file(storage.as_ref(), &path));
             write_output(plugin, outputs, &response)
         },
     )
 }
 
-fn make_delete_file_function(storage: Arc<ObjectStorage>) -> Function {
+fn make_delete_file_function(storage: Arc<dyn ObjectStorage>) -> Function {
     Function::new(
         "delete_file",
         [extism::PTR],
@@ -221,13 +221,13 @@ fn make_delete_file_function(storage: Arc<ObjectStorage>) -> Function {
             let storage = user_data.get().unwrap();
             let storage = storage.lock().unwrap();
 
-            let response = to_response(object_storage::delete_file(&storage, &path));
+            let response = to_response(object_storage::delete_file(storage.as_ref(), &path));
             write_output(plugin, outputs, response.as_bytes())
         },
     )
 }
 
-fn make_list_files_function(storage: Arc<ObjectStorage>) -> Function {
+fn make_list_files_function(storage: Arc<dyn ObjectStorage>) -> Function {
     Function::new(
         "list_files",
         [extism::PTR],
@@ -238,7 +238,7 @@ fn make_list_files_function(storage: Arc<ObjectStorage>) -> Function {
             let storage = user_data.get().unwrap();
             let storage = storage.lock().unwrap();
 
-            let response = to_response(object_storage::list_files(&storage, &dir_path));
+            let response = to_response(object_storage::list_files(storage.as_ref(), &dir_path));
             write_output(plugin, outputs, response.as_bytes())
         },
     )

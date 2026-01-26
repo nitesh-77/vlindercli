@@ -8,5 +8,5 @@
 mod object;
 mod vector;
 
-pub use object::ObjectStorage;
+pub use object::{ObjectStorage, SqliteObjectStorage, InMemoryObjectStorage, open_object_storage};
 pub use vector::VectorStorage;

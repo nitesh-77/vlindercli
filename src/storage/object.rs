@@ -1,15 +1,40 @@
 //! Object storage (virtual filesystem)
+//!
+//! Trait + SQLite implementation. Future backends (S3, filesystem, etc.)
+//! would implement the same trait.
 
 use crate::config;
+use crate::domain::Agent;
 use rusqlite::{params, Connection};
 use std::sync::{Arc, Mutex};
 
-/// Object storage for file operations
-pub struct ObjectStorage {
+// ============================================================================
+// Trait
+// ============================================================================
+
+/// Object storage for file operations.
+pub trait ObjectStorage: Send + Sync {
+    fn put_file(&self, path: &str, content: &[u8]) -> Result<(), String>;
+    fn get_file(&self, path: &str) -> Result<Option<Vec<u8>>, String>;
+    fn delete_file(&self, path: &str) -> Result<bool, String>;
+    fn list_files(&self, dir_path: &str) -> Result<Vec<String>, String>;
+}
+
+/// Open object storage for an agent. Currently uses SQLite.
+pub fn open_object_storage(agent: &Agent) -> Result<Arc<dyn ObjectStorage>, String> {
+    Ok(Arc::new(SqliteObjectStorage::open(&agent.name)?))
+}
+
+// ============================================================================
+// SQLite Implementation
+// ============================================================================
+
+/// SQLite-backed object storage.
+pub struct SqliteObjectStorage {
     conn: Arc<Mutex<Connection>>,
 }
 
-impl ObjectStorage {
+impl SqliteObjectStorage {
     /// Open object storage for an agent
     pub fn open(agent_name: &str) -> Result<Self, String> {
         let db_path = config::agent_db_path(agent_name);
@@ -35,13 +60,65 @@ impl ObjectStorage {
             [],
         ).map_err(|e| format!("failed to create files table: {}", e))?;
 
-        Ok(ObjectStorage {
+        Ok(SqliteObjectStorage {
             conn: Arc::new(Mutex::new(conn)),
         })
     }
+}
 
-    /// Write a file to storage
-    pub fn put_file(&self, path: &str, content: &[u8]) -> Result<(), String> {
+// ============================================================================
+// In-Memory Implementation
+// ============================================================================
+
+use std::collections::HashMap;
+
+/// In-memory object storage. Useful for testing.
+pub struct InMemoryObjectStorage {
+    files: Mutex<HashMap<String, Vec<u8>>>,
+}
+
+impl InMemoryObjectStorage {
+    pub fn new() -> Self {
+        InMemoryObjectStorage {
+            files: Mutex::new(HashMap::new()),
+        }
+    }
+}
+
+impl ObjectStorage for InMemoryObjectStorage {
+    fn put_file(&self, path: &str, content: &[u8]) -> Result<(), String> {
+        let mut files = self.files.lock().map_err(|e| e.to_string())?;
+        files.insert(path.to_string(), content.to_vec());
+        Ok(())
+    }
+
+    fn get_file(&self, path: &str) -> Result<Option<Vec<u8>>, String> {
+        let files = self.files.lock().map_err(|e| e.to_string())?;
+        Ok(files.get(path).cloned())
+    }
+
+    fn delete_file(&self, path: &str) -> Result<bool, String> {
+        let mut files = self.files.lock().map_err(|e| e.to_string())?;
+        Ok(files.remove(path).is_some())
+    }
+
+    fn list_files(&self, dir_path: &str) -> Result<Vec<String>, String> {
+        let files = self.files.lock().map_err(|e| e.to_string())?;
+        let prefix = if dir_path == "/" || dir_path.is_empty() {
+            "/".to_string()
+        } else {
+            format!("{}/", dir_path.trim_end_matches('/'))
+        };
+
+        Ok(files.keys()
+            .filter(|p| p.starts_with(&prefix))
+            .cloned()
+            .collect())
+    }
+}
+
+impl ObjectStorage for SqliteObjectStorage {
+    fn put_file(&self, path: &str, content: &[u8]) -> Result<(), String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         conn.execute(
             "INSERT OR REPLACE INTO files (path, content, updated_at) VALUES (?, ?, unixepoch())",
@@ -50,8 +127,7 @@ impl ObjectStorage {
         Ok(())
     }
 
-    /// Read a file from storage
-    pub fn get_file(&self, path: &str) -> Result<Option<Vec<u8>>, String> {
+    fn get_file(&self, path: &str) -> Result<Option<Vec<u8>>, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let mut stmt = conn.prepare("SELECT content FROM files WHERE path = ?")
             .map_err(|e| format!("failed to prepare query: {}", e))?;
@@ -67,16 +143,14 @@ impl ObjectStorage {
         }
     }
 
-    /// Delete a file from storage
-    pub fn delete_file(&self, path: &str) -> Result<bool, String> {
+    fn delete_file(&self, path: &str) -> Result<bool, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let rows_affected = conn.execute("DELETE FROM files WHERE path = ?", params![path])
             .map_err(|e| format!("failed to delete file: {}", e))?;
         Ok(rows_affected > 0)
     }
 
-    /// List files in a directory
-    pub fn list_files(&self, dir_path: &str) -> Result<Vec<String>, String> {
+    fn list_files(&self, dir_path: &str) -> Result<Vec<String>, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let pattern = if dir_path == "/" || dir_path.is_empty() {
             "/%".to_string()
