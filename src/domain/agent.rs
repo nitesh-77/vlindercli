@@ -14,14 +14,15 @@ pub struct Agent {
     pub prompts: Option<Prompts>,
     pub mounts: Vec<Mount>,
     pub agent_dir: PathBuf,
-    pub wasm_path: PathBuf,
+    /// URI pointing to the agent's executable code (e.g., "file:///path/to/agent.wasm")
+    pub code: String,
     manifest_raw: String,
 }
 
 impl Agent {
     /// Create an agent from a manifest, resolving paths against agent_dir.
     ///
-    /// Validates environmental constraints (wasm exists, mounts exist).
+    /// Validates environmental constraints (code exists, mounts exist).
     pub fn from_manifest(
         manifest: AgentManifest,
         manifest_raw: String,
@@ -29,19 +30,21 @@ impl Agent {
     ) -> Result<Agent, LoadError> {
         let agent_dir = agent_dir.to_path_buf();
 
-        // Resolve code path
-        let wasm_path = if Path::new(&manifest.code).is_absolute() {
+        // Resolve code path to absolute, then convert to URI
+        let code_path = if Path::new(&manifest.code).is_absolute() {
             PathBuf::from(&manifest.code)
         } else {
             agent_dir.join(&manifest.code)
         };
 
-        if !wasm_path.exists() {
+        if !code_path.exists() {
             return Err(LoadError::Io(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
-                format!("wasm not found: {}", wasm_path.display()),
+                format!("code not found: {}", code_path.display()),
             )));
         }
+
+        let code = format!("file://{}", code_path.display());
 
         // Resolve and validate mounts
         let mut mounts = Vec::new();
@@ -57,7 +60,7 @@ impl Agent {
             prompts: manifest.prompts.map(|p| p.into()),
             mounts,
             agent_dir,
-            wasm_path,
+            code,
             manifest_raw,
         })
     }

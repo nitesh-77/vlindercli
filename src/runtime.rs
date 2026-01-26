@@ -82,8 +82,13 @@ impl Runtime {
             make_search_by_vector_function(storage.clone()),
         ];
 
+        // Parse code URI to get the path
+        let code_path = agent.code
+            .strip_prefix("file://")
+            .unwrap_or(&agent.code);
+
         // Build WASM manifest with allowed paths from agent mounts
-        let wasm = Wasm::file(&agent.wasm_path);
+        let wasm = Wasm::file(code_path);
         let mut manifest = Manifest::new([wasm]).with_allowed_host("*");
 
         for mount in &agent.mounts {

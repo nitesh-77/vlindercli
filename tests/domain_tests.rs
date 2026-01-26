@@ -197,3 +197,11 @@ fn agent_db_path() {
     let agent = Agent::load(&agent_fixture("echo-agent")).unwrap();
     assert!(agent.db_path().ends_with("agent.db"));
 }
+
+#[test]
+fn agent_code_resolved_to_uri() {
+    let agent = Agent::load(&agent_fixture("echo-agent")).unwrap();
+
+    assert!(agent.code.starts_with("file://"));
+    assert!(agent.code.ends_with(".wasm"));
+}
