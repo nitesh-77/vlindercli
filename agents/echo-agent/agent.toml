@@ -1,5 +1,6 @@
 name = "echo-agent"
 description = "Test agent that echoes input"
+code = "agent.wasm"
 
 [requirements]
 models = []

@@ -1,4 +1,3 @@
-use crate::config;
 use extism::{Function, Manifest, Plugin, Wasm};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
@@ -41,17 +40,21 @@ pub struct Agent {
     pub description: String,
     #[serde(default)]
     pub source: Option<String>,
-    #[serde(default)]
-    pub code: Option<String>,
+    /// Path to the WASM binary (required - an agent must have code to run)
+    pub code: String,
     pub requirements: Requirements,
     #[serde(default)]
     pub prompts: Option<Prompts>,
     #[serde(default)]
     pub mounts: Vec<Mount>,
 
+    /// Agent directory (set at load time)
+    #[serde(skip)]
+    pub agent_dir: PathBuf,
+
     /// Resolved path to WASM binary
     #[serde(skip)]
-    wasm_path: String,
+    wasm_path: PathBuf,
 
     /// Raw manifest content (for passing to plugin)
     #[serde(skip)]
@@ -85,8 +88,13 @@ impl From<extism::Error> for LoadError {
 }
 
 impl Agent {
-    pub fn load(name: &str) -> Result<Agent, LoadError> {
-        let manifest_path = config::agent_manifest_path(name);
+    /// Load an agent from a directory path.
+    ///
+    /// Looks for `agent.toml` manifest and `agent.wasm` binary in the directory (ADR 020).
+    /// Mounts are validated at load time (ADR 019).
+    pub fn load(path: &Path) -> Result<Agent, LoadError> {
+        let agent_dir = path.to_path_buf();
+        let manifest_path = agent_dir.join("agent.toml");
 
         if !manifest_path.exists() {
             return Err(LoadError::Io(std::io::Error::new(
@@ -98,17 +106,11 @@ impl Agent {
         let manifest_raw = std::fs::read_to_string(&manifest_path)?;
         let mut agent: Agent = toml::from_str(&manifest_raw)?;
 
-        // Resolve code path: explicit `code` field or convention (<name>.wasm)
-        let wasm_path = match &agent.code {
-            Some(code_ref) => {
-                // Relative paths resolved against agent dir
-                if Path::new(code_ref).is_absolute() {
-                    PathBuf::from(code_ref)
-                } else {
-                    config::agent_dir(name).join(code_ref)
-                }
-            }
-            None => config::agent_wasm_path(name),
+        // Resolve code path (relative paths resolved against agent dir)
+        let wasm_path = if Path::new(&agent.code).is_absolute() {
+            PathBuf::from(&agent.code)
+        } else {
+            agent_dir.join(&agent.code)
         };
 
         if !wasm_path.exists() {
@@ -118,7 +120,8 @@ impl Agent {
             )));
         }
 
-        agent.wasm_path = wasm_path.to_string_lossy().to_string();
+        agent.agent_dir = agent_dir;
+        agent.wasm_path = wasm_path;
         agent.manifest_raw = manifest_raw;
 
         // Validate mounts at load time - fail fast if paths don't exist (ADR 019)
@@ -126,7 +129,7 @@ impl Agent {
             let host_path = if Path::new(&mount.host_path).is_absolute() {
                 PathBuf::from(&mount.host_path)
             } else {
-                config::agent_dir(name).join(&mount.host_path)
+                agent.agent_dir.join(&mount.host_path)
             };
 
             if !host_path.exists() {
@@ -138,6 +141,11 @@ impl Agent {
         }
 
         Ok(agent)
+    }
+
+    /// Get the path to the agent's database file
+    pub fn db_path(&self) -> PathBuf {
+        self.agent_dir.join("agent.db")
     }
 
     pub fn has_model(&self, name: &str) -> bool {
@@ -159,7 +167,7 @@ impl Agent {
                 let host_path = if Path::new(&m.host_path).is_absolute() {
                     PathBuf::from(&m.host_path)
                 } else {
-                    config::agent_dir(&self.name).join(&m.host_path)
+                    self.agent_dir.join(&m.host_path)
                 };
 
                 // Build key with ro: prefix if read-only

@@ -1,5 +1,6 @@
 name = "upper-agent"
 description = "Test agent that uppercases input"
+code = "agent.wasm"
 
 [requirements]
 models = []

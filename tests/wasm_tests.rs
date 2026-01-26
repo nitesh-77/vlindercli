@@ -1,29 +1,36 @@
+use std::path::{Path, PathBuf};
 use vlindercli::domain::Agent;
 use vlindercli::runtime::Runtime;
 
+const FIXTURES: &str = "tests/fixtures/agents";
+
+fn fixture(name: &str) -> PathBuf {
+    Path::new(FIXTURES).join(name)
+}
+
 #[test]
 fn agent_echo() {
-    let agent = Agent::load("echo-agent").unwrap();
+    let agent = Agent::load(&fixture("echo-agent")).unwrap();
     let result = agent.execute("hello");
     assert_eq!(result, "echo: hello");
 }
 
 #[test]
 fn agent_upper() {
-    let agent = Agent::load("upper-agent").unwrap();
+    let agent = Agent::load(&fixture("upper-agent")).unwrap();
     let result = agent.execute("hello");
     assert_eq!(result, "HELLO");
 }
 
 #[test]
 fn load_fails_for_missing_agent() {
-    let result = Agent::load("nonexistent-agent");
+    let result = Agent::load(Path::new("nonexistent-agent"));
     assert!(result.is_err());
 }
 
 #[test]
 fn agent_loads_requirements_from_manifest() {
-    let agent = Agent::load("pensieve").unwrap();
+    let agent = Agent::load(&fixture("pensieve")).unwrap();
     assert_eq!(agent.name, "pensieve");
     assert_eq!(agent.requirements.models.len(), 2);
     assert!(agent.has_model("phi3"));
@@ -40,7 +47,7 @@ fn agent_loads_requirements_from_manifest() {
 #[test]
 fn pensieve_agent_fetches_and_summarizes() {
     let runtime = Runtime::new();
-    let agent = Agent::load("pensieve").unwrap();
+    let agent = Agent::load(&fixture("pensieve")).unwrap();
 
     let result = runtime.execute(&agent, "https://httpbin.org/html");
 

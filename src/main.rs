@@ -1,4 +1,5 @@
 use std::io::{stdout, Write};
+use std::path::PathBuf;
 
 use reedline::Signal;
 use tracing_subscriber::EnvFilter;
@@ -13,7 +14,10 @@ fn main() {
     init_tracing(&config);
 
     let runtime = Runtime::new();
-    let agent = Agent::load("pensieve").expect("Failed to load agent");
+
+    // Parse -p flag for agent path, default to current directory
+    let agent_path = parse_agent_path();
+    let agent = Agent::load(&agent_path).expect("Failed to load agent");
 
     let mut editor = cli::create_editor();
     let prompt = VlinderPrompt;
@@ -58,6 +62,22 @@ fn main() {
             }
         }
     }
+}
+
+fn parse_agent_path() -> PathBuf {
+    let args: Vec<String> = std::env::args().collect();
+
+    // Look for -p <path> or --path <path>
+    let mut i = 1;
+    while i < args.len() {
+        if (args[i] == "-p" || args[i] == "--path") && i + 1 < args.len() {
+            return PathBuf::from(&args[i + 1]);
+        }
+        i += 1;
+    }
+
+    // Default to current directory
+    std::env::current_dir().expect("Failed to get current directory")
 }
 
 fn init_tracing(config: &Config) {
