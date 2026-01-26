@@ -56,7 +56,7 @@ build-pensieve:
 
 # Run a specific agent (usage: just run pensieve)
 run agent:
-    cargo run -- -p {{dev_project}}/{{agent}}
+    cargo run -- agent run -p {{dev_project}}/{{agent}}
 
 # Run tests (builds agents first)
 test: build-agents

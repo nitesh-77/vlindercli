@@ -1,0 +1,86 @@
+mod agent;
+mod repl;
+
+use clap::{Parser, Subcommand};
+
+#[derive(Parser)]
+#[command(name = "vlinder")]
+#[command(about = "Run AI agents locally")]
+pub struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Subcommand, Debug, PartialEq)]
+pub enum Command {
+    /// Manage and run agents
+    Agent {
+        #[command(subcommand)]
+        cmd: agent::AgentCommand,
+    },
+}
+
+pub fn run() {
+    let cli = Cli::parse();
+
+    match cli.command {
+        Command::Agent { cmd } => agent::execute(cmd),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+    use std::path::PathBuf;
+
+    #[test]
+    fn cli_agent_run_default_path() {
+        let cli = Cli::try_parse_from(["vlinder", "agent", "run"]).unwrap();
+        assert_eq!(
+            cli.command,
+            Command::Agent {
+                cmd: agent::AgentCommand::Run { path: None }
+            }
+        );
+    }
+
+    #[test]
+    fn cli_agent_run_with_short_path() {
+        let cli = Cli::try_parse_from(["vlinder", "agent", "run", "-p", "/tmp/agent"]).unwrap();
+        assert_eq!(
+            cli.command,
+            Command::Agent {
+                cmd: agent::AgentCommand::Run {
+                    path: Some(PathBuf::from("/tmp/agent"))
+                }
+            }
+        );
+    }
+
+    #[test]
+    fn cli_agent_run_with_long_path() {
+        let cli =
+            Cli::try_parse_from(["vlinder", "agent", "run", "--path", "./my-agent"]).unwrap();
+        assert_eq!(
+            cli.command,
+            Command::Agent {
+                cmd: agent::AgentCommand::Run {
+                    path: Some(PathBuf::from("./my-agent"))
+                }
+            }
+        );
+    }
+
+    #[test]
+    fn cli_missing_subcommand_fails() {
+        let result = Cli::try_parse_from(["vlinder"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn cli_agent_missing_action_fails() {
+        let result = Cli::try_parse_from(["vlinder", "agent"]);
+        assert!(result.is_err());
+    }
+}
