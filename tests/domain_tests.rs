@@ -205,3 +205,28 @@ fn agent_code_resolved_to_uri() {
     assert!(agent.code.starts_with("file://"));
     assert!(agent.code.ends_with(".wasm"));
 }
+
+#[test]
+fn agent_load_fails_for_missing_code() {
+    // Create temp directory with manifest pointing to non-existent code
+    let temp_dir = std::env::temp_dir().join("vlinder-test-missing-code");
+    let _ = std::fs::remove_dir_all(&temp_dir);
+    std::fs::create_dir_all(&temp_dir).unwrap();
+
+    let manifest = r#"
+        name = "missing-code-agent"
+        description = "Agent with missing code"
+        code = "nonexistent.wasm"
+
+        [requirements]
+        models = []
+        services = []
+    "#;
+    std::fs::write(temp_dir.join("agent.toml"), manifest).unwrap();
+
+    let result = Agent::load(&temp_dir);
+    assert!(result.is_err(), "Should fail when code file doesn't exist");
+
+    // Cleanup
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}

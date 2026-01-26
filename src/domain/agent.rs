@@ -20,31 +20,15 @@ pub struct Agent {
 }
 
 impl Agent {
-    /// Create an agent from a manifest, resolving paths against agent_dir.
+    /// Create an agent from a manifest, resolving mounts against agent_dir.
     ///
-    /// Validates environmental constraints (code exists, mounts exist).
+    /// The manifest's `code` field is already a resolved URI.
     pub fn from_manifest(
         manifest: AgentManifest,
         manifest_raw: String,
         agent_dir: &Path,
     ) -> Result<Agent, LoadError> {
         let agent_dir = agent_dir.to_path_buf();
-
-        // Resolve code path to absolute, then convert to URI
-        let code_path = if Path::new(&manifest.code).is_absolute() {
-            PathBuf::from(&manifest.code)
-        } else {
-            agent_dir.join(&manifest.code)
-        };
-
-        if !code_path.exists() {
-            return Err(LoadError::Io(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                format!("code not found: {}", code_path.display()),
-            )));
-        }
-
-        let code = format!("file://{}", code_path.display());
 
         // Resolve and validate mounts
         let mut mounts = Vec::new();
@@ -60,7 +44,7 @@ impl Agent {
             prompts: manifest.prompts.map(|p| p.into()),
             mounts,
             agent_dir,
-            code,
+            code: manifest.code,
             manifest_raw,
         })
     }
@@ -114,6 +98,7 @@ impl From<ParseError> for LoadError {
         match e {
             ParseError::Io(e) => LoadError::Io(e),
             ParseError::Toml(s) => LoadError::Parse(s),
+            ParseError::CodeNotFound(s) => LoadError::Parse(s),
         }
     }
 }
