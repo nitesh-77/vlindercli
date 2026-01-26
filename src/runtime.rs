@@ -1,9 +1,12 @@
+use std::path::Path;
+use std::sync::Arc;
+
+use extism::{CurrentPlugin, Function, Manifest, Plugin, UserData, Val, Wasm};
+
 use crate::config;
 use crate::domain::Agent;
 use crate::inference::{load_embedding_engine, load_engine};
 use crate::storage::Storage;
-use extism::{CurrentPlugin, Function, Manifest, Plugin, UserData, Val, Wasm};
-use std::sync::Arc;
 
 // ============================================================================
 // Error Handling
@@ -71,7 +74,16 @@ impl Runtime {
         Runtime
     }
 
-    pub fn execute(&self, agent: &Agent, input: &str) -> String {
+    /// Execute an agent at the given path with the provided input.
+    ///
+    /// Loads the agent manifest, resolves paths, and runs the WASM plugin.
+    pub fn execute(&self, agent_path: &Path, input: &str) -> String {
+        // Load agent from path
+        let agent = match Agent::load(agent_path) {
+            Ok(a) => a,
+            Err(e) => return format!("[error] failed to load agent: {:?}", e),
+        };
+
         // Ensure default mount directory exists
         let mnt_path = config::agent_mnt_path(&agent.name);
         if !mnt_path.exists() {

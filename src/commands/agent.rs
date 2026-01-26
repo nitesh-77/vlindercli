@@ -2,7 +2,6 @@ use std::path::PathBuf;
 
 use clap::Subcommand;
 
-use vlindercli::domain::Agent;
 use vlindercli::runtime::Runtime;
 
 use super::repl;
@@ -27,8 +26,7 @@ fn run(path: Option<PathBuf>) {
     let agent_path = path.unwrap_or_else(|| {
         std::env::current_dir().expect("Failed to get current directory")
     });
-    let agent = Agent::load(&agent_path).expect("Failed to load agent");
     let runtime = Runtime::new();
 
-    repl::run(|input| runtime.execute(&agent, input));
+    repl::run(|input| runtime.execute(&agent_path, input));
 }
