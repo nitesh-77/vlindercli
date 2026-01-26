@@ -5,7 +5,7 @@ use extism::{CurrentPlugin, Function, Manifest, Plugin, UserData, Val, Wasm};
 use crate::config;
 use crate::domain::Agent;
 use crate::loader;
-use crate::services::{inference, object_storage, vector_storage};
+use crate::services::{embedding, inference, object_storage, vector_storage};
 use crate::storage::{ObjectStorage, VectorStorage};
 
 // ============================================================================
@@ -167,7 +167,7 @@ fn make_embed_function(agent: Agent) -> Function {
             let agent = user_data.get().unwrap();
             let agent = agent.lock().unwrap();
 
-            let response = to_response(inference::embed(&agent, &model_name, &text));
+            let response = to_response(embedding::embed(&agent, &model_name, &text));
             write_output(plugin, outputs, response.as_bytes())
         },
     )

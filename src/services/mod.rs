@@ -4,6 +4,7 @@
 //! How they are exposed (WASM host functions, HTTP, etc.) is the
 //! executor's responsibility.
 
+pub mod embedding;
 pub mod inference;
 pub mod object_storage;
 pub mod vector_storage;
