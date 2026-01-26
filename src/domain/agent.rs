@@ -63,6 +63,7 @@ pub enum LoadError {
     Io(std::io::Error),
     Parse(String),
     Plugin(String),
+    MountNotFound(String),
 }
 
 impl From<std::io::Error> for LoadError {
@@ -120,6 +121,22 @@ impl Agent {
         agent.wasm_path = wasm_path.to_string_lossy().to_string();
         agent.manifest_raw = manifest_raw;
 
+        // Validate mounts at load time - fail fast if paths don't exist (ADR 019)
+        for mount in &agent.mounts {
+            let host_path = if Path::new(&mount.host_path).is_absolute() {
+                PathBuf::from(&mount.host_path)
+            } else {
+                config::agent_dir(name).join(&mount.host_path)
+            };
+
+            if !host_path.exists() {
+                return Err(LoadError::MountNotFound(format!(
+                    "mount path does not exist: {}",
+                    host_path.display()
+                )));
+            }
+        }
+
         Ok(agent)
     }
 
@@ -133,34 +150,17 @@ impl Agent {
 
     /// Resolve mounts to Extism allowed_paths format.
     /// Returns Vec<(host_path_with_ro_prefix, guest_path)>.
-    /// If no mounts are declared, returns the default mount: mnt -> /
+    /// No mounts declared → no filesystem access (ADR 019).
     pub fn resolve_mounts(&self) -> Vec<(String, PathBuf)> {
-        let mounts = if self.mounts.is_empty() {
-            // Default mount: agent's mnt dir -> /
-            vec![Mount {
-                host_path: "mnt".to_string(),
-                guest_path: "/".to_string(),
-                mode: "rw".to_string(),
-            }]
-        } else {
-            self.mounts.clone()
-        };
-
-        mounts
+        self.mounts
             .iter()
-            .filter_map(|m| {
+            .map(|m| {
                 // Resolve host path: relative paths against agent dir, absolute as-is
                 let host_path = if Path::new(&m.host_path).is_absolute() {
                     PathBuf::from(&m.host_path)
                 } else {
                     config::agent_dir(&self.name).join(&m.host_path)
                 };
-
-                // Skip if host path doesn't exist
-                if !host_path.exists() {
-                    tracing::warn!("Mount host_path does not exist: {:?}", host_path);
-                    return None;
-                }
 
                 // Build key with ro: prefix if read-only
                 let key = if m.mode == "ro" {
@@ -169,7 +169,7 @@ impl Agent {
                     host_path.display().to_string()
                 };
 
-                Some((key, PathBuf::from(&m.guest_path)))
+                (key, PathBuf::from(&m.guest_path))
             })
             .collect()
     }

@@ -25,31 +25,19 @@ fn agent_has_model_from_manifest() {
 }
 
 #[test]
-fn agent_default_mount_when_none_declared() {
+fn agent_no_mounts_when_none_declared() {
     // echo-agent has no [[mounts]] section
     let agent = Agent::load("echo-agent").unwrap();
 
-    // Should be empty in struct (no mounts declared)
+    // No mounts declared → no filesystem access (ADR 019)
     assert!(agent.mounts.is_empty());
-
-    // resolve_mounts() should return default: mnt -> /
-    // But only if mnt directory exists, so we need to create it first
-    let mnt_path = vlindercli::config::agent_mnt_path("echo-agent");
-    std::fs::create_dir_all(&mnt_path).unwrap();
-
-    let resolved = agent.resolve_mounts();
-    assert_eq!(resolved.len(), 1);
-
-    let (host_path, guest_path) = &resolved[0];
-    assert!(host_path.ends_with("echo-agent/mnt"), "host_path should end with echo-agent/mnt, got: {}", host_path);
-    assert_eq!(guest_path, &PathBuf::from("/"));
-    // Default mode is rw, so no "ro:" prefix
-    assert!(!host_path.starts_with("ro:"));
+    assert!(agent.resolve_mounts().is_empty());
 }
 
 #[test]
 fn agent_explicit_mounts_from_manifest() {
     // mount-test-agent has explicit [[mounts]] section
+    // Mount directories are part of the fixture (data/, output/)
     let agent = Agent::load("mount-test-agent").unwrap();
 
     // Should have two mounts declared
@@ -67,30 +55,19 @@ fn agent_explicit_mounts_from_manifest() {
 }
 
 #[test]
-fn agent_resolve_mounts_skips_nonexistent_paths() {
-    // Use upper-agent to avoid race with other tests that use echo-agent
-    let agent = Agent::load("upper-agent").unwrap();
-
-    // Remove mnt directory if it exists to test skipping behavior
-    let mnt_path = vlindercli::config::agent_mnt_path("upper-agent");
-    let _ = std::fs::remove_dir_all(&mnt_path);
-
-    // resolve_mounts should return empty vec when path doesn't exist
-    let resolved = agent.resolve_mounts();
-    assert!(resolved.is_empty(), "Should skip non-existent mount paths");
+fn agent_load_fails_for_missing_mount() {
+    // missing-mount-agent declares a mount to a nonexistent directory
+    let result = Agent::load("missing-mount-agent");
+    assert!(result.is_err(), "Should fail when explicit mount path doesn't exist");
 }
 
 #[test]
 fn agent_resolve_mounts_ro_prefix() {
     // mount-test-agent has ro and rw mounts
+    // Mount directories are part of the fixture (data/, output/)
     let agent = Agent::load("mount-test-agent").unwrap();
 
     assert_eq!(agent.mounts.len(), 2);
-
-    // Create the mount directories
-    let agent_dir = vlindercli::config::agent_dir("mount-test-agent");
-    std::fs::create_dir_all(agent_dir.join("data")).unwrap();
-    std::fs::create_dir_all(agent_dir.join("output")).unwrap();
 
     let resolved = agent.resolve_mounts();
     assert_eq!(resolved.len(), 2);
