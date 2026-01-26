@@ -1,0 +1,7 @@
+# Missing 'code' field
+name = "incomplete"
+description = "Missing required field"
+
+[requirements]
+models = []
+services = []

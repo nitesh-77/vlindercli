@@ -10,15 +10,17 @@ fn fixture(name: &str) -> PathBuf {
 
 #[test]
 fn agent_echo() {
+    let runtime = Runtime::new();
     let agent = Agent::load(&fixture("echo-agent")).unwrap();
-    let result = agent.execute("hello");
+    let result = runtime.execute(&agent, "hello");
     assert_eq!(result, "echo: hello");
 }
 
 #[test]
 fn agent_upper() {
+    let runtime = Runtime::new();
     let agent = Agent::load(&fixture("upper-agent")).unwrap();
-    let result = agent.execute("hello");
+    let result = runtime.execute(&agent, "hello");
     assert_eq!(result, "HELLO");
 }
 

@@ -1,0 +1,7 @@
+name = "minimal"
+description = "Minimal valid manifest"
+code = "agent.wasm"
+
+[requirements]
+models = []
+services = []

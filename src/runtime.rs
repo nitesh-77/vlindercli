@@ -2,7 +2,7 @@ use crate::config;
 use crate::domain::Agent;
 use crate::inference::{load_embedding_engine, load_engine};
 use crate::storage::Storage;
-use extism::{Function, CurrentPlugin, UserData, Val};
+use extism::{CurrentPlugin, Function, Manifest, Plugin, UserData, Val, Wasm};
 use std::sync::Arc;
 
 // ============================================================================
@@ -86,7 +86,7 @@ impl Runtime {
             Err(e) => return format!("[error] failed to open storage: {}", e),
         };
 
-        agent.execute_with_functions(input, [
+        let functions = [
             make_get_manifest_function(agent.clone()),
             make_infer_function(agent.clone()),
             make_embed_function(agent.clone()),
@@ -96,7 +96,32 @@ impl Runtime {
             make_list_files_function(storage.clone()),
             make_store_embedding_function(storage.clone()),
             make_search_by_vector_function(storage.clone()),
-        ])
+        ];
+
+        // Build WASM manifest with allowed paths from agent mounts
+        let wasm = Wasm::file(&agent.wasm_path);
+        let mut manifest = Manifest::new([wasm]).with_allowed_host("*");
+
+        for mount in &agent.mounts {
+            // Extism uses "ro:" prefix for read-only paths
+            let host_key = if mount.readonly {
+                format!("ro:{}", mount.host_path.display())
+            } else {
+                mount.host_path.display().to_string()
+            };
+            manifest = manifest.with_allowed_path(host_key, &mount.guest_path);
+        }
+
+        // Create and run plugin
+        let mut plugin = match Plugin::new(&manifest, functions, true) {
+            Ok(p) => p,
+            Err(e) => return format!("[error] failed to create plugin: {}", e),
+        };
+
+        match plugin.call::<_, Vec<u8>>("process", input) {
+            Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
+            Err(e) => format!("[error] plugin execution failed: {}", e),
+        }
     }
 }
 
