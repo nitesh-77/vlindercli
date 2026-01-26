@@ -6,7 +6,7 @@ use crate::config;
 use crate::domain::Agent;
 use crate::loader;
 use crate::services::{embedding, inference, object_storage, vector_storage};
-use crate::storage::{ObjectStorage, VectorStorage, open_object_storage};
+use crate::storage::{ObjectStorage, VectorStorage, open_object_storage, open_vector_storage};
 
 // ============================================================================
 // Helper Functions
@@ -70,8 +70,8 @@ impl Runtime {
             Err(e) => return format!("[error] failed to open object storage: {}", e),
         };
 
-        let vector_storage = match VectorStorage::open(&agent.name) {
-            Ok(s) => Arc::new(s),
+        let vector_storage = match open_vector_storage(&agent) {
+            Ok(s) => s,
             Err(e) => return format!("[error] failed to open vector storage: {}", e),
         };
 
@@ -244,7 +244,7 @@ fn make_list_files_function(storage: Arc<dyn ObjectStorage>) -> Function {
     )
 }
 
-fn make_store_embedding_function(storage: Arc<VectorStorage>) -> Function {
+fn make_store_embedding_function(storage: Arc<dyn VectorStorage>) -> Function {
     Function::new(
         "store_embedding",
         [extism::PTR, extism::PTR, extism::PTR],
@@ -257,13 +257,13 @@ fn make_store_embedding_function(storage: Arc<VectorStorage>) -> Function {
             let storage = user_data.get().unwrap();
             let storage = storage.lock().unwrap();
 
-            let response = to_response(vector_storage::store_embedding(&storage, &key, &vector_json, &metadata));
+            let response = to_response(vector_storage::store_embedding(storage.as_ref(), &key, &vector_json, &metadata));
             write_output(plugin, outputs, response.as_bytes())
         },
     )
 }
 
-fn make_search_by_vector_function(storage: Arc<VectorStorage>) -> Function {
+fn make_search_by_vector_function(storage: Arc<dyn VectorStorage>) -> Function {
     Function::new(
         "search_by_vector",
         [extism::PTR, extism::PTR],
@@ -276,7 +276,7 @@ fn make_search_by_vector_function(storage: Arc<VectorStorage>) -> Function {
             let storage = storage.lock().unwrap();
 
             let limit = limit_str.parse::<u32>().unwrap_or(10);
-            let response = to_response(vector_storage::search_by_vector(&storage, &query_json, limit));
+            let response = to_response(vector_storage::search_by_vector(storage.as_ref(), &query_json, limit));
             write_output(plugin, outputs, response.as_bytes())
         },
     )

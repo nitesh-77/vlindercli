@@ -1,17 +1,42 @@
 //! Vector storage (embeddings)
+//!
+//! Trait + SQLite implementation. The SQLite version uses sqlite-vec
+//! for efficient similarity search.
 
 use crate::config;
+use crate::domain::Agent;
 use rusqlite::{params, Connection};
 use sqlite_vec::sqlite3_vec_init;
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use zerocopy::AsBytes;
 
-/// Vector storage for embedding operations
-pub struct VectorStorage {
+// ============================================================================
+// Trait
+// ============================================================================
+
+/// Vector storage for embedding operations.
+pub trait VectorStorage: Send + Sync {
+    fn store_embedding(&self, key: &str, vector: &[f32], metadata: &str) -> Result<(), String>;
+    fn search_by_vector(&self, query_vector: &[f32], limit: u32) -> Result<Vec<(String, String, f64)>, String>;
+    fn delete_embedding(&self, key: &str) -> Result<bool, String>;
+}
+
+/// Open vector storage for an agent. Currently uses SQLite with sqlite-vec.
+pub fn open_vector_storage(agent: &Agent) -> Result<Arc<dyn VectorStorage>, String> {
+    Ok(Arc::new(SqliteVectorStorage::open(&agent.name)?))
+}
+
+// ============================================================================
+// SQLite Implementation
+// ============================================================================
+
+/// SQLite-backed vector storage using sqlite-vec.
+pub struct SqliteVectorStorage {
     conn: Arc<Mutex<Connection>>,
 }
 
-impl VectorStorage {
+impl SqliteVectorStorage {
     /// Open vector storage for an agent
     pub fn open(agent_name: &str) -> Result<Self, String> {
         let db_path = config::agent_db_path(agent_name);
@@ -43,13 +68,14 @@ impl VectorStorage {
             [],
         ).map_err(|e| format!("failed to create vec_items table: {}", e))?;
 
-        Ok(VectorStorage {
+        Ok(SqliteVectorStorage {
             conn: Arc::new(Mutex::new(conn)),
         })
     }
+}
 
-    /// Store an embedding vector (768 dimensions)
-    pub fn store_embedding(&self, key: &str, vector: &[f32], metadata: &str) -> Result<(), String> {
+impl VectorStorage for SqliteVectorStorage {
+    fn store_embedding(&self, key: &str, vector: &[f32], metadata: &str) -> Result<(), String> {
         if vector.len() != 768 {
             return Err(format!("expected 768 dimensions, got {}", vector.len()));
         }
@@ -67,8 +93,7 @@ impl VectorStorage {
         Ok(())
     }
 
-    /// Search for similar vectors using sqlite-vec
-    pub fn search_by_vector(&self, query_vector: &[f32], limit: u32) -> Result<Vec<(String, String, f64)>, String> {
+    fn search_by_vector(&self, query_vector: &[f32], limit: u32) -> Result<Vec<(String, String, f64)>, String> {
         if query_vector.len() != 768 {
             return Err(format!("expected 768 dimensions, got {}", query_vector.len()));
         }
@@ -97,11 +122,74 @@ impl VectorStorage {
         Ok(results)
     }
 
-    /// Delete an embedding by key
-    pub fn delete_embedding(&self, key: &str) -> Result<bool, String> {
+    fn delete_embedding(&self, key: &str) -> Result<bool, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let rows_affected = conn.execute("DELETE FROM vec_items WHERE key = ?", params![key])
             .map_err(|e| format!("failed to delete embedding: {}", e))?;
         Ok(rows_affected > 0)
     }
+}
+
+// ============================================================================
+// In-Memory Implementation
+// ============================================================================
+
+/// In-memory vector storage. Useful for testing.
+/// Uses brute-force euclidean distance for similarity search.
+pub struct InMemoryVectorStorage {
+    items: Mutex<HashMap<String, (Vec<f32>, String)>>,
+}
+
+impl InMemoryVectorStorage {
+    pub fn new() -> Self {
+        InMemoryVectorStorage {
+            items: Mutex::new(HashMap::new()),
+        }
+    }
+}
+
+impl VectorStorage for InMemoryVectorStorage {
+    fn store_embedding(&self, key: &str, vector: &[f32], metadata: &str) -> Result<(), String> {
+        if vector.len() != 768 {
+            return Err(format!("expected 768 dimensions, got {}", vector.len()));
+        }
+
+        let mut items = self.items.lock().map_err(|e| e.to_string())?;
+        items.insert(key.to_string(), (vector.to_vec(), metadata.to_string()));
+        Ok(())
+    }
+
+    fn search_by_vector(&self, query_vector: &[f32], limit: u32) -> Result<Vec<(String, String, f64)>, String> {
+        if query_vector.len() != 768 {
+            return Err(format!("expected 768 dimensions, got {}", query_vector.len()));
+        }
+
+        let items = self.items.lock().map_err(|e| e.to_string())?;
+
+        // Calculate distances and sort
+        let mut results: Vec<(String, String, f64)> = items.iter()
+            .map(|(key, (vector, metadata))| {
+                let distance = euclidean_distance(query_vector, vector);
+                (key.clone(), metadata.clone(), distance)
+            })
+            .collect();
+
+        results.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
+        results.truncate(limit as usize);
+
+        Ok(results)
+    }
+
+    fn delete_embedding(&self, key: &str) -> Result<bool, String> {
+        let mut items = self.items.lock().map_err(|e| e.to_string())?;
+        Ok(items.remove(key).is_some())
+    }
+}
+
+fn euclidean_distance(a: &[f32], b: &[f32]) -> f64 {
+    a.iter()
+        .zip(b.iter())
+        .map(|(x, y)| (x - y).powi(2) as f64)
+        .sum::<f64>()
+        .sqrt()
 }

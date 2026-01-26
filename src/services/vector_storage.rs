@@ -2,7 +2,7 @@
 
 use crate::storage::VectorStorage;
 
-pub fn store_embedding(storage: &VectorStorage, key: &str, vector_json: &str, metadata: &str) -> Result<String, Error> {
+pub fn store_embedding(storage: &dyn VectorStorage, key: &str, vector_json: &str, metadata: &str) -> Result<String, Error> {
     let vector: Vec<f32> = serde_json::from_str(vector_json)
         .map_err(|e| Error::Json(format!("invalid vector JSON: {}", e)))?;
 
@@ -12,7 +12,7 @@ pub fn store_embedding(storage: &VectorStorage, key: &str, vector_json: &str, me
     Ok("ok".to_string())
 }
 
-pub fn search_by_vector(storage: &VectorStorage, query_json: &str, limit: u32) -> Result<String, Error> {
+pub fn search_by_vector(storage: &dyn VectorStorage, query_json: &str, limit: u32) -> Result<String, Error> {
     let query_vector: Vec<f32> = serde_json::from_str(query_json)
         .map_err(|e| Error::Json(format!("invalid vector JSON: {}", e)))?;
 

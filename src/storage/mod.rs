@@ -9,4 +9,4 @@ mod object;
 mod vector;
 
 pub use object::{ObjectStorage, SqliteObjectStorage, InMemoryObjectStorage, open_object_storage};
-pub use vector::VectorStorage;
+pub use vector::{VectorStorage, SqliteVectorStorage, InMemoryVectorStorage, open_vector_storage};
