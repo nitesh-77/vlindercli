@@ -4,52 +4,24 @@ use extism::{CurrentPlugin, Function, Manifest, Plugin, UserData, Val, Wasm};
 
 use crate::config;
 use crate::domain::Agent;
-use crate::inference::{load_embedding_engine, load_engine};
 use crate::loader;
+use crate::services::{inference, object_storage, vector_storage};
 use crate::storage::Storage;
 
 // ============================================================================
-// Error Handling
+// Helper Functions
 // ============================================================================
 
-/// Errors that can occur in host functions
-#[derive(Debug)]
-pub enum HostError {
-    ModelNotDeclared(String),
-    ModelLoad { model: String, reason: String },
-    Inference(String),
-    Embedding(String),
-    Storage(String),
-    Json(String),
-    FileNotFound,
-}
-
-impl std::fmt::Display for HostError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            HostError::ModelNotDeclared(name) => write!(f, "model '{}' not declared by agent", name),
-            HostError::ModelLoad { model, reason } => write!(f, "failed to load '{}': {}", model, reason),
-            HostError::Inference(e) => write!(f, "{}", e),
-            HostError::Embedding(e) => write!(f, "{}", e),
-            HostError::Storage(e) => write!(f, "{}", e),
-            HostError::Json(e) => write!(f, "{}", e),
-            HostError::FileNotFound => write!(f, "file not found"),
-        }
-    }
-}
-
-type HostResult<T> = Result<T, HostError>;
-
-/// Convert a HostResult to a response string
-fn to_response(result: HostResult<String>) -> String {
+/// Convert a Result to a response string, formatting errors with [error] prefix
+fn to_response<T: AsRef<str>, E: std::fmt::Display>(result: Result<T, E>) -> String {
     match result {
-        Ok(s) => s,
+        Ok(s) => s.as_ref().to_string(),
         Err(e) => format!("[error] {}", e),
     }
 }
 
-/// Convert a HostResult<Vec<u8>> to response bytes
-fn to_response_bytes(result: HostResult<Vec<u8>>) -> Vec<u8> {
+/// Convert a Result<Vec<u8>> to response bytes
+fn to_response_bytes<E: std::fmt::Display>(result: Result<Vec<u8>, E>) -> Vec<u8> {
     match result {
         Ok(bytes) => bytes,
         Err(e) => format!("[error] {}", e).into_bytes(),
@@ -167,7 +139,7 @@ fn make_infer_function(agent: Agent) -> Function {
             let agent = user_data.get().unwrap();
             let agent = agent.lock().unwrap();
 
-            let response = to_response(do_infer(&agent, &model_name, &prompt));
+            let response = to_response(inference::infer(&agent, &model_name, &prompt));
             write_output(plugin, outputs, response.as_bytes())
         },
     )
@@ -185,7 +157,7 @@ fn make_embed_function(agent: Agent) -> Function {
             let agent = user_data.get().unwrap();
             let agent = agent.lock().unwrap();
 
-            let response = to_response(do_embed(&agent, &model_name, &text));
+            let response = to_response(inference::embed(&agent, &model_name, &text));
             write_output(plugin, outputs, response.as_bytes())
         },
     )
@@ -203,7 +175,7 @@ fn make_put_file_function(storage: Arc<Storage>) -> Function {
             let storage = user_data.get().unwrap();
             let storage = storage.lock().unwrap();
 
-            let response = to_response(do_put_file(&storage, &path, &content));
+            let response = to_response(object_storage::put_file(&storage, &path, &content));
             write_output(plugin, outputs, response.as_bytes())
         },
     )
@@ -220,7 +192,7 @@ fn make_get_file_function(storage: Arc<Storage>) -> Function {
             let storage = user_data.get().unwrap();
             let storage = storage.lock().unwrap();
 
-            let response = to_response_bytes(do_get_file(&storage, &path));
+            let response = to_response_bytes(object_storage::get_file(&storage, &path));
             write_output(plugin, outputs, &response)
         },
     )
@@ -237,7 +209,7 @@ fn make_delete_file_function(storage: Arc<Storage>) -> Function {
             let storage = user_data.get().unwrap();
             let storage = storage.lock().unwrap();
 
-            let response = to_response(do_delete_file(&storage, &path));
+            let response = to_response(object_storage::delete_file(&storage, &path));
             write_output(plugin, outputs, response.as_bytes())
         },
     )
@@ -254,7 +226,7 @@ fn make_list_files_function(storage: Arc<Storage>) -> Function {
             let storage = user_data.get().unwrap();
             let storage = storage.lock().unwrap();
 
-            let response = to_response(do_list_files(&storage, &dir_path));
+            let response = to_response(object_storage::list_files(&storage, &dir_path));
             write_output(plugin, outputs, response.as_bytes())
         },
     )
@@ -273,7 +245,7 @@ fn make_store_embedding_function(storage: Arc<Storage>) -> Function {
             let storage = user_data.get().unwrap();
             let storage = storage.lock().unwrap();
 
-            let response = to_response(do_store_embedding(&storage, &key, &vector_json, &metadata));
+            let response = to_response(vector_storage::store_embedding(&storage, &key, &vector_json, &metadata));
             write_output(plugin, outputs, response.as_bytes())
         },
     )
@@ -291,108 +263,9 @@ fn make_search_by_vector_function(storage: Arc<Storage>) -> Function {
             let storage = user_data.get().unwrap();
             let storage = storage.lock().unwrap();
 
-            let response = to_response(do_search_by_vector(&storage, &query_json, &limit_str));
+            let limit = limit_str.parse::<u32>().unwrap_or(10);
+            let response = to_response(vector_storage::search_by_vector(&storage, &query_json, limit));
             write_output(plugin, outputs, response.as_bytes())
         },
     )
-}
-
-// ============================================================================
-// Business Logic (separated from host function boilerplate)
-// ============================================================================
-
-fn do_infer(agent: &Agent, model_name: &str, prompt: &str) -> HostResult<String> {
-    if !agent.has_model(model_name) {
-        return Err(HostError::ModelNotDeclared(model_name.to_string()));
-    }
-
-    let engine = load_engine(model_name)
-        .map_err(|e| HostError::ModelLoad {
-            model: model_name.to_string(),
-            reason: e,
-        })?;
-
-    engine.infer(prompt, 256)
-        .map_err(HostError::Inference)
-}
-
-fn do_embed(agent: &Agent, model_name: &str, text: &str) -> HostResult<String> {
-    if !agent.has_model(model_name) {
-        return Err(HostError::ModelNotDeclared(model_name.to_string()));
-    }
-
-    let engine = load_embedding_engine(model_name)
-        .map_err(|e| HostError::ModelLoad {
-            model: model_name.to_string(),
-            reason: e,
-        })?;
-
-    let vec = engine.embed(text)
-        .map_err(HostError::Embedding)?;
-
-    serde_json::to_string(&vec)
-        .map_err(|e| HostError::Json(e.to_string()))
-}
-
-fn do_put_file(storage: &Storage, path: &str, content: &[u8]) -> HostResult<String> {
-    storage.put_file(path, content)
-        .map_err(|e| HostError::Storage(e.to_string()))?;
-    Ok("ok".to_string())
-}
-
-fn do_get_file(storage: &Storage, path: &str) -> HostResult<Vec<u8>> {
-    match storage.get_file(path) {
-        Ok(Some(content)) => Ok(content),
-        Ok(None) => Err(HostError::FileNotFound),
-        Err(e) => Err(HostError::Storage(e.to_string())),
-    }
-}
-
-fn do_delete_file(storage: &Storage, path: &str) -> HostResult<String> {
-    match storage.delete_file(path) {
-        Ok(true) => Ok("ok".to_string()),
-        Ok(false) => Ok("not_found".to_string()),
-        Err(e) => Err(HostError::Storage(e.to_string())),
-    }
-}
-
-fn do_list_files(storage: &Storage, dir_path: &str) -> HostResult<String> {
-    let files = storage.list_files(dir_path)
-        .map_err(|e| HostError::Storage(e.to_string()))?;
-
-    serde_json::to_string(&files)
-        .map_err(|e| HostError::Json(e.to_string()))
-}
-
-fn do_store_embedding(storage: &Storage, key: &str, vector_json: &str, metadata: &str) -> HostResult<String> {
-    let vector: Vec<f32> = serde_json::from_str(vector_json)
-        .map_err(|e| HostError::Json(format!("invalid vector JSON: {}", e)))?;
-
-    storage.store_embedding(key, &vector, metadata)
-        .map_err(|e| HostError::Storage(e.to_string()))?;
-
-    Ok("ok".to_string())
-}
-
-fn do_search_by_vector(storage: &Storage, query_json: &str, limit_str: &str) -> HostResult<String> {
-    let query_vector: Vec<f32> = serde_json::from_str(query_json)
-        .map_err(|e| HostError::Json(format!("invalid vector JSON: {}", e)))?;
-
-    let limit = limit_str.parse::<u32>().unwrap_or(10);
-
-    let results = storage.search_by_vector(&query_vector, limit)
-        .map_err(|e| HostError::Storage(e.to_string()))?;
-
-    let formatted: Vec<serde_json::Value> = results.iter()
-        .map(|(key, metadata, distance)| {
-            serde_json::json!({
-                "key": key,
-                "metadata": metadata,
-                "distance": distance
-            })
-        })
-        .collect();
-
-    serde_json::to_string(&formatted)
-        .map_err(|e| HostError::Json(e.to_string()))
 }
