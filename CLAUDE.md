@@ -37,6 +37,12 @@ ADRs are records of validated decisions, not speculative ones.
 - Refactor: clean up if needed
 - Run tests to verify
 
+## Code Structure
+
+- Top-down ordering: main type first, then errors, then supporting types
+- Separate manifest (TOML deserialization) from value types (resolved data)
+- Each has its own file: `foo_manifest.rs` and `foo.rs`
+
 ## TODO.md
 
 - Ungoverned scratchpad for raw thoughts
