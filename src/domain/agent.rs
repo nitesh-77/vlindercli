@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
@@ -67,8 +68,14 @@ impl Agent {
         self.agent_dir.join("agent.db")
     }
 
-    pub fn has_model(&self, name: &str) -> bool {
-        self.requirements.models.iter().any(|m| m == name)
+    /// Check if this agent declares a model by name.
+    pub fn has_model(&self, model_name: &str) -> bool {
+        self.requirements.models.contains_key(model_name)
+    }
+
+    /// Get the URI for a model by name.
+    pub fn model_uri(&self, model_name: &str) -> Option<&str> {
+        self.requirements.models.get(model_name).map(|s| s.as_str())
     }
 }
 
@@ -98,7 +105,8 @@ impl From<ParseError> for LoadError {
 /// Agent runtime requirements (validated)
 #[derive(Clone, Debug)]
 pub struct Requirements {
-    pub models: Vec<String>,
+    /// Model name → URI mapping
+    pub models: HashMap<String, String>,
     pub services: Vec<String>,
 }
 

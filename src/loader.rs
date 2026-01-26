@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::domain::{Agent, AgentLoadError, Fleet, FleetLoadError};
+use crate::domain::{Agent, AgentLoadError, Fleet, FleetLoadError, Model, ModelLoadError};
 
 // ============================================================================
 // Public API (free functions that dispatch by URI scheme)
@@ -20,6 +20,13 @@ pub fn load_fleet(uri: &str) -> Result<Fleet, LoadError> {
     }
 }
 
+pub fn load_model(uri: &str) -> Result<Model, LoadError> {
+    match parse_scheme(uri) {
+        "file" => FileLoader.load_model(uri),
+        scheme => Err(LoadError::NotFound(format!("unknown scheme: {}", scheme))),
+    }
+}
+
 fn parse_scheme(uri: &str) -> &str {
     uri.split("://").next().unwrap_or("file")
 }
@@ -28,10 +35,11 @@ fn parse_scheme(uri: &str) -> &str {
 // Trait and Implementations
 // ============================================================================
 
-/// Loads agents and fleets from URIs.
+/// Loads agents, fleets, and models from URIs.
 pub trait Loader {
     fn load_agent(&self, uri: &str) -> Result<Agent, LoadError>;
     fn load_fleet(&self, uri: &str) -> Result<Fleet, LoadError>;
+    fn load_model(&self, uri: &str) -> Result<Model, LoadError>;
 }
 
 /// Loads agents and fleets from the filesystem (file:// scheme).
@@ -52,6 +60,11 @@ impl Loader for FileLoader {
     fn load_fleet(&self, uri: &str) -> Result<Fleet, LoadError> {
         let path = Path::new(Self::uri_to_path(uri));
         Fleet::load(path).map_err(LoadError::from)
+    }
+
+    fn load_model(&self, uri: &str) -> Result<Model, LoadError> {
+        let path = Path::new(Self::uri_to_path(uri));
+        Model::load(path).map_err(LoadError::from)
     }
 }
 
@@ -95,6 +108,15 @@ impl From<FleetLoadError> for LoadError {
             FleetLoadError::Parse(s) => LoadError::Parse(s),
             FleetLoadError::Validation(s) => LoadError::Validation(s),
             FleetLoadError::PathNotFound(s) => LoadError::NotFound(s),
+        }
+    }
+}
+
+impl From<ModelLoadError> for LoadError {
+    fn from(e: ModelLoadError) -> Self {
+        match e {
+            ModelLoadError::Io(e) => LoadError::Io(e),
+            ModelLoadError::Parse(s) => LoadError::Parse(s),
         }
     }
 }
@@ -168,5 +190,49 @@ mod tests {
     fn load_agent_rejects_unknown_scheme() {
         let result = load_agent("registry://some-agent");
         assert!(result.is_err());
+    }
+
+    // ========================================================================
+    // load_model tests
+    // ========================================================================
+
+    fn model_fixture_uri(agent: &str, model_file: &str) -> String {
+        let path = PathBuf::from("tests/fixtures/agents")
+            .join(agent)
+            .join("models")
+            .join(model_file)
+            .canonicalize()
+            .unwrap();
+        format!("file://{}", path.display())
+    }
+
+    #[test]
+    fn load_model_with_file_uri() {
+        let model = load_model(&model_fixture_uri("model-test-agent", "inference.toml")).unwrap();
+        assert_eq!(model.name, "phi3");
+    }
+
+    #[test]
+    fn load_model_fails_for_missing_uri() {
+        let result = load_model("file:///nonexistent/model.toml");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn load_model_rejects_unknown_scheme() {
+        let result = load_model("http://example.com/model.toml");
+        assert!(result.is_err());
+
+        let result = load_model("ollama://phi3");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn load_model_returns_correct_type() {
+        let inference = load_model(&model_fixture_uri("model-test-agent", "inference.toml")).unwrap();
+        assert_eq!(inference.model_type, crate::domain::ModelType::Inference);
+
+        let embedding = load_model(&model_fixture_uri("model-test-agent", "embedding.toml")).unwrap();
+        assert_eq!(embedding.model_type, crate::domain::ModelType::Embedding);
     }
 }

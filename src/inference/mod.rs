@@ -11,8 +11,6 @@ use llama_cpp_2::model::params::LlamaModelParams;
 use llama_cpp_2::model::LlamaModel;
 use llama_cpp_2::sampling::LlamaSampler;
 
-use crate::config;
-
 static LLAMA_INIT: Once = Once::new();
 
 fn init_llama() {
@@ -108,8 +106,3 @@ impl InferenceEngine for LlamaEngine {
     }
 }
 
-pub fn load_inference_engine(model_name: &str) -> Result<Box<dyn InferenceEngine>, String> {
-    let path = config::model_path(model_name);
-    let engine = LlamaEngine::load(&path)?;
-    Ok(Box::new(engine))
-}

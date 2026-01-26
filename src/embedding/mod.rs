@@ -10,8 +10,6 @@ use llama_cpp_2::llama_batch::LlamaBatch;
 use llama_cpp_2::model::params::LlamaModelParams;
 use llama_cpp_2::model::LlamaModel;
 
-use crate::config;
-
 static LLAMA_INIT: Once = Once::new();
 
 fn init_llama() {
@@ -74,8 +72,3 @@ impl EmbeddingEngine for LlamaEmbeddingEngine {
     }
 }
 
-pub fn load_embedding_engine(model_name: &str) -> Result<Box<dyn EmbeddingEngine>, String> {
-    let path = config::model_path(model_name);
-    let engine = LlamaEmbeddingEngine::load(&path)?;
-    Ok(Box::new(engine))
-}

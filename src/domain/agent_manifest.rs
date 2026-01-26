@@ -1,5 +1,7 @@
-use serde::Deserialize;
+use std::collections::HashMap;
 use std::path::Path;
+
+use serde::Deserialize;
 
 /// Agent manifest as read from agent.toml.
 ///
@@ -87,7 +89,9 @@ impl From<toml::de::Error> for ParseError {
 /// Requirements as declared in agent.toml
 #[derive(Clone, Debug, Deserialize)]
 pub struct RequirementsConfig {
-    pub models: Vec<String>,
+    /// Model name → URI mapping (e.g., "phi3" = "file://./models/phi3.toml")
+    #[serde(default)]
+    pub models: HashMap<String, String>,
     pub services: Vec<String>,
 }
 
