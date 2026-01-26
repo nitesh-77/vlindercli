@@ -8,17 +8,22 @@ fn fixture(name: &str) -> PathBuf {
     Path::new(FIXTURES).join(name)
 }
 
+fn fixture_uri(name: &str) -> String {
+    let path = fixture(name).canonicalize().unwrap();
+    format!("file://{}", path.display())
+}
+
 #[test]
 fn agent_echo() {
     let runtime = Runtime::new();
-    let result = runtime.execute(&fixture("echo-agent"), "hello");
+    let result = runtime.execute(&fixture_uri("echo-agent"), "hello");
     assert_eq!(result, "echo: hello");
 }
 
 #[test]
 fn agent_upper() {
     let runtime = Runtime::new();
-    let result = runtime.execute(&fixture("upper-agent"), "hello");
+    let result = runtime.execute(&fixture_uri("upper-agent"), "hello");
     assert_eq!(result, "HELLO");
 }
 
@@ -47,7 +52,7 @@ fn agent_loads_requirements_from_manifest() {
 #[test]
 fn pensieve_agent_fetches_and_summarizes() {
     let runtime = Runtime::new();
-    let result = runtime.execute(&fixture("pensieve"), "https://httpbin.org/html");
+    let result = runtime.execute(&fixture_uri("pensieve"), "https://httpbin.org/html");
 
     // Verify output contains the formatted sections from the agent
     assert!(result.contains("Source:"), "Expected 'Source:' in output");

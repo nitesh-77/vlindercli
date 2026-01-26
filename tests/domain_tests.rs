@@ -2,15 +2,137 @@ use std::path::{Path, PathBuf};
 use vlindercli::domain::{Agent, AgentManifest};
 
 const AGENT_FIXTURES: &str = "tests/fixtures/agents";
-const MANIFEST_FIXTURES: &str = "tests/fixtures/manifests";
 
 fn agent_fixture(name: &str) -> PathBuf {
     Path::new(AGENT_FIXTURES).join(name)
 }
 
-fn manifest_fixture(name: &str) -> PathBuf {
-    Path::new(MANIFEST_FIXTURES).join(name).join("agent.toml")
+// ============================================================================
+// AgentManifest Tests (inline TOML - no fixtures needed)
+// ============================================================================
+
+fn parse_manifest(toml: &str) -> Result<AgentManifest, toml::de::Error> {
+    toml::from_str(toml)
 }
+
+#[test]
+fn manifest_parses_required_fields() {
+    let manifest: AgentManifest = parse_manifest(r#"
+        name = "test-agent"
+        description = "A test agent"
+        code = "agent.wasm"
+
+        [requirements]
+        models = []
+        services = []
+    "#).unwrap();
+
+    assert_eq!(manifest.name, "test-agent");
+    assert_eq!(manifest.description, "A test agent");
+    assert_eq!(manifest.code, "agent.wasm");
+}
+
+#[test]
+fn manifest_parses_optional_source() {
+    let manifest: AgentManifest = parse_manifest(r#"
+        name = "test-agent"
+        description = "A test agent"
+        code = "agent.wasm"
+        source = "https://github.com/example/agent"
+
+        [requirements]
+        models = []
+        services = []
+    "#).unwrap();
+
+    assert_eq!(manifest.source, Some("https://github.com/example/agent".to_string()));
+}
+
+#[test]
+fn manifest_parses_requirements() {
+    let manifest: AgentManifest = parse_manifest(r#"
+        name = "test-agent"
+        description = "A test agent"
+        code = "agent.wasm"
+
+        [requirements]
+        models = ["phi3", "nomic-embed"]
+        services = ["infer", "embed"]
+    "#).unwrap();
+
+    assert!(manifest.requirements.models.contains(&"phi3".to_string()));
+    assert!(manifest.requirements.models.contains(&"nomic-embed".to_string()));
+    assert!(manifest.requirements.services.contains(&"infer".to_string()));
+}
+
+#[test]
+fn manifest_parses_mounts() {
+    let manifest: AgentManifest = parse_manifest(r#"
+        name = "test-agent"
+        description = "A test agent"
+        code = "agent.wasm"
+
+        [requirements]
+        models = []
+        services = []
+
+        [[mounts]]
+        host_path = "data"
+        guest_path = "/data"
+        mode = "ro"
+
+        [[mounts]]
+        host_path = "output"
+        guest_path = "/output"
+        mode = "rw"
+    "#).unwrap();
+
+    assert_eq!(manifest.mounts.len(), 2);
+    assert_eq!(manifest.mounts[0].host_path, "data");
+    assert_eq!(manifest.mounts[0].guest_path, "/data");
+    assert_eq!(manifest.mounts[0].mode, "ro");
+    assert_eq!(manifest.mounts[1].mode, "rw");
+}
+
+#[test]
+fn manifest_defaults_empty_optional_fields() {
+    let manifest: AgentManifest = parse_manifest(r#"
+        name = "minimal"
+        description = "Minimal valid manifest"
+        code = "agent.wasm"
+
+        [requirements]
+        models = []
+        services = []
+    "#).unwrap();
+
+    assert!(manifest.source.is_none());
+    assert!(manifest.prompts.is_none());
+    assert!(manifest.mounts.is_empty());
+}
+
+#[test]
+fn manifest_fails_for_invalid_toml() {
+    let result = parse_manifest("this is not valid toml {{{{");
+    assert!(result.is_err());
+}
+
+#[test]
+fn manifest_fails_for_missing_required_field() {
+    let result = parse_manifest(r#"
+        name = "incomplete"
+        description = "Missing code field"
+
+        [requirements]
+        models = []
+        services = []
+    "#);
+    assert!(result.is_err());
+}
+
+// ============================================================================
+// Agent Tests (need fixtures for WASM files and directory structure)
+// ============================================================================
 
 #[test]
 fn agent_load_parses_manifest() {
@@ -74,78 +196,4 @@ fn agent_dir_set_from_load_path() {
 fn agent_db_path() {
     let agent = Agent::load(&agent_fixture("echo-agent")).unwrap();
     assert!(agent.db_path().ends_with("agent.db"));
-}
-
-// ============================================================================
-// AgentManifest Tests
-// ============================================================================
-
-#[test]
-fn manifest_load_parses_required_fields() {
-    let (manifest, _raw) = AgentManifest::load(&manifest_fixture("minimal-manifest")).unwrap();
-
-    assert_eq!(manifest.name, "minimal");
-    assert_eq!(manifest.description, "Minimal valid manifest");
-    assert_eq!(manifest.code, "agent.wasm");
-}
-
-#[test]
-fn manifest_load_parses_optional_source() {
-    let path = agent_fixture("pensieve").join("agent.toml");
-    let (manifest, _raw) = AgentManifest::load(&path).unwrap();
-
-    assert_eq!(manifest.source, Some("https://github.com/vlindercli/pensieve".to_string()));
-}
-
-#[test]
-fn manifest_load_parses_requirements() {
-    let path = agent_fixture("pensieve").join("agent.toml");
-    let (manifest, _raw) = AgentManifest::load(&path).unwrap();
-
-    assert!(manifest.requirements.models.contains(&"phi3".to_string()));
-    assert!(manifest.requirements.models.contains(&"nomic-embed".to_string()));
-    assert!(manifest.requirements.services.contains(&"infer".to_string()));
-}
-
-#[test]
-fn manifest_load_parses_mounts() {
-    let path = agent_fixture("mount-test-agent").join("agent.toml");
-    let (manifest, _raw) = AgentManifest::load(&path).unwrap();
-
-    assert_eq!(manifest.mounts.len(), 2);
-    assert_eq!(manifest.mounts[0].host_path, "data");
-    assert_eq!(manifest.mounts[0].guest_path, "/data");
-    assert_eq!(manifest.mounts[0].mode, "ro");
-}
-
-#[test]
-fn manifest_load_defaults_empty_optional_fields() {
-    let (manifest, _raw) = AgentManifest::load(&manifest_fixture("minimal-manifest")).unwrap();
-
-    assert!(manifest.source.is_none());
-    assert!(manifest.prompts.is_none());
-    assert!(manifest.mounts.is_empty());
-}
-
-#[test]
-fn manifest_load_fails_for_invalid_toml() {
-    let result = AgentManifest::load(&manifest_fixture("invalid-toml"));
-
-    assert!(result.is_err());
-}
-
-#[test]
-fn manifest_load_fails_for_missing_required_field() {
-    let result = AgentManifest::load(&manifest_fixture("missing-required"));
-
-    assert!(result.is_err());
-}
-
-#[test]
-fn manifest_load_returns_raw_content() {
-    let path = agent_fixture("echo-agent").join("agent.toml");
-    let (_manifest, raw) = AgentManifest::load(&path).unwrap();
-
-    assert!(raw.contains("echo-agent"));
-    assert!(raw.contains("Test agent that echoes input"));
 }

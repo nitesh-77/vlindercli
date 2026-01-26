@@ -1,5 +1,0 @@
-name = "minimal-fleet"
-entry = "main"
-
-[agents.main]
-path = "agents/main"

@@ -2,18 +2,71 @@ use std::path::{Path, PathBuf};
 use vlindercli::domain::{Fleet, FleetManifest};
 
 const FLEET_FIXTURES: &str = "tests/fixtures/fleets";
-const MANIFEST_FIXTURES: &str = "tests/fixtures/fleet-manifests";
 
 fn fleet_fixture(name: &str) -> PathBuf {
     Path::new(FLEET_FIXTURES).join(name)
 }
 
-fn manifest_fixture(name: &str) -> PathBuf {
-    Path::new(MANIFEST_FIXTURES).join(name).join("fleet.toml")
+// ============================================================================
+// FleetManifest Tests (inline TOML - no fixtures needed)
+// ============================================================================
+
+fn parse_fleet_manifest(toml: &str) -> Result<FleetManifest, toml::de::Error> {
+    toml::from_str(toml)
+}
+
+#[test]
+fn manifest_parses_required_fields() {
+    let manifest: FleetManifest = parse_fleet_manifest(r#"
+        name = "test-fleet"
+        entry = "main"
+
+        [agents.main]
+        path = "agents/main"
+    "#).unwrap();
+
+    assert_eq!(manifest.name, "test-fleet");
+    assert_eq!(manifest.entry, "main");
+    assert!(manifest.agents.contains_key("main"));
+}
+
+#[test]
+fn manifest_parses_agent_paths() {
+    let manifest: FleetManifest = parse_fleet_manifest(r#"
+        name = "test-fleet"
+        entry = "orchestrator"
+
+        [agents.orchestrator]
+        path = "agents/orchestrator"
+
+        [agents.worker]
+        path = "agents/worker"
+    "#).unwrap();
+
+    assert_eq!(manifest.agents.get("orchestrator").unwrap().path, "agents/orchestrator");
+    assert_eq!(manifest.agents.get("worker").unwrap().path, "agents/worker");
+}
+
+#[test]
+fn manifest_fails_for_invalid_toml() {
+    let result = parse_fleet_manifest("this is not valid toml {{{{");
+    assert!(result.is_err());
+}
+
+#[test]
+fn manifest_fails_for_missing_required_field() {
+    // Missing entry field
+    let result = parse_fleet_manifest(r#"
+        name = "incomplete"
+
+        [agents.main]
+        path = "agents/main"
+    "#);
+    assert!(result.is_err());
 }
 
 // ============================================================================
-// Fleet Tests
+// Fleet Tests (need fixtures for directory structure validation)
 // ============================================================================
 
 #[test]
@@ -60,37 +113,4 @@ fn fleet_agent_path() {
     let fleet = Fleet::load(&fleet_fixture("test-fleet")).unwrap();
     let path = fleet.agent_path("echo").unwrap();
     assert!(path.ends_with("agents/echo-agent"));
-}
-
-// ============================================================================
-// FleetManifest Tests
-// ============================================================================
-
-#[test]
-fn manifest_load_parses_required_fields() {
-    let manifest = FleetManifest::load(&manifest_fixture("minimal")).unwrap();
-
-    assert_eq!(manifest.name, "minimal-fleet");
-    assert_eq!(manifest.entry, "main");
-    assert!(manifest.agents.contains_key("main"));
-}
-
-#[test]
-fn manifest_load_parses_agent_paths() {
-    let manifest = FleetManifest::load(&manifest_fixture("minimal")).unwrap();
-
-    let agent = manifest.agents.get("main").unwrap();
-    assert_eq!(agent.path, "agents/main");
-}
-
-#[test]
-fn manifest_load_fails_for_invalid_toml() {
-    let result = FleetManifest::load(&manifest_fixture("invalid-toml"));
-    assert!(result.is_err());
-}
-
-#[test]
-fn manifest_load_fails_when_entry_not_in_agents() {
-    let result = FleetManifest::load(&manifest_fixture("missing-entry"));
-    assert!(result.is_err());
 }

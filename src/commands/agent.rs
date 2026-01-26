@@ -26,7 +26,15 @@ fn run(path: Option<PathBuf>) {
     let agent_path = path.unwrap_or_else(|| {
         std::env::current_dir().expect("Failed to get current directory")
     });
-    let runtime = Runtime::new();
 
-    repl::run(|input| runtime.execute(&agent_path, input));
+    // Canonicalize to absolute path for URI
+    let absolute_path = agent_path
+        .canonicalize()
+        .expect("Failed to resolve agent path");
+
+    // Construct file:// URI
+    let uri = format!("file://{}", absolute_path.display());
+
+    let runtime = Runtime::new();
+    repl::run(|input| runtime.execute(&uri, input));
 }
