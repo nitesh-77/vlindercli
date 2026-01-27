@@ -2,13 +2,15 @@
 
 use std::num::NonZeroU32;
 use std::path::Path;
-use std::sync::Once;
+use std::sync::{Arc, Once};
 
 use llama_cpp_2::context::params::LlamaContextParams;
 use llama_cpp_2::llama_backend::LlamaBackend;
 use llama_cpp_2::llama_batch::LlamaBatch;
 use llama_cpp_2::model::params::LlamaModelParams;
 use llama_cpp_2::model::LlamaModel;
+
+use crate::domain::Model;
 
 static LLAMA_INIT: Once = Once::new();
 
@@ -18,9 +20,51 @@ fn init_llama() {
     });
 }
 
+// ============================================================================
+// Trait
+// ============================================================================
+
 pub trait EmbeddingEngine: Send + Sync {
     fn embed(&self, text: &str) -> Result<Vec<f32>, String>;
 }
+
+// ============================================================================
+// Factory
+// ============================================================================
+
+/// Open an embedding engine for the given model.
+pub fn open_embedding_engine(model: &Model) -> Result<Arc<dyn EmbeddingEngine>, String> {
+    let model_path = model.model.strip_prefix("file://")
+        .ok_or_else(|| format!("unsupported model URI scheme: {}", model.model))?;
+
+    let engine = LlamaEmbeddingEngine::load(Path::new(model_path))?;
+    Ok(Arc::new(engine))
+}
+
+// ============================================================================
+// In-Memory Implementation (for testing)
+// ============================================================================
+
+/// In-memory embedding engine that returns canned responses.
+pub struct InMemoryEmbedding {
+    embedding: Vec<f32>,
+}
+
+impl InMemoryEmbedding {
+    pub fn new(embedding: Vec<f32>) -> Self {
+        Self { embedding }
+    }
+}
+
+impl EmbeddingEngine for InMemoryEmbedding {
+    fn embed(&self, _text: &str) -> Result<Vec<f32>, String> {
+        Ok(self.embedding.clone())
+    }
+}
+
+// ============================================================================
+// Llama Implementation
+// ============================================================================
 
 pub struct LlamaEmbeddingEngine {
     backend: LlamaBackend,

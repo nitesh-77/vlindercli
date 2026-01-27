@@ -1,12 +1,39 @@
 //! Embedding service - vector representations.
 
 use std::path::Path;
+use std::sync::Arc;
 
 use crate::domain::{Agent, ModelType};
-use crate::embedding::{EmbeddingEngine, LlamaEmbeddingEngine};
+use crate::embedding::{open_embedding_engine, EmbeddingEngine};
 use crate::loader;
 
+/// Generate embeddings using the model declared by the agent.
 pub fn embed(agent: &Agent, model_name: &str, text: &str) -> Result<String, Error> {
+    let (model, _) = resolve_model(agent, model_name)?;
+
+    let engine = open_embedding_engine(&model)
+        .map_err(|e| Error::ModelLoad {
+            model: model_name.to_string(),
+            reason: e,
+        })?;
+
+    run_embedding(&engine, text)
+}
+
+/// Generate embeddings with a provided engine (for testing).
+pub fn embed_with_engine(
+    agent: &Agent,
+    model_name: &str,
+    text: &str,
+    engine: Arc<dyn EmbeddingEngine>,
+) -> Result<String, Error> {
+    // Still validate model exists and has correct type
+    let _ = resolve_model(agent, model_name)?;
+    run_embedding(&engine, text)
+}
+
+/// Resolve and validate model from agent requirements.
+fn resolve_model(agent: &Agent, model_name: &str) -> Result<(crate::domain::Model, String), Error> {
     // Get model URI from agent's requirements
     let model_uri = agent.model_uri(model_name)
         .ok_or_else(|| Error::ModelNotDeclared(model_name.to_string()))?;
@@ -28,20 +55,10 @@ pub fn embed(agent: &Agent, model_name: &str, text: &str) -> Result<String, Erro
         });
     }
 
-    // Get model file path from URI
-    let model_path = uri_to_path(&model.model)
-        .map_err(|e| Error::ModelLoad {
-            model: model_name.to_string(),
-            reason: e,
-        })?;
+    Ok((model, resolved_uri))
+}
 
-    // Load and generate embedding
-    let engine = LlamaEmbeddingEngine::load(&model_path)
-        .map_err(|e| Error::ModelLoad {
-            model: model_name.to_string(),
-            reason: e,
-        })?;
-
+fn run_embedding(engine: &Arc<dyn EmbeddingEngine>, text: &str) -> Result<String, Error> {
     let vec = engine.embed(text)
         .map_err(Error::Embedding)?;
 
@@ -58,12 +75,6 @@ fn resolve_uri(uri: &str, base_dir: &Path) -> String {
         }
     }
     uri.to_string()
-}
-
-fn uri_to_path(uri: &str) -> Result<std::path::PathBuf, String> {
-    uri.strip_prefix("file://")
-        .map(std::path::PathBuf::from)
-        .ok_or_else(|| format!("unsupported URI scheme: {}", uri))
 }
 
 // ============================================================================

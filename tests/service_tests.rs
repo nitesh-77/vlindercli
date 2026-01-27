@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use vlindercli::domain::Agent;
+use vlindercli::embedding::InMemoryEmbedding;
 use vlindercli::inference::InMemoryInference;
 use vlindercli::services::{inference, embedding};
 
@@ -117,6 +118,42 @@ fn embed_rejects_inference_model() {
         "Expected type mismatch error, got: {}",
         err
     );
+}
+
+#[test]
+fn embed_with_engine_returns_json() {
+    let agent = Agent::load(&agent_fixture("model-test-agent")).unwrap();
+    let engine = Arc::new(InMemoryEmbedding::new(vec![0.1, 0.2, 0.3]));
+
+    let result = embedding::embed_with_engine(&agent, "nomic-embed", "test text", engine);
+
+    assert!(result.is_ok());
+    let json = result.unwrap();
+    assert_eq!(json, "[0.1,0.2,0.3]");
+}
+
+#[test]
+fn embed_with_engine_still_validates_model_exists() {
+    let agent = Agent::load(&agent_fixture("model-test-agent")).unwrap();
+    let engine = Arc::new(InMemoryEmbedding::new(vec![0.1]));
+
+    // Model doesn't exist - should fail even with injected engine
+    let result = embedding::embed_with_engine(&agent, "nonexistent", "text", engine);
+
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("not declared"));
+}
+
+#[test]
+fn embed_with_engine_still_validates_model_type() {
+    let agent = Agent::load(&agent_fixture("type-mismatch-agent")).unwrap();
+    let engine = Arc::new(InMemoryEmbedding::new(vec![0.1]));
+
+    // "embedding-model" maps to an inference model - should fail
+    let result = embedding::embed_with_engine(&agent, "embedding-model", "text", engine);
+
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("Inference"));
 }
 
 // ============================================================================
