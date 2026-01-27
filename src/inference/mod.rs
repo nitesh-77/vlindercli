@@ -2,7 +2,7 @@
 
 use std::num::NonZeroU32;
 use std::path::Path;
-use std::sync::Once;
+use std::sync::{Arc, Once};
 
 use llama_cpp_2::context::params::LlamaContextParams;
 use llama_cpp_2::llama_backend::LlamaBackend;
@@ -10,6 +10,8 @@ use llama_cpp_2::llama_batch::LlamaBatch;
 use llama_cpp_2::model::params::LlamaModelParams;
 use llama_cpp_2::model::LlamaModel;
 use llama_cpp_2::sampling::LlamaSampler;
+
+use crate::domain::Model;
 
 static LLAMA_INIT: Once = Once::new();
 
@@ -19,9 +21,51 @@ fn init_llama() {
     });
 }
 
+// ============================================================================
+// Trait
+// ============================================================================
+
 pub trait InferenceEngine: Send + Sync {
     fn infer(&self, prompt: &str, max_tokens: u32) -> Result<String, String>;
 }
+
+// ============================================================================
+// Factory
+// ============================================================================
+
+/// Open an inference engine for the given model.
+pub fn open_inference_engine(model: &Model) -> Result<Arc<dyn InferenceEngine>, String> {
+    let model_path = model.model.strip_prefix("file://")
+        .ok_or_else(|| format!("unsupported model URI scheme: {}", model.model))?;
+
+    let engine = LlamaEngine::load(Path::new(model_path))?;
+    Ok(Arc::new(engine))
+}
+
+// ============================================================================
+// In-Memory Implementation (for testing)
+// ============================================================================
+
+/// In-memory inference engine that returns canned responses.
+pub struct InMemoryInference {
+    response: String,
+}
+
+impl InMemoryInference {
+    pub fn new(response: impl Into<String>) -> Self {
+        Self { response: response.into() }
+    }
+}
+
+impl InferenceEngine for InMemoryInference {
+    fn infer(&self, _prompt: &str, _max_tokens: u32) -> Result<String, String> {
+        Ok(self.response.clone())
+    }
+}
+
+// ============================================================================
+// Llama Implementation
+// ============================================================================
 
 pub struct LlamaEngine {
     backend: LlamaBackend,
