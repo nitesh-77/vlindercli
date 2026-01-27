@@ -1,0 +1,98 @@
+//! Storage domain types and traits.
+//!
+//! Storage provides object (file) and vector (embedding) persistence.
+//! This module defines both the configuration types (WHAT storage to use)
+//! and the capability traits (the abstract interface).
+
+use std::path::PathBuf;
+
+// ============================================================================
+// ObjectStorage Trait
+// ============================================================================
+
+/// Object storage for file operations.
+///
+/// Implementations provide a virtual filesystem for agents. Paths are keys,
+/// not real filesystem paths - this isolates agents from the host system.
+pub trait ObjectStorage: Send + Sync {
+    /// Store a file at the given path.
+    fn put_file(&self, path: &str, content: &[u8]) -> Result<(), String>;
+
+    /// Retrieve a file from the given path. Returns None if not found.
+    fn get_file(&self, path: &str) -> Result<Option<Vec<u8>>, String>;
+
+    /// Delete a file at the given path. Returns true if the file existed.
+    fn delete_file(&self, path: &str) -> Result<bool, String>;
+
+    /// List all files under the given directory path.
+    fn list_files(&self, dir_path: &str) -> Result<Vec<String>, String>;
+}
+
+// ============================================================================
+// VectorStorage Trait
+// ============================================================================
+
+/// Vector storage for embedding operations.
+///
+/// Implementations provide similarity search over embedded vectors.
+/// Each embedding has a key, a 768-dimensional vector, and metadata.
+pub trait VectorStorage: Send + Sync {
+    /// Store an embedding with the given key.
+    fn store_embedding(&self, key: &str, vector: &[f32], metadata: &str) -> Result<(), String>;
+
+    /// Search for similar embeddings. Returns (key, metadata, distance) tuples.
+    fn search_by_vector(&self, query_vector: &[f32], limit: u32) -> Result<Vec<(String, String, f64)>, String>;
+
+    /// Delete an embedding by key. Returns true if it existed.
+    fn delete_embedding(&self, key: &str) -> Result<bool, String>;
+}
+
+// ============================================================================
+// Storage (top-level capability)
+// ============================================================================
+
+/// A storage capability for agent data persistence.
+///
+/// Agents can optionally have storage. When present, it provides
+/// both object storage (files) and vector storage (embeddings).
+#[derive(Clone, Debug)]
+pub struct Storage {
+    pub backend: StorageBackend,
+}
+
+// ============================================================================
+// StorageBackend (shared config + kind)
+// ============================================================================
+
+/// Backend configuration for storage.
+///
+/// Contains common settings (namespace) plus the specific kind.
+#[derive(Clone, Debug)]
+pub struct StorageBackend {
+    /// Namespace for isolation (typically agent name).
+    pub namespace: String,
+    pub kind: StorageKind,
+}
+
+// ============================================================================
+// StorageKind (enum for exhaustive matching)
+// ============================================================================
+
+/// The specific storage implementation.
+#[derive(Clone, Debug)]
+pub enum StorageKind {
+    Sqlite(SqliteConfig),
+    /// In-memory storage for testing. No persistence, no disk I/O.
+    InMemory,
+}
+
+// ============================================================================
+// Kind-specific configs
+// ============================================================================
+
+/// Configuration for SQLite storage.
+#[derive(Clone, Debug)]
+pub struct SqliteConfig {
+    /// Path to the database file.
+    pub db_path: PathBuf,
+}
