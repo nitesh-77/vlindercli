@@ -1,26 +1,15 @@
 //! Vector storage (embeddings)
 //!
-//! Trait + SQLite implementation. The SQLite version uses sqlite-vec
-//! for efficient similarity search.
+//! SQLite implementation of the VectorStorage trait using sqlite-vec
+//! for efficient similarity search. The trait is defined in the domain module.
 
 use crate::config;
-use crate::domain::Agent;
+use crate::domain::{Agent, VectorStorage};
 use rusqlite::{params, Connection};
 use sqlite_vec::sqlite3_vec_init;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use zerocopy::AsBytes;
-
-// ============================================================================
-// Trait
-// ============================================================================
-
-/// Vector storage for embedding operations.
-pub trait VectorStorage: Send + Sync {
-    fn store_embedding(&self, key: &str, vector: &[f32], metadata: &str) -> Result<(), String>;
-    fn search_by_vector(&self, query_vector: &[f32], limit: u32) -> Result<Vec<(String, String, f64)>, String>;
-    fn delete_embedding(&self, key: &str) -> Result<bool, String>;
-}
 
 /// Open vector storage for an agent. Currently uses SQLite with sqlite-vec.
 pub fn open_vector_storage(agent: &Agent) -> Result<Arc<dyn VectorStorage>, String> {

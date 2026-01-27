@@ -1,24 +1,12 @@
 //! Object storage (virtual filesystem)
 //!
-//! Trait + SQLite implementation. Future backends (S3, filesystem, etc.)
-//! would implement the same trait.
+//! SQLite implementation of the ObjectStorage trait.
+//! The trait is defined in the domain module.
 
 use crate::config;
-use crate::domain::Agent;
+use crate::domain::{Agent, ObjectStorage};
 use rusqlite::{params, Connection};
 use std::sync::{Arc, Mutex};
-
-// ============================================================================
-// Trait
-// ============================================================================
-
-/// Object storage for file operations.
-pub trait ObjectStorage: Send + Sync {
-    fn put_file(&self, path: &str, content: &[u8]) -> Result<(), String>;
-    fn get_file(&self, path: &str) -> Result<Option<Vec<u8>>, String>;
-    fn delete_file(&self, path: &str) -> Result<bool, String>;
-    fn list_files(&self, dir_path: &str) -> Result<Vec<String>, String>;
-}
 
 /// Open object storage for an agent. Currently uses SQLite.
 pub fn open_object_storage(agent: &Agent) -> Result<Arc<dyn ObjectStorage>, String> {
