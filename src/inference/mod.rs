@@ -2,6 +2,8 @@
 //!
 //! The trait is defined in the domain module.
 
+pub mod dispatch;
+
 use std::num::NonZeroU32;
 use std::path::Path;
 use std::sync::{Arc, Once};
