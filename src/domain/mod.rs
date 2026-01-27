@@ -11,6 +11,7 @@ mod agent;
 mod agent_manifest;
 mod fleet;
 mod fleet_manifest;
+mod inference;
 mod model;
 mod model_manifest;
 mod storage;
@@ -31,6 +32,15 @@ pub use fleet_manifest::FleetManifest;
 pub use storage::{
     ObjectStorage, VectorStorage,
     SqliteConfig, Storage, StorageBackend, StorageKind,
+};
+
+// ============================================================================
+// Inference (config + trait)
+// ============================================================================
+
+pub use inference::{
+    InferenceEngine,
+    Inference, InferenceBackend, InferenceKind, LlamaConfig,
 };
 
 // ============================================================================

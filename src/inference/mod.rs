@@ -1,4 +1,6 @@
-//! Inference engine for text generation.
+//! Inference engine implementations.
+//!
+//! The trait is defined in the domain module.
 
 use std::num::NonZeroU32;
 use std::path::Path;
@@ -11,7 +13,7 @@ use llama_cpp_2::model::params::LlamaModelParams;
 use llama_cpp_2::model::LlamaModel;
 use llama_cpp_2::sampling::LlamaSampler;
 
-use crate::domain::Model;
+use crate::domain::{InferenceEngine, Model};
 
 static LLAMA_INIT: Once = Once::new();
 
@@ -20,18 +22,6 @@ fn init_llama() {
         llama_cpp_2::send_logs_to_tracing(llama_cpp_2::LogOptions::default());
     });
 }
-
-// ============================================================================
-// Trait
-// ============================================================================
-
-pub trait InferenceEngine: Send + Sync {
-    fn infer(&self, prompt: &str, max_tokens: u32) -> Result<String, String>;
-}
-
-// ============================================================================
-// Factory
-// ============================================================================
 
 /// Open an inference engine for the given model.
 pub fn open_inference_engine(model: &Model) -> Result<Arc<dyn InferenceEngine>, String> {

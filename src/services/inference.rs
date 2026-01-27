@@ -3,8 +3,8 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::domain::{Agent, ModelType};
-use crate::inference::{open_inference_engine, InferenceEngine};
+use crate::domain::{Agent, InferenceEngine, ModelType};
+use crate::inference::open_inference_engine;
 use crate::loader;
 
 /// Run inference using the model declared by the agent.
