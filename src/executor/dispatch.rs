@@ -49,6 +49,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn open_executor_creates_wasm_executor() {
+        let kind = ExecutorKind::Wasm(WasmConfig {
+            module_path: "/path/to/agent.wasm".into(),
+            max_memory: 0,
+        });
+
+        let executor = open_executor(&kind);
+        assert!(executor.is_ok());
+    }
+
+    #[test]
     fn executor_kind_from_wasm_code() {
         let kind = executor_kind_from_code("file:///path/to/agent.wasm").unwrap();
 
