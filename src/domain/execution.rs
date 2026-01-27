@@ -3,10 +3,6 @@
 //! These types represent what the runtime processes.
 
 use super::agent::Agent;
-use super::embedding::Embedding;
-use super::executor::Executor;
-use super::inference::Inference;
-use super::storage::Storage;
 
 /// A plan describing what the runtime should execute.
 #[derive(Clone, Debug)]
@@ -17,21 +13,20 @@ pub enum ExecutionPlan {
     Continue(Vec<AgentExecution>),
 }
 
-/// Everything needed to execute a single agent.
+/// A request to execute an agent with input.
+///
+/// The runtime derives all capabilities (storage, executor, inference, embedding)
+/// from the agent's configuration.
 #[derive(Clone, Debug)]
 pub struct AgentExecution {
     pub agent: Agent,
-    pub executor: Executor,
-    pub storage: Option<Storage>,
-    pub inference: Option<Inference>,
-    pub embedding: Option<Embedding>,
     pub input: String,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{ExecutorBackend, Requirements};
+    use crate::domain::Requirements;
     use std::collections::HashMap;
     use std::path::PathBuf;
 
@@ -51,12 +46,6 @@ mod tests {
         }
     }
 
-    fn test_executor() -> Executor {
-        Executor {
-            backend: ExecutorBackend::default(),
-        }
-    }
-
     #[test]
     fn execution_plan_done() {
         let plan = ExecutionPlan::Done("result".to_string());
@@ -71,10 +60,6 @@ mod tests {
     fn execution_plan_continue() {
         let exec = AgentExecution {
             agent: test_agent(),
-            executor: test_executor(),
-            storage: None,
-            inference: None,
-            embedding: None,
             input: "hello".to_string(),
         };
 
@@ -90,19 +75,13 @@ mod tests {
     }
 
     #[test]
-    fn agent_execution_with_no_capabilities() {
+    fn agent_execution_holds_agent_and_input() {
         let exec = AgentExecution {
             agent: test_agent(),
-            executor: test_executor(),
-            storage: None,
-            inference: None,
-            embedding: None,
             input: "test input".to_string(),
         };
 
         assert_eq!(exec.agent.name, "test-agent");
-        assert!(exec.storage.is_none());
-        assert!(exec.inference.is_none());
-        assert!(exec.embedding.is_none());
+        assert_eq!(exec.input, "test input");
     }
 }
