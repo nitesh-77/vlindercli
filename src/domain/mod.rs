@@ -10,6 +10,7 @@
 mod agent;
 mod agent_manifest;
 mod embedding;
+mod execution;
 mod executor;
 mod fleet;
 mod fleet_manifest;
@@ -62,6 +63,12 @@ pub use executor::{
     ExecutorEngine,
     Executor, ExecutorBackend, ExecutorKind, WasmConfig,
 };
+
+// ============================================================================
+// Execution
+// ============================================================================
+
+pub use execution::{AgentExecution, ExecutionPlan};
 
 // ============================================================================
 // Model
