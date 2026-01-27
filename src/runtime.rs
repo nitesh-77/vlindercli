@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use extism::{CurrentPlugin, Function, Manifest, Plugin, UserData, Val, Wasm};
 
-use crate::config;
 use crate::domain::Agent;
 use crate::loader;
 use crate::services::{embedding, inference, object_storage, vector_storage};
@@ -55,14 +54,6 @@ impl Runtime {
             Ok(a) => a,
             Err(e) => return format!("[error] failed to load agent: {}", e),
         };
-
-        // Ensure default mount directory exists
-        let mnt_path = config::agent_mnt_path(&agent.name);
-        if !mnt_path.exists() {
-            if let Err(e) = std::fs::create_dir_all(&mnt_path) {
-                tracing::warn!("Failed to create mount directory: {}", e);
-            }
-        }
 
         // Open storage for this agent
         let object_storage = match open_object_storage(&agent) {
