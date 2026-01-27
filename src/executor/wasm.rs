@@ -24,7 +24,7 @@ impl WasmExecutor {
     pub fn new<I, E>(inference_factory: I, embedding_factory: E) -> Self
     where
         I: Fn(&Model) -> Result<Arc<dyn crate::domain::InferenceEngine>, String> + Send + Sync + 'static,
-        E: Fn(&Model) -> Result<Arc<dyn crate::embedding::EmbeddingEngine>, String> + Send + Sync + 'static,
+        E: Fn(&Model) -> Result<Arc<dyn crate::domain::EmbeddingEngine>, String> + Send + Sync + 'static,
     {
         Self {
             inference_factory: Arc::new(inference_factory),

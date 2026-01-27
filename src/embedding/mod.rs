@@ -1,4 +1,6 @@
-//! Embedding engine for vector representations.
+//! Embedding engine implementations.
+//!
+//! The trait is defined in the domain module.
 
 use std::num::NonZeroU32;
 use std::path::Path;
@@ -10,7 +12,7 @@ use llama_cpp_2::llama_batch::LlamaBatch;
 use llama_cpp_2::model::params::LlamaModelParams;
 use llama_cpp_2::model::LlamaModel;
 
-use crate::domain::Model;
+use crate::domain::{EmbeddingEngine, Model};
 
 static LLAMA_INIT: Once = Once::new();
 
@@ -19,18 +21,6 @@ fn init_llama() {
         llama_cpp_2::send_logs_to_tracing(llama_cpp_2::LogOptions::default());
     });
 }
-
-// ============================================================================
-// Trait
-// ============================================================================
-
-pub trait EmbeddingEngine: Send + Sync {
-    fn embed(&self, text: &str) -> Result<Vec<f32>, String>;
-}
-
-// ============================================================================
-// Factory
-// ============================================================================
 
 /// Open an embedding engine for the given model.
 pub fn open_embedding_engine(model: &Model) -> Result<Arc<dyn EmbeddingEngine>, String> {

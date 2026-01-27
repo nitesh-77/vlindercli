@@ -3,8 +3,8 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::domain::{Agent, ModelType};
-use crate::embedding::{open_embedding_engine, EmbeddingEngine};
+use crate::domain::{Agent, EmbeddingEngine, ModelType};
+use crate::embedding::open_embedding_engine;
 use crate::loader;
 
 /// Generate embeddings using the model declared by the agent.

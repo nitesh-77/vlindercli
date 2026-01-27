@@ -9,6 +9,7 @@
 
 mod agent;
 mod agent_manifest;
+mod embedding;
 mod fleet;
 mod fleet_manifest;
 mod inference;
@@ -41,6 +42,15 @@ pub use storage::{
 pub use inference::{
     InferenceEngine,
     Inference, InferenceBackend, InferenceKind, LlamaConfig,
+};
+
+// ============================================================================
+// Embedding (config + trait)
+// ============================================================================
+
+pub use embedding::{
+    EmbeddingEngine,
+    Embedding, EmbeddingBackend, EmbeddingKind, NomicConfig,
 };
 
 // ============================================================================

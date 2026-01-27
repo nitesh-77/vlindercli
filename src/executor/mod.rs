@@ -7,8 +7,8 @@ mod wasm;
 
 use std::sync::Arc;
 
-use crate::domain::{Agent, InferenceEngine, Model};
-use crate::embedding::{open_embedding_engine, EmbeddingEngine};
+use crate::domain::{Agent, EmbeddingEngine, InferenceEngine, Model};
+use crate::embedding::open_embedding_engine;
 use crate::inference::open_inference_engine;
 use crate::storage::{ObjectStorage, VectorStorage};
 
