@@ -2,6 +2,7 @@
 //!
 //! The trait is defined in the domain module.
 
+pub mod dispatch;
 mod wasm;
 
 use std::sync::Arc;
