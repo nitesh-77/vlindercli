@@ -1,36 +1,16 @@
 //! Agent execution engines.
 //!
-//! Executors run agent code in isolated environments.
-//! WASM is the current implementation; Podman and Firecracker are planned.
+//! The trait is defined in the domain module.
 
 mod wasm;
 
 use std::sync::Arc;
 
-use crate::domain::{Agent, EmbeddingEngine, InferenceEngine, Model};
+use crate::domain::{Agent, EmbeddingEngine, ExecutorEngine, InferenceEngine, Model};
 use crate::embedding::open_embedding_engine;
 use crate::inference::open_inference_engine;
-use crate::storage::{ObjectStorage, VectorStorage};
 
 pub use wasm::WasmExecutor;
-
-// ============================================================================
-// Trait
-// ============================================================================
-
-pub trait Executor: Send + Sync {
-    fn execute(
-        &self,
-        agent: &Agent,
-        input: &str,
-        object_storage: Arc<dyn ObjectStorage>,
-        vector_storage: Arc<dyn VectorStorage>,
-    ) -> Result<String, String>;
-}
-
-// ============================================================================
-// Factory Types
-// ============================================================================
 
 /// Factory function for creating inference engines from models.
 pub type InferenceFactory = Arc<dyn Fn(&Model) -> Result<Arc<dyn InferenceEngine>, String> + Send + Sync>;
@@ -47,7 +27,7 @@ pub type EmbeddingFactory = Arc<dyn Fn(&Model) -> Result<Arc<dyn EmbeddingEngine
 /// Dispatches based on the agent's code URI:
 /// - `file://...*.wasm` → WasmExecutor
 /// - Future: `container://` → PodmanExecutor, etc.
-pub fn open_executor(agent: &Agent) -> Result<Box<dyn Executor>, String> {
+pub fn open_executor(agent: &Agent) -> Result<Box<dyn ExecutorEngine>, String> {
     let code = &agent.code;
 
     if code.ends_with(".wasm") {

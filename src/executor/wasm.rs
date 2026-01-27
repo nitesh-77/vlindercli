@@ -9,7 +9,8 @@ use crate::loader;
 use crate::services::{object_storage, vector_storage};
 use crate::storage::{ObjectStorage, VectorStorage};
 
-use super::{EmbeddingFactory, Executor, InferenceFactory};
+use super::{EmbeddingFactory, InferenceFactory};
+use crate::domain::ExecutorEngine;
 
 // ============================================================================
 // WasmExecutor
@@ -33,7 +34,7 @@ impl WasmExecutor {
     }
 }
 
-impl Executor for WasmExecutor {
+impl ExecutorEngine for WasmExecutor {
     fn execute(
         &self,
         agent: &Agent,

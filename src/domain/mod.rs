@@ -10,6 +10,7 @@
 mod agent;
 mod agent_manifest;
 mod embedding;
+mod executor;
 mod fleet;
 mod fleet_manifest;
 mod inference;
@@ -51,6 +52,15 @@ pub use inference::{
 pub use embedding::{
     EmbeddingEngine,
     Embedding, EmbeddingBackend, EmbeddingKind, NomicConfig,
+};
+
+// ============================================================================
+// Executor (config + trait)
+// ============================================================================
+
+pub use executor::{
+    ExecutorEngine,
+    Executor, ExecutorBackend, ExecutorKind, WasmConfig,
 };
 
 // ============================================================================
