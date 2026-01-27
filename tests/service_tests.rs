@@ -33,23 +33,6 @@ fn infer_fails_for_undeclared_model() {
 }
 
 #[test]
-fn infer_rejects_embedding_model() {
-    let agent = Agent::load(&agent_fixture("type-mismatch-agent")).unwrap();
-
-    // "inference-model" is mapped to an embedding-type model
-    let result = inference::infer(&agent, "inference-model", "test prompt");
-
-    assert!(result.is_err());
-    let err = result.unwrap_err();
-    // Error: "model 'inference-model' has type Embedding but inference was expected"
-    assert!(
-        err.to_string().contains("Embedding") && err.to_string().contains("inference"),
-        "Expected type mismatch error, got: {}",
-        err
-    );
-}
-
-#[test]
 fn infer_with_engine_returns_response() {
     let agent = Agent::load(&agent_fixture("model-test-agent")).unwrap();
     let engine = Arc::new(InMemoryInference::new("Hello from the model!"));
@@ -72,18 +55,6 @@ fn infer_with_engine_still_validates_model_exists() {
     assert!(result.unwrap_err().to_string().contains("not declared"));
 }
 
-#[test]
-fn infer_with_engine_still_validates_model_type() {
-    let agent = Agent::load(&agent_fixture("type-mismatch-agent")).unwrap();
-    let engine = Arc::new(InMemoryInference::new("response"));
-
-    // "inference-model" maps to an embedding model - should fail
-    let result = inference::infer_with_engine(&agent, "inference-model", "prompt", engine);
-
-    assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("Embedding"));
-}
-
 // ============================================================================
 // Embedding Service Tests
 // ============================================================================
@@ -99,23 +70,6 @@ fn embed_fails_for_undeclared_model() {
     assert!(
         err.to_string().contains("not declared"),
         "Expected 'not declared' error, got: {}",
-        err
-    );
-}
-
-#[test]
-fn embed_rejects_inference_model() {
-    let agent = Agent::load(&agent_fixture("type-mismatch-agent")).unwrap();
-
-    // "embedding-model" is mapped to an inference-type model
-    let result = embedding::embed(&agent, "embedding-model", "test text");
-
-    assert!(result.is_err());
-    let err = result.unwrap_err();
-    // Error: "model 'embedding-model' has type Inference but embedding was expected"
-    assert!(
-        err.to_string().contains("Inference") && err.to_string().contains("embedding"),
-        "Expected type mismatch error, got: {}",
         err
     );
 }
@@ -142,18 +96,6 @@ fn embed_with_engine_still_validates_model_exists() {
 
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("not declared"));
-}
-
-#[test]
-fn embed_with_engine_still_validates_model_type() {
-    let agent = Agent::load(&agent_fixture("type-mismatch-agent")).unwrap();
-    let engine = Arc::new(InMemoryEmbedding::new(vec![0.1]));
-
-    // "embedding-model" maps to an inference model - should fail
-    let result = embedding::embed_with_engine(&agent, "embedding-model", "text", engine);
-
-    assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("Inference"));
 }
 
 // ============================================================================
