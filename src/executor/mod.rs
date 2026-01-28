@@ -29,7 +29,7 @@ pub type EmbeddingFactory = Arc<dyn Fn(&Model) -> Result<Arc<dyn EmbeddingEngine
 /// - `file://...*.wasm` → WasmExecutor
 /// - Future: `container://` → PodmanExecutor, etc.
 pub fn open_executor(agent: &Agent) -> Result<Box<dyn ExecutorEngine>, String> {
-    let code = &agent.code;
+    let code = agent.code.as_str();
 
     if code.ends_with(".wasm") {
         Ok(Box::new(WasmExecutor::new(open_inference_engine, open_embedding_engine)))

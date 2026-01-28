@@ -55,10 +55,9 @@ impl ExecutorEngine for WasmExecutor {
             make_search_by_vector_function(vector_storage.clone()),
         ];
 
-        // Parse code URI to get the path
-        let code_path = agent.code
-            .strip_prefix("file://")
-            .unwrap_or(&agent.code);
+        // Extract file path from the absolute URI
+        let code_path = agent.code.file_path()
+            .ok_or_else(|| format!("code URI is not a file:// URI: {}", agent.code))?;
 
         // Build WASM manifest with allowed paths from agent mounts
         let wasm = Wasm::file(code_path);
@@ -66,9 +65,9 @@ impl ExecutorEngine for WasmExecutor {
 
         for mount in &agent.mounts {
             let host_key = if mount.readonly {
-                format!("ro:{}", mount.host_path.display())
+                format!("ro:{}", mount.host_path)
             } else {
-                mount.host_path.display().to_string()
+                mount.host_path.to_string()
             };
             manifest = manifest.with_allowed_path(host_key, &mount.guest_path);
         }
@@ -159,11 +158,11 @@ fn make_infer_function(agent: Agent, factory: &InferenceFactory) -> Function {
 
 fn run_infer(agent: &Agent, model_name: &str, prompt: &str, factory: &InferenceFactory) -> String {
     let result = (|| -> Result<String, String> {
+        // Model URI is already resolved to absolute at load time
         let model_uri = agent.model_uri(model_name)
             .ok_or_else(|| format!("model '{}' not declared by agent", model_name))?;
 
-        let resolved_uri = resolve_uri(model_uri, &agent.agent_dir);
-        let model = loader::load_model(&resolved_uri)
+        let model = loader::load_model(model_uri.as_str())
             .map_err(|e| format!("failed to load '{}': {}", model_name, e))?;
 
         if model.model_type != ModelType::Inference {
@@ -211,11 +210,11 @@ fn make_embed_function(agent: Agent, factory: &EmbeddingFactory) -> Function {
 
 fn run_embed(agent: &Agent, model_name: &str, text: &str, factory: &EmbeddingFactory) -> String {
     let result = (|| -> Result<String, String> {
+        // Model URI is already resolved to absolute at load time
         let model_uri = agent.model_uri(model_name)
             .ok_or_else(|| format!("model '{}' not declared by agent", model_name))?;
 
-        let resolved_uri = resolve_uri(model_uri, &agent.agent_dir);
-        let model = loader::load_model(&resolved_uri)
+        let model = loader::load_model(model_uri.as_str())
             .map_err(|e| format!("failed to load '{}': {}", model_name, e))?;
 
         if model.model_type != ModelType::Embedding {
@@ -231,17 +230,6 @@ fn run_embed(agent: &Agent, model_name: &str, text: &str, factory: &EmbeddingFac
     })();
 
     to_response(result)
-}
-
-fn resolve_uri(uri: &str, base_dir: &std::path::Path) -> String {
-    if let Some(path) = uri.strip_prefix("file://") {
-        if path.starts_with("./") || !std::path::Path::new(path).is_absolute() {
-            let clean_path = path.strip_prefix("./").unwrap_or(path);
-            let resolved = base_dir.join(clean_path);
-            return format!("file://{}", resolved.display());
-        }
-    }
-    uri.to_string()
 }
 
 fn make_put_file_function(storage: Arc<dyn ObjectStorage>) -> Function {

@@ -26,17 +26,15 @@ pub struct AgentExecution {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::Requirements;
+    use crate::domain::{AbsoluteUri, Requirements};
     use std::collections::HashMap;
-    use std::path::PathBuf;
 
     fn test_agent() -> Agent {
         Agent {
             name: "test-agent".to_string(),
             description: "A test agent".to_string(),
             source: None,
-            code: "file://test.wasm".to_string(),
-            agent_dir: PathBuf::from("/tmp"),
+            code: AbsoluteUri::from_absolute("file:///tmp/test.wasm").unwrap(),
             prompts: None,
             requirements: Requirements {
                 models: HashMap::new(),

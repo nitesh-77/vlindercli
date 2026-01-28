@@ -19,7 +19,7 @@ fn open_executor_returns_wasm_executor_for_wasm_code() {
     let agent = Agent::load(&agent_fixture("echo-agent")).unwrap();
 
     // Agent has .wasm code
-    assert!(agent.code.ends_with(".wasm"));
+    assert!(agent.code.as_str().ends_with(".wasm"));
 
     // Should return an executor without error
     let result = open_executor(&agent);

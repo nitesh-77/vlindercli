@@ -17,6 +17,7 @@ mod fleet_manifest;
 mod inference;
 mod model;
 mod model_manifest;
+mod path;
 mod storage;
 
 // ============================================================================
@@ -24,6 +25,7 @@ mod storage;
 // ============================================================================
 
 pub use agent::{Agent, LoadError as AgentLoadError, Mount, Prompts, Requirements};
+pub use path::{AbsolutePath, AbsoluteUri};
 pub use agent_manifest::AgentManifest;
 pub use fleet::{Fleet, LoadError as FleetLoadError};
 pub use fleet_manifest::FleetManifest;

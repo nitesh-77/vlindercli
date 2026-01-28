@@ -1,6 +1,5 @@
 //! Embedding service - vector representations.
 
-use std::path::Path;
 use std::sync::Arc;
 
 use crate::domain::{Agent, EmbeddingEngine, ModelType};
@@ -34,13 +33,12 @@ pub fn embed_with_engine(
 
 /// Resolve and validate model from agent requirements.
 fn resolve_model(agent: &Agent, model_name: &str) -> Result<(crate::domain::Model, String), Error> {
-    // Get model URI from agent's requirements
+    // Get model URI from agent's requirements (already resolved to absolute)
     let model_uri = agent.model_uri(model_name)
         .ok_or_else(|| Error::ModelNotDeclared(model_name.to_string()))?;
 
-    // Resolve relative URI and load model manifest
-    let resolved_uri = resolve_uri(model_uri, &agent.agent_dir);
-    let model = loader::load_model(&resolved_uri)
+    // Load model manifest
+    let model = loader::load_model(model_uri.as_str())
         .map_err(|e| Error::ModelLoad {
             model: model_name.to_string(),
             reason: e.to_string(),
@@ -55,7 +53,7 @@ fn resolve_model(agent: &Agent, model_name: &str) -> Result<(crate::domain::Mode
         });
     }
 
-    Ok((model, resolved_uri))
+    Ok((model, model_uri.to_string()))
 }
 
 fn run_embedding(engine: &Arc<dyn EmbeddingEngine>, text: &str) -> Result<String, Error> {
@@ -64,17 +62,6 @@ fn run_embedding(engine: &Arc<dyn EmbeddingEngine>, text: &str) -> Result<String
 
     serde_json::to_string(&vec)
         .map_err(|e| Error::Json(e.to_string()))
-}
-
-fn resolve_uri(uri: &str, base_dir: &Path) -> String {
-    if let Some(path) = uri.strip_prefix("file://") {
-        if path.starts_with("./") || !Path::new(path).is_absolute() {
-            let clean_path = path.strip_prefix("./").unwrap_or(path);
-            let resolved = base_dir.join(clean_path);
-            return format!("file://{}", resolved.display());
-        }
-    }
-    uri.to_string()
 }
 
 // ============================================================================

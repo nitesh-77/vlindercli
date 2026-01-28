@@ -4,9 +4,11 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 
 use super::agent_manifest::{AgentManifest, MountConfig, ParseError, PromptsConfig, RequirementsConfig};
+use super::path::{AbsolutePath, AbsoluteUri};
 
 /// An agent with resolved paths, ready for execution.
 ///
+/// All paths (code, mounts, model URIs) are resolved to absolute paths at load time.
 /// See ADR 020 for the manifest format.
 #[derive(Clone, Debug)]
 pub struct Agent {
@@ -16,33 +18,33 @@ pub struct Agent {
     pub requirements: Requirements,
     pub prompts: Option<Prompts>,
     pub mounts: Vec<Mount>,
-    pub agent_dir: PathBuf,
     /// URI pointing to the agent's executable code (e.g., "file:///path/to/agent.wasm")
-    pub code: String,
+    pub code: AbsoluteUri,
 }
 
 impl Agent {
-    /// Create an agent from a manifest, resolving mounts against agent_dir.
+    /// Create an agent from a manifest.
     ///
-    /// The manifest's `code` field is already a resolved URI.
-    pub fn from_manifest(manifest: AgentManifest, agent_dir: &Path) -> Result<Agent, LoadError> {
-        let agent_dir = agent_dir.to_path_buf();
-
-        // Resolve and validate mounts
+    /// All paths in the manifest are already resolved to absolute paths.
+    pub fn from_manifest(manifest: AgentManifest) -> Result<Agent, LoadError> {
+        // Validate mounts exist
         let mut mounts = Vec::new();
         for mount_config in manifest.mounts {
-            mounts.push(Mount::from_config(mount_config, &agent_dir)?);
+            mounts.push(Mount::from_config(mount_config)?);
         }
+
+        // Code is already resolved to absolute URI by AgentManifest::load()
+        let code = AbsoluteUri::from_absolute(&manifest.code)
+            .expect("AgentManifest::load() must produce absolute URIs");
 
         Ok(Agent {
             name: manifest.name,
             description: manifest.description,
             source: manifest.source,
-            requirements: manifest.requirements.into(),
+            requirements: Requirements::from_config(manifest.requirements),
             prompts: manifest.prompts.map(|p| p.into()),
             mounts,
-            agent_dir,
-            code: manifest.code,
+            code,
         })
     }
 
@@ -50,8 +52,7 @@ impl Agent {
     ///
     /// Looks for `agent.toml` manifest in the directory (ADR 020).
     pub fn load(path: &Path) -> Result<Agent, LoadError> {
-        let agent_dir = path.to_path_buf();
-        let manifest_path = agent_dir.join("agent.toml");
+        let manifest_path = path.join("agent.toml");
 
         if !manifest_path.exists() {
             return Err(LoadError::Io(std::io::Error::new(
@@ -61,11 +62,7 @@ impl Agent {
         }
 
         let manifest = AgentManifest::load(&manifest_path)?;
-        Self::from_manifest(manifest, &agent_dir)
-    }
-
-    pub fn db_path(&self) -> PathBuf {
-        self.agent_dir.join("agent.db")
+        Self::from_manifest(manifest)
     }
 
     /// Check if this agent declares a model by name.
@@ -74,8 +71,8 @@ impl Agent {
     }
 
     /// Get the URI for a model by name.
-    pub fn model_uri(&self, model_name: &str) -> Option<&str> {
-        self.requirements.models.get(model_name).map(|s| s.as_str())
+    pub fn model_uri(&self, model_name: &str) -> Option<&AbsoluteUri> {
+        self.requirements.models.get(model_name)
     }
 }
 
@@ -105,15 +102,26 @@ impl From<ParseError> for LoadError {
 /// Agent runtime requirements (validated)
 #[derive(Clone, Debug)]
 pub struct Requirements {
-    /// Model name → URI mapping
-    pub models: HashMap<String, String>,
+    /// Model name → absolute URI mapping
+    pub models: HashMap<String, AbsoluteUri>,
     pub services: Vec<String>,
 }
 
-impl From<RequirementsConfig> for Requirements {
-    fn from(config: RequirementsConfig) -> Self {
+impl Requirements {
+    /// Create Requirements from config.
+    /// All model URIs are already resolved to absolute by AgentManifest::load().
+    fn from_config(config: RequirementsConfig) -> Self {
+        let models = config.models
+            .into_iter()
+            .map(|(name, uri)| {
+                let abs_uri = AbsoluteUri::from_absolute(&uri)
+                    .expect("AgentManifest::load() must produce absolute URIs");
+                (name, abs_uri)
+            })
+            .collect();
+
         Requirements {
-            models: config.models,
+            models,
             services: config.services,
         }
     }
@@ -146,23 +154,21 @@ impl From<PromptsConfig> for Prompts {
 /// Resolved filesystem mount for WASI access
 #[derive(Clone, Debug)]
 pub struct Mount {
-    pub host_path: PathBuf,
+    pub host_path: AbsolutePath,
     pub guest_path: PathBuf,
     pub readonly: bool,
 }
 
 impl Mount {
-    fn from_config(config: MountConfig, agent_dir: &Path) -> Result<Mount, LoadError> {
-        let host_path = if Path::new(&config.host_path).is_absolute() {
-            PathBuf::from(&config.host_path)
-        } else {
-            agent_dir.join(&config.host_path)
-        };
+    /// Create a Mount from config. Host path is already resolved to absolute.
+    fn from_config(config: MountConfig) -> Result<Mount, LoadError> {
+        let host_path = AbsolutePath::from_absolute(Path::new(&config.host_path))
+            .expect("AgentManifest::load() must produce absolute paths");
 
         if !host_path.exists() {
             return Err(LoadError::MountNotFound(format!(
                 "mount path does not exist: {}",
-                host_path.display()
+                host_path
             )));
         }
 

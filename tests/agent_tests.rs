@@ -173,11 +173,11 @@ fn agent_explicit_mounts_from_manifest() {
     assert_eq!(agent.mounts.len(), 2);
 
     // Mounts are resolved to absolute paths
-    assert!(agent.mounts[0].host_path.ends_with("data"));
+    assert!(agent.mounts[0].host_path.to_string().ends_with("data"));
     assert_eq!(agent.mounts[0].guest_path, PathBuf::from("/data"));
     assert!(agent.mounts[0].readonly);
 
-    assert!(agent.mounts[1].host_path.ends_with("output"));
+    assert!(agent.mounts[1].host_path.to_string().ends_with("output"));
     assert_eq!(agent.mounts[1].guest_path, PathBuf::from("/output"));
     assert!(!agent.mounts[1].readonly);
 }
@@ -189,23 +189,11 @@ fn agent_load_fails_for_missing_mount() {
 }
 
 #[test]
-fn agent_dir_set_from_load_path() {
-    let agent = Agent::load(&agent_fixture("echo-agent")).unwrap();
-    assert!(agent.agent_dir.ends_with("echo-agent"));
-}
-
-#[test]
-fn agent_db_path() {
-    let agent = Agent::load(&agent_fixture("echo-agent")).unwrap();
-    assert!(agent.db_path().ends_with("agent.db"));
-}
-
-#[test]
 fn agent_code_resolved_to_uri() {
     let agent = Agent::load(&agent_fixture("echo-agent")).unwrap();
 
-    assert!(agent.code.starts_with("file://"));
-    assert!(agent.code.ends_with(".wasm"));
+    assert!(agent.code.as_str().starts_with("file://"));
+    assert!(agent.code.as_str().ends_with(".wasm"));
 }
 
 #[test]

@@ -24,16 +24,34 @@ pub struct AgentManifest {
 impl AgentManifest {
     /// Load an agent manifest from a file path.
     ///
-    /// Resolves `code` to a URI and validates the file exists.
+    /// Resolves all paths to absolute URIs:
+    /// - `code` → file:// URI
+    /// - `requirements.models` values → file:// URIs
+    /// - `mounts[].host_path` → absolute paths
     pub fn load(path: &Path) -> Result<AgentManifest, ParseError> {
         let content = std::fs::read_to_string(path)?;
         let mut manifest: AgentManifest = toml::from_str(&content)?;
 
-        // Derive agent directory from manifest path
-        let agent_dir = path.parent().unwrap_or(Path::new("."));
+        // Derive agent directory from manifest path, ensuring it's absolute
+        let agent_dir = path
+            .parent()
+            .unwrap_or(Path::new("."))
+            .canonicalize()
+            .unwrap_or_else(|_| path.parent().unwrap_or(Path::new(".")).to_path_buf());
 
         // Resolve code to URI
-        manifest.code = resolve_code_uri(&manifest.code, agent_dir)?;
+        manifest.code = resolve_code_uri(&manifest.code, &agent_dir)?;
+
+        // Resolve model URIs
+        manifest.requirements.models = manifest.requirements.models
+            .into_iter()
+            .map(|(name, uri)| (name, resolve_uri(&uri, &agent_dir)))
+            .collect();
+
+        // Resolve mount host paths to absolute
+        for mount in &mut manifest.mounts {
+            mount.host_path = resolve_host_path(&mount.host_path, &agent_dir);
+        }
 
         Ok(manifest)
     }
@@ -65,6 +83,30 @@ fn resolve_code_uri(code: &str, agent_dir: &Path) -> Result<String, ParseError> 
     }
 
     Ok(format!("file://{}", code_path.display()))
+}
+
+/// Resolve a URI, making relative file:// URIs absolute.
+///
+/// - If already absolute or non-file URI, return as-is
+/// - If relative file:// URI, resolve against agent_dir
+fn resolve_uri(uri: &str, agent_dir: &Path) -> String {
+    if let Some(path) = uri.strip_prefix("file://") {
+        if path.starts_with("./") || !Path::new(path).is_absolute() {
+            let clean_path = path.strip_prefix("./").unwrap_or(path);
+            let resolved = agent_dir.join(clean_path);
+            return format!("file://{}", resolved.display());
+        }
+    }
+    uri.to_string()
+}
+
+/// Resolve a host path, making relative paths absolute.
+fn resolve_host_path(host_path: &str, agent_dir: &Path) -> String {
+    if Path::new(host_path).is_absolute() {
+        host_path.to_string()
+    } else {
+        agent_dir.join(host_path).display().to_string()
+    }
 }
 
 #[derive(Debug)]
