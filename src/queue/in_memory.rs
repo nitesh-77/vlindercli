@@ -52,7 +52,7 @@ mod tests {
     fn send_and_receive() {
         let queue = InMemoryQueue::new();
 
-        let msg = Message::new(b"hello".to_vec());
+        let msg = Message::request(b"hello".to_vec(), "reply-queue");
         queue.send("test", msg).unwrap();
 
         let received = queue.receive("test").unwrap();
@@ -62,7 +62,7 @@ mod tests {
     #[test]
     fn receive_from_empty_queue_fails() {
         let queue = InMemoryQueue::new();
-        queue.send("test", Message::new(vec![])).unwrap(); // create queue
+        queue.send("test", Message::request(vec![], "reply")).unwrap(); // create queue
         queue.receive("test").unwrap(); // drain it
 
         let result = queue.receive("test");
@@ -80,8 +80,8 @@ mod tests {
     fn fifo_order() {
         let queue = InMemoryQueue::new();
 
-        queue.send("test", Message::new(b"first".to_vec())).unwrap();
-        queue.send("test", Message::new(b"second".to_vec())).unwrap();
+        queue.send("test", Message::request(b"first".to_vec(), "reply")).unwrap();
+        queue.send("test", Message::request(b"second".to_vec(), "reply")).unwrap();
 
         let first = queue.receive("test").unwrap();
         let second = queue.receive("test").unwrap();
@@ -107,12 +107,57 @@ mod tests {
         let response_payload: &[u8] = if is_palindrome { b"true" } else { b"false" };
 
         // Agent sends response to reply_to queue
-        let reply_to = received.reply_to.expect("request should have reply_to");
-        let response = Message::new(response_payload.to_vec());
-        queue.send(&reply_to, response).unwrap();
+        let reply_to = &received.reply_to;
+        let response = Message::response(response_payload.to_vec(), reply_to, received.id.clone());
+        queue.send(reply_to, response).unwrap();
 
         // Caller receives response
         let result = queue.receive("caller").unwrap();
         assert_eq!(result.payload, b"true");
+    }
+
+    #[test]
+    fn multiple_requests_with_correlation() {
+        let queue = InMemoryQueue::new();
+
+        // Caller sends TWO requests
+        let request1 = Message::request(b"racecar".to_vec(), "caller"); // palindrome
+        let request2 = Message::request(b"hello".to_vec(), "caller");   // not palindrome
+
+        // Track request IDs for correlation
+        let request1_id = request1.id.clone();
+        let request2_id = request2.id.clone();
+
+        queue.send("palindrome", request1).unwrap();
+        queue.send("palindrome", request2).unwrap();
+
+        // Agent processes both
+        for _ in 0..2 {
+            let received = queue.receive("palindrome").unwrap();
+            let input = String::from_utf8(received.payload.clone()).unwrap();
+            let is_palindrome = input.chars().eq(input.chars().rev());
+            let response_payload: &[u8] = if is_palindrome { b"true" } else { b"false" };
+
+            let reply_to = &received.reply_to;
+            // Response includes correlation_id linking back to request
+            let response = Message::response(response_payload.to_vec(), reply_to, received.id.clone());
+            queue.send(reply_to, response).unwrap();
+        }
+
+        // Caller receives TWO responses
+        let resp1 = queue.receive("caller").unwrap();
+        let resp2 = queue.receive("caller").unwrap();
+
+        // Now we CAN correlate responses to requests!
+        // Collect into a map by correlation_id
+        let mut results = std::collections::HashMap::new();
+        for resp in [resp1, resp2] {
+            let corr_id = resp.correlation_id.expect("response should have correlation_id");
+            results.insert(corr_id, resp.payload);
+        }
+
+        // Match responses to original requests by ID
+        assert_eq!(results.get(&request1_id).unwrap(), b"true");  // racecar is palindrome
+        assert_eq!(results.get(&request2_id).unwrap(), b"false"); // hello is not
     }
 }

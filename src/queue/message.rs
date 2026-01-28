@@ -4,29 +4,34 @@ use std::fmt;
 use uuid::Uuid;
 
 /// A message that travels through the queue.
+///
+/// All messages expect a response - no fire-and-forget.
 #[derive(Clone, Debug)]
 pub struct Message {
     pub id: MessageId,
     pub payload: Vec<u8>,
-    pub reply_to: Option<String>,
+    pub reply_to: String,
+    pub correlation_id: Option<MessageId>,
 }
 
 impl Message {
-    /// Create a fire-and-forget message.
-    pub fn new(payload: Vec<u8>) -> Self {
-        Self {
-            id: MessageId::new(),
-            payload,
-            reply_to: None,
-        }
-    }
-
     /// Create a request that expects a response.
     pub fn request(payload: Vec<u8>, reply_to: impl Into<String>) -> Self {
         Self {
             id: MessageId::new(),
             payload,
-            reply_to: Some(reply_to.into()),
+            reply_to: reply_to.into(),
+            correlation_id: None,
+        }
+    }
+
+    /// Create a response to a request.
+    pub fn response(payload: Vec<u8>, reply_to: impl Into<String>, correlation_id: MessageId) -> Self {
+        Self {
+            id: MessageId::new(),
+            payload,
+            reply_to: reply_to.into(),
+            correlation_id: Some(correlation_id),
         }
     }
 }
