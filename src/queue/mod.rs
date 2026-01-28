@@ -8,7 +8,9 @@
 mod message;
 mod traits;
 mod in_memory;
+mod worker;
 
 pub use message::{Message, MessageId};
 pub use traits::{MessageQueue, QueueError};
 pub use in_memory::InMemoryQueue;
+pub use worker::{process_one, WorkerError};
