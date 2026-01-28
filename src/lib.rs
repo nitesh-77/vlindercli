@@ -5,6 +5,7 @@ pub mod embedding;
 pub mod executor;
 pub mod inference;
 pub mod loader;
+pub mod queue;
 pub mod runtime;
 pub mod services;
 pub mod storage;
