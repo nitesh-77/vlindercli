@@ -1,8 +1,12 @@
 //! Agent runtime - orchestrates agent execution.
 //!
-//! The runtime processes ExecutionPlan values:
-//! - `Done(result)`: Return the result
-//! - `Continue(executions)`: Execute all agents and continue
+//! Contains:
+//! - Runtime: processes ExecutionPlan values (legacy model)
+//! - WasmRuntime: queue-based WASM agent execution (new model)
+
+mod wasm;
+
+pub use wasm::WasmRuntime;
 
 use crate::domain::{AgentExecution, ExecutionPlan};
 use crate::executor::open_executor;
