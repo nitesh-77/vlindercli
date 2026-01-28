@@ -89,4 +89,30 @@ mod tests {
         assert_eq!(first.payload, b"first");
         assert_eq!(second.payload, b"second");
     }
+
+    #[test]
+    fn palindrome_agent_flow() {
+        let queue = InMemoryQueue::new();
+
+        // Caller sends "racecar" to palindrome agent, expecting response on "caller" queue
+        let request = Message::request(b"racecar".to_vec(), "caller");
+        queue.send("palindrome", request).unwrap();
+
+        // Palindrome agent receives
+        let received = queue.receive("palindrome").unwrap();
+        let input = String::from_utf8(received.payload).unwrap();
+
+        // Agent checks palindrome
+        let is_palindrome = input.chars().eq(input.chars().rev());
+        let response_payload: &[u8] = if is_palindrome { b"true" } else { b"false" };
+
+        // Agent sends response to reply_to queue
+        let reply_to = received.reply_to.expect("request should have reply_to");
+        let response = Message::new(response_payload.to_vec());
+        queue.send(&reply_to, response).unwrap();
+
+        // Caller receives response
+        let result = queue.receive("caller").unwrap();
+        assert_eq!(result.payload, b"true");
+    }
 }

@@ -8,13 +8,25 @@ use uuid::Uuid;
 pub struct Message {
     pub id: MessageId,
     pub payload: Vec<u8>,
+    pub reply_to: Option<String>,
 }
 
 impl Message {
+    /// Create a fire-and-forget message.
     pub fn new(payload: Vec<u8>) -> Self {
         Self {
             id: MessageId::new(),
             payload,
+            reply_to: None,
+        }
+    }
+
+    /// Create a request that expects a response.
+    pub fn request(payload: Vec<u8>, reply_to: impl Into<String>) -> Self {
+        Self {
+            id: MessageId::new(),
+            payload,
+            reply_to: Some(reply_to.into()),
         }
     }
 }
