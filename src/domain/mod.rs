@@ -14,6 +14,7 @@ mod execution;
 mod executor;
 mod fleet;
 mod fleet_manifest;
+mod harness;
 mod inference;
 mod model;
 mod model_manifest;
@@ -78,3 +79,9 @@ pub use execution::{AgentExecution, ExecutionPlan};
 
 pub use model::{Model, ModelType, ModelEngine, LoadError as ModelLoadError};
 pub use model_manifest::{ModelManifest, ModelTypeConfig, ModelEngineConfig};
+
+// ============================================================================
+// Harness
+// ============================================================================
+
+pub use harness::{Harness, HarnessError};
