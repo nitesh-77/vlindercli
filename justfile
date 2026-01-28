@@ -9,11 +9,13 @@ build-agents:
     # Build agents
     cd agents/echo-agent && cargo build --target wasm32-unknown-unknown --release
     cd agents/upper-agent && cargo build --target wasm32-unknown-unknown --release
+    cd agents/reverse-agent && cargo build --target wasm32-unknown-unknown --release
     cd agents/pensieve && cargo build --target wasm32-wasip1 --release
 
     # Deploy to test fixtures (agent.toml + agent.wasm convention)
     mkdir -p {{fixtures}}/echo-agent
     mkdir -p {{fixtures}}/upper-agent
+    mkdir -p {{fixtures}}/reverse-agent
     mkdir -p {{fixtures}}/pensieve/mnt
     mkdir -p {{fixtures}}/mount-test-agent/data
     mkdir -p {{fixtures}}/mount-test-agent/output
@@ -23,6 +25,8 @@ build-agents:
     cp agents/echo-agent/agent.toml {{fixtures}}/echo-agent/
     cp agents/upper-agent/target/wasm32-unknown-unknown/release/upper_agent.wasm {{fixtures}}/upper-agent/agent.wasm
     cp agents/upper-agent/agent.toml {{fixtures}}/upper-agent/
+    cp agents/reverse-agent/target/wasm32-unknown-unknown/release/reverse_agent.wasm {{fixtures}}/reverse-agent/agent.wasm
+    cp agents/reverse-agent/agent.toml {{fixtures}}/reverse-agent/
     cp agents/pensieve/target/wasm32-wasip1/release/pensieve.wasm {{fixtures}}/pensieve/agent.wasm
     cp agents/pensieve/agent.toml {{fixtures}}/pensieve/
 

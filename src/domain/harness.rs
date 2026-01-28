@@ -115,4 +115,33 @@ mod tests {
         assert_eq!(results.get(&id_b).unwrap(), "B");
         assert_eq!(results.get(&id_c).unwrap(), "C");
     }
+
+    #[test]
+    fn wasm_runtime_pattern() {
+        use extism::{Manifest, Plugin, Wasm};
+
+        let queue_system = InMemoryQueue::new();
+        let reply_queue = "harness-reply";
+
+        // Harness invokes
+        let request = Message::request(b"hello".to_vec(), reply_queue);
+        let request_id = request.id.clone();
+        queue_system.send("reverse-agent", request).unwrap();
+
+        // WasmRuntime: receive → run WASM → respond
+        let wasm_path = "tests/fixtures/agents/reverse-agent/agent.wasm";
+        process_one(&queue_system, "reverse-agent", |payload| {
+            let wasm = Wasm::file(wasm_path);
+            let manifest = Manifest::new([wasm]);
+            let mut plugin = Plugin::new(&manifest, [], true).unwrap();
+            plugin.call::<_, Vec<u8>>("process", payload).unwrap()
+        }).unwrap();
+
+        // Harness polls
+        let response = queue_system.receive(reply_queue).unwrap();
+        assert_eq!(response.correlation_id, Some(request_id));
+
+        let output = String::from_utf8(response.payload).unwrap();
+        assert_eq!(output, "olleh");
+    }
 }
