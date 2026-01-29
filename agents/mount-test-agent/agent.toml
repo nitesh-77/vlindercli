@@ -3,7 +3,6 @@ description = "Test agent with explicit mounts"
 code = "agent.wasm"
 
 [requirements]
-models = []
 services = []
 
 [[mounts]]

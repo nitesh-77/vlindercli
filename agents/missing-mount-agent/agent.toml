@@ -3,7 +3,6 @@ description = "Test agent with mount that doesn't exist"
 code = "agent.wasm"
 
 [requirements]
-models = []
 services = []
 
 [[mounts]]

@@ -42,16 +42,6 @@ code = "agent.wasm"
 # If the runtime can't satisfy these requirements, the agent won't load.
 
 [requirements]
-
-# Models this agent needs access to via the `infer` and `embed` host functions.
-# The runtime maps these names to actual model backends (ollama, llama.cpp, etc.)
-#
-# - phi3: Small, fast inference model for intent classification and summarization
-# - nomic-embed: Embedding model for semantic search
-#
-# Want to try a different model? Change the name here and update prompts below.
-models = ["phi3", "nomic-embed"]
-
 # Services this agent requires from the runtime.
 # These form the agent's interface to the outside world.
 #
@@ -77,6 +67,17 @@ services = [
     "store_embedding",
     "search_by_vector",
 ]
+
+# Models this agent needs access to via the `infer` and `embed` host functions.
+# The runtime maps these names to actual model backends (ollama, llama.cpp, etc.)
+#
+# - phi3: Small, fast inference model for intent classification and summarization
+# - nomic-embed: Embedding model for semantic search
+#
+# Want to try a different model? Change the name here and update prompts below.
+[requirements.models]
+phi3 = "file://./models/phi3.toml"
+nomic-embed = "file://./models/nomic-embed.toml"
 
 
 # -----------------------------------------------------------------------------
