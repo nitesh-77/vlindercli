@@ -12,6 +12,12 @@ build-agents:
     cd agents/reverse-agent && cargo build --target wasm32-unknown-unknown --release
     cd agents/pensieve && cargo build --target wasm32-wasip1 --release
 
+    # Copy WASM to source dirs (for running from agents/<name>/)
+    cp agents/echo-agent/target/wasm32-unknown-unknown/release/echo_agent.wasm agents/echo-agent/agent.wasm
+    cp agents/upper-agent/target/wasm32-unknown-unknown/release/upper_agent.wasm agents/upper-agent/agent.wasm
+    cp agents/reverse-agent/target/wasm32-unknown-unknown/release/reverse_agent.wasm agents/reverse-agent/agent.wasm
+    cp agents/pensieve/target/wasm32-wasip1/release/pensieve.wasm agents/pensieve/agent.wasm
+
     # Deploy to test fixtures (agent.toml + agent.wasm convention)
     mkdir -p {{fixtures}}/echo-agent
     mkdir -p {{fixtures}}/upper-agent
@@ -51,12 +57,15 @@ build-agents:
 # Build and deploy pensieve agent only
 build-pensieve:
     cd agents/pensieve && cargo build --target wasm32-wasip1 --release
+    # Copy to source dir (for running from agents/pensieve/)
+    cp agents/pensieve/target/wasm32-wasip1/release/pensieve.wasm agents/pensieve/agent.wasm
+    # Deploy to fixtures and dev-project
     mkdir -p {{fixtures}}/pensieve/mnt
     mkdir -p {{dev_project}}/pensieve/mnt
-    cp agents/pensieve/target/wasm32-wasip1/release/pensieve.wasm {{fixtures}}/pensieve/agent.wasm
+    cp agents/pensieve/agent.wasm {{fixtures}}/pensieve/agent.wasm
     cp agents/pensieve/agent.toml {{fixtures}}/pensieve/
-    cp {{fixtures}}/pensieve/agent.wasm {{dev_project}}/pensieve/
-    cp {{fixtures}}/pensieve/agent.toml {{dev_project}}/pensieve/
+    cp agents/pensieve/agent.wasm {{dev_project}}/pensieve/
+    cp agents/pensieve/agent.toml {{dev_project}}/pensieve/
 
 # Run a specific agent (usage: just run pensieve)
 run agent:
