@@ -1,6 +1,5 @@
 use std::path::{Path, PathBuf};
-use vlindercli::domain::Agent;
-use vlindercli::runtime::Runtime;
+use vlindercli::domain::{Agent, CliHarness, Harness};
 
 const FIXTURES: &str = "tests/fixtures/agents";
 
@@ -8,22 +7,25 @@ fn fixture(name: &str) -> PathBuf {
     Path::new(FIXTURES).join(name)
 }
 
-fn fixture_uri(name: &str) -> String {
-    let path = fixture(name).canonicalize().unwrap();
-    format!("file://{}", path.display())
+fn run_agent(name: &str, input: &str) -> String {
+    let mut harness = CliHarness::new();
+    let agent = Agent::load(&fixture(name)).unwrap();
+    let agent_name = agent.name.clone();
+    harness.register(agent);
+
+    let request_id = harness.invoke(&agent_name, input).unwrap();
+    harness.run_until_response(&request_id).unwrap()
 }
 
 #[test]
 fn agent_echo() {
-    let runtime = Runtime::new();
-    let result = runtime.execute(&fixture_uri("echo-agent"), "hello");
+    let result = run_agent("echo-agent", "hello");
     assert_eq!(result, "echo: hello");
 }
 
 #[test]
 fn agent_upper() {
-    let runtime = Runtime::new();
-    let result = runtime.execute(&fixture_uri("upper-agent"), "hello");
+    let result = run_agent("upper-agent", "hello");
     assert_eq!(result, "HELLO");
 }
 
@@ -51,8 +53,7 @@ fn agent_loads_requirements_from_manifest() {
 /// 5. Returns formatted output with stats, content preview, and summary
 #[test]
 fn pensieve_agent_fetches_and_summarizes() {
-    let runtime = Runtime::new();
-    let result = runtime.execute(&fixture_uri("pensieve"), "https://httpbin.org/html");
+    let result = run_agent("pensieve", "https://httpbin.org/html");
 
     // Verify output contains the formatted sections from the agent
     assert!(result.contains("Source:"), "Expected 'Source:' in output");
