@@ -83,11 +83,21 @@ Storage configuration: backend type (SQLite, InMemory), connection details.
 - **Type**: [`src/domain/storage.rs`](../src/domain/storage.rs)
 
 
-## Manifest (Concept)
+## Loader Trait
 
-A **manifest** is how configuration is provided to the system. It's an abstract concept—configuration could come from files, service discovery, Terraform, etc.
+The `Loader` trait abstracts how configuration is loaded from URIs. Different schemes dispatch to different implementations.
 
-**Note**: No abstract `Manifest` trait exists yet. Currently only TOML file loading is implemented (see Part 2).
+- **Trait**: [`src/loader.rs`](../src/loader.rs)
+
+```rust
+pub trait Loader {
+    fn load_agent(&self, uri: &str) -> Result<Agent, LoadError>;
+    fn load_fleet(&self, uri: &str) -> Result<Fleet, LoadError>;
+    fn load_model(&self, uri: &str) -> Result<Model, LoadError>;
+}
+```
+
+Free functions (`load_agent()`, `load_fleet()`, `load_model()`) dispatch by URI scheme to the appropriate loader implementation.
 
 ---
 
@@ -103,6 +113,7 @@ These traits define the **runtime protocol**. They are the contracts that implem
 | `VectorStorage` | Embedding storage with similarity search | [`src/domain/storage.rs`](../src/domain/storage.rs) |
 | `MessageQueue` | Message passing abstraction | [`src/queue/traits.rs`](../src/queue/traits.rs) |
 | `Harness` | User-facing interface to runtime | [`src/domain/harness.rs`](../src/domain/harness.rs) |
+| `Loader` | Load agents/fleets/models from URIs | [`src/loader.rs`](../src/loader.rs) |
 
 ---
 
@@ -148,6 +159,9 @@ InferenceEngine          ObjectStorage              MessageQueue
 EmbeddingEngine          VectorStorage              Harness
  ├── LlamaEmbeddingEngine ├── SqliteVecStorage       └── CliHarness
  └── InMemoryEmbedding    └── InMemoryVectorStorage
+
+Loader
+ └── FileLoader
 ```
 
 ### Dependencies ("uses")
@@ -181,14 +195,13 @@ These modules implement the domain concepts with actual infrastructure.
 
 ---
 
-## Manifest Implementations
+## Loader Implementations
 
-### Loader
-
-The loader dispatches by URI scheme to the appropriate manifest loader.
+| Implementation | Trait | Description |
+|----------------|-------|-------------|
+| `FileLoader` | `Loader` | Loads from filesystem (`file://` scheme) |
 
 - **Location**: [`src/loader.rs`](../src/loader.rs)
-- **Functions**: `load_agent()`, `load_model()`, `load_fleet()`
 
 | URI Scheme | Loader | Status |
 |------------|--------|--------|
@@ -305,23 +318,24 @@ Location: [`src/domain/harness.rs`](../src/domain/harness.rs)
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                      DOMAIN (abstract)                       │
+│                      DOMAIN (abstract)                      │
 │                                                             │
 │  Types: Agent, Model, Fleet, Storage                        │
-│  Traits: InferenceEngine, EmbeddingEngine,                  │
-│          ObjectStorage, VectorStorage, MessageQueue, Harness│
+│  Traits: InferenceEngine, EmbeddingEngine, ObjectStorage,   │
+│          VectorStorage, MessageQueue, Harness, Loader       │
 └─────────────────────────────────────────────────────────────┘
                             │
                             │ implements
                             ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                  IMPLEMENTATIONS (concrete)                  │
+│                  IMPLEMENTATIONS (concrete)                 │
 │                                                             │
 │  Inference: LlamaEngine, InMemoryInference                  │
 │  Embedding: LlamaEmbeddingEngine, InMemoryEmbedding         │
 │  Storage:   SqliteObjectStorage, SqliteVecStorage,          │
 │             InMemoryObjectStorage, InMemoryVectorStorage    │
 │  Queue:     InMemoryQueue, Message                          │
+│  Loader:    FileLoader                                      │
 │  Runtime:   WasmRuntime, ServiceHandlers                    │
 │  Harness:   CliHarness                                      │
 └─────────────────────────────────────────────────────────────┘
