@@ -4,14 +4,9 @@
 //! The trait is defined in the domain module.
 
 use crate::config;
-use crate::domain::{Agent, ObjectStorage};
+use crate::domain::ObjectStorage;
 use rusqlite::{params, Connection};
 use std::sync::{Arc, Mutex};
-
-/// Open object storage for an agent. Currently uses SQLite.
-pub fn open_object_storage(agent: &Agent) -> Result<Arc<dyn ObjectStorage>, String> {
-    Ok(Arc::new(SqliteObjectStorage::open(&agent.name)?))
-}
 
 // ============================================================================
 // SQLite Implementation

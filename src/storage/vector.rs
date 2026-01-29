@@ -4,17 +4,12 @@
 //! for efficient similarity search. The trait is defined in the domain module.
 
 use crate::config;
-use crate::domain::{Agent, VectorStorage};
+use crate::domain::VectorStorage;
 use rusqlite::{params, Connection};
 use sqlite_vec::sqlite3_vec_init;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use zerocopy::AsBytes;
-
-/// Open vector storage for an agent. Currently uses SQLite with sqlite-vec.
-pub fn open_vector_storage(agent: &Agent) -> Result<Arc<dyn VectorStorage>, String> {
-    Ok(Arc::new(SqliteVectorStorage::open(&agent.name)?))
-}
 
 // ============================================================================
 // SQLite Implementation

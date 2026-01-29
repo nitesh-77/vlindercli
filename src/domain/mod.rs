@@ -10,8 +10,6 @@
 mod agent;
 mod agent_manifest;
 mod embedding;
-mod execution;
-mod executor;
 mod fleet;
 mod fleet_manifest;
 mod harness;
@@ -57,21 +55,6 @@ pub use embedding::{
     EmbeddingEngine,
     Embedding, EmbeddingBackend, EmbeddingKind, NomicConfig,
 };
-
-// ============================================================================
-// Executor (config + trait)
-// ============================================================================
-
-pub use executor::{
-    ExecutorEngine,
-    Executor, ExecutorBackend, ExecutorKind, WasmConfig,
-};
-
-// ============================================================================
-// Execution
-// ============================================================================
-
-pub use execution::{AgentExecution, ExecutionPlan};
 
 // ============================================================================
 // Model

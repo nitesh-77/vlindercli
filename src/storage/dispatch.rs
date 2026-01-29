@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use crate::domain::{ObjectStorage, SqliteConfig, Storage, StorageKind, VectorStorage};
+use crate::domain::{ObjectStorage, Storage, StorageKind, VectorStorage};
 
 use super::object::{InMemoryObjectStorage, SqliteObjectStorage};
 use super::vector::{InMemoryVectorStorage, SqliteVectorStorage};
@@ -32,16 +32,6 @@ pub(crate) fn open_vector_storage(storage: &Storage) -> Result<Arc<dyn VectorSto
         StorageKind::InMemory => {
             Ok(Arc::new(InMemoryVectorStorage::new()))
         }
-    }
-}
-
-/// Create a Storage domain type for an agent.
-pub(crate) fn storage_for_agent(agent_name: &str, db_path: std::path::PathBuf) -> Storage {
-    Storage {
-        backend: crate::domain::StorageBackend {
-            namespace: agent_name.to_string(),
-            kind: StorageKind::Sqlite(SqliteConfig { db_path }),
-        },
     }
 }
 
@@ -92,13 +82,5 @@ mod tests {
         let results = vec.search_by_vector(&embedding, 1).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].0, "doc1");
-    }
-
-    #[test]
-    fn storage_for_agent_creates_sqlite_config() {
-        let storage = storage_for_agent("my-agent", "/tmp/test.db".into());
-
-        assert_eq!(storage.backend.namespace, "my-agent");
-        assert!(matches!(storage.backend.kind, StorageKind::Sqlite(_)));
     }
 }
