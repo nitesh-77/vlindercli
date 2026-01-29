@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted (supersedes ADR 015)
+Superseded by ADR 020 (itself supersedes ADR 015)
+
+ADR 020 changed the manifest name from `<name>-agent.toml` to just `agent.toml` — a conventional name like `Cargo.toml` in Rust crates. The self-identifying benefit moved to the directory name instead.
 
 ## Context
 

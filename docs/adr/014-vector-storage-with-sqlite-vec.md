@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted
+Accepted (interface updated by ADR 018)
+
+The sqlite-vec storage decision and EmbeddingEngine trait remain valid. The host function interface (`embed`, `store_embedding`, `search_by_vector`) was replaced by queue-based services (`embed`, `vector-put`, `vector-search` queues).
 
 ## Context
 

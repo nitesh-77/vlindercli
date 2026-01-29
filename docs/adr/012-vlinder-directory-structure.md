@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted
+Superseded by ADR 020
+
+ADR 020 replaced the global `.vlinder/agents/` registry with self-contained agent directories. Agents are now loaded by path (`Agent::load(path)`), not by name from a central location.
 
 ## Context
 

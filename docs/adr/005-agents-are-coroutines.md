@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted
+Accepted (wire protocol updated by ADR 018)
+
+The coroutine model remains valid. The wire protocol changed from `yield_to(agent_ptr, ...)` to queue-based `send(queue, payload, reply_to)` and `receive(queue)`. Implementation uses Extism, not Wasmtime async.
 
 ## Context
 

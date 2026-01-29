@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted
+Accepted (interface updated by ADR 018, paths updated by ADR 020)
+
+The MIT-only SQLite storage decision stands. The host function interface (`put_file`, `get_file`) was replaced by queue-based services (`kv-put`, `kv-get` queues). Path conventions updated by ADR 020.
 
 ## Context
 
