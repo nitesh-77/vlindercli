@@ -84,4 +84,4 @@ pub use model_manifest::{ModelManifest, ModelTypeConfig, ModelEngineConfig};
 // Harness
 // ============================================================================
 
-pub use harness::{Harness, HarnessError};
+pub use harness::{CliHarness, Harness, HarnessError};

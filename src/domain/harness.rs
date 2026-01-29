@@ -7,7 +7,11 @@
 //! - invoke: tee off an agent run, returns immediately
 //! - poll: check for response on reply queue
 
-use crate::queue::MessageId;
+use std::sync::Arc;
+
+use crate::domain::Agent;
+use crate::queue::{InMemoryQueue, Message, MessageId, MessageQueue};
+use crate::runtime::WasmRuntime;
 
 /// A harness for interacting with agents.
 ///
@@ -49,6 +53,76 @@ impl std::fmt::Display for HarnessError {
 }
 
 impl std::error::Error for HarnessError {}
+
+// --- CliHarness Implementation ---
+
+/// CLI harness for invoking agents from the command line.
+///
+/// Currently embeds WasmRuntime in-process (no daemon).
+/// Will be updated to talk to daemon via socket once that exists.
+pub struct CliHarness {
+    queue: Arc<InMemoryQueue>,
+    runtime: WasmRuntime,
+    reply_queue: String,
+}
+
+impl CliHarness {
+    pub fn new() -> Self {
+        let queue = Arc::new(InMemoryQueue::new());
+        let runtime = WasmRuntime::new(Arc::clone(&queue));
+        let reply_queue = format!("cli-harness-{}", uuid::Uuid::new_v4());
+        Self {
+            queue,
+            runtime,
+            reply_queue,
+        }
+    }
+
+    /// Register an agent to be served by the embedded runtime.
+    pub fn register(&mut self, agent: Agent) {
+        self.runtime.register(agent);
+    }
+
+    /// Run the runtime's tick loop until a response is ready.
+    /// This is the embedded mode behavior - blocks until done.
+    pub fn run_until_response(&mut self, request_id: &MessageId) -> Result<String, HarnessError> {
+        loop {
+            self.runtime.tick();
+            if let Some(output) = self.poll(request_id)? {
+                return Ok(output);
+            }
+        }
+    }
+}
+
+impl Harness for CliHarness {
+    fn invoke(&self, agent_name: &str, input: &str) -> Result<MessageId, HarnessError> {
+        let request = Message::request(input.as_bytes().to_vec(), &self.reply_queue);
+        let request_id = request.id.clone();
+
+        self.queue
+            .send(agent_name, request)
+            .map_err(|e| HarnessError::SendFailed(e.to_string()))?;
+
+        Ok(request_id)
+    }
+
+    fn poll(&self, request_id: &MessageId) -> Result<Option<String>, HarnessError> {
+        // Try to receive from reply queue
+        if let Ok(response) = self.queue.receive(&self.reply_queue) {
+            let output = String::from_utf8(response.payload)
+                .map_err(|e| HarnessError::ReceiveFailed(e.to_string()))?;
+
+            // Check if this is the one we're looking for
+            if response.correlation_id.as_ref() == Some(request_id) {
+                return Ok(Some(output));
+            }
+            // For now, drop mismatched responses (simple single-request model)
+        }
+
+        Ok(None)
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -142,6 +216,27 @@ mod tests {
         assert_eq!(response.correlation_id, Some(request_id));
 
         let output = String::from_utf8(response.payload).unwrap();
+        assert_eq!(output, "olleh");
+    }
+
+    #[test]
+    fn cli_harness_end_to_end() {
+        use super::{CliHarness, Harness};
+        use crate::domain::Agent;
+        use std::path::Path;
+
+        // Create harness
+        let mut harness = CliHarness::new();
+
+        // Register agent
+        let agent = Agent::load(Path::new("tests/fixtures/agents/reverse-agent")).unwrap();
+        let agent_name = agent.name.clone();
+        harness.register(agent);
+
+        // Invoke and wait for result
+        let request_id = harness.invoke(&agent_name, "hello").unwrap();
+        let output = harness.run_until_response(&request_id).unwrap();
+
         assert_eq!(output, "olleh");
     }
 }
