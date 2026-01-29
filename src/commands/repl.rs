@@ -7,9 +7,9 @@ use vlindercli::cli::{self, VlinderPrompt};
 /// Run an interactive REPL loop.
 ///
 /// The `process` function is called for each user input and returns the response to display.
-pub fn run<F>(process: F)
+pub fn run<F>(mut process: F)
 where
-    F: Fn(&str) -> String,
+    F: FnMut(&str) -> String,
 {
     let mut editor = cli::create_editor();
     let prompt = VlinderPrompt;

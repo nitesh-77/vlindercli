@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::Subcommand;
 
-use vlindercli::runtime::Runtime;
+use vlindercli::domain::{Agent, CliHarness, Harness};
 
 use super::repl;
 
@@ -27,14 +27,29 @@ fn run(path: Option<PathBuf>) {
         std::env::current_dir().expect("Failed to get current directory")
     });
 
-    // Canonicalize to absolute path for URI
+    // Canonicalize to absolute path
     let absolute_path = agent_path
         .canonicalize()
         .expect("Failed to resolve agent path");
 
-    // Construct file:// URI
-    let uri = format!("file://{}", absolute_path.display());
+    // Load agent
+    let agent = Agent::load(&absolute_path).expect("Failed to load agent");
+    let agent_name = agent.name.clone();
 
-    let runtime = Runtime::new();
-    repl::run(|input| runtime.execute(&uri, input));
+    // Create harness and register agent
+    let mut harness = CliHarness::new();
+    harness.register(agent);
+
+    // Run REPL
+    repl::run(|input| {
+        match harness.invoke(&agent_name, input) {
+            Ok(request_id) => {
+                match harness.run_until_response(&request_id) {
+                    Ok(output) => output,
+                    Err(e) => format!("[error] {}", e),
+                }
+            }
+            Err(e) => format!("[error] {}", e),
+        }
+    });
 }
