@@ -61,6 +61,15 @@ fn run_inference(engine: &Arc<dyn InferenceEngine>, prompt: &str) -> Result<Stri
         .map_err(Error::Inference)
 }
 
+/// Run inference with a pre-resolved engine (for service handlers).
+///
+/// This is the lower-level function for when the engine is already resolved.
+/// Service handlers use this after looking up the engine by model name.
+pub fn run_infer(engine: &dyn InferenceEngine, prompt: &str, max_tokens: u32) -> Result<String, Error> {
+    engine.infer(prompt, max_tokens)
+        .map_err(Error::Inference)
+}
+
 // ============================================================================
 // Errors
 // ============================================================================

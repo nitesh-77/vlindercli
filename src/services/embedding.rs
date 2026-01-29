@@ -64,6 +64,15 @@ fn run_embedding(engine: &Arc<dyn EmbeddingEngine>, text: &str) -> Result<String
         .map_err(|e| Error::Json(e.to_string()))
 }
 
+/// Run embedding with a pre-resolved engine (for service handlers).
+///
+/// This is the lower-level function for when the engine is already resolved.
+/// Service handlers use this after looking up the engine by model name.
+pub fn run_embed(engine: &dyn EmbeddingEngine, text: &str) -> Result<Vec<f32>, Error> {
+    engine.embed(text)
+        .map_err(Error::Embedding)
+}
+
 // ============================================================================
 // Errors
 // ============================================================================
