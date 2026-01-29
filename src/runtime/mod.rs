@@ -3,10 +3,16 @@
 //! Contains:
 //! - Runtime: processes ExecutionPlan values (legacy model)
 //! - WasmRuntime: queue-based WASM agent execution (new model)
+//! - services: Native handlers for infrastructure services
 
 mod wasm;
+pub mod services;
 
 pub use wasm::WasmRuntime;
+pub use services::{
+    ObjectServiceHandler, VectorServiceHandler,
+    InferenceServiceHandler, EmbeddingServiceHandler,
+};
 
 use crate::domain::{AgentExecution, ExecutionPlan};
 use crate::executor::open_executor;
