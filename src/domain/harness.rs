@@ -9,9 +9,12 @@
 
 use std::sync::Arc;
 
-use crate::domain::Agent;
+use crate::domain::{Agent, Model, ModelType};
+use crate::embedding::{open_embedding_engine, InMemoryEmbedding};
+use crate::inference::{open_inference_engine, InMemoryInference};
 use crate::queue::{InMemoryQueue, Message, MessageId, MessageQueue};
 use crate::runtime::WasmRuntime;
+use crate::storage::dispatch::{in_memory_storage, open_object_storage, open_vector_storage};
 
 /// A harness for interacting with agents.
 ///
@@ -79,8 +82,76 @@ impl CliHarness {
     }
 
     /// Register an agent to be served by the embedded runtime.
+    ///
+    /// Sets up:
+    /// - In-memory storage for the agent's namespace
+    /// - Inference/embedding engines for declared models
     pub fn register(&mut self, agent: Agent) {
+        let agent_name = agent.name.clone();
+
+        // Register storage for this agent's namespace
+        let storage = in_memory_storage();
+        let object = open_object_storage(&storage).expect("in-memory storage always succeeds");
+        let vector = open_vector_storage(&storage).expect("in-memory storage always succeeds");
+        self.runtime.register_storage(&agent_name, object, vector);
+
+        // Register models declared by the agent
+        for (model_name, model_uri) in &agent.requirements.models {
+            self.register_model(model_name, model_uri.as_str());
+        }
+
+        // Register the agent itself
         self.runtime.register(agent);
+    }
+
+    /// Register a model by loading its manifest and creating the appropriate engine.
+    ///
+    /// Tries to load real llama.cpp engines. Falls back to InMemory if model file not found.
+    fn register_model(&mut self, model_name: &str, model_uri: &str) {
+        // Parse the model manifest path from URI
+        let manifest_path = model_uri
+            .strip_prefix("file://")
+            .unwrap_or(model_uri);
+
+        // Try to load the model manifest
+        let model = match Model::load(std::path::Path::new(manifest_path)) {
+            Ok(m) => m,
+            Err(e) => {
+                eprintln!("[warning] Failed to load model {}: {}", model_name, e);
+                return;
+            }
+        };
+
+        // Register appropriate engine based on model type
+        match model.model_type {
+            ModelType::Inference => {
+                match open_inference_engine(&model) {
+                    Ok(engine) => {
+                        eprintln!("[info] Loaded inference model: {}", model_name);
+                        self.runtime.register_inference(model_name, engine);
+                    }
+                    Err(e) => {
+                        eprintln!("[warning] Failed to load inference model {}, using placeholder: {}", model_name, e);
+                        let engine = Arc::new(InMemoryInference::new("[inference placeholder]"));
+                        self.runtime.register_inference(model_name, engine);
+                    }
+                }
+            }
+            ModelType::Embedding => {
+                match open_embedding_engine(&model) {
+                    Ok(engine) => {
+                        eprintln!("[info] Loaded embedding model: {}", model_name);
+                        self.runtime.register_embedding(model_name, engine);
+                    }
+                    Err(e) => {
+                        eprintln!("[warning] Failed to load embedding model {}, using placeholder: {}", model_name, e);
+                        let canned: Vec<f32> = (0..768).map(|i| i as f32 * 0.001).collect();
+                        let engine = Arc::new(InMemoryEmbedding::new(canned));
+                        self.runtime.register_embedding(model_name, engine);
+                    }
+                }
+            }
+        }
     }
 
     /// Run the runtime's tick loop until a response is ready.
