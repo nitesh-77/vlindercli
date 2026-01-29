@@ -4,23 +4,15 @@
 
 use std::num::NonZeroU32;
 use std::path::Path;
-use std::sync::{Arc, Once};
+use std::sync::Arc;
 
 use llama_cpp_2::context::params::LlamaContextParams;
-use llama_cpp_2::llama_backend::LlamaBackend;
 use llama_cpp_2::llama_batch::LlamaBatch;
 use llama_cpp_2::model::params::LlamaModelParams;
 use llama_cpp_2::model::LlamaModel;
 
 use crate::domain::{EmbeddingEngine, Model};
-
-static LLAMA_INIT: Once = Once::new();
-
-fn init_llama() {
-    LLAMA_INIT.call_once(|| {
-        llama_cpp_2::send_logs_to_tracing(llama_cpp_2::LogOptions::default());
-    });
-}
+use crate::inference::get_backend;  // Use shared backend from inference
 
 /// Open an embedding engine for the given model.
 pub fn open_embedding_engine(model: &Model) -> Result<Arc<dyn EmbeddingEngine>, String> {
@@ -57,25 +49,24 @@ impl EmbeddingEngine for InMemoryEmbedding {
 // ============================================================================
 
 pub struct LlamaEmbeddingEngine {
-    backend: LlamaBackend,
     model: LlamaModel,
 }
 
 impl LlamaEmbeddingEngine {
     pub fn load(model_path: &Path) -> Result<Self, String> {
-        init_llama();
-        let backend = LlamaBackend::init().map_err(|e| e.to_string())?;
+        let backend = get_backend()?;
 
         let model_params = LlamaModelParams::default();
-        let model = LlamaModel::load_from_file(&backend, model_path, &model_params)
+        let model = LlamaModel::load_from_file(backend, model_path, &model_params)
             .map_err(|e| e.to_string())?;
 
-        Ok(Self { backend, model })
+        Ok(Self { model })
     }
 }
 
 impl EmbeddingEngine for LlamaEmbeddingEngine {
     fn embed(&self, text: &str) -> Result<Vec<f32>, String> {
+        let backend = get_backend()?;
         let ctx_size: u32 = 2048;
         let batch_size: u32 = 512;
 
@@ -84,7 +75,7 @@ impl EmbeddingEngine for LlamaEmbeddingEngine {
             .with_n_batch(batch_size)
             .with_embeddings(true);
 
-        let mut ctx = self.model.new_context(&self.backend, ctx_params)
+        let mut ctx = self.model.new_context(backend, ctx_params)
             .map_err(|e| e.to_string())?;
 
         let tokens = self.model

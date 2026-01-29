@@ -4,7 +4,7 @@
 
 use std::num::NonZeroU32;
 use std::path::Path;
-use std::sync::{Arc, Once};
+use std::sync::{Arc, OnceLock};
 
 use llama_cpp_2::context::params::LlamaContextParams;
 use llama_cpp_2::llama_backend::LlamaBackend;
@@ -15,12 +15,15 @@ use llama_cpp_2::sampling::LlamaSampler;
 
 use crate::domain::{InferenceEngine, Model};
 
-static LLAMA_INIT: Once = Once::new();
+// Shared backend - initialized once, used by both inference and embedding
+static LLAMA_BACKEND: OnceLock<LlamaBackend> = OnceLock::new();
 
-fn init_llama() {
-    LLAMA_INIT.call_once(|| {
+/// Get the shared llama backend, initializing it if necessary.
+pub fn get_backend() -> Result<&'static LlamaBackend, String> {
+    Ok(LLAMA_BACKEND.get_or_init(|| {
         llama_cpp_2::send_logs_to_tracing(llama_cpp_2::LogOptions::default());
-    });
+        LlamaBackend::init().expect("Failed to initialize llama backend")
+    }))
 }
 
 /// Open an inference engine for the given model.
@@ -58,25 +61,24 @@ impl InferenceEngine for InMemoryInference {
 // ============================================================================
 
 pub struct LlamaEngine {
-    backend: LlamaBackend,
     model: LlamaModel,
 }
 
 impl LlamaEngine {
     pub fn load(model_path: &Path) -> Result<Self, String> {
-        init_llama();
-        let backend = LlamaBackend::init().map_err(|e| e.to_string())?;
+        let backend = get_backend()?;
 
         let model_params = LlamaModelParams::default();
-        let model = LlamaModel::load_from_file(&backend, model_path, &model_params)
+        let model = LlamaModel::load_from_file(backend, model_path, &model_params)
             .map_err(|e| e.to_string())?;
 
-        Ok(Self { backend, model })
+        Ok(Self { model })
     }
 }
 
 impl InferenceEngine for LlamaEngine {
     fn infer(&self, prompt: &str, max_tokens: u32) -> Result<String, String> {
+        let backend = get_backend()?;
         let ctx_size: u32 = 8192;
         let batch_size: u32 = 2048;
 
@@ -85,7 +87,7 @@ impl InferenceEngine for LlamaEngine {
         let ctx_params = LlamaContextParams::default()
             .with_n_ctx(NonZeroU32::new(ctx_size))
             .with_n_batch(batch_size);
-        let mut ctx = self.model.new_context(&self.backend, ctx_params)
+        let mut ctx = self.model.new_context(backend, ctx_params)
             .map_err(|e| e.to_string())?;
 
         let mut tokens = self.model
