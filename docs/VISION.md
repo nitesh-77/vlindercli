@@ -22,29 +22,17 @@ Agent systems today are messy. VlinderCLI aims to provide a domain specific voca
 - **Runtime**: The execution engine that abstracts away the infrastructure.
 - **Text boundaries**: Human-readable and extensible at every surface.
 
-### Separation of Concerns
+### Domain Model
 
-The **agent manifest** declares what an agent is and how it runs. It is composed of:
-- **Identity**: Name, description, and source — how the agent identifies itself
-- **Code**: Reference to the agent's logic (default: `<name>.wasm`)
-- **Models**: Which models the agent needs
-  - phi3 (generation)
-  - nomic-embed (embedding)
-  - whisper (transcription)
-  - llava (vision)
-- **Services**: Which runtime services the agent needs (infer, embed, storage, vectors)
-- **Prompts**: Behavior, personality, constraints
-- **Mounts**: Filesystem access and persistence
+The system is built around a few core concepts:
 
-The **fleet manifest** declares where and how to deploy a collection of agents.
-Which deployment target, which storage backends, which inference providers.
-Today, the fleet manifest is implicit — sensible defaults, no spec file needed.
-It becomes explicit when deployment needs parameterization.
-<!-- TODO: Fleet manifest spec not yet modeled -->
+- **Agent**: A unit of behavior with declared requirements (models, services, mounts)
+- **Model**: An inference or embedding capability (e.g., phi3, nomic-embed)
+- **Fleet**: A deployment configuration for a collection of agents
+- **Runtime**: Executes agents via queue-based message passing
+- **Services**: Infrastructure capabilities exposed to agents (infer, embed, storage)
 
-**Runtime** executes agents and satisfies their requirements. It owns the
-hard problems: model lifecycle, inference scheduling, storage, permissions.
-Different runtimes can implement the same interface for different targets.
+For the complete domain vocabulary, see [`DOMAIN_MODEL.md`](DOMAIN_MODEL.md).
 
  
 ### Who It's For
