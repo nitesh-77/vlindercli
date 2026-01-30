@@ -82,21 +82,50 @@ pub struct RuntimeCapabilities {
 }
 ```
 
-### Discovery Flow
+### The Flow
 
-```
-1. User: vlinder agent run -p ./my-agent
+vlinderd is the vlindercli daemon.
+  - it is what provides the entire functionality of this software.
+  - it runs as a service that spawns all the processes require to provide the functionality.
+  - it provides discovery as a service over http -- one of the processes.
+  - it runs all the runtimes (local wasm, aws, k8s.... whichever is enabled, and listens to respective
+  queues)
+  - it kicks off a message queue (or acts as the local proxy for when the message queue is on the
+  cloud)
 
-2. CLI asks vlinderd:
-   → POST /agents/my-agent/resolve
-   ← { runtime: "wasm-local", endpoint: "unix:///var/run/vlinder/wasm.sock" }
+  harness cli when run by a user from a terminal,
+  - accepts user inputs
+  - reads manifests from current directory
+  - registers them (this is an idempotent operation - create if it doesn't exist, read if it does)
+  - reads queue info from registry
+  - creates a message to run the agent, based on manifests in current dir
+  - queues up the message in the queue for the runtime to consume
 
-3. CLI sends request to runtime endpoint:
-   → Runtime executes agent
-   ← Response
+  runtime, having been started by vlinderd
+  - consumes the message in the message queue
+  - inspects the message info, which contains everything it needs to invoke the agent
+  - invokes the agent
+  - if the agents deployment target is wasm, it laumches the wasm files
+  - if deployment target is lambdas/podman/firecracker, it invokes them
 
-4. CLI displays result
-```
+  the agent
+  - if it has finished executing, queues up a message in the runtime's reply queue
+  - the runtime then queues up the response back to the harness's reply-to.
+
+  if it needs any access to the services (vector, object, inference, embedding)
+  - makes the request known to runtime (push/pull, based on type)
+
+  the runtime
+  - queues up the message to the respective services (vector, object, inference, embedding)
+
+  the services (having been started as processes by vlinderd)
+  - listens to messages in the queue
+  - invokes respective systems (dynamodb/s3/pinecone/bedrock/.....)
+  - gathers responses
+  - queues up a message back to the reply-to queue (the agent's queue)
+
+  THis is the desired state. Which part of this is not clear to you? Ask if you have questions.
+
 
 ### What vlinderd Tracks
 
@@ -117,6 +146,67 @@ vlinderd
     └── Fleets
         └── my-fleet → { agents: [...], status: deployed }
 ```
+
+## Current State vs Desired State
+
+### Current State
+
+```
+CliHarness (single process)
+├── embeds WasmRuntime
+├── embeds ServiceHandlers (object, vector, inference, embedding)
+├── embeds InMemoryQueue
+└── register() does everything: creates storage, loads models, registers agent
+```
+
+Everything is in-process. Harness IS the system.
+
+### Desired State
+
+```
+vlinderd (daemon) ────spawns────┬── discovery service (HTTP)
+                                ├── message queue
+                                ├── runtimes (wasm, aws, k8s)
+                                └── services (object, vector, inference, embedding)
+
+harness (thin client) ──────────┬── reads manifests
+                                ├── registers with vlinderd
+                                ├── gets queue info from registry
+                                └── queues message
+```
+
+All separate processes communicating via queues.
+
+### Key Gaps
+
+| Component | Current | Desired |
+|-----------|---------|---------|
+| vlinderd | doesn't exist | spawns all processes |
+| registry | doesn't exist | HTTP discovery service |
+| harness | embeds everything | thin client |
+| runtime | embedded in harness | separate process |
+| services | embedded in runtime | separate processes |
+| queue | in-memory, in-process | separate (or cloud proxy) |
+
+### ResourceId
+
+All resources in the registry are identified by URI:
+
+```rust
+pub struct ResourceId(String);
+```
+
+The scheme encodes the resource type:
+- `sqlite:///path/to/db.sqlite` → SQLite storage
+- `s3://bucket/prefix` → S3 storage
+- `memory://test` → in-memory (testing)
+- `ollama://phi3` → Ollama model
+- `file:///path/to/model.gguf` → local model file
+
+ResourceId is:
+- The key for registry lookups (`HashMap<ResourceId, Arc<dyn ObjectStorage>>`)
+- Declared in manifests (`object_storage = "sqlite:///data/notes.db"`)
+- Resolved by harness, looked up by runtime
 
 ## Consequences
 
