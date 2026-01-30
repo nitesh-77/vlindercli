@@ -18,16 +18,19 @@ pub struct SqliteObjectStorage {
 }
 
 impl SqliteObjectStorage {
-    /// Open object storage for an agent
+    /// Open object storage for an agent (derives path from agent name).
     pub fn open(agent_name: &str) -> Result<Self, String> {
-        let db_path = config::agent_db_path(agent_name);
+        Self::open_at(&config::agent_db_path(agent_name))
+    }
 
+    /// Open object storage at a specific path.
+    pub fn open_at(db_path: &std::path::Path) -> Result<Self, String> {
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent)
-                .map_err(|e| format!("failed to create agent directory: {}", e))?;
+                .map_err(|e| format!("failed to create storage directory: {}", e))?;
         }
 
-        let conn = Connection::open(&db_path)
+        let conn = Connection::open(db_path)
             .map_err(|e| format!("failed to open database: {}", e))?;
 
         conn.execute_batch("PRAGMA journal_mode=WAL;")
