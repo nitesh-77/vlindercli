@@ -17,6 +17,7 @@ mod inference;
 mod model;
 mod model_manifest;
 mod path;
+mod resource_id;
 mod storage;
 
 // ============================================================================
@@ -38,6 +39,12 @@ pub use storage::{
     SqliteConfig, Storage, StorageBackend, StorageKind,
     ObjectStorageManifest, VectorStorageManifest,
 };
+
+// ============================================================================
+// Resource ID (registry key)
+// ============================================================================
+
+pub use resource_id::ResourceId;
 
 // ============================================================================
 // Inference (config + trait)
