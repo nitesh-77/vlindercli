@@ -36,6 +36,7 @@ pub use fleet_manifest::FleetManifest;
 pub use storage::{
     ObjectStorage, VectorStorage,
     SqliteConfig, Storage, StorageBackend, StorageKind,
+    ObjectStorageManifest, VectorStorageManifest,
 };
 
 // ============================================================================

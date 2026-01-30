@@ -96,3 +96,35 @@ pub struct SqliteConfig {
     /// Path to the database file.
     pub db_path: PathBuf,
 }
+
+// ============================================================================
+// ObjectStorageManifest (new - independent config)
+// ============================================================================
+
+/// Manifest for object storage configuration.
+///
+/// Object storage is configured independently from vector storage.
+/// All paths are resolved at manifest creation time.
+#[derive(Clone, Debug)]
+pub enum ObjectStorageManifest {
+    /// SQLite-backed storage.
+    Sqlite { path: PathBuf },
+    /// In-memory storage for testing.
+    InMemory,
+}
+
+// ============================================================================
+// VectorStorageManifest (new - independent config)
+// ============================================================================
+
+/// Manifest for vector storage configuration.
+///
+/// Vector storage is configured independently from object storage.
+/// All paths are resolved at manifest creation time.
+#[derive(Clone, Debug)]
+pub enum VectorStorageManifest {
+    /// SQLite-backed storage with sqlite-vec.
+    Sqlite { path: PathBuf },
+    /// In-memory storage for testing.
+    InMemory,
+}
