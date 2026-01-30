@@ -2,9 +2,9 @@
 
 ## Status
 
-Accepted (interface updated by ADR 018)
+Superseded
 
-The sqlite-vec storage decision and EmbeddingEngine trait remain valid. The host function interface (`embed`, `store_embedding`, `search_by_vector`) was replaced by queue-based services (`embed`, `vector-put`, `vector-search` queues).
+The specific sqlite-vec implementation is now one implementation of the `VectorStorage` trait. The domain defines the abstract interface; implementations include `SqliteVecStorage` (this ADR's approach) and `InMemoryVectorStorage` (for testing). See `src/domain/storage.rs` for the trait, ADR 018 for the queue-based access pattern.
 
 ## Context
 

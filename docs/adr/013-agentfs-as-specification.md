@@ -2,9 +2,9 @@
 
 ## Status
 
-Accepted (interface updated by ADR 018, paths updated by ADR 020)
+Superseded
 
-The MIT-only SQLite storage decision stands. The host function interface (`put_file`, `get_file`) was replaced by queue-based services (`kv-put`, `kv-get` queues). Path conventions updated by ADR 020.
+The specific AgentFS schema is now one implementation of the `ObjectStorage` trait. The domain defines the abstract interface; implementations include `SqliteObjectStorage` (this ADR's approach) and `InMemoryObjectStorage` (for testing). See `src/domain/storage.rs` for the trait, ADR 018 for the queue-based access pattern.
 
 ## Context
 
