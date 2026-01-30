@@ -6,6 +6,8 @@
 
 use std::path::PathBuf;
 
+use serde::Deserialize;
+
 // ============================================================================
 // ObjectStorage Trait
 // ============================================================================
@@ -105,7 +107,8 @@ pub struct SqliteConfig {
 ///
 /// Object storage is configured independently from vector storage.
 /// All paths are resolved at manifest creation time.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum ObjectStorageManifest {
     /// SQLite-backed storage.
     Sqlite { path: PathBuf },
@@ -121,10 +124,12 @@ pub enum ObjectStorageManifest {
 ///
 /// Vector storage is configured independently from object storage.
 /// All paths are resolved at manifest creation time.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum VectorStorageManifest {
     /// SQLite-backed storage with sqlite-vec.
     Sqlite { path: PathBuf },
     /// In-memory storage for testing.
     InMemory,
 }
+
