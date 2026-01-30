@@ -55,6 +55,13 @@ Claude should:
 - Read TODO.md when deciding what to do next (don't rely only on conversation memory)
 - Update TODO.md as work progresses, decisions are made, or new questions arise
 
+## Build & Setup
+
+- Always use `justfile` for build, setup, and fixture operations
+- Before creating files/directories manually, check if there's a just recipe for it
+- If a recipe is missing, add it to the justfile rather than doing it ad-hoc
+- Run `just --list` to see available recipes
+
 ## Prototyping
 
 - Write throwaway code to learn, not to keep

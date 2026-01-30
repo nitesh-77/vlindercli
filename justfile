@@ -42,6 +42,11 @@ build-agents:
     cp {{fixtures}}/echo-agent/agent.wasm {{fixtures}}/missing-mount-agent/agent.wasm
     cp agents/missing-mount-agent/agent.toml {{fixtures}}/missing-mount-agent/
 
+    # Setup fleet fixtures (symlinks to agent fixtures)
+    mkdir -p tests/fixtures/fleets/test-fleet/agents
+    ln -sf ../../../agents/echo-agent tests/fixtures/fleets/test-fleet/agents/echo-agent
+    ln -sf ../../../agents/upper-agent tests/fixtures/fleets/test-fleet/agents/upper-agent
+
     # Deploy to dev-project (for vlinder -p dev-project/agents/pensieve)
     mkdir -p {{dev_project}}/echo-agent
     mkdir -p {{dev_project}}/upper-agent
