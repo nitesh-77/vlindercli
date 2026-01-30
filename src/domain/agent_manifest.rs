@@ -3,6 +3,8 @@ use std::path::Path;
 
 use serde::Deserialize;
 
+use super::resource_id::ResourceId;
+
 /// Agent manifest as read from agent.toml.
 ///
 /// The `code` field is resolved to a URI during loading. Relative paths
@@ -19,6 +21,12 @@ pub struct AgentManifest {
     pub prompts: Option<PromptsConfig>,
     #[serde(default)]
     pub mounts: Vec<MountConfig>,
+    /// Object storage resource ID (e.g., "sqlite:///path/to/objects.db")
+    #[serde(default)]
+    pub object_storage: Option<ResourceId>,
+    /// Vector storage resource ID (e.g., "sqlite:///path/to/vectors.db")
+    #[serde(default)]
+    pub vector_storage: Option<ResourceId>,
 }
 
 impl AgentManifest {
@@ -159,4 +167,99 @@ pub struct MountConfig {
 
 fn default_mount_mode() -> String {
     "rw".to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_manifest_with_storage() {
+        let toml = r#"
+            name = "test-agent"
+            description = "Test agent with storage"
+            code = "agent.wasm"
+            object_storage = "sqlite:///data/objects.db"
+            vector_storage = "sqlite:///data/vectors.db"
+
+            [requirements]
+            services = ["inference"]
+        "#;
+
+        let manifest: AgentManifest = toml::from_str(toml).unwrap();
+
+        assert_eq!(manifest.name, "test-agent");
+        assert_eq!(
+            manifest.object_storage.as_ref().map(|r| r.as_str()),
+            Some("sqlite:///data/objects.db")
+        );
+        assert_eq!(
+            manifest.vector_storage.as_ref().map(|r| r.as_str()),
+            Some("sqlite:///data/vectors.db")
+        );
+    }
+
+    #[test]
+    fn parse_manifest_without_storage() {
+        let toml = r#"
+            name = "test-agent"
+            description = "Test agent without storage"
+            code = "agent.wasm"
+
+            [requirements]
+            services = ["inference"]
+        "#;
+
+        let manifest: AgentManifest = toml::from_str(toml).unwrap();
+
+        assert_eq!(manifest.name, "test-agent");
+        assert!(manifest.object_storage.is_none());
+        assert!(manifest.vector_storage.is_none());
+    }
+
+    #[test]
+    fn parse_manifest_with_partial_storage() {
+        let toml = r#"
+            name = "test-agent"
+            description = "Test agent with only object storage"
+            code = "agent.wasm"
+            object_storage = "s3://my-bucket/agents/test"
+
+            [requirements]
+            services = []
+        "#;
+
+        let manifest: AgentManifest = toml::from_str(toml).unwrap();
+
+        assert_eq!(
+            manifest.object_storage.as_ref().map(|r| r.as_str()),
+            Some("s3://my-bucket/agents/test")
+        );
+        assert!(manifest.vector_storage.is_none());
+    }
+
+    #[test]
+    fn storage_resource_id_scheme() {
+        let toml = r#"
+            name = "test-agent"
+            description = "Test"
+            code = "agent.wasm"
+            object_storage = "memory://test"
+            vector_storage = "pinecone://my-index"
+
+            [requirements]
+            services = []
+        "#;
+
+        let manifest: AgentManifest = toml::from_str(toml).unwrap();
+
+        assert_eq!(
+            manifest.object_storage.as_ref().and_then(|r| r.scheme()),
+            Some("memory")
+        );
+        assert_eq!(
+            manifest.vector_storage.as_ref().and_then(|r| r.scheme()),
+            Some("pinecone")
+        );
+    }
 }

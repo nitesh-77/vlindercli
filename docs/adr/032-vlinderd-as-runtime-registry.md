@@ -161,6 +161,19 @@ CliHarness (single process)
 
 Everything is in-process. Harness IS the system.
 
+**Domain entities implemented:**
+
+| Entity | Status | Notes |
+|--------|--------|-------|
+| ResourceId | ✓ | URI-based key for registry lookups |
+| ObjectStorageManifest | ✓ | Serde-deserializable, tagged enum |
+| VectorStorageManifest | ✓ | Serde-deserializable, tagged enum |
+| AgentManifest.object_storage | ✓ | Optional ResourceId field |
+| AgentManifest.vector_storage | ✓ | Optional ResourceId field |
+| Registry | - | Not yet implemented |
+| Harness uses Registry | - | Still creates storage directly |
+| Runtime uses Registry | - | Still receives storage from harness |
+
 ### Desired State
 
 ```
@@ -207,6 +220,28 @@ ResourceId is:
 - The key for registry lookups (`HashMap<ResourceId, Arc<dyn ObjectStorage>>`)
 - Declared in manifests (`object_storage = "sqlite:///data/notes.db"`)
 - Resolved by harness, looked up by runtime
+
+**Implemented:** `AgentManifest` now has optional storage fields:
+
+```rust
+pub struct AgentManifest {
+    // ...
+    pub object_storage: Option<ResourceId>,
+    pub vector_storage: Option<ResourceId>,
+}
+```
+
+Example agent.toml:
+```toml
+name = "pensieve"
+description = "Memory agent"
+code = "agent.wasm"
+object_storage = "sqlite:///data/objects.db"
+vector_storage = "sqlite:///data/vectors.db"
+
+[requirements]
+services = ["inference", "embedding"]
+```
 
 ## Consequences
 
