@@ -170,9 +170,13 @@ Everything is in-process. Harness IS the system.
 | VectorStorageManifest | ✓ | Serde-deserializable, tagged enum |
 | AgentManifest.object_storage | ✓ | Optional ResourceId field |
 | AgentManifest.vector_storage | ✓ | Optional ResourceId field |
-| Registry | - | Not yet implemented |
-| Harness uses Registry | - | Still creates storage directly |
-| Runtime uses Registry | - | Still receives storage from harness |
+| Registry | ✓ | Stores jobs and agents, has API endpoint URI |
+| JobId | ✓ | Full URI: `<registry_id>/jobs/<uuid>` |
+| Job | ✓ | agent_id (ResourceId), input, status |
+| JobStatus | ✓ | Pending, Running, Completed, Failed |
+| Daemon | ✓ | Control plane owning Registry, Harness, Runtime, Provider |
+| Harness (Daemon-owned) | ✓ | API surface for invoke/poll, owned by Daemon |
+| Runtime uses ResourceId | ✓ | Agents keyed by ResourceId, queue routing by agent_id |
 
 ### Desired State
 
@@ -194,12 +198,14 @@ All separate processes communicating via queues.
 
 | Component | Current | Desired |
 |-----------|---------|---------|
-| vlinderd | doesn't exist | spawns all processes |
-| registry | doesn't exist | HTTP discovery service |
-| harness | embeds everything | thin client |
-| runtime | embedded in harness | separate process |
-| services | embedded in runtime | separate processes |
+| vlinderd | **Daemon exists** (in-process) | spawns all processes |
+| registry | **Registry exists** (in-process) | HTTP discovery service |
+| harness | **Harness owned by Daemon** | thin client (separate process) |
+| runtime | embedded in Daemon | separate process |
+| services | embedded in Daemon | separate processes |
 | queue | in-memory, in-process | separate (or cloud proxy) |
+
+**Progress**: Core abstractions (Daemon, Registry, Harness, Job) are implemented in-process. Next step is process separation.
 
 ### ResourceId
 

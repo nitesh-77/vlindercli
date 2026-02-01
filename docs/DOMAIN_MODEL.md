@@ -82,6 +82,49 @@ Storage configuration: backend type (SQLite, InMemory), connection details.
 
 - **Type**: [`src/domain/storage.rs`](../src/domain/storage.rs)
 
+---
+
+## Control Plane Types
+
+These types manage system state and coordinate execution.
+
+### Daemon
+
+The control plane that owns all system components. Like k8s, it coordinates Registry (etcd), Harness (API Server), Runtime (Kubelet), and Provider (services).
+
+- **Type**: [`src/domain/daemon.rs`](../src/domain/daemon.rs)
+
+### Registry
+
+Source of truth for all system state. Stores jobs and agent definitions. Has an `id` (ResourceId) representing its API endpoint.
+
+- **Type**: [`src/domain/registry.rs`](../src/domain/registry.rs)
+
+### Job
+
+A submitted job and its current state: id (JobId), agent_id (ResourceId), input, status.
+
+- **Type**: [`src/domain/registry.rs`](../src/domain/registry.rs)
+
+### JobId
+
+Unique identifier for a job. Format: `<registry_id>/jobs/<uuid>` (e.g., `http://127.0.0.1:9000/jobs/abc-123`).
+
+- **Type**: [`src/domain/registry.rs`](../src/domain/registry.rs)
+
+### JobStatus
+
+Job lifecycle states: Pending → Running → Completed/Failed.
+
+- **Type**: [`src/domain/registry.rs`](../src/domain/registry.rs)
+
+### Harness (Daemon-owned)
+
+API surface owned by Daemon. Handles job submission and status tracking via Registry.
+
+- **Type**: [`src/domain/harness.rs`](../src/domain/harness.rs)
+
+---
 
 ## Loader Trait
 
@@ -168,10 +211,17 @@ Harness                  Loader
 ### Dependencies ("uses")
 
 ```
-CliHarness
- ├── uses WasmRuntime (implements Runtime trait)
+Daemon (control plane)
+ ├── owns Registry
+ │    ├── stores Job (agent_id, input, status)
+ │    └── stores Agent (by ResourceId)
+ ├── owns Harness
+ │    ├── creates jobs in Registry
+ │    ├── queues messages to Runtime
+ │    └── reconciles completed jobs from reply queue
+ ├── owns WasmRuntime (implements Runtime trait)
  │    └── uses MessageQueue
- └── uses Provider (aggregates workers)
+ └── owns Provider (aggregates workers)
       ├── ObjectServiceWorker → ObjectStorage
       ├── VectorServiceWorker → VectorStorage
       ├── InferenceServiceWorker → InferenceEngine
@@ -321,11 +371,12 @@ Supports heterogeneous deployments: different agents can use different backends 
 
 Location: [`src/domain/harness.rs`](../src/domain/harness.rs)
 
-| Implementation | Description |
-|----------------|-------------|
-| `CliHarness` | Embeds `WasmRuntime` in-process for CLI usage |
+`Harness` is the API surface for job submission and status. Owned by `Daemon`, it:
+- Creates jobs in Registry
+- Queues messages to Runtime
+- Monitors reply queue and updates job status
 
-**Future**: `DaemonHarness` (connects to vlinderd via socket)
+The CLI (`vlinder agent run`) uses Daemon which owns Harness internally.
 
 ---
 
@@ -335,9 +386,10 @@ Location: [`src/domain/harness.rs`](../src/domain/harness.rs)
 ┌─────────────────────────────────────────────────────────────┐
 │                      DOMAIN (abstract)                      │
 │                                                             │
-│  Types: Agent, Model, Fleet, Storage, ResourceId            │
+│  Config: Agent, Model, Fleet, Storage, ResourceId           │
+│  Control: Daemon, Registry, Harness, Job, JobId, JobStatus  │
 │  Traits: InferenceEngine, EmbeddingEngine, ObjectStorage,   │
-│          VectorStorage, MessageQueue, Runtime, Harness      │
+│          VectorStorage, MessageQueue, Runtime               │
 │  Workers: ObjectServiceWorker, VectorServiceWorker,         │
 │           InferenceServiceWorker, EmbeddingServiceWorker    │
 │  Provider: aggregates workers, routes to backends           │
@@ -355,6 +407,15 @@ Location: [`src/domain/harness.rs`](../src/domain/harness.rs)
 │  Queue:     InMemoryQueue                                   │
 │  Runtime:   WasmRuntime                                     │
 │  Loader:    FileLoader                                      │
-│  Harness:   CliHarness                                      │
+└─────────────────────────────────────────────────────────────┘
+
+Control Plane (k8s-like architecture):
+
+┌─────────────────────────────────────────────────────────────┐
+│                         Daemon                              │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐    │
+│  │ Registry │  │ Harness  │  │ Runtime  │  │ Provider │    │
+│  │ (state)  │  │  (API)   │  │ (exec)   │  │(services)│    │
+│  └──────────┘  └──────────┘  └──────────┘  └──────────┘    │
 └─────────────────────────────────────────────────────────────┘
 ```
