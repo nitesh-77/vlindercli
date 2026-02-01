@@ -106,3 +106,70 @@ impl Default for Registry {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn job_lifecycle() {
+        let mut registry = Registry::new();
+
+        // Create job
+        let job_id = registry.create_job("test-agent".to_string(), "hello".to_string());
+
+        // Initial state is Pending
+        let job = registry.get_job(&job_id).unwrap();
+        assert_eq!(job.status, JobStatus::Pending);
+        assert_eq!(job.agent_name, "test-agent");
+        assert_eq!(job.input, "hello");
+
+        // Update to Running
+        registry.update_job_status(&job_id, JobStatus::Running);
+        assert_eq!(registry.get_job(&job_id).unwrap().status, JobStatus::Running);
+
+        // Update to Completed
+        registry.update_job_status(&job_id, JobStatus::Completed("result".to_string()));
+        assert_eq!(
+            registry.get_job(&job_id).unwrap().status,
+            JobStatus::Completed("result".to_string())
+        );
+    }
+
+    #[test]
+    fn pending_jobs_filters_by_status() {
+        let mut registry = Registry::new();
+
+        let job1 = registry.create_job("agent".to_string(), "a".to_string());
+        let job2 = registry.create_job("agent".to_string(), "b".to_string());
+        let _job3 = registry.create_job("agent".to_string(), "c".to_string());
+
+        // All three are pending
+        assert_eq!(registry.pending_jobs().len(), 3);
+
+        // Mark one as running, one as completed
+        registry.update_job_status(&job1, JobStatus::Running);
+        registry.update_job_status(&job2, JobStatus::Completed("done".to_string()));
+
+        // Only one pending now
+        assert_eq!(registry.pending_jobs().len(), 1);
+    }
+
+    #[test]
+    fn agent_registration() {
+        use std::path::Path;
+
+        let mut registry = Registry::new();
+
+        // Agent not found initially
+        assert!(registry.get_agent("test-agent").is_none());
+
+        // Register agent
+        let agent = Agent::load(Path::new("tests/fixtures/agents/echo-agent")).unwrap();
+        registry.register_agent(agent);
+
+        // Now found
+        let agent = registry.get_agent("echo-agent").unwrap();
+        assert_eq!(agent.name, "echo-agent");
+    }
+}
