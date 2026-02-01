@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::domain::registry::{JobId, JobStatus, Registry};
+use crate::domain::ResourceId;
 use crate::queue::{Message, MessageId, MessageQueue};
 
 /// The harness - API surface for job submission and status.
@@ -34,18 +35,18 @@ impl Harness {
     pub fn invoke(
         &mut self,
         registry: &mut Registry,
-        agent_name: &str,
+        agent_id: &ResourceId,
         input: &str,
     ) -> Result<JobId, String> {
         // Create job in registry
-        let job_id = registry.create_job(agent_name.to_string(), input.to_string());
+        let job_id = registry.create_job(agent_id.clone(), input.to_string());
 
         // Queue message to agent
         let message = Message::request(input.as_bytes().to_vec(), &self.reply_queue);
         let message_id = message.id.clone();
 
         self.queue
-            .send(agent_name, message)
+            .send(agent_id.as_str(), message)
             .map_err(|e| format!("failed to queue: {}", e))?;
 
         // Track for response correlation
@@ -86,21 +87,26 @@ mod tests {
     use super::*;
     use crate::queue::InMemoryQueue;
 
+    fn test_agent_id() -> ResourceId {
+        ResourceId::new("file:///test/agent.wasm")
+    }
+
     #[test]
     fn invoke_creates_job_and_queues_message() {
         let queue = Arc::new(InMemoryQueue::new());
         let mut harness = Harness::new(queue.clone());
         let mut registry = Registry::new();
+        let agent_id = test_agent_id();
 
-        let job_id = harness.invoke(&mut registry, "test-agent", "hello").unwrap();
+        let job_id = harness.invoke(&mut registry, &agent_id, "hello").unwrap();
 
         // Job exists in registry with Running status
         let job = registry.get_job(&job_id).unwrap();
         assert_eq!(job.status, JobStatus::Running);
-        assert_eq!(job.agent_name, "test-agent");
+        assert_eq!(job.agent_id, agent_id);
 
-        // Message is in queue
-        let msg = queue.receive("test-agent").unwrap();
+        // Message is in queue (keyed by agent_id string)
+        let msg = queue.receive(agent_id.as_str()).unwrap();
         assert_eq!(msg.payload, b"hello");
     }
 
@@ -109,8 +115,9 @@ mod tests {
         let queue = Arc::new(InMemoryQueue::new());
         let mut harness = Harness::new(queue.clone());
         let mut registry = Registry::new();
+        let agent_id = test_agent_id();
 
-        let job_id = harness.invoke(&mut registry, "test-agent", "hello").unwrap();
+        let job_id = harness.invoke(&mut registry, &agent_id, "hello").unwrap();
 
         // Poll returns None while job is running
         assert!(harness.poll(&registry, &job_id).is_none());
@@ -121,8 +128,9 @@ mod tests {
         let queue = Arc::new(InMemoryQueue::new());
         let harness = Harness::new(queue);
         let mut registry = Registry::new();
+        let agent_id = test_agent_id();
 
-        let job_id = registry.create_job("agent".to_string(), "input".to_string());
+        let job_id = registry.create_job(agent_id, "input".to_string());
         registry.update_job_status(&job_id, JobStatus::Completed("done".to_string()));
 
         assert_eq!(harness.poll(&registry, &job_id), Some("done".to_string()));
@@ -133,12 +141,13 @@ mod tests {
         let queue = Arc::new(InMemoryQueue::new());
         let mut harness = Harness::new(queue.clone());
         let mut registry = Registry::new();
+        let agent_id = test_agent_id();
 
         // Invoke creates job and queues message
-        let job_id = harness.invoke(&mut registry, "test-agent", "hello").unwrap();
+        let job_id = harness.invoke(&mut registry, &agent_id, "hello").unwrap();
 
         // Simulate worker processing: receive request, send response
-        let request = queue.receive("test-agent").unwrap();
+        let request = queue.receive(agent_id.as_str()).unwrap();
         let response = Message::response(
             b"result".to_vec(),
             harness.reply_queue(),

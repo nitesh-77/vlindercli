@@ -54,16 +54,16 @@ impl Daemon {
         let agent = Agent::from_toml(manifest_toml)
             .map_err(|e| format!("failed to parse manifest: {:?}", e))?;
 
-        let agent_name = agent.name.clone();
+        let agent_id = agent.id.clone();
 
         // Register infrastructure if new agent
-        if self.registry.get_agent(&agent_name).is_none() {
+        if self.registry.get_agent(&agent_id).is_none() {
             self.register_agent_infrastructure(&agent);
             self.registry.register_agent(agent);
         }
 
         // Delegate to harness
-        self.harness.invoke(&mut self.registry, &agent_name, input)
+        self.harness.invoke(&mut self.registry, &agent_id, input)
     }
 
     /// Poll for job completion.

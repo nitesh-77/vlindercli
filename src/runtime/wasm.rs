@@ -16,7 +16,7 @@ use std::thread::{self, JoinHandle};
 
 use extism::{CurrentPlugin, Function, Manifest, Plugin, UserData, Val, Wasm};
 
-use crate::domain::{Agent, Runtime};
+use crate::domain::{Agent, ResourceId, Runtime};
 use crate::queue::{Message, MessageId, MessageQueue};
 
 /// Tracks a WASM execution running in a background thread.
@@ -28,7 +28,7 @@ struct RunningTask {
 
 pub struct WasmRuntime {
     queue: Arc<dyn MessageQueue + Send + Sync>,
-    agents: HashMap<String, Agent>,
+    agents: HashMap<ResourceId, Agent>,
     running: Option<RunningTask>,
 }
 
@@ -44,7 +44,7 @@ impl WasmRuntime {
 
 impl Runtime for WasmRuntime {
     fn register(&mut self, agent: Agent) {
-        self.agents.insert(agent.name.clone(), agent);
+        self.agents.insert(agent.id.clone(), agent);
     }
 
     fn tick(&mut self) -> bool {
@@ -64,8 +64,8 @@ impl Runtime for WasmRuntime {
         }
 
         // No running task, check for new work
-        for (name, agent) in &self.agents {
-            if let Ok(request) = self.queue.receive(name) {
+        for (agent_id, agent) in &self.agents {
+            if let Ok(request) = self.queue.receive(agent_id.as_str()) {
                 // Prepare data for the thread
                 let queue = Arc::clone(&self.queue);
                 let wasm_path = agent
@@ -216,9 +216,10 @@ mod tests {
         let mut runtime = WasmRuntime::new(queue);
 
         let agent = load_test_agent("reverse-agent");
+        let agent_id = agent.id.clone();
         runtime.register(agent);
 
-        assert!(runtime.agents.contains_key("reverse-agent"));
+        assert!(runtime.agents.contains_key(&agent_id));
     }
 
     #[test]
@@ -228,13 +229,14 @@ mod tests {
 
         // Register agent
         let agent = load_test_agent("reverse-agent");
+        let agent_id = agent.id.clone();
         runtime.register(agent);
 
-        // Send message to agent's queue
+        // Send message to agent's queue (keyed by agent_id)
         let reply_queue = "test-reply";
         let request = Message::request(b"hello".to_vec(), reply_queue);
         let request_id = request.id.clone();
-        queue.send("reverse-agent", request).unwrap();
+        queue.send(agent_id.as_str(), request).unwrap();
 
         // First tick spawns the WASM thread
         assert!(runtime.tick());

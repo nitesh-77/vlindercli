@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use crate::domain::Agent;
+use crate::domain::{Agent, ResourceId};
 
 /// Unique identifier for a submitted job.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -32,7 +32,7 @@ impl Default for JobId {
 #[derive(Clone, Debug)]
 pub struct Job {
     pub id: JobId,
-    pub agent_name: String,
+    pub agent_id: ResourceId,
     pub input: String,
     pub status: JobStatus,
 }
@@ -48,7 +48,7 @@ pub enum JobStatus {
 /// The registry - source of truth for all state.
 pub struct Registry {
     jobs: HashMap<JobId, Job>,
-    agents: HashMap<String, Agent>,
+    agents: HashMap<ResourceId, Agent>,
 }
 
 impl Registry {
@@ -61,11 +61,11 @@ impl Registry {
 
     // --- Job operations ---
 
-    pub fn create_job(&mut self, agent_name: String, input: String) -> JobId {
+    pub fn create_job(&mut self, agent_id: ResourceId, input: String) -> JobId {
         let id = JobId::new();
         let job = Job {
             id: id.clone(),
-            agent_name,
+            agent_id,
             input,
             status: JobStatus::Pending,
         };
@@ -93,11 +93,11 @@ impl Registry {
     // --- Agent operations ---
 
     pub fn register_agent(&mut self, agent: Agent) {
-        self.agents.insert(agent.name.clone(), agent);
+        self.agents.insert(agent.id.clone(), agent);
     }
 
-    pub fn get_agent(&self, name: &str) -> Option<&Agent> {
-        self.agents.get(name)
+    pub fn get_agent(&self, id: &ResourceId) -> Option<&Agent> {
+        self.agents.get(id)
     }
 }
 
@@ -111,17 +111,22 @@ impl Default for Registry {
 mod tests {
     use super::*;
 
+    fn test_agent_id() -> ResourceId {
+        ResourceId::new("file:///test/agent.wasm")
+    }
+
     #[test]
     fn job_lifecycle() {
         let mut registry = Registry::new();
+        let agent_id = test_agent_id();
 
         // Create job
-        let job_id = registry.create_job("test-agent".to_string(), "hello".to_string());
+        let job_id = registry.create_job(agent_id.clone(), "hello".to_string());
 
         // Initial state is Pending
         let job = registry.get_job(&job_id).unwrap();
         assert_eq!(job.status, JobStatus::Pending);
-        assert_eq!(job.agent_name, "test-agent");
+        assert_eq!(job.agent_id, agent_id);
         assert_eq!(job.input, "hello");
 
         // Update to Running
@@ -139,10 +144,11 @@ mod tests {
     #[test]
     fn pending_jobs_filters_by_status() {
         let mut registry = Registry::new();
+        let agent_id = test_agent_id();
 
-        let job1 = registry.create_job("agent".to_string(), "a".to_string());
-        let job2 = registry.create_job("agent".to_string(), "b".to_string());
-        let _job3 = registry.create_job("agent".to_string(), "c".to_string());
+        let job1 = registry.create_job(agent_id.clone(), "a".to_string());
+        let job2 = registry.create_job(agent_id.clone(), "b".to_string());
+        let _job3 = registry.create_job(agent_id.clone(), "c".to_string());
 
         // All three are pending
         assert_eq!(registry.pending_jobs().len(), 3);
@@ -160,16 +166,18 @@ mod tests {
         use std::path::Path;
 
         let mut registry = Registry::new();
+        let fake_id = ResourceId::new("file:///nonexistent/agent.wasm");
 
         // Agent not found initially
-        assert!(registry.get_agent("test-agent").is_none());
+        assert!(registry.get_agent(&fake_id).is_none());
 
         // Register agent
         let agent = Agent::load(Path::new("tests/fixtures/agents/echo-agent")).unwrap();
+        let agent_id = agent.id.clone();
         registry.register_agent(agent);
 
-        // Now found
-        let agent = registry.get_agent("echo-agent").unwrap();
+        // Now found by id
+        let agent = registry.get_agent(&agent_id).unwrap();
         assert_eq!(agent.name, "echo-agent");
     }
 }
