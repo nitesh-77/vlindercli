@@ -9,11 +9,11 @@
 
 use std::sync::Arc;
 
-use crate::domain::{Agent, Model, ModelType};
+use crate::domain::{Agent, Model, ModelType, Provider};
 use crate::embedding::{open_embedding_engine, InMemoryEmbedding};
 use crate::inference::{open_inference_engine, InMemoryInference};
 use crate::queue::{InMemoryQueue, Message, MessageId, MessageQueue};
-use crate::runtime::{Provider, WasmRuntime};
+use crate::runtime::WasmRuntime;
 use crate::storage::dispatch::{in_memory_storage, open_object_storage, open_vector_storage};
 
 /// A harness for interacting with agents.
@@ -112,8 +112,8 @@ impl CliHarness {
         let storage = in_memory_storage();
         let object = open_object_storage(&storage).expect("in-memory storage always succeeds");
         let vector = open_vector_storage(&storage).expect("in-memory storage always succeeds");
-        self.provider.object.register(&agent_name, object);
-        self.provider.vector.register(&agent_name, vector);
+        self.provider.register_object(&agent_name, object);
+        self.provider.register_vector(&agent_name, vector);
 
         // Register models on Provider
         for (model_name, model_uri) in &agent.requirements.models {
@@ -148,12 +148,12 @@ impl CliHarness {
                 match open_inference_engine(&model) {
                     Ok(engine) => {
                         eprintln!("[info] Loaded inference model: {}", model_name);
-                        self.provider.inference.register(model_name, engine);
+                        self.provider.register_inference(model_name, engine);
                     }
                     Err(e) => {
                         eprintln!("[warning] Failed to load inference model {}, using placeholder: {}", model_name, e);
                         let engine = Arc::new(InMemoryInference::new("[inference placeholder]"));
-                        self.provider.inference.register(model_name, engine);
+                        self.provider.register_inference(model_name, engine);
                     }
                 }
             }
@@ -161,13 +161,13 @@ impl CliHarness {
                 match open_embedding_engine(&model) {
                     Ok(engine) => {
                         eprintln!("[info] Loaded embedding model: {}", model_name);
-                        self.provider.embedding.register(model_name, engine);
+                        self.provider.register_embedding(model_name, engine);
                     }
                     Err(e) => {
                         eprintln!("[warning] Failed to load embedding model {}, using placeholder: {}", model_name, e);
                         let canned: Vec<f32> = (0..768).map(|i| i as f32 * 0.001).collect();
                         let engine = Arc::new(InMemoryEmbedding::new(canned));
-                        self.provider.embedding.register(model_name, engine);
+                        self.provider.register_embedding(model_name, engine);
                     }
                 }
             }

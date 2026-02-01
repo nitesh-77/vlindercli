@@ -6,7 +6,7 @@
 //! - `vector-delete`: Delete an embedding
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use serde::Deserialize;
 
@@ -45,20 +45,20 @@ struct DeleteRequest {
 
 pub struct VectorServiceWorker {
     queue: Arc<dyn MessageQueue + Send + Sync>,
-    stores: HashMap<String, Arc<dyn VectorStorage>>,
+    stores: RwLock<HashMap<String, Arc<dyn VectorStorage>>>,
 }
 
 impl VectorServiceWorker {
     pub fn new(queue: Arc<dyn MessageQueue + Send + Sync>) -> Self {
         Self {
             queue,
-            stores: HashMap::new(),
+            stores: RwLock::new(HashMap::new()),
         }
     }
 
     /// Register storage for a namespace (typically agent name).
-    pub fn register(&mut self, namespace: &str, storage: Arc<dyn VectorStorage>) {
-        self.stores.insert(namespace.to_string(), storage);
+    pub fn register(&self, namespace: &str, storage: Arc<dyn VectorStorage>) {
+        self.stores.write().unwrap().insert(namespace.to_string(), storage);
     }
 
     /// Process one message if available. Returns true if processed.
@@ -107,7 +107,8 @@ impl VectorServiceWorker {
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
 
-        let store = match self.stores.get(&req.namespace) {
+        let stores = self.stores.read().unwrap();
+        let store = match stores.get(&req.namespace) {
             Some(s) => s,
             None => return format!("[error] unknown namespace: {}", req.namespace).into_bytes(),
         };
@@ -125,7 +126,8 @@ impl VectorServiceWorker {
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
 
-        let store = match self.stores.get(&req.namespace) {
+        let stores = self.stores.read().unwrap();
+        let store = match stores.get(&req.namespace) {
             Some(s) => s,
             None => return format!("[error] unknown namespace: {}", req.namespace).into_bytes(),
         };
@@ -143,7 +145,8 @@ impl VectorServiceWorker {
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
 
-        let store = match self.stores.get(&req.namespace) {
+        let stores = self.stores.read().unwrap();
+        let store = match stores.get(&req.namespace) {
             Some(s) => s,
             None => return format!("[error] unknown namespace: {}", req.namespace).into_bytes(),
         };
@@ -166,7 +169,7 @@ mod tests {
     #[test]
     fn handles_store_and_search() {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
-        let mut handler = VectorServiceWorker::new(Arc::clone(&queue));
+        let handler = VectorServiceWorker::new(Arc::clone(&queue));
 
         // Register storage
         let storage = in_memory_storage();

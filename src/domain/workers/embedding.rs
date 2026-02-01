@@ -4,7 +4,7 @@
 //! - `embed`: Generate embeddings for text
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use serde::Deserialize;
 
@@ -28,20 +28,20 @@ struct EmbedRequest {
 
 pub struct EmbeddingServiceWorker {
     queue: Arc<dyn MessageQueue + Send + Sync>,
-    engines: HashMap<String, Arc<dyn EmbeddingEngine>>,
+    engines: RwLock<HashMap<String, Arc<dyn EmbeddingEngine>>>,
 }
 
 impl EmbeddingServiceWorker {
     pub fn new(queue: Arc<dyn MessageQueue + Send + Sync>) -> Self {
         Self {
             queue,
-            engines: HashMap::new(),
+            engines: RwLock::new(HashMap::new()),
         }
     }
 
     /// Register an embedding engine by model name.
-    pub fn register(&mut self, model_name: &str, engine: Arc<dyn EmbeddingEngine>) {
-        self.engines.insert(model_name.to_string(), engine);
+    pub fn register(&self, model_name: &str, engine: Arc<dyn EmbeddingEngine>) {
+        self.engines.write().unwrap().insert(model_name.to_string(), engine);
     }
 
     /// Process one message if available. Returns true if processed.
@@ -65,7 +65,8 @@ impl EmbeddingServiceWorker {
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
 
-        let engine = match self.engines.get(&req.model) {
+        let engines = self.engines.read().unwrap();
+        let engine = match engines.get(&req.model) {
             Some(e) => e,
             None => return format!("[error] unknown model: {}", req.model).into_bytes(),
         };
@@ -93,7 +94,7 @@ mod tests {
     #[test]
     fn handles_embed_request() {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
-        let mut handler = EmbeddingServiceWorker::new(Arc::clone(&queue));
+        let handler = EmbeddingServiceWorker::new(Arc::clone(&queue));
 
         // Register mock engine
         let canned: Vec<f32> = (0..768).map(|i| i as f32 * 0.001).collect();

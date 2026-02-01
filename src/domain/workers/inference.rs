@@ -4,7 +4,7 @@
 //! - `infer`: Run inference with a model
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use serde::Deserialize;
 
@@ -34,20 +34,20 @@ fn default_max_tokens() -> u32 {
 
 pub struct InferenceServiceWorker {
     queue: Arc<dyn MessageQueue + Send + Sync>,
-    engines: HashMap<String, Arc<dyn InferenceEngine>>,
+    engines: RwLock<HashMap<String, Arc<dyn InferenceEngine>>>,
 }
 
 impl InferenceServiceWorker {
     pub fn new(queue: Arc<dyn MessageQueue + Send + Sync>) -> Self {
         Self {
             queue,
-            engines: HashMap::new(),
+            engines: RwLock::new(HashMap::new()),
         }
     }
 
     /// Register an inference engine by model name.
-    pub fn register(&mut self, model_name: &str, engine: Arc<dyn InferenceEngine>) {
-        self.engines.insert(model_name.to_string(), engine);
+    pub fn register(&self, model_name: &str, engine: Arc<dyn InferenceEngine>) {
+        self.engines.write().unwrap().insert(model_name.to_string(), engine);
     }
 
     /// Process one message if available. Returns true if processed.
@@ -71,7 +71,8 @@ impl InferenceServiceWorker {
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
 
-        let engine = match self.engines.get(&req.model) {
+        let engines = self.engines.read().unwrap();
+        let engine = match engines.get(&req.model) {
             Some(e) => e,
             None => return format!("[error] unknown model: {}", req.model).into_bytes(),
         };
@@ -93,7 +94,7 @@ mod tests {
     #[test]
     fn handles_infer_request() {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
-        let mut handler = InferenceServiceWorker::new(Arc::clone(&queue));
+        let handler = InferenceServiceWorker::new(Arc::clone(&queue));
 
         // Register mock engine
         let engine = Arc::new(InMemoryInference::new("test response"));

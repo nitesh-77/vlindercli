@@ -15,6 +15,7 @@ mod fleet_manifest;
 mod harness;
 mod inference;
 mod model;
+mod provider;
 mod model_manifest;
 mod path;
 mod resource_id;
@@ -71,6 +72,12 @@ pub use embedding::{
 
 pub use model::{Model, ModelType, ModelEngine, LoadError as ModelLoadError};
 pub use model_manifest::{ModelManifest, ModelTypeConfig, ModelEngineConfig};
+
+// ============================================================================
+// Provider
+// ============================================================================
+
+pub use provider::Provider;
 
 // ============================================================================
 // Harness
