@@ -6,7 +6,9 @@
 mod object;
 mod vector;
 mod inference;
+mod embedding;
 
 pub use object::ObjectServiceWorker;
 pub use vector::VectorServiceWorker;
 pub use inference::InferenceServiceWorker;
+pub use embedding::EmbeddingServiceWorker;
