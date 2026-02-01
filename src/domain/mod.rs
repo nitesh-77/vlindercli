@@ -14,9 +14,11 @@ mod embedding;
 mod fleet;
 mod fleet_manifest;
 mod harness;
+mod harness2;
 mod inference;
 mod model;
 mod provider;
+mod registry;
 mod runtime;
 mod model_manifest;
 mod path;
@@ -94,7 +96,8 @@ pub use runtime::Runtime;
 pub use harness::{CliHarness, Harness, HarnessError};
 
 // ============================================================================
-// Daemon
+// Daemon & Registry
 // ============================================================================
 
-pub use daemon::{Daemon, AgentId};
+pub use daemon::Daemon;
+pub use registry::JobId;
