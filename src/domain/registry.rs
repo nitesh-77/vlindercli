@@ -47,6 +47,8 @@ pub enum JobStatus {
 
 /// The registry - source of truth for all state.
 pub struct Registry {
+    /// URI where this registry exposes its API.
+    pub id: ResourceId,
     jobs: HashMap<JobId, Job>,
     agents: HashMap<ResourceId, Agent>,
 }
@@ -54,6 +56,7 @@ pub struct Registry {
 impl Registry {
     pub fn new() -> Self {
         Self {
+            id: ResourceId::new("http://127.0.0.1:9000"),
             jobs: HashMap::new(),
             agents: HashMap::new(),
         }
@@ -113,6 +116,15 @@ mod tests {
 
     fn test_agent_id() -> ResourceId {
         ResourceId::new("file:///test/agent.wasm")
+    }
+
+    #[test]
+    fn registry_has_api_endpoint() {
+        let registry = Registry::new();
+
+        // Registry exposes an HTTP API endpoint
+        assert_eq!(registry.id.scheme(), Some("http"));
+        assert!(registry.id.as_str().starts_with("http://127.0.0.1:"));
     }
 
     #[test]
