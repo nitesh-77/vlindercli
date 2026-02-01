@@ -2,16 +2,51 @@
 //!
 //! Defines how agents are registered and executed.
 
-use super::Agent;
+use super::{Agent, ResourceId};
+
+// ============================================================================
+// Runtime Type (compile-time supported runtimes)
+// ============================================================================
+
+/// Supported runtime types.
+///
+/// This is a compile-time enum - adding a new runtime type requires code changes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum RuntimeType {
+    /// WebAssembly runtime (Extism/WASI)
+    Wasm,
+    // Future: Lambda, Container, etc.
+}
+
+impl RuntimeType {
+    /// String representation for URI construction.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            RuntimeType::Wasm => "wasm",
+        }
+    }
+}
+
+// ============================================================================
+// Runtime Trait
+// ============================================================================
 
 /// Executes agents in response to queue messages.
 ///
 /// The runtime:
+/// - Has a unique id (`<registry>/runtimes/<type>`)
 /// - Registers agents to serve
 /// - Polls their input queues
 /// - Executes agent code on message arrival
 /// - Sends responses to reply queues
 pub trait Runtime {
+    /// Unique identifier for this runtime instance.
+    /// Format: `<registry_id>/runtimes/<runtime_type>`
+    fn id(&self) -> &ResourceId;
+
+    /// The type of runtime (Wasm, Lambda, etc.)
+    fn runtime_type(&self) -> RuntimeType;
+
     /// Register an agent to be served by this runtime.
     fn register(&mut self, agent: Agent);
 
@@ -27,6 +62,7 @@ mod tests {
 
     /// Mock runtime for testing - records registrations, returns canned responses.
     struct MockRuntime {
+        id: ResourceId,
         agents: HashMap<String, Agent>,
         work_available: bool,
     }
@@ -34,6 +70,7 @@ mod tests {
     impl MockRuntime {
         fn new() -> Self {
             Self {
+                id: ResourceId::new("http://test/runtimes/mock"),
                 agents: HashMap::new(),
                 work_available: false,
             }
@@ -49,6 +86,14 @@ mod tests {
     }
 
     impl Runtime for MockRuntime {
+        fn id(&self) -> &ResourceId {
+            &self.id
+        }
+
+        fn runtime_type(&self) -> RuntimeType {
+            RuntimeType::Wasm // Mock as Wasm for testing
+        }
+
         fn register(&mut self, agent: Agent) {
             self.agents.insert(agent.name.clone(), agent);
         }

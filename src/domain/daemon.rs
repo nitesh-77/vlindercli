@@ -10,7 +10,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::domain::{Agent, Model, ModelType, Provider, Runtime};
+use crate::domain::{Agent, Model, ModelType, Provider, Runtime, RuntimeType};
 use crate::domain::harness::Harness;
 use crate::domain::registry::{JobId, Registry};
 use crate::embedding::{open_embedding_engine, InMemoryEmbedding};
@@ -34,11 +34,16 @@ pub struct Daemon {
 impl Daemon {
     pub fn new() -> Self {
         let queue = Arc::new(InMemoryQueue::new());
+        let mut registry = Registry::new();
+        let runtime = WasmRuntime::new(&registry.id, queue.clone());
+
+        // Register available runtimes
+        registry.register_runtime(RuntimeType::Wasm);
 
         Self {
-            registry: Registry::new(),
+            registry,
             harness: Harness::new(queue.clone()),
-            runtime: WasmRuntime::new(queue.clone()),
+            runtime,
             provider: Provider::new(queue.clone()),
             queue,
         }
@@ -58,7 +63,7 @@ impl Daemon {
 
         // Register infrastructure if new agent
         if self.registry.get_agent(&agent_id).is_none() {
-            self.register_agent_infrastructure(&agent);
+            self.register_agent_infrastructure(&agent)?;
             self.registry.register_agent(agent);
         }
 
@@ -86,7 +91,11 @@ impl Daemon {
     // Infrastructure Setup
     // ========================================================================
 
-    fn register_agent_infrastructure(&mut self, agent: &Agent) {
+    fn register_agent_infrastructure(&mut self, agent: &Agent) -> Result<(), String> {
+        // Select runtime first - fail fast if no suitable runtime
+        let runtime_type = self.registry.select_runtime(agent)
+            .ok_or_else(|| format!("no runtime available for agent: {}", agent.id.as_str()))?;
+
         let name = &agent.name;
 
         // Storage
@@ -101,8 +110,12 @@ impl Daemon {
             self.register_model(model_name, model_uri.as_str());
         }
 
-        // Runtime
-        self.runtime.register(agent.clone());
+        // Register with selected runtime
+        match runtime_type {
+            RuntimeType::Wasm => self.runtime.register(agent.clone()),
+        }
+
+        Ok(())
     }
 
     fn register_model(&mut self, model_name: &str, model_uri: &str) {
@@ -182,5 +195,24 @@ mod tests {
         };
 
         assert_eq!(result, "olleh");
+    }
+
+    #[test]
+    fn invoke_rejects_agent_with_no_matching_runtime() {
+        let mut daemon = Daemon::new();
+
+        // Agent with http:// scheme - no runtime supports this
+        let manifest = r#"
+            name = "remote-agent"
+            description = "An agent hosted remotely"
+            id = "http://example.com/agent.wasm"
+            [requirements]
+            services = []
+        "#;
+
+        let result = daemon.invoke(manifest, "hello");
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("no runtime available"));
     }
 }

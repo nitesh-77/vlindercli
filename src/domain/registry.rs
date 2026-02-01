@@ -1,12 +1,13 @@
 //! Registry - source of truth for all system state.
 //!
 //! Stores:
+//! - Runtimes (available at `/runtimes`)
+//! - Agents (registered agent definitions)
 //! - Jobs (submitted, running, completed)
-//! - Agent definitions (parsed from TOML)
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-use crate::domain::{Agent, ResourceId};
+use crate::domain::{Agent, ResourceId, RuntimeType};
 
 /// Unique identifier for a submitted job.
 ///
@@ -50,6 +51,7 @@ pub struct Registry {
     pub id: ResourceId,
     jobs: HashMap<JobId, Job>,
     agents: HashMap<ResourceId, Agent>,
+    available_runtimes: HashSet<RuntimeType>,
 }
 
 impl Registry {
@@ -58,7 +60,30 @@ impl Registry {
             id: ResourceId::new("http://127.0.0.1:9000"),
             jobs: HashMap::new(),
             agents: HashMap::new(),
+            available_runtimes: HashSet::new(),
         }
+    }
+
+    // --- Runtime operations ---
+
+    /// Register a runtime type as available.
+    pub fn register_runtime(&mut self, runtime_type: RuntimeType) {
+        self.available_runtimes.insert(runtime_type);
+    }
+
+    /// Select the appropriate runtime for an agent based on its id.
+    ///
+    /// Returns None if no suitable runtime is available.
+    pub fn select_runtime(&self, agent: &Agent) -> Option<RuntimeType> {
+        // file:// scheme + .wasm extension → Wasm runtime
+        if agent.id.scheme() == Some("file") {
+            if let Some(path) = agent.id.path() {
+                if path.ends_with(".wasm") && self.available_runtimes.contains(&RuntimeType::Wasm) {
+                    return Some(RuntimeType::Wasm);
+                }
+            }
+        }
+        None
     }
 
     // --- Job operations ---
@@ -202,5 +227,60 @@ mod tests {
         // Now found by id
         let agent = registry.get_agent(&agent_id).unwrap();
         assert_eq!(agent.name, "echo-agent");
+    }
+
+    #[test]
+    fn select_runtime_for_file_wasm() {
+        use std::path::Path;
+
+        let mut registry = Registry::new();
+        registry.register_runtime(RuntimeType::Wasm);
+
+        let agent = Agent::load(Path::new("tests/fixtures/agents/echo-agent")).unwrap();
+
+        // file:// + .wasm → Wasm runtime
+        assert_eq!(registry.select_runtime(&agent), Some(RuntimeType::Wasm));
+    }
+
+    #[test]
+    fn select_runtime_returns_none_without_registered_runtime() {
+        use std::path::Path;
+
+        let registry = Registry::new(); // No runtimes registered
+
+        let agent = Agent::load(Path::new("tests/fixtures/agents/echo-agent")).unwrap();
+
+        // No Wasm runtime available
+        assert_eq!(registry.select_runtime(&agent), None);
+    }
+
+    #[test]
+    fn select_runtime_returns_none_for_non_file_scheme() {
+        use std::path::Path;
+
+        let mut registry = Registry::new();
+        registry.register_runtime(RuntimeType::Wasm);
+
+        // Load agent and modify its id to use http:// scheme
+        let mut agent = Agent::load(Path::new("tests/fixtures/agents/echo-agent")).unwrap();
+        agent.id = ResourceId::new("http://example.com/agent.wasm");
+
+        // http:// scheme → no runtime (only file:// supported)
+        assert_eq!(registry.select_runtime(&agent), None);
+    }
+
+    #[test]
+    fn select_runtime_returns_none_for_non_wasm_extension() {
+        use std::path::Path;
+
+        let mut registry = Registry::new();
+        registry.register_runtime(RuntimeType::Wasm);
+
+        // Load agent and modify its id to use non-.wasm extension
+        let mut agent = Agent::load(Path::new("tests/fixtures/agents/echo-agent")).unwrap();
+        agent.id = ResourceId::new("file:///path/to/agent.js");
+
+        // file:// but not .wasm → no runtime
+        assert_eq!(registry.select_runtime(&agent), None);
     }
 }

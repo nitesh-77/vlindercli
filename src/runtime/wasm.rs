@@ -16,7 +16,7 @@ use std::thread::{self, JoinHandle};
 
 use extism::{CurrentPlugin, Function, Manifest, Plugin, UserData, Val, Wasm};
 
-use crate::domain::{Agent, ResourceId, Runtime};
+use crate::domain::{Agent, ResourceId, Runtime, RuntimeType};
 use crate::queue::{Message, MessageId, MessageQueue};
 
 /// Tracks a WASM execution running in a background thread.
@@ -27,14 +27,21 @@ struct RunningTask {
 }
 
 pub struct WasmRuntime {
+    id: ResourceId,
     queue: Arc<dyn MessageQueue + Send + Sync>,
     agents: HashMap<ResourceId, Agent>,
     running: Option<RunningTask>,
 }
 
 impl WasmRuntime {
-    pub fn new(queue: Arc<dyn MessageQueue + Send + Sync>) -> Self {
+    pub fn new(registry_id: &ResourceId, queue: Arc<dyn MessageQueue + Send + Sync>) -> Self {
+        let id = ResourceId::new(format!(
+            "{}/runtimes/{}",
+            registry_id.as_str(),
+            RuntimeType::Wasm.as_str()
+        ));
         Self {
+            id,
             queue,
             agents: HashMap::new(),
             running: None,
@@ -43,6 +50,14 @@ impl WasmRuntime {
 }
 
 impl Runtime for WasmRuntime {
+    fn id(&self) -> &ResourceId {
+        &self.id
+    }
+
+    fn runtime_type(&self) -> RuntimeType {
+        RuntimeType::Wasm
+    }
+
     fn register(&mut self, agent: Agent) {
         self.agents.insert(agent.id.clone(), agent);
     }
@@ -205,15 +220,29 @@ mod tests {
     use crate::queue::{InMemoryQueue, Message, MessageQueue};
     use std::path::Path;
 
+    fn test_registry_id() -> ResourceId {
+        ResourceId::new("http://test:9000")
+    }
+
     fn load_test_agent(name: &str) -> Agent {
         let path = Path::new("tests/fixtures/agents").join(name);
         Agent::load(&path).unwrap()
     }
 
     #[test]
+    fn runtime_id_format() {
+        let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
+        let runtime = WasmRuntime::new(&test_registry_id(), queue);
+
+        // Format: <registry_id>/runtimes/<runtime_type>
+        assert_eq!(runtime.id().as_str(), "http://test:9000/runtimes/wasm");
+        assert_eq!(runtime.runtime_type(), RuntimeType::Wasm);
+    }
+
+    #[test]
     fn runtime_registers_agent() {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
-        let mut runtime = WasmRuntime::new(queue);
+        let mut runtime = WasmRuntime::new(&test_registry_id(), queue);
 
         let agent = load_test_agent("reverse-agent");
         let agent_id = agent.id.clone();
@@ -225,7 +254,7 @@ mod tests {
     #[test]
     fn tick_processes_message() {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
-        let mut runtime = WasmRuntime::new(Arc::clone(&queue));
+        let mut runtime = WasmRuntime::new(&test_registry_id(), Arc::clone(&queue));
 
         // Register agent
         let agent = load_test_agent("reverse-agent");

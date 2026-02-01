@@ -86,7 +86,7 @@ pub use provider::Provider;
 // Runtime (trait)
 // ============================================================================
 
-pub use runtime::Runtime;
+pub use runtime::{Runtime, RuntimeType};
 
 // ============================================================================
 // Harness (internal to Daemon)

@@ -170,13 +170,16 @@ Everything is in-process. Harness IS the system.
 | VectorStorageManifest | ✓ | Serde-deserializable, tagged enum |
 | AgentManifest.object_storage | ✓ | Optional ResourceId field |
 | AgentManifest.vector_storage | ✓ | Optional ResourceId field |
-| Registry | ✓ | Stores jobs and agents, has API endpoint URI |
+| Registry | ✓ | Stores jobs, agents, and available runtimes |
 | JobId | ✓ | Full URI: `<registry_id>/jobs/<uuid>` |
 | Job | ✓ | agent_id (ResourceId), input, status |
 | JobStatus | ✓ | Pending, Running, Completed, Failed |
 | Daemon | ✓ | Control plane owning Registry, Harness, Runtime, Provider |
 | Harness (Daemon-owned) | ✓ | API surface for invoke/poll, owned by Daemon |
 | Runtime uses ResourceId | ✓ | Agents keyed by ResourceId, queue routing by agent_id |
+| RuntimeType | ✓ | Compile-time enum: Wasm (future: Lambda, Container) |
+| Runtime.id() | ✓ | Returns ResourceId: `<registry_id>/runtimes/<type>` |
+| Runtime dispatch | ✓ | Registry.select_runtime() - see ADR 034 |
 
 ### Desired State
 
