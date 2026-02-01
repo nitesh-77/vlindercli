@@ -170,7 +170,7 @@ Loader
 CliHarness
  └── uses WasmRuntime
       └── uses MessageQueue
-      └── uses ServiceHandlers
+      └── uses Provider
            ├── InferenceServiceHandler → InferenceEngine
            ├── EmbeddingServiceHandler → EmbeddingEngine
            ├── ObjectServiceHandler → ObjectStorage
@@ -336,7 +336,7 @@ Location: [`src/domain/harness.rs`](../src/domain/harness.rs)
 │             InMemoryObjectStorage, InMemoryVectorStorage    │
 │  Queue:     InMemoryQueue, Message                          │
 │  Loader:    FileLoader                                      │
-│  Runtime:   WasmRuntime, ServiceHandlers                    │
+│  Runtime:   WasmRuntime, Provider                           │
 │  Harness:   CliHarness                                      │
 └─────────────────────────────────────────────────────────────┘
 ```

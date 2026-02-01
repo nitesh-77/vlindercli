@@ -24,15 +24,15 @@ use super::services::{
     ObjectServiceHandler, VectorServiceHandler,
 };
 
-/// Shared service handlers that can be accessed from host functions
-struct ServiceHandlers {
+/// Shared service provider that can be accessed from host functions
+struct Provider {
     object: ObjectServiceHandler,
     vector: VectorServiceHandler,
     inference: InferenceServiceHandler,
     embedding: EmbeddingServiceHandler,
 }
 
-impl ServiceHandlers {
+impl Provider {
     /// Process one service message if available. Returns true if processed.
     fn tick(&self) -> bool {
         if self.object.tick() { return true; }
@@ -46,12 +46,12 @@ impl ServiceHandlers {
 pub struct WasmRuntime {
     queue: Arc<InMemoryQueue>,
     agents: HashMap<String, Agent>,
-    services: Arc<Mutex<ServiceHandlers>>,
+    services: Arc<Mutex<Provider>>,
 }
 
 impl WasmRuntime {
     pub fn new(queue: Arc<InMemoryQueue>) -> Self {
-        let services = ServiceHandlers {
+        let services = Provider {
             object: ObjectServiceHandler::new(Arc::clone(&queue)),
             vector: VectorServiceHandler::new(Arc::clone(&queue)),
             inference: InferenceServiceHandler::new(Arc::clone(&queue)),
@@ -182,14 +182,14 @@ fn make_send_function(queue: Arc<InMemoryQueue>) -> Function {
 /// Data passed to the receive function - queue and service handlers
 struct ReceiveData {
     queue: Arc<InMemoryQueue>,
-    services: Arc<Mutex<ServiceHandlers>>,
+    services: Arc<Mutex<Provider>>,
 }
 
 /// Host function: receive(queue_name) -> payload
 ///
 /// Receives a message from a queue. Processes service queues while waiting
 /// to avoid deadlock when agent is waiting for a service response.
-fn make_receive_function(queue: Arc<InMemoryQueue>, services: Arc<Mutex<ServiceHandlers>>) -> Function {
+fn make_receive_function(queue: Arc<InMemoryQueue>, services: Arc<Mutex<Provider>>) -> Function {
     Function::new(
         "receive",
         [extism::PTR], // queue_name

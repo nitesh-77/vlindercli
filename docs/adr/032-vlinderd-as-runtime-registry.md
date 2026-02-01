@@ -154,7 +154,7 @@ vlinderd
 ```
 CliHarness (single process)
 ├── embeds WasmRuntime
-├── embeds ServiceHandlers (object, vector, inference, embedding)
+├── embeds Provider (object, vector, inference, embedding)
 ├── embeds InMemoryQueue
 └── register() does everything: creates storage, loads models, registers agent
 ```
