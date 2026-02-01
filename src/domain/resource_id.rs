@@ -31,7 +31,56 @@ impl ResourceId {
 
     /// Get the scheme (e.g., "sqlite", "s3", "memory", "ollama").
     pub fn scheme(&self) -> Option<&str> {
+        if !self.0.contains("://") {
+            return None;
+        }
         self.0.split("://").next()
+    }
+
+    /// Get the authority (host, bucket, or service name).
+    ///
+    /// URI format: `scheme://authority/path`
+    /// - `s3://bucket/key` → Some("bucket")
+    /// - `https://api.example.com/path` → Some("api.example.com")
+    /// - `file:///absolute/path` → None (empty authority)
+    /// - `memory://test` → Some("test")
+    pub fn authority(&self) -> Option<&str> {
+        // Get everything after "://"
+        let after_scheme = self.0.split("://").nth(1)?;
+
+        // Split on first "/" to separate authority from path
+        let authority = match after_scheme.find('/') {
+            Some(0) => return None,  // Empty authority (e.g., file:///)
+            Some(idx) => &after_scheme[..idx],
+            None => after_scheme,     // No path, entire rest is authority
+        };
+
+        if authority.is_empty() {
+            None
+        } else {
+            Some(authority)
+        }
+    }
+
+    /// Get the path component.
+    ///
+    /// URI format: `scheme://authority/path`
+    /// - `s3://bucket/prefix/key` → Some("/prefix/key")
+    /// - `file:///home/user/file.txt` → Some("/home/user/file.txt")
+    /// - `memory://test` → None (no path)
+    pub fn path(&self) -> Option<&str> {
+        // Get everything after "://"
+        let after_scheme = self.0.split("://").nth(1)?;
+
+        // Find the first "/" which starts the path
+        let path_start = after_scheme.find('/')?;
+        let path = &after_scheme[path_start..];
+
+        if path.is_empty() || path == "/" {
+            None
+        } else {
+            Some(path)
+        }
     }
 }
 
@@ -106,5 +155,86 @@ mod tests {
         let json = r#""memory://test""#;
         let id: ResourceId = serde_json::from_str(json).unwrap();
         assert_eq!(id.as_str(), "memory://test");
+    }
+
+    // ========================================================================
+    // URI Parsing Tests (TDD - tests first, implementation follows)
+    // ========================================================================
+
+    #[test]
+    fn authority_for_s3() {
+        // s3://bucket/prefix/key → authority is "bucket"
+        let id = ResourceId::new("s3://my-bucket/prefix/key");
+        assert_eq!(id.authority(), Some("my-bucket"));
+    }
+
+    #[test]
+    fn authority_for_https() {
+        // https://api.example.com/v1/agents → authority is "api.example.com"
+        let id = ResourceId::new("https://api.example.com/v1/agents");
+        assert_eq!(id.authority(), Some("api.example.com"));
+    }
+
+    #[test]
+    fn authority_for_memory() {
+        // memory://test → authority is "test"
+        let id = ResourceId::new("memory://test");
+        assert_eq!(id.authority(), Some("test"));
+    }
+
+    #[test]
+    fn authority_for_file_is_empty() {
+        // file:///absolute/path → no authority (empty string between file:// and /path)
+        let id = ResourceId::new("file:///home/user/agent.wasm");
+        assert_eq!(id.authority(), None);
+    }
+
+    #[test]
+    fn authority_for_sqlite_is_empty() {
+        // sqlite:///path/to/db.sqlite → no authority
+        let id = ResourceId::new("sqlite:///data/notes.db");
+        assert_eq!(id.authority(), None);
+    }
+
+    #[test]
+    fn path_for_s3() {
+        // s3://bucket/prefix/key → path is "/prefix/key"
+        let id = ResourceId::new("s3://my-bucket/prefix/key");
+        assert_eq!(id.path(), Some("/prefix/key"));
+    }
+
+    #[test]
+    fn path_for_file() {
+        // file:///home/user/agent.wasm → path is "/home/user/agent.wasm"
+        let id = ResourceId::new("file:///home/user/agent.wasm");
+        assert_eq!(id.path(), Some("/home/user/agent.wasm"));
+    }
+
+    #[test]
+    fn path_for_memory_is_empty() {
+        // memory://test → no path
+        let id = ResourceId::new("memory://test");
+        assert_eq!(id.path(), None);
+    }
+
+    #[test]
+    fn path_for_https() {
+        // https://api.example.com/v1/agents → path is "/v1/agents"
+        let id = ResourceId::new("https://api.example.com/v1/agents");
+        assert_eq!(id.path(), Some("/v1/agents"));
+    }
+
+    #[test]
+    fn path_for_ollama_is_empty() {
+        // ollama://phi3 → no path
+        let id = ResourceId::new("ollama://phi3");
+        assert_eq!(id.path(), None);
+    }
+
+    #[test]
+    fn scheme_returns_none_for_invalid() {
+        // No "://" separator
+        let id = ResourceId::new("not-a-uri");
+        assert_eq!(id.scheme(), None);
     }
 }
