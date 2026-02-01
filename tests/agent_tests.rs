@@ -197,6 +197,30 @@ fn agent_id_resolved_to_uri() {
 }
 
 #[test]
+fn agent_id_has_file_scheme() {
+    let agent = Agent::load(&agent_fixture("echo-agent")).unwrap();
+
+    // ResourceId parsing works on loaded agents
+    assert_eq!(agent.id.scheme(), Some("file"));
+    assert!(agent.id.path().unwrap().ends_with("agent.wasm"));
+}
+
+#[test]
+fn manifest_with_remote_uri_passes_through() {
+    // Non-file URIs should pass through without resolution
+    let manifest: AgentManifest = parse_manifest(r#"
+        name = "lambda-agent"
+        description = "Agent running on AWS Lambda"
+        id = "aws://lambda/us-east-1/my-function"
+
+        [requirements]
+        services = []
+    "#).unwrap();
+
+    assert_eq!(manifest.id, "aws://lambda/us-east-1/my-function");
+}
+
+#[test]
 fn agent_load_fails_for_missing_id() {
     // Create temp directory with manifest pointing to non-existent code
     let temp_dir = std::env::temp_dir().join("vlinder-test-missing-id");
