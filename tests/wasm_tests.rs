@@ -9,9 +9,7 @@ fn fixture(name: &str) -> PathBuf {
 
 fn run_agent(name: &str, input: &str) -> String {
     let mut harness = CliHarness::new();
-    let agent = Agent::load(&fixture(name)).unwrap();
-    let agent_name = agent.name.clone();
-    harness.register(agent);
+    let agent_name = harness.load_agent(&fixture(name)).unwrap();
 
     let request_id = harness.invoke(&agent_name, input).unwrap();
     harness.run_until_response(&request_id).unwrap()

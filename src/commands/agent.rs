@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::Subcommand;
 
-use vlindercli::domain::{Agent, CliHarness, Harness};
+use vlindercli::domain::{CliHarness, Harness};
 
 use super::repl;
 
@@ -32,13 +32,11 @@ fn run(path: Option<PathBuf>) {
         .canonicalize()
         .expect("Failed to resolve agent path");
 
-    // Load agent
-    let agent = Agent::load(&absolute_path).expect("Failed to load agent");
-    let agent_name = agent.name.clone();
-
-    // Create harness and register agent
+    // Create harness and load agent
     let mut harness = CliHarness::new();
-    harness.register(agent);
+    let agent_name = harness
+        .load_agent(&absolute_path)
+        .expect("Failed to load agent");
 
     // Run REPL
     repl::run(|input| {

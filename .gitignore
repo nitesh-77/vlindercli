@@ -10,3 +10,4 @@ agents/*/*.wasm
 tests/fixtures/agents/
 tests/fixtures/fleets/*/agents/
 dev-project/
+agents/pensieve/data/

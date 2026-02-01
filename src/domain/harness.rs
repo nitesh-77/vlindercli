@@ -87,13 +87,25 @@ impl CliHarness {
         }
     }
 
-    /// Register an agent to be served by the embedded runtime.
+    /// Load and register an agent from a directory path.
+    ///
+    /// This is the main entry point for adding agents to the harness.
+    /// Handles loading the agent manifest and setting up all required services.
+    pub fn load_agent(&mut self, path: &std::path::Path) -> Result<String, HarnessError> {
+        let agent = Agent::load(path)
+            .map_err(|e| HarnessError::AgentNotFound(format!("{}: {:?}", path.display(), e)))?;
+        let name = agent.name.clone();
+        self.register(agent);
+        Ok(name)
+    }
+
+    /// Register an already-loaded agent.
     ///
     /// Sets up:
     /// - In-memory storage for the agent's namespace (on Provider)
     /// - Inference/embedding engines for declared models (on Provider)
     /// - Agent registration (on WasmRuntime)
-    pub fn register(&mut self, agent: Agent) {
+    fn register(&mut self, agent: Agent) {
         let agent_name = agent.name.clone();
 
         // Register storage on Provider
