@@ -9,6 +9,7 @@
 
 mod agent;
 mod agent_manifest;
+mod daemon;
 mod embedding;
 mod fleet;
 mod fleet_manifest;
@@ -91,3 +92,9 @@ pub use runtime::Runtime;
 // ============================================================================
 
 pub use harness::{CliHarness, Harness, HarnessError};
+
+// ============================================================================
+// Daemon
+// ============================================================================
+
+pub use daemon::{Daemon, AgentId};

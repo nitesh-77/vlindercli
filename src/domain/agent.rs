@@ -24,6 +24,16 @@ pub struct Agent {
 }
 
 impl Agent {
+    /// Create an agent directly from TOML content.
+    ///
+    /// The TOML should contain resolved absolute URIs for `id` and model paths.
+    /// No path resolution is performed - caller is responsible for pre-resolving.
+    pub fn from_toml(toml_content: &str) -> Result<Agent, LoadError> {
+        let manifest: AgentManifest = toml::from_str(toml_content)
+            .map_err(|e| LoadError::Parse(e.to_string()))?;
+        Self::from_manifest(manifest)
+    }
+
     /// Create an agent from a manifest.
     ///
     /// All paths in the manifest are already resolved to absolute paths.
