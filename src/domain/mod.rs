@@ -19,6 +19,7 @@ mod model_manifest;
 mod path;
 mod resource_id;
 mod storage;
+pub mod workers;
 
 // ============================================================================
 // Agent & Fleet
