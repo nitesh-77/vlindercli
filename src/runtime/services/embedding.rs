@@ -26,12 +26,12 @@ struct EmbedRequest {
 // Handler
 // ============================================================================
 
-pub struct EmbeddingServiceHandler {
+pub struct EmbeddingServiceWorker {
     queue: Arc<InMemoryQueue>,
     engines: HashMap<String, Arc<dyn EmbeddingEngine>>,
 }
 
-impl EmbeddingServiceHandler {
+impl EmbeddingServiceWorker {
     pub fn new(queue: Arc<InMemoryQueue>) -> Self {
         Self {
             queue,
@@ -93,7 +93,7 @@ mod tests {
     #[test]
     fn handles_embed_request() {
         let queue = Arc::new(InMemoryQueue::new());
-        let mut handler = EmbeddingServiceHandler::new(Arc::clone(&queue));
+        let mut handler = EmbeddingServiceWorker::new(Arc::clone(&queue));
 
         // Register mock engine
         let canned: Vec<f32> = (0..768).map(|i| i as f32 * 0.001).collect();
@@ -122,7 +122,7 @@ mod tests {
     #[test]
     fn returns_error_for_unknown_model() {
         let queue = Arc::new(InMemoryQueue::new());
-        let handler = EmbeddingServiceHandler::new(Arc::clone(&queue));
+        let handler = EmbeddingServiceWorker::new(Arc::clone(&queue));
 
         let payload = serde_json::json!({
             "model": "unknown",

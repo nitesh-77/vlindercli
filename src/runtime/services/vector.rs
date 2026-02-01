@@ -43,12 +43,12 @@ struct DeleteRequest {
 // Handler
 // ============================================================================
 
-pub struct VectorServiceHandler {
+pub struct VectorServiceWorker {
     queue: Arc<InMemoryQueue>,
     stores: HashMap<String, Arc<dyn VectorStorage>>,
 }
 
-impl VectorServiceHandler {
+impl VectorServiceWorker {
     pub fn new(queue: Arc<InMemoryQueue>) -> Self {
         Self {
             queue,
@@ -166,7 +166,7 @@ mod tests {
     #[test]
     fn handles_store_and_search() {
         let queue = Arc::new(InMemoryQueue::new());
-        let mut handler = VectorServiceHandler::new(Arc::clone(&queue));
+        let mut handler = VectorServiceWorker::new(Arc::clone(&queue));
 
         // Register storage
         let storage = in_memory_storage();

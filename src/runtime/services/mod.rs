@@ -14,7 +14,7 @@ mod vector;
 mod inference;
 mod embedding;
 
-pub use object::ObjectServiceHandler;
-pub use vector::VectorServiceHandler;
-pub use inference::InferenceServiceHandler;
-pub use embedding::EmbeddingServiceHandler;
+pub use object::ObjectServiceWorker;
+pub use vector::VectorServiceWorker;
+pub use inference::InferenceServiceWorker;
+pub use embedding::EmbeddingServiceWorker;

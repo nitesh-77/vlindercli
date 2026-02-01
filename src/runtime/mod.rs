@@ -9,6 +9,6 @@ pub mod services;
 
 pub use wasm::WasmRuntime;
 pub use services::{
-    ObjectServiceHandler, VectorServiceHandler,
-    InferenceServiceHandler, EmbeddingServiceHandler,
+    ObjectServiceWorker, VectorServiceWorker,
+    InferenceServiceWorker, EmbeddingServiceWorker,
 };

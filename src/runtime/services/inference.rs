@@ -32,12 +32,12 @@ fn default_max_tokens() -> u32 {
 // Handler
 // ============================================================================
 
-pub struct InferenceServiceHandler {
+pub struct InferenceServiceWorker {
     queue: Arc<InMemoryQueue>,
     engines: HashMap<String, Arc<dyn InferenceEngine>>,
 }
 
-impl InferenceServiceHandler {
+impl InferenceServiceWorker {
     pub fn new(queue: Arc<InMemoryQueue>) -> Self {
         Self {
             queue,
@@ -93,7 +93,7 @@ mod tests {
     #[test]
     fn handles_infer_request() {
         let queue = Arc::new(InMemoryQueue::new());
-        let mut handler = InferenceServiceHandler::new(Arc::clone(&queue));
+        let mut handler = InferenceServiceWorker::new(Arc::clone(&queue));
 
         // Register mock engine
         let engine = Arc::new(InMemoryInference::new("test response"));
@@ -119,7 +119,7 @@ mod tests {
     #[test]
     fn returns_error_for_unknown_model() {
         let queue = Arc::new(InMemoryQueue::new());
-        let handler = InferenceServiceHandler::new(Arc::clone(&queue));
+        let handler = InferenceServiceWorker::new(Arc::clone(&queue));
 
         let payload = serde_json::json!({
             "model": "unknown",

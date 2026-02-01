@@ -20,16 +20,16 @@ use crate::domain::{Agent, EmbeddingEngine, InferenceEngine, ObjectStorage, Vect
 use crate::queue::{InMemoryQueue, Message, MessageQueue};
 
 use super::services::{
-    EmbeddingServiceHandler, InferenceServiceHandler,
-    ObjectServiceHandler, VectorServiceHandler,
+    EmbeddingServiceWorker, InferenceServiceWorker,
+    ObjectServiceWorker, VectorServiceWorker,
 };
 
 /// Shared service provider that can be accessed from host functions
 struct Provider {
-    object: ObjectServiceHandler,
-    vector: VectorServiceHandler,
-    inference: InferenceServiceHandler,
-    embedding: EmbeddingServiceHandler,
+    object: ObjectServiceWorker,
+    vector: VectorServiceWorker,
+    inference: InferenceServiceWorker,
+    embedding: EmbeddingServiceWorker,
 }
 
 impl Provider {
@@ -52,10 +52,10 @@ pub struct WasmRuntime {
 impl WasmRuntime {
     pub fn new(queue: Arc<InMemoryQueue>) -> Self {
         let services = Provider {
-            object: ObjectServiceHandler::new(Arc::clone(&queue)),
-            vector: VectorServiceHandler::new(Arc::clone(&queue)),
-            inference: InferenceServiceHandler::new(Arc::clone(&queue)),
-            embedding: EmbeddingServiceHandler::new(Arc::clone(&queue)),
+            object: ObjectServiceWorker::new(Arc::clone(&queue)),
+            vector: VectorServiceWorker::new(Arc::clone(&queue)),
+            inference: InferenceServiceWorker::new(Arc::clone(&queue)),
+            embedding: EmbeddingServiceWorker::new(Arc::clone(&queue)),
         };
         Self {
             queue,

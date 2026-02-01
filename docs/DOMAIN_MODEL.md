@@ -171,10 +171,10 @@ CliHarness
  └── uses WasmRuntime
       └── uses MessageQueue
       └── uses Provider
-           ├── InferenceServiceHandler → InferenceEngine
-           ├── EmbeddingServiceHandler → EmbeddingEngine
-           ├── ObjectServiceHandler → ObjectStorage
-           └── VectorServiceHandler → VectorStorage
+           ├── InferenceServiceWorker → InferenceEngine
+           ├── EmbeddingServiceWorker → EmbeddingEngine
+           ├── ObjectServiceWorker → ObjectStorage
+           └── VectorServiceWorker → VectorStorage
 ```
 
 ### Loading Flow
@@ -295,10 +295,10 @@ Native handlers that listen on well-known queues:
 
 | Handler | Queues | Location |
 |---------|--------|----------|
-| `InferenceServiceHandler` | `infer` | [`src/runtime/services/inference.rs`](../src/runtime/services/inference.rs) |
-| `EmbeddingServiceHandler` | `embed` | [`src/runtime/services/embedding.rs`](../src/runtime/services/embedding.rs) |
-| `ObjectServiceHandler` | `kv-*` | [`src/runtime/services/object.rs`](../src/runtime/services/object.rs) |
-| `VectorServiceHandler` | `vector-*` | [`src/runtime/services/vector.rs`](../src/runtime/services/vector.rs) |
+| `InferenceServiceWorker` | `infer` | [`src/runtime/services/inference.rs`](../src/runtime/services/inference.rs) |
+| `EmbeddingServiceWorker` | `embed` | [`src/runtime/services/embedding.rs`](../src/runtime/services/embedding.rs) |
+| `ObjectServiceWorker` | `kv-*` | [`src/runtime/services/object.rs`](../src/runtime/services/object.rs) |
+| `VectorServiceWorker` | `vector-*` | [`src/runtime/services/vector.rs`](../src/runtime/services/vector.rs) |
 
 ---
 

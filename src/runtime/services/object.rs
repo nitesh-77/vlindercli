@@ -49,12 +49,12 @@ struct DeleteRequest {
 // Handler
 // ============================================================================
 
-pub struct ObjectServiceHandler {
+pub struct ObjectServiceWorker {
     queue: Arc<InMemoryQueue>,
     stores: HashMap<String, Arc<dyn ObjectStorage>>,
 }
 
-impl ObjectServiceHandler {
+impl ObjectServiceWorker {
     pub fn new(queue: Arc<InMemoryQueue>) -> Self {
         Self {
             queue,
@@ -206,7 +206,7 @@ mod tests {
     #[test]
     fn handles_put_and_get() {
         let queue = Arc::new(InMemoryQueue::new());
-        let mut handler = ObjectServiceHandler::new(Arc::clone(&queue));
+        let mut handler = ObjectServiceWorker::new(Arc::clone(&queue));
 
         // Register storage
         let storage = in_memory_storage();
