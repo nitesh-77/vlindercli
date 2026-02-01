@@ -69,10 +69,9 @@ impl Runtime for WasmRuntime {
                 // Prepare data for the thread
                 let queue = Arc::clone(&self.queue);
                 let wasm_path = agent
-                    .code
-                    .as_str()
-                    .strip_prefix("file://")
-                    .unwrap_or(agent.code.as_str())
+                    .id
+                    .path()
+                    .unwrap_or(agent.id.as_str())
                     .to_string();
                 let payload = request.payload.clone();
 
