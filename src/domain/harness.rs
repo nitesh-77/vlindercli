@@ -9,7 +9,7 @@
 
 use std::sync::Arc;
 
-use crate::domain::{Agent, Model, ModelType, Provider};
+use crate::domain::{Agent, Model, ModelType, Provider, Runtime};
 use crate::embedding::{open_embedding_engine, InMemoryEmbedding};
 use crate::inference::{open_inference_engine, InMemoryInference};
 use crate::queue::{InMemoryQueue, Message, MessageId, MessageQueue};

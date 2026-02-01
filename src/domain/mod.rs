@@ -16,6 +16,7 @@ mod harness;
 mod inference;
 mod model;
 mod provider;
+mod runtime;
 mod model_manifest;
 mod path;
 mod resource_id;
@@ -78,6 +79,12 @@ pub use model_manifest::{ModelManifest, ModelTypeConfig, ModelEngineConfig};
 // ============================================================================
 
 pub use provider::Provider;
+
+// ============================================================================
+// Runtime (trait)
+// ============================================================================
+
+pub use runtime::Runtime;
 
 // ============================================================================
 // Harness

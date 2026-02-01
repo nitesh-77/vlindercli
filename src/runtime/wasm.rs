@@ -16,7 +16,7 @@ use std::thread::{self, JoinHandle};
 
 use extism::{CurrentPlugin, Function, Manifest, Plugin, UserData, Val, Wasm};
 
-use crate::domain::Agent;
+use crate::domain::{Agent, Runtime};
 use crate::queue::{Message, MessageId, MessageQueue};
 
 /// Tracks a WASM execution running in a background thread.
@@ -40,16 +40,14 @@ impl WasmRuntime {
             running: None,
         }
     }
+}
 
-    /// Register an agent to be served by this runtime.
-    pub fn register(&mut self, agent: Agent) {
+impl Runtime for WasmRuntime {
+    fn register(&mut self, agent: Agent) {
         self.agents.insert(agent.name.clone(), agent);
     }
 
-    /// Process agent work. Non-blocking - spawns WASM in background thread.
-    ///
-    /// Returns true if work was done (task completed or started).
-    pub fn tick(&mut self) -> bool {
+    fn tick(&mut self) -> bool {
         // First, check if a running task completed
         if let Some(task) = self.running.take() {
             if task.handle.is_finished() {
