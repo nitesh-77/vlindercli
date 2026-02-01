@@ -5,6 +5,8 @@
 
 mod object;
 mod vector;
+mod inference;
 
 pub use object::ObjectServiceWorker;
 pub use vector::VectorServiceWorker;
+pub use inference::InferenceServiceWorker;

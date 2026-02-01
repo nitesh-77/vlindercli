@@ -5,12 +5,10 @@
 
 use std::sync::Arc;
 
-use crate::domain::workers::{ObjectServiceWorker, VectorServiceWorker};
+use crate::domain::workers::{ObjectServiceWorker, VectorServiceWorker, InferenceServiceWorker};
 use crate::queue::MessageQueue;
 
-use super::services::{
-    EmbeddingServiceWorker, InferenceServiceWorker,
-};
+use super::services::EmbeddingServiceWorker;
 
 /// Shared service provider that can be accessed from host functions.
 ///

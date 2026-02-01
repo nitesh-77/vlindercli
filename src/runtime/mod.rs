@@ -11,6 +11,4 @@ pub mod services;
 
 pub use provider::Provider;
 pub use wasm::WasmRuntime;
-pub use services::{
-    InferenceServiceWorker, EmbeddingServiceWorker,
-};
+pub use services::EmbeddingServiceWorker;
