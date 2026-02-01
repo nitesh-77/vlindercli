@@ -9,22 +9,21 @@ use std::collections::HashMap;
 use crate::domain::{Agent, ResourceId};
 
 /// Unique identifier for a submitted job.
+///
+/// Format: `<registry_id>/jobs/<uuid>`
+/// Example: `http://127.0.0.1:9000/jobs/550e8400-e29b-41d4-a716-446655440000`
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct JobId(String);
 
 impl JobId {
-    pub fn new() -> Self {
-        Self(uuid::Uuid::new_v4().to_string())
+    /// Create a new JobId under the given registry.
+    pub fn new(registry_id: &ResourceId) -> Self {
+        let uuid = uuid::Uuid::new_v4();
+        Self(format!("{}/jobs/{}", registry_id.as_str(), uuid))
     }
 
     pub fn as_str(&self) -> &str {
         &self.0
-    }
-}
-
-impl Default for JobId {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -65,7 +64,7 @@ impl Registry {
     // --- Job operations ---
 
     pub fn create_job(&mut self, agent_id: ResourceId, input: String) -> JobId {
-        let id = JobId::new();
+        let id = JobId::new(&self.id);
         let job = Job {
             id: id.clone(),
             agent_id,
@@ -125,6 +124,18 @@ mod tests {
         // Registry exposes an HTTP API endpoint
         assert_eq!(registry.id.scheme(), Some("http"));
         assert!(registry.id.as_str().starts_with("http://127.0.0.1:"));
+    }
+
+    #[test]
+    fn job_id_includes_registry_id() {
+        let mut registry = Registry::new();
+        let agent_id = test_agent_id();
+
+        let job_id = registry.create_job(agent_id, "test".to_string());
+
+        // JobId format: <registry_id>/jobs/<uuid>
+        assert!(job_id.as_str().starts_with(registry.id.as_str()));
+        assert!(job_id.as_str().contains("/jobs/"));
     }
 
     #[test]
