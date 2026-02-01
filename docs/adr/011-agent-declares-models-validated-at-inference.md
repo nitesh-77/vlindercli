@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted (updates ADR 007, 008, 010; path conventions updated by ADR 012)
+Partially superseded by ADR 018, ADR 029, ADR 030
+
+*Agent declaration concept still valid. Execution model changed from direct `runtime.execute()` to queue-based invoke/poll (ADR 029). Inference via queue workers (ADR 018, ADR 030).*
 
 ## Context
 

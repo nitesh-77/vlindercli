@@ -1,4 +1,4 @@
-# ADR 031: Harness as User Interface
+# ADR 029: Harness as User Interface
 
 ## Status
 
@@ -31,9 +31,15 @@ We needed a concept that separates "how users interact" from "how agents execute
 
 ```rust
 pub trait Harness {
-    fn run(&self, agent: &Agent, input: &str) -> Result<String, HarnessError>;
+    /// Invoke an agent. Returns immediately with a request ID.
+    fn invoke(&self, agent_name: &str, input: &str) -> Result<MessageId, HarnessError>;
+
+    /// Poll for response. Returns Some(output) if ready, None if pending.
+    fn poll(&self, request_id: &MessageId) -> Result<Option<String>, HarnessError>;
 }
 ```
+
+The async invoke/poll pattern allows harnesses to remain responsive while agents execute via queue-based message passing.
 
 ### Implementations
 
@@ -60,7 +66,7 @@ This coupling was intentional — we needed to see the system work end-to-end be
 2. Different harnesses want the same runtime (CLI and web shouldn't duplicate)
 3. Runtime lifecycle is independent of harness lifecycle
 
-This understanding led to ADR 032, where harnesses become thin clients that query vlinderd for runtime endpoints.
+This understanding led to ADR 031, where harnesses become thin clients that query vlinderd for runtime endpoints.
 
 ## Consequences
 

@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted (updated by ADR 011)
+Superseded by ADR 018, ADR 030
+
+*Original decision accepted, but implementation changed to queue-based message passing (ADR 018). Runtime is now a trait with `register()` and `tick()` methods (ADR 030).*
 
 ## Context
 

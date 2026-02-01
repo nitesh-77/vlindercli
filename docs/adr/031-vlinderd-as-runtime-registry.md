@@ -1,4 +1,4 @@
-# ADR 032: vlinderd as Runtime Registry
+# ADR 031: vlinderd as Runtime Registry
 
 ## Status
 
@@ -6,9 +6,9 @@ Proposed
 
 ## Context
 
-ADR 018 established queue-based message passing. ADR 031 defined harnesses as user-facing interfaces.
+ADR 018 established queue-based message passing. ADR 029 defined harnesses as user-facing interfaces.
 
-The current `CliHarness` embeds `WasmRuntime` directly — it creates and manages the runtime in-process. This coupling was useful for learning (see ADR 031) but now limits us: harnesses should work with any runtime, local or remote.
+The current `CliHarness` embeds `WasmRuntime` directly — it creates and manages the runtime in-process. This coupling was useful for learning (see ADR 029) but now limits us: harnesses should work with any runtime, local or remote.
 
 ## Decision
 

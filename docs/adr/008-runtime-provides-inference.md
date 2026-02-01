@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted (updated by ADR 011)
+Superseded by ADR 018, ADR 030
+
+*Original decision accepted, but implementation changed to queue-based message passing (ADR 018). Inference is now provided via InferenceServiceWorker listening on the `infer` queue (ADR 030).*
 
 ## Context
 

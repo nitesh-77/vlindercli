@@ -112,6 +112,7 @@ These traits define the **runtime protocol**. They are the contracts that implem
 | `ObjectStorage` | Key-value file storage | [`src/domain/storage.rs`](../src/domain/storage.rs) |
 | `VectorStorage` | Embedding storage with similarity search | [`src/domain/storage.rs`](../src/domain/storage.rs) |
 | `MessageQueue` | Message passing abstraction | [`src/queue/traits.rs`](../src/queue/traits.rs) |
+| `Runtime` | Agent execution protocol | [`src/domain/runtime.rs`](../src/domain/runtime.rs) |
 | `Harness` | User-facing interface to runtime | [`src/domain/harness.rs`](../src/domain/harness.rs) |
 | `Loader` | Load agents/fleets/models from URIs | [`src/loader.rs`](../src/loader.rs) |
 
@@ -156,25 +157,25 @@ InferenceEngine          ObjectStorage              MessageQueue
  ├── LlamaEngine          ├── SqliteObjectStorage    └── InMemoryQueue
  └── InMemoryInference    └── InMemoryObjectStorage
 
-EmbeddingEngine          VectorStorage              Harness
- ├── LlamaEmbeddingEngine ├── SqliteVecStorage       └── CliHarness
+EmbeddingEngine          VectorStorage              Runtime
+ ├── LlamaEmbeddingEngine ├── SqliteVecStorage       └── WasmRuntime
  └── InMemoryEmbedding    └── InMemoryVectorStorage
 
-Loader
- └── FileLoader
+Harness                  Loader
+ └── CliHarness           └── FileLoader
 ```
 
 ### Dependencies ("uses")
 
 ```
 CliHarness
- └── uses WasmRuntime
-      └── uses MessageQueue
-      └── uses Provider
-           ├── InferenceServiceWorker → InferenceEngine
-           ├── EmbeddingServiceWorker → EmbeddingEngine
-           ├── ObjectServiceWorker → ObjectStorage
-           └── VectorServiceWorker → VectorStorage
+ ├── uses WasmRuntime (implements Runtime trait)
+ │    └── uses MessageQueue
+ └── uses Provider (aggregates workers)
+      ├── ObjectServiceWorker → ObjectStorage
+      ├── VectorServiceWorker → VectorStorage
+      ├── InferenceServiceWorker → InferenceEngine
+      └── EmbeddingServiceWorker → EmbeddingEngine
 ```
 
 ### Loading Flow
@@ -279,9 +280,9 @@ The `Message` struct is defined in [`src/queue/message.rs`](../src/queue/message
 
 ## Runtime
 
-Location: [`src/runtime/`](../src/runtime/mod.rs)
+The `Runtime` trait defines agent execution protocol. See ADR 030.
 
-**Note**: No abstract `Runtime` trait exists yet. `WasmRuntime` is currently the only implementation.
+- **Trait**: [`src/domain/runtime.rs`](../src/domain/runtime.rs)
 
 ### WasmRuntime
 
@@ -289,16 +290,30 @@ Executes WASM agents via Extism. Provides host functions: `send`, `receive`, `ge
 
 - **Implementation**: [`src/runtime/wasm.rs`](../src/runtime/wasm.rs)
 
-### Service Handlers
+---
 
-Native handlers that listen on well-known queues:
+## Service Workers (Domain)
 
-| Handler | Queues | Location |
-|---------|--------|----------|
-| `InferenceServiceWorker` | `infer` | [`src/runtime/services/inference.rs`](../src/runtime/services/inference.rs) |
-| `EmbeddingServiceWorker` | `embed` | [`src/runtime/services/embedding.rs`](../src/runtime/services/embedding.rs) |
-| `ObjectServiceWorker` | `kv-*` | [`src/runtime/services/object.rs`](../src/runtime/services/object.rs) |
-| `VectorServiceWorker` | `vector-*` | [`src/runtime/services/vector.rs`](../src/runtime/services/vector.rs) |
+Service workers are **domain entities** that define the protocol handlers (see ADR 030). They depend only on capability traits, not concrete implementations.
+
+Location: [`src/domain/workers/`](../src/domain/workers/mod.rs)
+
+| Worker | Queues | Trait Used |
+|--------|--------|------------|
+| `ObjectServiceWorker` | `kv-get`, `kv-put`, `kv-delete`, `kv-list` | `ObjectStorage` |
+| `VectorServiceWorker` | `vector-store`, `vector-search`, `vector-delete` | `VectorStorage` |
+| `InferenceServiceWorker` | `infer` | `InferenceEngine` |
+| `EmbeddingServiceWorker` | `embed` | `EmbeddingEngine` |
+
+---
+
+## Provider (Domain)
+
+`Provider` aggregates service workers and routes messages to registered backends.
+
+- **Location**: [`src/domain/provider.rs`](../src/domain/provider.rs)
+
+Supports heterogeneous deployments: different agents can use different backends within the same Provider instance.
 
 ---
 
@@ -320,9 +335,12 @@ Location: [`src/domain/harness.rs`](../src/domain/harness.rs)
 ┌─────────────────────────────────────────────────────────────┐
 │                      DOMAIN (abstract)                      │
 │                                                             │
-│  Types: Agent, Model, Fleet, Storage                        │
+│  Types: Agent, Model, Fleet, Storage, ResourceId            │
 │  Traits: InferenceEngine, EmbeddingEngine, ObjectStorage,   │
-│          VectorStorage, MessageQueue, Harness, Loader       │
+│          VectorStorage, MessageQueue, Runtime, Harness      │
+│  Workers: ObjectServiceWorker, VectorServiceWorker,         │
+│           InferenceServiceWorker, EmbeddingServiceWorker    │
+│  Provider: aggregates workers, routes to backends           │
 └─────────────────────────────────────────────────────────────┘
                             │
                             │ implements
@@ -334,9 +352,9 @@ Location: [`src/domain/harness.rs`](../src/domain/harness.rs)
 │  Embedding: LlamaEmbeddingEngine, InMemoryEmbedding         │
 │  Storage:   SqliteObjectStorage, SqliteVecStorage,          │
 │             InMemoryObjectStorage, InMemoryVectorStorage    │
-│  Queue:     InMemoryQueue, Message                          │
+│  Queue:     InMemoryQueue                                   │
+│  Runtime:   WasmRuntime                                     │
 │  Loader:    FileLoader                                      │
-│  Runtime:   WasmRuntime, Provider                           │
 │  Harness:   CliHarness                                      │
 └─────────────────────────────────────────────────────────────┘
 ```

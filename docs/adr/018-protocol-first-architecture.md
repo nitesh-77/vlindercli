@@ -101,3 +101,7 @@ This applies to all services:
 - **Deterministic at event boundaries**: Local models + message log = reproducible execution.
 
 - **Scale anything**: Add workers to any queue. No architectural changes.
+
+## See Also
+
+- **ADR 030**: Domain module structure — where service workers live and why they're domain entities.

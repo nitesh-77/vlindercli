@@ -1,4 +1,4 @@
-# ADR 033: Stateless Agent Execution
+# ADR 032: Stateless Agent Execution
 
 ## Status
 
@@ -14,7 +14,7 @@ Current implementation problem: when an agent calls `receive()` to wait for a se
 2. **Threading** - run Provider in separate thread
 3. **Stateless execution** - agent returns state to host, can be fully destroyed
 
-Option 3 aligns with ADR 032's vision of vlinderd as a distributed registry with separate worker processes.
+Option 3 aligns with ADR 031's vision of vlinderd as a distributed registry with separate worker processes.
 
 ## Domain Decision
 
@@ -73,7 +73,7 @@ Until stateless execution is implemented, we use threading as a workaround:
 - WASM instance stays alive (per ADR 005)
 - Decoupling achieved via threads, not architecture
 
-This unblocks the Provider/Runtime decoupling (ADR 032) without the full stateless rewrite.
+This unblocks the Provider/Runtime decoupling (ADR 031) without the full stateless rewrite.
 
 ## Open Questions
 
