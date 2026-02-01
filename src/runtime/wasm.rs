@@ -5,35 +5,39 @@
 //! - Polls their input queues
 //! - Executes WASM on message arrival
 //! - Sends responses to reply queues
-//! - Runs service workers for infrastructure (storage, inference, embedding)
 //!
 //! Host functions provided to WASM guests:
 //! - send(queue_name, payload) -> message_id
-//! - receive(queue_name) -> payload (blocking, processes services while waiting)
+//! - receive(queue_name) -> payload (blocks until message available)
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::thread::{self, JoinHandle};
 
 use extism::{CurrentPlugin, Function, Manifest, Plugin, UserData, Val, Wasm};
 
-use crate::domain::{Agent, EmbeddingEngine, InferenceEngine, ObjectStorage, VectorStorage};
-use crate::queue::{InMemoryQueue, Message, MessageQueue};
+use crate::domain::Agent;
+use crate::queue::{InMemoryQueue, Message, MessageId, MessageQueue};
 
-use super::Provider;
+/// Tracks a WASM execution running in a background thread.
+struct RunningTask {
+    handle: JoinHandle<Vec<u8>>,
+    reply_to: String,
+    request_id: MessageId,
+}
 
 pub struct WasmRuntime {
     queue: Arc<InMemoryQueue>,
     agents: HashMap<String, Agent>,
-    services: Arc<Mutex<Provider>>,
+    running: Option<RunningTask>,
 }
 
 impl WasmRuntime {
     pub fn new(queue: Arc<InMemoryQueue>) -> Self {
-        let services = Provider::new(Arc::clone(&queue));
         Self {
             queue,
             agents: HashMap::new(),
-            services: Arc::new(Mutex::new(services)),
+            running: None,
         }
     }
 
@@ -42,71 +46,65 @@ impl WasmRuntime {
         self.agents.insert(agent.name.clone(), agent);
     }
 
-    /// Register storage backends for a namespace (typically agent name).
-    pub fn register_storage(
-        &mut self,
-        namespace: &str,
-        object: Arc<dyn ObjectStorage>,
-        vector: Arc<dyn VectorStorage>,
-    ) {
-        let mut services = self.services.lock().unwrap();
-        services.object.register(namespace, object);
-        services.vector.register(namespace, vector);
-    }
-
-    /// Register an inference engine by model name.
-    pub fn register_inference(&mut self, model_name: &str, engine: Arc<dyn InferenceEngine>) {
-        let mut services = self.services.lock().unwrap();
-        services.inference.register(model_name, engine);
-    }
-
-    /// Register an embedding engine by model name.
-    pub fn register_embedding(&mut self, model_name: &str, engine: Arc<dyn EmbeddingEngine>) {
-        let mut services = self.services.lock().unwrap();
-        services.embedding.register(model_name, engine);
-    }
-
-    pub fn tick(&mut self) {
-        // First, try service queues (fast, no WASM execution)
-        {
-            let services = self.services.lock().unwrap();
-            if services.tick() { return; }
-        }
-
-        // Then, check each agent's queue for work
-        for (name, agent) in &self.agents {
-            if let Ok(request) = self.queue.receive(name) {
-                // Build host functions with queue and service access
-                let functions = [
-                    make_send_function(Arc::clone(&self.queue)),
-                    make_receive_function(Arc::clone(&self.queue), Arc::clone(&self.services)),
-                    make_get_prompts_function(),
-                ];
-
-                // Execute WASM
-                let wasm_path = agent.code.as_str().strip_prefix("file://").unwrap_or(agent.code.as_str());
-                let wasm = Wasm::file(wasm_path);
-                let manifest = Manifest::new([wasm])
-                    .with_allowed_hosts(["*".to_string()].into_iter());
-                let mut plugin = Plugin::new(&manifest, functions, true).unwrap();
-
-                let output = plugin
-                    .call::<_, Vec<u8>>("process", &request.payload)
-                    .unwrap();
-
-                // Send response to reply queue
-                let response = Message::response(output, &request.reply_to, request.id.clone());
-                self.queue.send(&request.reply_to, response).unwrap();
-
-                return; // Process one message per tick
+    /// Process agent work. Non-blocking - spawns WASM in background thread.
+    ///
+    /// Returns true if work was done (task completed or started).
+    pub fn tick(&mut self) -> bool {
+        // First, check if a running task completed
+        if let Some(task) = self.running.take() {
+            if task.handle.is_finished() {
+                // Task done - send response
+                let output = task.handle.join().unwrap();
+                let response = Message::response(output, &task.reply_to, task.request_id);
+                self.queue.send(&task.reply_to, response).unwrap();
+                return true;
+            } else {
+                // Still running, put it back
+                self.running = Some(task);
+                return false; // Can't start new work while one is running
             }
         }
-    }
 
-    pub fn run(&mut self) {
-        loop {
-            self.tick();
+        // No running task, check for new work
+        for (name, agent) in &self.agents {
+            if let Ok(request) = self.queue.receive(name) {
+                // Prepare data for the thread
+                let queue = Arc::clone(&self.queue);
+                let wasm_path = agent
+                    .code
+                    .as_str()
+                    .strip_prefix("file://")
+                    .unwrap_or(agent.code.as_str())
+                    .to_string();
+                let payload = request.payload.clone();
+
+                // Spawn WASM execution in background thread
+                let handle = thread::spawn(move || {
+                    let functions = [
+                        make_send_function(Arc::clone(&queue)),
+                        make_receive_function(Arc::clone(&queue)),
+                        make_get_prompts_function(),
+                    ];
+
+                    let wasm = Wasm::file(&wasm_path);
+                    let manifest =
+                        Manifest::new([wasm]).with_allowed_hosts(["*".to_string()].into_iter());
+                    let mut plugin = Plugin::new(&manifest, functions, true).unwrap();
+
+                    plugin.call::<_, Vec<u8>>("process", &payload).unwrap()
+                });
+
+                self.running = Some(RunningTask {
+                    handle,
+                    reply_to: request.reply_to.clone(),
+                    request_id: request.id,
+                });
+
+                return true; // Started new work
+            }
         }
+
+        false // No work to do
     }
 }
 
@@ -152,32 +150,26 @@ fn make_send_function(queue: Arc<InMemoryQueue>) -> Function {
     )
 }
 
-/// Data passed to the receive function - queue and service handlers
-struct ReceiveData {
-    queue: Arc<InMemoryQueue>,
-    services: Arc<Mutex<Provider>>,
-}
-
 /// Host function: receive(queue_name) -> payload
 ///
-/// Receives a message from a queue. Processes service queues while waiting
-/// to avoid deadlock when agent is waiting for a service response.
-fn make_receive_function(queue: Arc<InMemoryQueue>, services: Arc<Mutex<Provider>>) -> Function {
+/// Receives a message from a queue. Blocks until a message is available.
+/// The caller is responsible for ensuring service workers are running
+/// in parallel to avoid deadlock.
+fn make_receive_function(queue: Arc<InMemoryQueue>) -> Function {
     Function::new(
         "receive",
         [extism::PTR], // queue_name
         [extism::PTR], // payload (JSON with id, payload, correlation_id)
-        UserData::new(ReceiveData { queue, services }),
+        UserData::new(queue),
         |plugin, inputs, outputs, user_data| {
             let queue_name: String = plugin.memory_get_val(&inputs[0])?;
 
-            let data = user_data.get().unwrap();
-            let data = data.lock().unwrap();
+            let queue = user_data.get().unwrap();
+            let queue = queue.lock().unwrap();
 
-            // Spin until message available, processing services while waiting
+            // Spin until message available
             loop {
-                // Check for our message first
-                if let Ok(message) = data.queue.receive(&queue_name) {
+                if let Ok(message) = queue.receive(&queue_name) {
                     // Return message as JSON
                     let response = serde_json::json!({
                         "id": message.id.to_string(),
@@ -185,11 +177,6 @@ fn make_receive_function(queue: Arc<InMemoryQueue>, services: Arc<Mutex<Provider
                         "correlation_id": message.correlation_id.map(|id| id.to_string()),
                     });
                     return write_output(plugin, outputs, response.to_string().as_bytes());
-                }
-
-                // Process service queues while waiting
-                if let Ok(services) = data.services.try_lock() {
-                    services.tick();
                 }
 
                 std::thread::sleep(std::time::Duration::from_millis(1));
@@ -218,11 +205,7 @@ fn make_get_prompts_function() -> Function {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use base64::Engine as _;
     use crate::queue::{InMemoryQueue, Message, MessageQueue};
-    use crate::storage::dispatch::{in_memory_storage, open_object_storage, open_vector_storage};
-    use crate::inference::InMemoryInference;
-    use crate::embedding::InMemoryEmbedding;
     use std::path::Path;
 
     fn load_test_agent(name: &str) -> Agent {
@@ -256,114 +239,20 @@ mod tests {
         let request_id = request.id.clone();
         queue.send("reverse-agent", request).unwrap();
 
-        // Tick should process it
-        runtime.tick();
+        // First tick spawns the WASM thread
+        assert!(runtime.tick());
+
+        // Keep ticking until the task completes and response is sent
+        loop {
+            if runtime.tick() {
+                break; // Task completed
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
 
         // Response should be on reply queue
         let response = queue.receive(reply_queue).unwrap();
         assert_eq!(response.correlation_id, Some(request_id));
         assert_eq!(String::from_utf8(response.payload).unwrap(), "olleh");
-    }
-
-    #[test]
-    fn tick_processes_service_messages() {
-        let queue = Arc::new(InMemoryQueue::new());
-        let mut runtime = WasmRuntime::new(Arc::clone(&queue));
-
-        // Register storage for a namespace
-        let storage = in_memory_storage();
-        let object = open_object_storage(&storage).unwrap();
-        let vector = open_vector_storage(&storage).unwrap();
-        runtime.register_storage("test-agent", object, vector);
-
-        // Send a kv-put message (simulating what a WASM agent would do)
-        let put_payload = serde_json::json!({
-            "namespace": "test-agent",
-            "path": "/notes/hello.txt",
-            "content": base64::engine::general_purpose::STANDARD.encode(b"hello world")
-        });
-        let put_msg = Message::request(
-            serde_json::to_vec(&put_payload).unwrap(),
-            "reply-queue",
-        );
-        queue.send("kv-put", put_msg).unwrap();
-
-        // Tick should process the service message
-        runtime.tick();
-
-        // Check response
-        let response = queue.receive("reply-queue").unwrap();
-        assert_eq!(response.payload, b"ok");
-
-        // Now send a kv-get to verify it was stored
-        let get_payload = serde_json::json!({
-            "namespace": "test-agent",
-            "path": "/notes/hello.txt"
-        });
-        let get_msg = Message::request(
-            serde_json::to_vec(&get_payload).unwrap(),
-            "reply-queue",
-        );
-        queue.send("kv-get", get_msg).unwrap();
-
-        runtime.tick();
-
-        let response = queue.receive("reply-queue").unwrap();
-        assert_eq!(response.payload, b"hello world");
-    }
-
-    #[test]
-    fn tick_processes_inference_messages() {
-        let queue = Arc::new(InMemoryQueue::new());
-        let mut runtime = WasmRuntime::new(Arc::clone(&queue));
-
-        // Register inference engine
-        let engine = Arc::new(InMemoryInference::new("The answer is 42."));
-        runtime.register_inference("test-model", engine);
-
-        // Send infer message
-        let infer_payload = serde_json::json!({
-            "model": "test-model",
-            "prompt": "What is the meaning of life?"
-        });
-        let infer_msg = Message::request(
-            serde_json::to_vec(&infer_payload).unwrap(),
-            "reply-queue",
-        );
-        queue.send("infer", infer_msg).unwrap();
-
-        runtime.tick();
-
-        let response = queue.receive("reply-queue").unwrap();
-        assert_eq!(String::from_utf8(response.payload).unwrap(), "The answer is 42.");
-    }
-
-    #[test]
-    fn tick_processes_embedding_messages() {
-        let queue = Arc::new(InMemoryQueue::new());
-        let mut runtime = WasmRuntime::new(Arc::clone(&queue));
-
-        // Register embedding engine with canned 768-dim vector
-        let canned: Vec<f32> = (0..768).map(|i| i as f32 * 0.001).collect();
-        let engine = Arc::new(InMemoryEmbedding::new(canned.clone()));
-        runtime.register_embedding("test-model", engine);
-
-        // Send embed message
-        let embed_payload = serde_json::json!({
-            "model": "test-model",
-            "text": "hello world"
-        });
-        let embed_msg = Message::request(
-            serde_json::to_vec(&embed_payload).unwrap(),
-            "reply-queue",
-        );
-        queue.send("embed", embed_msg).unwrap();
-
-        runtime.tick();
-
-        let response = queue.receive("reply-queue").unwrap();
-        let vector: Vec<f32> = serde_json::from_slice(&response.payload).unwrap();
-        assert_eq!(vector.len(), 768);
-        assert_eq!(vector, canned);
     }
 }

@@ -13,7 +13,7 @@ use crate::domain::{Agent, Model, ModelType};
 use crate::embedding::{open_embedding_engine, InMemoryEmbedding};
 use crate::inference::{open_inference_engine, InMemoryInference};
 use crate::queue::{InMemoryQueue, Message, MessageId, MessageQueue};
-use crate::runtime::WasmRuntime;
+use crate::runtime::{Provider, WasmRuntime};
 use crate::storage::dispatch::{in_memory_storage, open_object_storage, open_vector_storage};
 
 /// A harness for interacting with agents.
@@ -61,10 +61,14 @@ impl std::error::Error for HarnessError {}
 
 /// CLI harness for invoking agents from the command line.
 ///
-/// Currently embeds WasmRuntime in-process (no daemon).
-/// Will be updated to talk to daemon via socket once that exists.
+/// Owns both Provider (service workers) and WasmRuntime (agent execution)
+/// as separate components that communicate via queues.
+///
+/// Currently runs in-process. Path to distributed: run Provider and
+/// WasmRuntime in separate threads/processes.
 pub struct CliHarness {
     queue: Arc<InMemoryQueue>,
+    provider: Provider,
     runtime: WasmRuntime,
     reply_queue: String,
 }
@@ -72,10 +76,12 @@ pub struct CliHarness {
 impl CliHarness {
     pub fn new() -> Self {
         let queue = Arc::new(InMemoryQueue::new());
+        let provider = Provider::new(Arc::clone(&queue));
         let runtime = WasmRuntime::new(Arc::clone(&queue));
         let reply_queue = format!("cli-harness-{}", uuid::Uuid::new_v4());
         Self {
             queue,
+            provider,
             runtime,
             reply_queue,
         }
@@ -84,23 +90,25 @@ impl CliHarness {
     /// Register an agent to be served by the embedded runtime.
     ///
     /// Sets up:
-    /// - In-memory storage for the agent's namespace
-    /// - Inference/embedding engines for declared models
+    /// - In-memory storage for the agent's namespace (on Provider)
+    /// - Inference/embedding engines for declared models (on Provider)
+    /// - Agent registration (on WasmRuntime)
     pub fn register(&mut self, agent: Agent) {
         let agent_name = agent.name.clone();
 
-        // Register storage for this agent's namespace
+        // Register storage on Provider
         let storage = in_memory_storage();
         let object = open_object_storage(&storage).expect("in-memory storage always succeeds");
         let vector = open_vector_storage(&storage).expect("in-memory storage always succeeds");
-        self.runtime.register_storage(&agent_name, object, vector);
+        self.provider.object.register(&agent_name, object);
+        self.provider.vector.register(&agent_name, vector);
 
-        // Register models declared by the agent
+        // Register models on Provider
         for (model_name, model_uri) in &agent.requirements.models {
             self.register_model(model_name, model_uri.as_str());
         }
 
-        // Register the agent itself
+        // Register agent on WasmRuntime
         self.runtime.register(agent);
     }
 
@@ -122,18 +130,18 @@ impl CliHarness {
             }
         };
 
-        // Register appropriate engine based on model type
+        // Register appropriate engine on Provider
         match model.model_type {
             ModelType::Inference => {
                 match open_inference_engine(&model) {
                     Ok(engine) => {
                         eprintln!("[info] Loaded inference model: {}", model_name);
-                        self.runtime.register_inference(model_name, engine);
+                        self.provider.inference.register(model_name, engine);
                     }
                     Err(e) => {
                         eprintln!("[warning] Failed to load inference model {}, using placeholder: {}", model_name, e);
                         let engine = Arc::new(InMemoryInference::new("[inference placeholder]"));
-                        self.runtime.register_inference(model_name, engine);
+                        self.provider.inference.register(model_name, engine);
                     }
                 }
             }
@@ -141,27 +149,34 @@ impl CliHarness {
                 match open_embedding_engine(&model) {
                     Ok(engine) => {
                         eprintln!("[info] Loaded embedding model: {}", model_name);
-                        self.runtime.register_embedding(model_name, engine);
+                        self.provider.embedding.register(model_name, engine);
                     }
                     Err(e) => {
                         eprintln!("[warning] Failed to load embedding model {}, using placeholder: {}", model_name, e);
                         let canned: Vec<f32> = (0..768).map(|i| i as f32 * 0.001).collect();
                         let engine = Arc::new(InMemoryEmbedding::new(canned));
-                        self.runtime.register_embedding(model_name, engine);
+                        self.provider.embedding.register(model_name, engine);
                     }
                 }
             }
         }
     }
 
-    /// Run the runtime's tick loop until a response is ready.
-    /// This is the embedded mode behavior - blocks until done.
+    /// Run tick loops until a response is ready.
+    ///
+    /// Ticks both Provider (service workers) and WasmRuntime (agent execution)
+    /// in a loop. WasmRuntime spawns WASM in a background thread internally,
+    /// so tick() is non-blocking and Provider can process service messages.
+    ///
+    /// See ADR 033 for the long-term stateless execution model.
     pub fn run_until_response(&mut self, request_id: &MessageId) -> Result<String, HarnessError> {
         loop {
+            self.provider.tick();
             self.runtime.tick();
             if let Some(output) = self.poll(request_id)? {
                 return Ok(output);
             }
+            std::thread::sleep(std::time::Duration::from_millis(1));
         }
     }
 }
