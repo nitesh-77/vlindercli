@@ -11,7 +11,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::domain::{Agent, Model, ModelType, Provider, Runtime};
-use crate::domain::harness2::Harness;
+use crate::domain::harness::Harness;
 use crate::domain::registry::{JobId, Registry};
 use crate::embedding::{open_embedding_engine, InMemoryEmbedding};
 use crate::inference::{open_inference_engine, InMemoryInference};

@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::Subcommand;
 
-use vlindercli::domain::{CliHarness, Harness};
+use vlindercli::domain::Daemon;
 
 use super::repl;
 
@@ -32,22 +32,83 @@ fn run(path: Option<PathBuf>) {
         .canonicalize()
         .expect("Failed to resolve agent path");
 
-    // Create harness and load agent
-    let mut harness = CliHarness::new();
-    let agent_name = harness
-        .load_agent(&absolute_path)
-        .expect("Failed to load agent");
+    // Read manifest as string
+    let manifest_path = absolute_path.join("agent.toml");
+    let manifest_toml = std::fs::read_to_string(&manifest_path)
+        .expect("Failed to read agent.toml");
+
+    // Resolve relative paths in manifest to absolute
+    let resolved_toml = resolve_manifest_paths(&manifest_toml, &absolute_path);
+
+    // Create daemon
+    let mut daemon = Daemon::new();
 
     // Run REPL
     repl::run(|input| {
-        match harness.invoke(&agent_name, input) {
-            Ok(request_id) => {
-                match harness.run_until_response(&request_id) {
-                    Ok(output) => output,
-                    Err(e) => format!("[error] {}", e),
+        match daemon.invoke(&resolved_toml, input) {
+            Ok(job_id) => {
+                // Tick until complete
+                loop {
+                    daemon.tick();
+                    if let Some(result) = daemon.poll(&job_id) {
+                        return result;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(1));
                 }
             }
             Err(e) => format!("[error] {}", e),
         }
     });
+}
+
+/// Resolve relative paths in manifest to absolute paths.
+///
+/// This is the CLI's job - daemon receives resolved TOML.
+fn resolve_manifest_paths(toml: &str, base_path: &std::path::Path) -> String {
+    // Simple approach: use AgentManifest to parse and resolve, then rebuild
+    use vlindercli::domain::AgentManifest;
+
+    let manifest_path = base_path.join("agent.toml");
+    let manifest = AgentManifest::load(&manifest_path)
+        .expect("Failed to parse manifest");
+
+    // Rebuild TOML with resolved paths
+    let mut result = format!(
+        "name = \"{}\"\ndescription = ",
+        manifest.name
+    );
+
+    // Handle multi-line description
+    if manifest.description.contains('\n') {
+        result.push_str(&format!("\"\"\"\n{}\"\"\"\n", manifest.description));
+    } else {
+        result.push_str(&format!("\"{}\"\n", manifest.description));
+    }
+
+    result.push_str(&format!("id = \"{}\"\n", manifest.id));
+
+    if let Some(ref source) = manifest.source {
+        result.push_str(&format!("source = \"{}\"\n", source));
+    }
+
+    // Requirements
+    result.push_str("\n[requirements]\n");
+    result.push_str(&format!("services = {:?}\n", manifest.requirements.services));
+
+    if !manifest.requirements.models.is_empty() {
+        result.push_str("\n[requirements.models]\n");
+        for (name, uri) in &manifest.requirements.models {
+            result.push_str(&format!("{} = \"{}\"\n", name, uri));
+        }
+    }
+
+    // Mounts
+    for mount in &manifest.mounts {
+        result.push_str(&format!(
+            "\n[[mounts]]\nhost_path = \"{}\"\nguest_path = \"{}\"\nmode = \"{}\"\n",
+            mount.host_path, mount.guest_path, mount.mode
+        ));
+    }
+
+    result
 }

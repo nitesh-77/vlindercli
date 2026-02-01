@@ -14,7 +14,6 @@ mod embedding;
 mod fleet;
 mod fleet_manifest;
 mod harness;
-mod harness2;
 mod inference;
 mod model;
 mod provider;
@@ -90,10 +89,10 @@ pub use provider::Provider;
 pub use runtime::Runtime;
 
 // ============================================================================
-// Harness
+// Harness (internal to Daemon)
 // ============================================================================
 
-pub use harness::{CliHarness, Harness, HarnessError};
+// Harness is now owned by Daemon, not exported directly
 
 // ============================================================================
 // Daemon & Registry
