@@ -67,12 +67,25 @@ impl AgentManifest {
 
 /// Resolve an id reference to a URI.
 ///
-/// - If already a URI (contains "://"), return as-is
+/// - If already a URI (contains "://"), return as-is (but resolve relative file:// paths)
 /// - If absolute path, convert to file:// URI
 /// - If relative path, resolve against agent_dir and convert to file:// URI
 fn resolve_id_uri(id: &str, agent_dir: &Path) -> Result<String, ParseError> {
     // Already a URI
     if id.contains("://") {
+        // For file:// URIs with relative paths, resolve them
+        if let Some(path) = id.strip_prefix("file://") {
+            if !Path::new(path).is_absolute() {
+                let resolved = agent_dir.join(path);
+                if !resolved.exists() {
+                    return Err(ParseError::IdNotFound(format!(
+                        "id not found: {}",
+                        resolved.display()
+                    )));
+                }
+                return Ok(format!("file://{}", resolved.display()));
+            }
+        }
         return Ok(id.to_string());
     }
 

@@ -28,8 +28,8 @@ pub fn get_backend() -> Result<&'static LlamaBackend, String> {
 
 /// Open an inference engine for the given model.
 pub fn open_inference_engine(model: &Model) -> Result<Arc<dyn InferenceEngine>, String> {
-    let model_path = model.model.strip_prefix("file://")
-        .ok_or_else(|| format!("unsupported model URI scheme: {}", model.model))?;
+    let model_path = model.id.path()
+        .ok_or_else(|| format!("unsupported model URI: {}", model.id))?;
 
     let engine = LlamaEngine::load(Path::new(model_path))?;
     Ok(Arc::new(engine))

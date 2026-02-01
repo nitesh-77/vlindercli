@@ -1,4 +1,4 @@
 name = "phi3"
 type = "inference"
 engine = "llama"
-model = "file://../../../.vlinder/models/phi3.gguf"
+id = "file://../../../.vlinder/models/phi3.gguf"

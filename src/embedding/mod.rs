@@ -16,8 +16,8 @@ use crate::inference::get_backend;  // Use shared backend from inference
 
 /// Open an embedding engine for the given model.
 pub fn open_embedding_engine(model: &Model) -> Result<Arc<dyn EmbeddingEngine>, String> {
-    let model_path = model.model.strip_prefix("file://")
-        .ok_or_else(|| format!("unsupported model URI scheme: {}", model.model))?;
+    let model_path = model.id.path()
+        .ok_or_else(|| format!("unsupported model URI: {}", model.id))?;
 
     let engine = LlamaEmbeddingEngine::load(Path::new(model_path))?;
     Ok(Arc::new(engine))

@@ -3,6 +3,7 @@
 use std::path::Path;
 
 use super::model_manifest::{ModelManifest, ModelTypeConfig, ModelEngineConfig, ParseError};
+use super::resource_id::ResourceId;
 
 /// A model with resolved paths, ready for use.
 #[derive(Clone, Debug)]
@@ -10,8 +11,8 @@ pub struct Model {
     pub name: String,
     pub model_type: ModelType,
     pub engine: ModelEngine,
-    /// URI pointing to the model file (e.g., "file:///path/to/model.gguf")
-    pub model: String,
+    /// Resource URI pointing to model weights (e.g., GGUF file, Ollama model)
+    pub id: ResourceId,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -28,13 +29,13 @@ pub enum ModelEngine {
 impl Model {
     /// Create a model from a manifest.
     ///
-    /// The manifest's `model` field is already a resolved URI.
+    /// The manifest's `id` field is already a resolved URI.
     pub fn from_manifest(manifest: ModelManifest) -> Model {
         Model {
             name: manifest.name,
             model_type: manifest.model_type.into(),
             engine: manifest.engine.into(),
-            model: manifest.model,
+            id: ResourceId::new(manifest.id),
         }
     }
 
@@ -77,7 +78,7 @@ impl From<ParseError> for LoadError {
         match e {
             ParseError::Io(e) => LoadError::Io(e),
             ParseError::Toml(s) => LoadError::Parse(s),
-            ParseError::ModelNotFound(s) => LoadError::Parse(s),
+            ParseError::IdNotFound(s) => LoadError::Parse(s),
         }
     }
 }

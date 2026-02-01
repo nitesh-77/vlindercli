@@ -16,13 +16,13 @@ fn model_manifest_parses_inference_type() {
         name = "phi3"
         type = "inference"
         engine = "llama"
-        model = "file://./phi3.gguf"
+        id = "file://./phi3.gguf"
     "#).unwrap();
 
     assert_eq!(manifest.name, "phi3");
     assert_eq!(manifest.model_type, ModelTypeConfig::Inference);
     assert_eq!(manifest.engine, ModelEngineConfig::Llama);
-    assert_eq!(manifest.model, "file://./phi3.gguf");
+    assert_eq!(manifest.id, "file://./phi3.gguf");
 }
 
 #[test]
@@ -31,7 +31,7 @@ fn model_manifest_parses_embedding_type() {
         name = "nomic-embed"
         type = "embedding"
         engine = "llama"
-        model = "file://./nomic.gguf"
+        id = "file://./nomic.gguf"
     "#).unwrap();
 
     assert_eq!(manifest.name, "nomic-embed");
@@ -40,12 +40,12 @@ fn model_manifest_parses_embedding_type() {
 }
 
 #[test]
-fn model_manifest_fails_for_invalid_type() {
+fn model_manifest_fails_for_invalmodel_type() {
     let result = parse_model_manifest(r#"
         name = "bad"
         type = "unknown"
         engine = "llama"
-        model = "file://./model.gguf"
+        id = "file://./model.gguf"
     "#);
     assert!(result.is_err());
 }
@@ -77,7 +77,7 @@ fn model_load_parses_manifest() {
         name = "phi3"
         type = "inference"
         engine = "llama"
-        model = "file://./phi3.gguf"
+        id = "file://./phi3.gguf"
     "#;
     std::fs::write(temp_dir.join("model.toml"), manifest).unwrap();
 
@@ -85,8 +85,8 @@ fn model_load_parses_manifest() {
     assert_eq!(model.name, "phi3");
     assert_eq!(model.model_type, ModelType::Inference);
     assert_eq!(model.engine, ModelEngine::Llama);
-    assert!(model.model.starts_with("file://"));
-    assert!(model.model.ends_with("phi3.gguf"));
+    assert_eq!(model.id.scheme(), Some("file"));
+    assert!(model.id.path().unwrap().ends_with("phi3.gguf"));
 
     let _ = std::fs::remove_dir_all(&temp_dir);
 }
@@ -101,7 +101,7 @@ fn model_load_fails_for_missing_model_file() {
         name = "phi3"
         type = "inference"
         engine = "llama"
-        model = "file://./nonexistent.gguf"
+        id = "file://./nonexistent.gguf"
     "#;
     std::fs::write(temp_dir.join("model.toml"), manifest).unwrap();
 
@@ -124,7 +124,7 @@ fn model_type_from_manifest() {
         name = "inference-model"
         type = "inference"
         engine = "llama"
-        model = "file://./model.gguf"
+        id = "file://./model.gguf"
     "#;
     std::fs::write(temp_dir.join("inference.toml"), inference_manifest).unwrap();
     let model = Model::load(&temp_dir.join("inference.toml")).unwrap();
@@ -135,7 +135,7 @@ fn model_type_from_manifest() {
         name = "embedding-model"
         type = "embedding"
         engine = "llama"
-        model = "file://./model.gguf"
+        id = "file://./model.gguf"
     "#;
     std::fs::write(temp_dir.join("embedding.toml"), embedding_manifest).unwrap();
     let model = Model::load(&temp_dir.join("embedding.toml")).unwrap();
@@ -159,7 +159,7 @@ fn model_type_can_be_compared() {
         name = "test"
         type = "inference"
         engine = "llama"
-        model = "file://./model.gguf"
+        id = "file://./model.gguf"
     "#;
     std::fs::write(temp_dir.join("model.toml"), manifest).unwrap();
 
@@ -183,7 +183,7 @@ fn model_engine_is_llama() {
         name = "test"
         type = "inference"
         engine = "llama"
-        model = "file://./model.gguf"
+        id = "file://./model.gguf"
     "#;
     std::fs::write(temp_dir.join("model.toml"), manifest).unwrap();
 
