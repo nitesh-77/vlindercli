@@ -9,10 +9,8 @@
 //! The handlers are thin adapters that translate queue protocol to
 //! service function calls. Business logic lives in `crate::services`.
 
-mod vector;
 mod inference;
 mod embedding;
 
-pub use vector::VectorServiceWorker;
 pub use inference::InferenceServiceWorker;
 pub use embedding::EmbeddingServiceWorker;

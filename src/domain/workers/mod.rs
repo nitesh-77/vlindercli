@@ -4,5 +4,7 @@
 //! storage/inference/embedding backends.
 
 mod object;
+mod vector;
 
 pub use object::ObjectServiceWorker;
+pub use vector::VectorServiceWorker;
