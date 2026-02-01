@@ -7,7 +7,7 @@ use super::resource_id::ResourceId;
 
 /// Agent manifest as read from agent.toml.
 ///
-/// The `code` field is resolved to a URI during loading. Relative paths
+/// The `id` field is resolved to a URI during loading. Relative paths
 /// are resolved against the manifest's directory.
 #[derive(Clone, Debug, Deserialize)]
 pub struct AgentManifest {
@@ -15,7 +15,7 @@ pub struct AgentManifest {
     pub description: String,
     #[serde(default)]
     pub source: Option<String>,
-    pub code: String,
+    pub id: String,
     pub requirements: RequirementsConfig,
     #[serde(default)]
     pub prompts: Option<PromptsConfig>,
@@ -33,7 +33,7 @@ impl AgentManifest {
     /// Load an agent manifest from a file path.
     ///
     /// Resolves all paths to absolute URIs:
-    /// - `code` → file:// URI
+    /// - `id` → file:// URI (for local files)
     /// - `requirements.models` values → file:// URIs
     /// - `mounts[].host_path` → absolute paths
     pub fn load(path: &Path) -> Result<AgentManifest, ParseError> {
@@ -47,8 +47,8 @@ impl AgentManifest {
             .canonicalize()
             .unwrap_or_else(|_| path.parent().unwrap_or(Path::new(".")).to_path_buf());
 
-        // Resolve code to URI
-        manifest.code = resolve_code_uri(&manifest.code, &agent_dir)?;
+        // Resolve id to URI
+        manifest.id = resolve_id_uri(&manifest.id, &agent_dir)?;
 
         // Resolve model URIs
         manifest.requirements.models = manifest.requirements.models
@@ -65,32 +65,32 @@ impl AgentManifest {
     }
 }
 
-/// Resolve a code reference to a URI.
+/// Resolve an id reference to a URI.
 ///
 /// - If already a URI (contains "://"), return as-is
 /// - If absolute path, convert to file:// URI
 /// - If relative path, resolve against agent_dir and convert to file:// URI
-fn resolve_code_uri(code: &str, agent_dir: &Path) -> Result<String, ParseError> {
+fn resolve_id_uri(id: &str, agent_dir: &Path) -> Result<String, ParseError> {
     // Already a URI
-    if code.contains("://") {
-        return Ok(code.to_string());
+    if id.contains("://") {
+        return Ok(id.to_string());
     }
 
     // Resolve path (relative or absolute)
-    let code_path = if Path::new(code).is_absolute() {
-        Path::new(code).to_path_buf()
+    let id_path = if Path::new(id).is_absolute() {
+        Path::new(id).to_path_buf()
     } else {
-        agent_dir.join(code)
+        agent_dir.join(id)
     };
 
-    if !code_path.exists() {
-        return Err(ParseError::CodeNotFound(format!(
-            "code not found: {}",
-            code_path.display()
+    if !id_path.exists() {
+        return Err(ParseError::IdNotFound(format!(
+            "id not found: {}",
+            id_path.display()
         )));
     }
 
-    Ok(format!("file://{}", code_path.display()))
+    Ok(format!("file://{}", id_path.display()))
 }
 
 /// Resolve a URI, making relative file:// URIs absolute.
@@ -121,7 +121,7 @@ fn resolve_host_path(host_path: &str, agent_dir: &Path) -> String {
 pub enum ParseError {
     Io(std::io::Error),
     Toml(String),
-    CodeNotFound(String),
+    IdNotFound(String),
 }
 
 impl From<std::io::Error> for ParseError {
@@ -178,7 +178,7 @@ mod tests {
         let toml = r#"
             name = "test-agent"
             description = "Test agent with storage"
-            code = "agent.wasm"
+            id = "agent.wasm"
             object_storage = "sqlite:///data/objects.db"
             vector_storage = "sqlite:///data/vectors.db"
 
@@ -204,7 +204,7 @@ mod tests {
         let toml = r#"
             name = "test-agent"
             description = "Test agent without storage"
-            code = "agent.wasm"
+            id = "agent.wasm"
 
             [requirements]
             services = ["inference"]
@@ -222,7 +222,7 @@ mod tests {
         let toml = r#"
             name = "test-agent"
             description = "Test agent with only object storage"
-            code = "agent.wasm"
+            id = "agent.wasm"
             object_storage = "s3://my-bucket/agents/test"
 
             [requirements]
@@ -243,7 +243,7 @@ mod tests {
         let toml = r#"
             name = "test-agent"
             description = "Test"
-            code = "agent.wasm"
+            id = "agent.wasm"
             object_storage = "memory://test"
             vector_storage = "pinecone://my-index"
 

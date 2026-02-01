@@ -22,7 +22,7 @@ fn manifest_parses_required_fields() {
     let manifest: AgentManifest = parse_manifest(r#"
         name = "test-agent"
         description = "A test agent"
-        code = "agent.wasm"
+        id = "agent.wasm"
 
         [requirements]
         services = []
@@ -30,7 +30,7 @@ fn manifest_parses_required_fields() {
 
     assert_eq!(manifest.name, "test-agent");
     assert_eq!(manifest.description, "A test agent");
-    assert_eq!(manifest.code, "agent.wasm");
+    assert_eq!(manifest.id, "agent.wasm");
 }
 
 #[test]
@@ -38,7 +38,7 @@ fn manifest_parses_optional_source() {
     let manifest: AgentManifest = parse_manifest(r#"
         name = "test-agent"
         description = "A test agent"
-        code = "agent.wasm"
+        id = "agent.wasm"
         source = "https://github.com/example/agent"
 
         [requirements]
@@ -53,7 +53,7 @@ fn manifest_parses_requirements() {
     let manifest: AgentManifest = parse_manifest(r#"
         name = "test-agent"
         description = "A test agent"
-        code = "agent.wasm"
+        id = "agent.wasm"
 
         [requirements]
         services = ["infer", "embed"]
@@ -73,7 +73,7 @@ fn manifest_parses_mounts() {
     let manifest: AgentManifest = parse_manifest(r#"
         name = "test-agent"
         description = "A test agent"
-        code = "agent.wasm"
+        id = "agent.wasm"
 
         [requirements]
         services = []
@@ -101,7 +101,7 @@ fn manifest_defaults_empty_optional_fields() {
     let manifest: AgentManifest = parse_manifest(r#"
         name = "minimal"
         description = "Minimal valid manifest"
-        code = "agent.wasm"
+        id = "agent.wasm"
 
         [requirements]
         services = []
@@ -123,7 +123,7 @@ fn manifest_fails_for_invalid_toml() {
 fn manifest_fails_for_missing_required_field() {
     let result = parse_manifest(r#"
         name = "incomplete"
-        description = "Missing code field"
+        description = "Missing id field"
 
         [requirements]
         models = []
@@ -189,24 +189,24 @@ fn agent_load_fails_for_missing_mount() {
 }
 
 #[test]
-fn agent_code_resolved_to_uri() {
+fn agent_id_resolved_to_uri() {
     let agent = Agent::load(&agent_fixture("echo-agent")).unwrap();
 
-    assert!(agent.code.as_str().starts_with("file://"));
-    assert!(agent.code.as_str().ends_with(".wasm"));
+    assert!(agent.id.as_str().starts_with("file://"));
+    assert!(agent.id.as_str().ends_with(".wasm"));
 }
 
 #[test]
-fn agent_load_fails_for_missing_code() {
+fn agent_load_fails_for_missing_id() {
     // Create temp directory with manifest pointing to non-existent code
-    let temp_dir = std::env::temp_dir().join("vlinder-test-missing-code");
+    let temp_dir = std::env::temp_dir().join("vlinder-test-missing-id");
     let _ = std::fs::remove_dir_all(&temp_dir);
     std::fs::create_dir_all(&temp_dir).unwrap();
 
     let manifest = r#"
-        name = "missing-code-agent"
+        name = "missing-id-agent"
         description = "Agent with missing code"
-        code = "nonexistent.wasm"
+        id = "nonexistent.wasm"
 
         [requirements]
         models = []

@@ -1,6 +1,6 @@
 name = "missing-mount-agent"
 description = "Test agent with mount that doesn't exist"
-code = "agent.wasm"
+id = "agent.wasm"
 
 [requirements]
 services = []

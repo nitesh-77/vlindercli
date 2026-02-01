@@ -32,7 +32,7 @@ answers from your knowledge base. Like Dumbledore's pensieve, but for the web.
 """
 
 source = "https://github.com/vlindercli/pensieve"
-code = "agent.wasm"
+id = "agent.wasm"
 
 
 # -----------------------------------------------------------------------------

@@ -34,8 +34,8 @@ impl Agent {
             mounts.push(Mount::from_config(mount_config)?);
         }
 
-        // Code is already resolved to absolute URI by AgentManifest::load()
-        let id = ResourceId::new(&manifest.code);
+        // id is already resolved to absolute URI by AgentManifest::load()
+        let id = ResourceId::new(&manifest.id);
 
         Ok(Agent {
             name: manifest.name,
@@ -94,7 +94,7 @@ impl From<ParseError> for LoadError {
         match e {
             ParseError::Io(e) => LoadError::Io(e),
             ParseError::Toml(s) => LoadError::Parse(s),
-            ParseError::CodeNotFound(s) => LoadError::Parse(s),
+            ParseError::IdNotFound(s) => LoadError::Parse(s),
         }
     }
 }

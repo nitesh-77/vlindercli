@@ -119,7 +119,7 @@ fn infer_fails_for_missing_manifest() {
     let manifest = r#"
         name = "missing-manifest-agent"
         description = "Test agent"
-        code = "agent.wasm"
+        id = "agent.wasm"
 
         [requirements]
         services = ["infer"]
