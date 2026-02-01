@@ -67,7 +67,7 @@ impl std::error::Error for HarnessError {}
 /// Currently runs in-process. Path to distributed: run Provider and
 /// WasmRuntime in separate threads/processes.
 pub struct CliHarness {
-    queue: Arc<InMemoryQueue>,
+    queue: Arc<dyn MessageQueue + Send + Sync>,
     provider: Provider,
     runtime: WasmRuntime,
     reply_queue: String,
@@ -75,7 +75,7 @@ pub struct CliHarness {
 
 impl CliHarness {
     pub fn new() -> Self {
-        let queue = Arc::new(InMemoryQueue::new());
+        let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
         let provider = Provider::new(Arc::clone(&queue));
         let runtime = WasmRuntime::new(Arc::clone(&queue));
         let reply_queue = format!("cli-harness-{}", uuid::Uuid::new_v4());

@@ -9,7 +9,7 @@ use std::sync::Arc;
 use serde::Deserialize;
 
 use crate::domain::EmbeddingEngine;
-use crate::queue::{InMemoryQueue, Message, MessageQueue};
+use crate::queue::{Message, MessageQueue};
 use crate::services::embedding;
 
 // ============================================================================
@@ -27,12 +27,12 @@ struct EmbedRequest {
 // ============================================================================
 
 pub struct EmbeddingServiceWorker {
-    queue: Arc<InMemoryQueue>,
+    queue: Arc<dyn MessageQueue + Send + Sync>,
     engines: HashMap<String, Arc<dyn EmbeddingEngine>>,
 }
 
 impl EmbeddingServiceWorker {
-    pub fn new(queue: Arc<InMemoryQueue>) -> Self {
+    pub fn new(queue: Arc<dyn MessageQueue + Send + Sync>) -> Self {
         Self {
             queue,
             engines: HashMap::new(),
@@ -87,12 +87,12 @@ impl EmbeddingServiceWorker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::queue::Message;
+    use crate::queue::{InMemoryQueue, Message};
     use crate::embedding::InMemoryEmbedding;
 
     #[test]
     fn handles_embed_request() {
-        let queue = Arc::new(InMemoryQueue::new());
+        let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
         let mut handler = EmbeddingServiceWorker::new(Arc::clone(&queue));
 
         // Register mock engine
@@ -121,7 +121,7 @@ mod tests {
 
     #[test]
     fn returns_error_for_unknown_model() {
-        let queue = Arc::new(InMemoryQueue::new());
+        let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
         let handler = EmbeddingServiceWorker::new(Arc::clone(&queue));
 
         let payload = serde_json::json!({

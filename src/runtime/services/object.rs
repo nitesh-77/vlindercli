@@ -13,7 +13,7 @@ use base64::Engine as _;
 use serde::Deserialize;
 
 use crate::domain::ObjectStorage;
-use crate::queue::{InMemoryQueue, Message, MessageQueue};
+use crate::queue::{Message, MessageQueue};
 use crate::services::object_storage;
 
 // ============================================================================
@@ -50,12 +50,12 @@ struct DeleteRequest {
 // ============================================================================
 
 pub struct ObjectServiceWorker {
-    queue: Arc<InMemoryQueue>,
+    queue: Arc<dyn MessageQueue + Send + Sync>,
     stores: HashMap<String, Arc<dyn ObjectStorage>>,
 }
 
 impl ObjectServiceWorker {
-    pub fn new(queue: Arc<InMemoryQueue>) -> Self {
+    pub fn new(queue: Arc<dyn MessageQueue + Send + Sync>) -> Self {
         Self {
             queue,
             stores: HashMap::new(),
@@ -200,12 +200,12 @@ impl ObjectServiceWorker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::queue::Message;
+    use crate::queue::{InMemoryQueue, Message};
     use crate::storage::dispatch::{in_memory_storage, open_object_storage};
 
     #[test]
     fn handles_put_and_get() {
-        let queue = Arc::new(InMemoryQueue::new());
+        let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
         let mut handler = ObjectServiceWorker::new(Arc::clone(&queue));
 
         // Register storage

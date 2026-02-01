@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use crate::queue::InMemoryQueue;
+use crate::queue::MessageQueue;
 
 use super::services::{
     EmbeddingServiceWorker, InferenceServiceWorker,
@@ -25,7 +25,7 @@ pub struct Provider {
 
 impl Provider {
     /// Create a new Provider with all service workers.
-    pub fn new(queue: Arc<InMemoryQueue>) -> Self {
+    pub fn new(queue: Arc<dyn MessageQueue + Send + Sync>) -> Self {
         Self {
             object: ObjectServiceWorker::new(Arc::clone(&queue)),
             vector: VectorServiceWorker::new(Arc::clone(&queue)),

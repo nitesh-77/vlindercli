@@ -9,7 +9,7 @@ use std::sync::Arc;
 use serde::Deserialize;
 
 use crate::domain::InferenceEngine;
-use crate::queue::{InMemoryQueue, Message, MessageQueue};
+use crate::queue::{Message, MessageQueue};
 use crate::services::inference;
 
 // ============================================================================
@@ -33,12 +33,12 @@ fn default_max_tokens() -> u32 {
 // ============================================================================
 
 pub struct InferenceServiceWorker {
-    queue: Arc<InMemoryQueue>,
+    queue: Arc<dyn MessageQueue + Send + Sync>,
     engines: HashMap<String, Arc<dyn InferenceEngine>>,
 }
 
 impl InferenceServiceWorker {
-    pub fn new(queue: Arc<InMemoryQueue>) -> Self {
+    pub fn new(queue: Arc<dyn MessageQueue + Send + Sync>) -> Self {
         Self {
             queue,
             engines: HashMap::new(),
@@ -87,12 +87,12 @@ impl InferenceServiceWorker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::queue::Message;
+    use crate::queue::{InMemoryQueue, Message};
     use crate::inference::InMemoryInference;
 
     #[test]
     fn handles_infer_request() {
-        let queue = Arc::new(InMemoryQueue::new());
+        let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
         let mut handler = InferenceServiceWorker::new(Arc::clone(&queue));
 
         // Register mock engine
@@ -118,7 +118,7 @@ mod tests {
 
     #[test]
     fn returns_error_for_unknown_model() {
-        let queue = Arc::new(InMemoryQueue::new());
+        let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
         let handler = InferenceServiceWorker::new(Arc::clone(&queue));
 
         let payload = serde_json::json!({

@@ -17,7 +17,7 @@ use std::thread::{self, JoinHandle};
 use extism::{CurrentPlugin, Function, Manifest, Plugin, UserData, Val, Wasm};
 
 use crate::domain::Agent;
-use crate::queue::{InMemoryQueue, Message, MessageId, MessageQueue};
+use crate::queue::{Message, MessageId, MessageQueue};
 
 /// Tracks a WASM execution running in a background thread.
 struct RunningTask {
@@ -27,13 +27,13 @@ struct RunningTask {
 }
 
 pub struct WasmRuntime {
-    queue: Arc<InMemoryQueue>,
+    queue: Arc<dyn MessageQueue + Send + Sync>,
     agents: HashMap<String, Agent>,
     running: Option<RunningTask>,
 }
 
 impl WasmRuntime {
-    pub fn new(queue: Arc<InMemoryQueue>) -> Self {
+    pub fn new(queue: Arc<dyn MessageQueue + Send + Sync>) -> Self {
         Self {
             queue,
             agents: HashMap::new(),
@@ -121,7 +121,7 @@ fn write_output(plugin: &mut CurrentPlugin, outputs: &mut [Val], response: &[u8]
 /// Host function: send(queue_name, payload) -> message_id
 ///
 /// Sends a message to a queue. Returns the message ID for correlation.
-fn make_send_function(queue: Arc<InMemoryQueue>) -> Function {
+fn make_send_function(queue: Arc<dyn MessageQueue + Send + Sync>) -> Function {
     Function::new(
         "send",
         [extism::PTR, extism::PTR, extism::PTR], // queue_name, payload, reply_to
@@ -155,7 +155,7 @@ fn make_send_function(queue: Arc<InMemoryQueue>) -> Function {
 /// Receives a message from a queue. Blocks until a message is available.
 /// The caller is responsible for ensuring service workers are running
 /// in parallel to avoid deadlock.
-fn make_receive_function(queue: Arc<InMemoryQueue>) -> Function {
+fn make_receive_function(queue: Arc<dyn MessageQueue + Send + Sync>) -> Function {
     Function::new(
         "receive",
         [extism::PTR], // queue_name
@@ -215,7 +215,7 @@ mod tests {
 
     #[test]
     fn runtime_registers_agent() {
-        let queue = Arc::new(InMemoryQueue::new());
+        let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
         let mut runtime = WasmRuntime::new(queue);
 
         let agent = load_test_agent("reverse-agent");
@@ -226,7 +226,7 @@ mod tests {
 
     #[test]
     fn tick_processes_message() {
-        let queue = Arc::new(InMemoryQueue::new());
+        let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
         let mut runtime = WasmRuntime::new(Arc::clone(&queue));
 
         // Register agent

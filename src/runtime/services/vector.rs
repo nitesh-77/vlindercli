@@ -11,7 +11,7 @@ use std::sync::Arc;
 use serde::Deserialize;
 
 use crate::domain::VectorStorage;
-use crate::queue::{InMemoryQueue, Message, MessageQueue};
+use crate::queue::{Message, MessageQueue};
 use crate::services::vector_storage;
 
 // ============================================================================
@@ -44,12 +44,12 @@ struct DeleteRequest {
 // ============================================================================
 
 pub struct VectorServiceWorker {
-    queue: Arc<InMemoryQueue>,
+    queue: Arc<dyn MessageQueue + Send + Sync>,
     stores: HashMap<String, Arc<dyn VectorStorage>>,
 }
 
 impl VectorServiceWorker {
-    pub fn new(queue: Arc<InMemoryQueue>) -> Self {
+    pub fn new(queue: Arc<dyn MessageQueue + Send + Sync>) -> Self {
         Self {
             queue,
             stores: HashMap::new(),
@@ -160,12 +160,12 @@ impl VectorServiceWorker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::queue::Message;
+    use crate::queue::{InMemoryQueue, Message};
     use crate::storage::dispatch::{in_memory_storage, open_vector_storage};
 
     #[test]
     fn handles_store_and_search() {
-        let queue = Arc::new(InMemoryQueue::new());
+        let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
         let mut handler = VectorServiceWorker::new(Arc::clone(&queue));
 
         // Register storage
