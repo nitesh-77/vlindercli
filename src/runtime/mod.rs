@@ -2,11 +2,14 @@
 //!
 //! Contains:
 //! - WasmRuntime: queue-based WASM agent execution
-//! - services: Native handlers for infrastructure services
+//! - Provider: aggregates service workers
+//! - services: Native workers for infrastructure services
 
+mod provider;
 mod wasm;
 pub mod services;
 
+pub use provider::Provider;
 pub use wasm::WasmRuntime;
 pub use services::{
     ObjectServiceWorker, VectorServiceWorker,

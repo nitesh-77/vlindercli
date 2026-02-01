@@ -19,29 +19,7 @@ use extism::{CurrentPlugin, Function, Manifest, Plugin, UserData, Val, Wasm};
 use crate::domain::{Agent, EmbeddingEngine, InferenceEngine, ObjectStorage, VectorStorage};
 use crate::queue::{InMemoryQueue, Message, MessageQueue};
 
-use super::services::{
-    EmbeddingServiceWorker, InferenceServiceWorker,
-    ObjectServiceWorker, VectorServiceWorker,
-};
-
-/// Shared service provider that can be accessed from host functions
-struct Provider {
-    object: ObjectServiceWorker,
-    vector: VectorServiceWorker,
-    inference: InferenceServiceWorker,
-    embedding: EmbeddingServiceWorker,
-}
-
-impl Provider {
-    /// Process one service message if available. Returns true if processed.
-    fn tick(&self) -> bool {
-        if self.object.tick() { return true; }
-        if self.vector.tick() { return true; }
-        if self.inference.tick() { return true; }
-        if self.embedding.tick() { return true; }
-        false
-    }
-}
+use super::Provider;
 
 pub struct WasmRuntime {
     queue: Arc<InMemoryQueue>,
@@ -51,12 +29,7 @@ pub struct WasmRuntime {
 
 impl WasmRuntime {
     pub fn new(queue: Arc<InMemoryQueue>) -> Self {
-        let services = Provider {
-            object: ObjectServiceWorker::new(Arc::clone(&queue)),
-            vector: VectorServiceWorker::new(Arc::clone(&queue)),
-            inference: InferenceServiceWorker::new(Arc::clone(&queue)),
-            embedding: EmbeddingServiceWorker::new(Arc::clone(&queue)),
-        };
+        let services = Provider::new(Arc::clone(&queue));
         Self {
             queue,
             agents: HashMap::new(),
