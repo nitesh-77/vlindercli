@@ -1,5 +1,25 @@
 //! Embedding capability domain types and traits.
 
+// ============================================================================
+// EmbeddingEngineType (available implementations)
+// ============================================================================
+
+/// Available embedding engine implementations.
+///
+/// Registered with the Registry to track what backends are available.
+/// Follows the same pattern as `RuntimeType` and `InferenceEngineType`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum EmbeddingEngineType {
+    /// Nomic embedding via llama.cpp.
+    Nomic,
+    /// In-memory embedding (for testing).
+    InMemory,
+}
+
+// ============================================================================
+// EmbeddingEngine Trait
+// ============================================================================
+
 /// Embedding engine for vector generation.
 pub trait EmbeddingEngine: Send + Sync {
     fn embed(&self, text: &str) -> Result<Vec<f32>, String>;

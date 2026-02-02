@@ -65,7 +65,7 @@ pub use inference::{
 // ============================================================================
 
 pub use embedding::{
-    EmbeddingEngine,
+    EmbeddingEngine, EmbeddingEngineType,
     Embedding, EmbeddingBackend, EmbeddingKind, NomicConfig,
 };
 

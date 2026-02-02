@@ -10,7 +10,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::domain::{Agent, InferenceEngineType, Model, ModelType, ObjectStorageType, Provider, Runtime, RuntimeType, VectorStorageType};
+use crate::domain::{Agent, EmbeddingEngineType, InferenceEngineType, Model, ModelType, ObjectStorageType, Provider, Runtime, RuntimeType, VectorStorageType};
 use crate::domain::harness::Harness;
 use crate::domain::registry::{JobId, Registry};
 use crate::embedding::{open_embedding_engine, InMemoryEmbedding};
@@ -51,6 +51,10 @@ impl Daemon {
         // Register available inference engine implementations
         registry.register_inference_engine(InferenceEngineType::Llama);
         registry.register_inference_engine(InferenceEngineType::InMemory);
+
+        // Register available embedding engine implementations
+        registry.register_embedding_engine(EmbeddingEngineType::Nomic);
+        registry.register_embedding_engine(EmbeddingEngineType::InMemory);
 
         Self {
             registry,
