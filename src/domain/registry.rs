@@ -7,7 +7,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::domain::{Agent, ResourceId, RuntimeType};
+use crate::domain::{Agent, ObjectStorageType, ResourceId, RuntimeType};
 
 /// Unique identifier for a submitted job.
 ///
@@ -52,6 +52,7 @@ pub struct Registry {
     jobs: HashMap<JobId, Job>,
     agents: HashMap<ResourceId, Agent>,
     available_runtimes: HashSet<RuntimeType>,
+    available_object_storage: HashSet<ObjectStorageType>,
 }
 
 impl Registry {
@@ -61,6 +62,7 @@ impl Registry {
             jobs: HashMap::new(),
             agents: HashMap::new(),
             available_runtimes: HashSet::new(),
+            available_object_storage: HashSet::new(),
         }
     }
 
@@ -84,6 +86,18 @@ impl Registry {
             }
         }
         None
+    }
+
+    // --- Object storage operations ---
+
+    /// Register an object storage type as available.
+    pub fn register_object_storage(&mut self, storage_type: ObjectStorageType) {
+        self.available_object_storage.insert(storage_type);
+    }
+
+    /// Check if an object storage type is available.
+    pub fn has_object_storage(&self, storage_type: ObjectStorageType) -> bool {
+        self.available_object_storage.contains(&storage_type)
     }
 
     // --- Job operations ---
@@ -282,5 +296,26 @@ mod tests {
 
         // file:// but not .wasm → no runtime
         assert_eq!(registry.select_runtime(&agent), None);
+    }
+
+    // --- Object storage tests ---
+
+    #[test]
+    fn register_object_storage_types() {
+        let mut registry = Registry::new();
+
+        // Initially nothing available
+        assert!(!registry.has_object_storage(ObjectStorageType::Sqlite));
+        assert!(!registry.has_object_storage(ObjectStorageType::InMemory));
+
+        // Register Sqlite
+        registry.register_object_storage(ObjectStorageType::Sqlite);
+        assert!(registry.has_object_storage(ObjectStorageType::Sqlite));
+        assert!(!registry.has_object_storage(ObjectStorageType::InMemory));
+
+        // Register InMemory
+        registry.register_object_storage(ObjectStorageType::InMemory);
+        assert!(registry.has_object_storage(ObjectStorageType::Sqlite));
+        assert!(registry.has_object_storage(ObjectStorageType::InMemory));
     }
 }

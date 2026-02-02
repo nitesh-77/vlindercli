@@ -9,6 +9,22 @@ use std::path::PathBuf;
 use serde::Deserialize;
 
 // ============================================================================
+// ObjectStorageType (available implementations)
+// ============================================================================
+
+/// Available object storage implementations.
+///
+/// Registered with the Registry to track what backends are available.
+/// Follows the same pattern as `RuntimeType`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ObjectStorageType {
+    /// SQLite-backed storage.
+    Sqlite,
+    /// In-memory storage (for testing).
+    InMemory,
+}
+
+// ============================================================================
 // ObjectStorage Trait
 // ============================================================================
 
