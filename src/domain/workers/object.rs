@@ -22,26 +22,26 @@ use crate::services::object_storage;
 
 #[derive(Debug, Deserialize)]
 struct GetRequest {
-    namespace: String,
+    agent_id: String,
     path: String,
 }
 
 #[derive(Debug, Deserialize)]
 struct PutRequest {
-    namespace: String,
+    agent_id: String,
     path: String,
     content: String, // base64 encoded
 }
 
 #[derive(Debug, Deserialize)]
 struct ListRequest {
-    namespace: String,
+    agent_id: String,
     path: String,
 }
 
 #[derive(Debug, Deserialize)]
 struct DeleteRequest {
-    namespace: String,
+    agent_id: String,
     path: String,
 }
 
@@ -62,9 +62,9 @@ impl ObjectServiceWorker {
         }
     }
 
-    /// Register storage for a namespace (typically agent name).
-    pub fn register(&self, namespace: &str, storage: Arc<dyn ObjectStorage>) {
-        self.stores.write().unwrap().insert(namespace.to_string(), storage);
+    /// Register storage for an agent (keyed by agent ID).
+    pub fn register(&self, agent_id: &str, storage: Arc<dyn ObjectStorage>) {
+        self.stores.write().unwrap().insert(agent_id.to_string(), storage);
     }
 
     /// Process one message if available. Returns true if processed.
@@ -124,9 +124,9 @@ impl ObjectServiceWorker {
         };
 
         let stores = self.stores.read().unwrap();
-        let store = match stores.get(&req.namespace) {
+        let store = match stores.get(&req.agent_id) {
             Some(s) => s,
-            None => return format!("[error] unknown namespace: {}", req.namespace).into_bytes(),
+            None => return format!("[error] unknown agent_id: {}", req.agent_id).into_bytes(),
         };
 
         // Call pure service function
@@ -144,9 +144,9 @@ impl ObjectServiceWorker {
         };
 
         let stores = self.stores.read().unwrap();
-        let store = match stores.get(&req.namespace) {
+        let store = match stores.get(&req.agent_id) {
             Some(s) => s,
-            None => return format!("[error] unknown namespace: {}", req.namespace).into_bytes(),
+            None => return format!("[error] unknown agent_id: {}", req.agent_id).into_bytes(),
         };
 
         // Decode base64 (protocol concern)
@@ -169,9 +169,9 @@ impl ObjectServiceWorker {
         };
 
         let stores = self.stores.read().unwrap();
-        let store = match stores.get(&req.namespace) {
+        let store = match stores.get(&req.agent_id) {
             Some(s) => s,
-            None => return format!("[error] unknown namespace: {}", req.namespace).into_bytes(),
+            None => return format!("[error] unknown agent_id: {}", req.agent_id).into_bytes(),
         };
 
         // Call pure service function
@@ -188,9 +188,9 @@ impl ObjectServiceWorker {
         };
 
         let stores = self.stores.read().unwrap();
-        let store = match stores.get(&req.namespace) {
+        let store = match stores.get(&req.agent_id) {
             Some(s) => s,
-            None => return format!("[error] unknown namespace: {}", req.namespace).into_bytes(),
+            None => return format!("[error] unknown agent_id: {}", req.agent_id).into_bytes(),
         };
 
         // Call pure service function
@@ -219,7 +219,7 @@ mod tests {
 
         // Send put request
         let put_payload = serde_json::json!({
-            "namespace": "test",
+            "agent_id": "test",
             "path": "/hello.txt",
             "content": base64::engine::general_purpose::STANDARD.encode(b"hello world")
         });
@@ -236,7 +236,7 @@ mod tests {
 
         // Send get request
         let get_payload = serde_json::json!({
-            "namespace": "test",
+            "agent_id": "test",
             "path": "/hello.txt"
         });
         let get_msg = Message::request(

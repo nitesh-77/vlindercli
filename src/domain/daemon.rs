@@ -136,12 +136,12 @@ impl Daemon {
         }
 
         // Setup storage (use in-memory for now, TODO: use declared storage)
-        let name = &agent.name;
+        let agent_id = agent.id.as_str();
         let storage = in_memory_storage();
         let object = open_object_storage(&storage).expect("in-memory always succeeds");
         let vector = open_vector_storage(&storage).expect("in-memory always succeeds");
-        self.provider.register_object(name, object);
-        self.provider.register_vector(name, vector);
+        self.provider.register_object(agent_id, object);
+        self.provider.register_vector(agent_id, vector);
 
         // Register with selected runtime
         match runtime_type {

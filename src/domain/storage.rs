@@ -122,11 +122,11 @@ pub struct Storage {
 
 /// Backend configuration for storage.
 ///
-/// Contains common settings (namespace) plus the specific kind.
+/// Contains common settings (agent_id) plus the specific kind.
 #[derive(Clone, Debug)]
 pub struct StorageBackend {
-    /// Namespace for isolation (typically agent name).
-    pub namespace: String,
+    /// Agent ID for isolation.
+    pub agent_id: String,
     pub kind: StorageKind,
 }
 

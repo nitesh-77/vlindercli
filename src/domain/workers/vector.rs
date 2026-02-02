@@ -20,7 +20,7 @@ use crate::services::vector_storage;
 
 #[derive(Debug, Deserialize)]
 struct StoreRequest {
-    namespace: String,
+    agent_id: String,
     key: String,
     vector: Vec<f32>,
     metadata: String,
@@ -28,14 +28,14 @@ struct StoreRequest {
 
 #[derive(Debug, Deserialize)]
 struct SearchRequest {
-    namespace: String,
+    agent_id: String,
     vector: Vec<f32>,
     limit: u32,
 }
 
 #[derive(Debug, Deserialize)]
 struct DeleteRequest {
-    namespace: String,
+    agent_id: String,
     key: String,
 }
 
@@ -56,9 +56,9 @@ impl VectorServiceWorker {
         }
     }
 
-    /// Register storage for a namespace (typically agent name).
-    pub fn register(&self, namespace: &str, storage: Arc<dyn VectorStorage>) {
-        self.stores.write().unwrap().insert(namespace.to_string(), storage);
+    /// Register storage for an agent (keyed by agent ID).
+    pub fn register(&self, agent_id: &str, storage: Arc<dyn VectorStorage>) {
+        self.stores.write().unwrap().insert(agent_id.to_string(), storage);
     }
 
     /// Process one message if available. Returns true if processed.
@@ -108,9 +108,9 @@ impl VectorServiceWorker {
         };
 
         let stores = self.stores.read().unwrap();
-        let store = match stores.get(&req.namespace) {
+        let store = match stores.get(&req.agent_id) {
             Some(s) => s,
-            None => return format!("[error] unknown namespace: {}", req.namespace).into_bytes(),
+            None => return format!("[error] unknown agent_id: {}", req.agent_id).into_bytes(),
         };
 
         // Call pure service function (vec variant)
@@ -127,9 +127,9 @@ impl VectorServiceWorker {
         };
 
         let stores = self.stores.read().unwrap();
-        let store = match stores.get(&req.namespace) {
+        let store = match stores.get(&req.agent_id) {
             Some(s) => s,
-            None => return format!("[error] unknown namespace: {}", req.namespace).into_bytes(),
+            None => return format!("[error] unknown agent_id: {}", req.agent_id).into_bytes(),
         };
 
         // Call pure service function (vec variant)
@@ -146,9 +146,9 @@ impl VectorServiceWorker {
         };
 
         let stores = self.stores.read().unwrap();
-        let store = match stores.get(&req.namespace) {
+        let store = match stores.get(&req.agent_id) {
             Some(s) => s,
-            None => return format!("[error] unknown namespace: {}", req.namespace).into_bytes(),
+            None => return format!("[error] unknown agent_id: {}", req.agent_id).into_bytes(),
         };
 
         // Call trait method directly (no pure function needed for simple delete)
@@ -179,7 +179,7 @@ mod tests {
         // Store embedding
         let embedding: Vec<f32> = (0..768).map(|i| i as f32 * 0.001).collect();
         let store_payload = serde_json::json!({
-            "namespace": "test",
+            "agent_id": "test",
             "key": "doc1",
             "vector": embedding,
             "metadata": "test document"
@@ -196,7 +196,7 @@ mod tests {
 
         // Search
         let search_payload = serde_json::json!({
-            "namespace": "test",
+            "agent_id": "test",
             "vector": embedding,
             "limit": 1
         });

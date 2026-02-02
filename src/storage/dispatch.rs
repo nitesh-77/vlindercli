@@ -15,7 +15,7 @@ use super::vector::{InMemoryVectorStorage, SqliteVectorStorage};
 pub(crate) fn open_object_storage(storage: &Storage) -> Result<Arc<dyn ObjectStorage>, DispatchError> {
     match &storage.backend.kind {
         StorageKind::Sqlite(_) => {
-            SqliteObjectStorage::open(&storage.backend.namespace)
+            SqliteObjectStorage::open(&storage.backend.agent_id)
                 .map(|s| Arc::new(s) as Arc<dyn ObjectStorage>)
                 .map_err(DispatchError::Sqlite)
         }
@@ -29,7 +29,7 @@ pub(crate) fn open_object_storage(storage: &Storage) -> Result<Arc<dyn ObjectSto
 pub(crate) fn open_vector_storage(storage: &Storage) -> Result<Arc<dyn VectorStorage>, DispatchError> {
     match &storage.backend.kind {
         StorageKind::Sqlite(_) => {
-            SqliteVectorStorage::open(&storage.backend.namespace)
+            SqliteVectorStorage::open(&storage.backend.agent_id)
                 .map(|s| Arc::new(s) as Arc<dyn VectorStorage>)
                 .map_err(DispatchError::Sqlite)
         }
@@ -43,7 +43,7 @@ pub(crate) fn open_vector_storage(storage: &Storage) -> Result<Arc<dyn VectorSto
 pub(crate) fn in_memory_storage() -> Storage {
     Storage {
         backend: crate::domain::StorageBackend {
-            namespace: "test".to_string(),
+            agent_id: "test".to_string(),
             kind: StorageKind::InMemory,
         },
     }

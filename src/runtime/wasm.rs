@@ -7,8 +7,12 @@
 //! - Sends responses to reply queues
 //!
 //! Host functions provided to WASM guests:
-//! - send(queue_name, payload) -> message_id
-//! - receive(queue_name) -> payload (blocks until message available)
+//! - send(payload) -> response (synchronous request/response)
+//!
+//! The runtime handles all routing concerns:
+//! - Extracts `op` from payload to determine target queue
+//! - Injects `agent_id` for storage isolation
+//! - Manages reply queue creation and response waiting
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -88,13 +92,13 @@ impl Runtime for WasmRuntime {
                     .path()
                     .unwrap_or(agent.id.as_str())
                     .to_string();
+                let agent_id_str = agent_id.as_str().to_string();
                 let payload = request.payload.clone();
 
                 // Spawn WASM execution in background thread
                 let handle = thread::spawn(move || {
                     let functions = [
-                        make_send_function(Arc::clone(&queue)),
-                        make_receive_function(Arc::clone(&queue)),
+                        make_send_function(Arc::clone(&queue), agent_id_str),
                         make_get_prompts_function(),
                     ];
 
@@ -130,67 +134,64 @@ fn write_output(plugin: &mut CurrentPlugin, outputs: &mut [Val], response: &[u8]
     Ok(())
 }
 
-/// Host function: send(queue_name, payload) -> message_id
-///
-/// Sends a message to a queue. Returns the message ID for correlation.
-fn make_send_function(queue: Arc<dyn MessageQueue + Send + Sync>) -> Function {
-    Function::new(
-        "send",
-        [extism::PTR, extism::PTR, extism::PTR], // queue_name, payload, reply_to
-        [extism::PTR],                            // message_id
-        UserData::new(queue),
-        |plugin, inputs, outputs, user_data| {
-            let queue_name: String = plugin.memory_get_val(&inputs[0])?;
-            let payload: Vec<u8> = plugin.memory_get_val(&inputs[1])?;
-            let reply_to: String = plugin.memory_get_val(&inputs[2])?;
-
-            let queue = user_data.get().unwrap();
-            let queue = queue.lock().unwrap();
-
-            let message = Message::request(payload, &reply_to);
-            let message_id = message.id.to_string();
-
-            let result = queue.send(&queue_name, message);
-
-            let response = match result {
-                Ok(()) => message_id,
-                Err(e) => format!("[error] {}", e),
-            };
-
-            write_output(plugin, outputs, response.as_bytes())
-        },
-    )
+/// Data passed to the send host function
+struct SendFunctionData {
+    queue: Arc<dyn MessageQueue + Send + Sync>,
+    agent_id: String,
 }
 
-/// Host function: receive(queue_name) -> payload
+/// Host function: send(payload) -> response
 ///
-/// Receives a message from a queue. Blocks until a message is available.
-/// The caller is responsible for ensuring service workers are running
-/// in parallel to avoid deadlock.
-fn make_receive_function(queue: Arc<dyn MessageQueue + Send + Sync>) -> Function {
+/// Synchronous request/response. The runtime:
+/// - Extracts `op` from payload to determine target queue
+/// - Injects `agent_id` for storage isolation
+/// - Handles reply queue management
+/// - Returns the response payload directly
+fn make_send_function(queue: Arc<dyn MessageQueue + Send + Sync>, agent_id: String) -> Function {
+    let data = SendFunctionData { queue, agent_id };
+
     Function::new(
-        "receive",
-        [extism::PTR], // queue_name
-        [extism::PTR], // payload (JSON with id, payload, correlation_id)
-        UserData::new(queue),
+        "send",
+        [extism::PTR], // payload (JSON with op field)
+        [extism::PTR], // response payload
+        UserData::new(data),
         |plugin, inputs, outputs, user_data| {
-            let queue_name: String = plugin.memory_get_val(&inputs[0])?;
+            let payload: Vec<u8> = plugin.memory_get_val(&inputs[0])?;
 
-            let queue = user_data.get().unwrap();
-            let queue = queue.lock().unwrap();
+            let data = user_data.get().unwrap();
+            let data = data.lock().unwrap();
 
-            // Spin until message available
+            // Parse payload to extract op and inject agent_id
+            let mut json: serde_json::Value = serde_json::from_slice(&payload)
+                .map_err(|e| extism::Error::msg(format!("invalid JSON payload: {}", e)))?;
+
+            // Extract op to determine queue
+            let op = json.get("op")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| extism::Error::msg("payload missing 'op' field"))?
+                .to_string();
+
+            // Inject agent_id for storage operations
+            if let Some(obj) = json.as_object_mut() {
+                obj.insert("agent_id".to_string(), serde_json::Value::String(data.agent_id.clone()));
+            }
+
+            // Generate reply queue
+            let reply_to = format!("{}-reply-{}", data.agent_id, uuid::Uuid::new_v4());
+
+            // Send request
+            let enriched_payload = serde_json::to_vec(&json)
+                .map_err(|e| extism::Error::msg(format!("serialize error: {}", e)))?;
+            let message = Message::request(enriched_payload, &reply_to);
+
+            data.queue.send(&op, message)
+                .map_err(|e| extism::Error::msg(format!("send error: {}", e)))?;
+
+            // Wait for response
             loop {
-                if let Ok(message) = queue.receive(&queue_name) {
-                    // Return message as JSON
-                    let response = serde_json::json!({
-                        "id": message.id.to_string(),
-                        "payload": String::from_utf8_lossy(&message.payload),
-                        "correlation_id": message.correlation_id.map(|id| id.to_string()),
-                    });
-                    return write_output(plugin, outputs, response.to_string().as_bytes());
+                if let Ok(response) = data.queue.receive(&reply_to) {
+                    return write_output(plugin, outputs, &response.payload);
                 }
-
                 std::thread::sleep(std::time::Duration::from_millis(1));
             }
         },

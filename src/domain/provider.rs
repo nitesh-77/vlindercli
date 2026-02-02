@@ -1,7 +1,7 @@
 //! Provider - service worker aggregation.
 //!
 //! Aggregates service workers and routes messages to backends.
-//! Registration maps namespaces (agent names) to backend implementations.
+//! Registration maps agent IDs to backend implementations.
 
 use std::sync::Arc;
 
@@ -15,7 +15,7 @@ use crate::queue::MessageQueue;
 /// Aggregates service workers for the runtime.
 ///
 /// Each worker handles one service type (object storage, vector storage,
-/// inference, embedding). Registration maps namespaces/models to backends.
+/// inference, embedding). Registration maps agent IDs/models to backends.
 /// Supports heterogeneous deployments — different agents can use different
 /// backends within the same Provider.
 pub struct Provider {
@@ -36,14 +36,14 @@ impl Provider {
         }
     }
 
-    /// Register object storage for a namespace (agent name).
-    pub fn register_object(&self, namespace: &str, storage: Arc<dyn ObjectStorage>) {
-        self.object.register(namespace, storage);
+    /// Register object storage for an agent.
+    pub fn register_object(&self, agent_id: &str, storage: Arc<dyn ObjectStorage>) {
+        self.object.register(agent_id, storage);
     }
 
-    /// Register vector storage for a namespace (agent name).
-    pub fn register_vector(&self, namespace: &str, storage: Arc<dyn VectorStorage>) {
-        self.vector.register(namespace, storage);
+    /// Register vector storage for an agent.
+    pub fn register_vector(&self, agent_id: &str, storage: Arc<dyn VectorStorage>) {
+        self.vector.register(agent_id, storage);
     }
 
     /// Register inference engine for a model name.
@@ -89,7 +89,7 @@ mod tests {
 
         // Write to agent-a's storage
         let put_a = serde_json::json!({
-            "namespace": "agent-a",
+            "agent_id": "agent-a",
             "path": "/data.txt",
             "content": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, b"data for A")
         });
@@ -100,7 +100,7 @@ mod tests {
 
         // Write to agent-b's storage
         let put_b = serde_json::json!({
-            "namespace": "agent-b",
+            "agent_id": "agent-b",
             "path": "/data.txt",
             "content": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, b"data for B")
         });
@@ -110,7 +110,7 @@ mod tests {
         let _ = queue.receive("reply-put-b").unwrap(); // consume put response
 
         // Read from agent-a - gets A's data
-        let get_a = serde_json::json!({ "namespace": "agent-a", "path": "/data.txt" });
+        let get_a = serde_json::json!({ "agent_id": "agent-a", "path": "/data.txt" });
         let msg = Message::request(serde_json::to_vec(&get_a).unwrap(), "reply-get-a");
         queue.send("kv-get", msg).unwrap();
         provider.tick();
@@ -118,7 +118,7 @@ mod tests {
         assert_eq!(response.payload, b"data for A");
 
         // Read from agent-b - gets B's data (isolated)
-        let get_b = serde_json::json!({ "namespace": "agent-b", "path": "/data.txt" });
+        let get_b = serde_json::json!({ "agent_id": "agent-b", "path": "/data.txt" });
         let msg = Message::request(serde_json::to_vec(&get_b).unwrap(), "reply-get-b");
         queue.send("kv-get", msg).unwrap();
         provider.tick();

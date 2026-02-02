@@ -49,7 +49,7 @@ id = "agent.wasm"
 #   - infer: Call an LLM with a prompt, get text back
 #   - embed: Convert text to vector embeddings
 #
-# Persistence (scoped to this agent's namespace):
+# Persistence (scoped to this agent's identity):
 #   - get_file: Read a cached file
 #   - put_file: Write a file to cache
 #   - list_files: List files in a directory
