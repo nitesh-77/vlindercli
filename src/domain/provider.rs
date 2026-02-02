@@ -81,17 +81,19 @@ mod tests {
         // Each agent gets its own isolated storage (lazy-opened from memory://)
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
         let mut registry = Registry::new();
+        registry.register_runtime(crate::domain::RuntimeType::Wasm);
+        registry.register_object_storage(crate::domain::ObjectStorageType::InMemory);
 
         // Register agents - each declares memory:// storage (each gets separate instance)
-        registry.register_agent(test_agent("file://agent-a.wasm"));
-        registry.register_agent(test_agent("file://agent-b.wasm"));
+        registry.register_agent(test_agent("file:///agent-a.wasm")).unwrap();
+        registry.register_agent(test_agent("file:///agent-b.wasm")).unwrap();
 
         let registry = Arc::new(RwLock::new(registry));
         let provider = Provider::new(Arc::clone(&queue), Arc::clone(&registry));
 
         // Write to agent-a's storage
         let put_a = serde_json::json!({
-            "agent_id": "file://agent-a.wasm",
+            "agent_id": "file:///agent-a.wasm",
             "path": "/data.txt",
             "content": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, b"data for A")
         });
@@ -102,7 +104,7 @@ mod tests {
 
         // Write to agent-b's storage
         let put_b = serde_json::json!({
-            "agent_id": "file://agent-b.wasm",
+            "agent_id": "file:///agent-b.wasm",
             "path": "/data.txt",
             "content": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, b"data for B")
         });
@@ -112,7 +114,7 @@ mod tests {
         let _ = queue.receive("reply-put-b").unwrap(); // consume put response
 
         // Read from agent-a - gets A's data
-        let get_a = serde_json::json!({ "agent_id": "file://agent-a.wasm", "path": "/data.txt" });
+        let get_a = serde_json::json!({ "agent_id": "file:///agent-a.wasm", "path": "/data.txt" });
         let msg = Message::request(serde_json::to_vec(&get_a).unwrap(), "reply-get-a");
         queue.send("kv-get", msg).unwrap();
         provider.tick();
@@ -120,7 +122,7 @@ mod tests {
         assert_eq!(response.payload, b"data for A");
 
         // Read from agent-b - gets B's data (isolated)
-        let get_b = serde_json::json!({ "agent_id": "file://agent-b.wasm", "path": "/data.txt" });
+        let get_b = serde_json::json!({ "agent_id": "file:///agent-b.wasm", "path": "/data.txt" });
         let msg = Message::request(serde_json::to_vec(&get_b).unwrap(), "reply-get-b");
         queue.send("kv-get", msg).unwrap();
         provider.tick();

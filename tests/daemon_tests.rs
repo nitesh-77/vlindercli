@@ -28,13 +28,19 @@ fn reverse_agent_toml() -> String {
 fn daemon_invokes_agent_and_returns_result() {
     let mut daemon = Daemon::new();
 
-    // Invoke via daemon (which delegates to harness)
-    let job_id = daemon.invoke(&reverse_agent_toml(), "hello").unwrap();
+    // Deploy agent
+    let agent_id = daemon.harness.deploy(&reverse_agent_toml()).unwrap();
+
+    // Activate agent (register with runtime)
+    daemon.activate_agent(&agent_id).unwrap();
+
+    // Invoke via harness
+    let job_id = daemon.harness.invoke(&agent_id, "hello").unwrap();
 
     // Tick until complete
     let result = loop {
         daemon.tick();
-        if let Some(result) = daemon.poll(&job_id) {
+        if let Some(result) = daemon.harness.poll(&job_id) {
             break result;
         }
         std::thread::sleep(std::time::Duration::from_millis(1));

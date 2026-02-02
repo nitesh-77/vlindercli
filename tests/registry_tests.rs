@@ -21,6 +21,7 @@ fn load_agent(name: &str) -> Agent {
 #[test]
 fn agent_registration() {
     let mut registry = Registry::new();
+    registry.register_runtime(RuntimeType::Wasm);
     let fake_id = ResourceId::new("file:///nonexistent/agent.wasm");
 
     // Agent not found initially
@@ -29,7 +30,7 @@ fn agent_registration() {
     // Register agent
     let agent = load_agent("echo-agent");
     let agent_id = agent.id.clone();
-    registry.register_agent(agent);
+    registry.register_agent(agent).unwrap();
 
     // Now found by id
     let agent = registry.get_agent(&agent_id).unwrap();

@@ -10,9 +10,9 @@
 use std::path::Path;
 use std::sync::{Arc, RwLock};
 
-use crate::domain::{Agent, EngineType, Model, ModelType, ObjectStorageType, Provider, Runtime, RuntimeType, VectorStorageType};
+use crate::domain::{EngineType, Model, ModelType, ObjectStorageType, Provider, Runtime, RuntimeType, VectorStorageType};
 use crate::domain::harness::Harness;
-use crate::domain::registry::{JobId, Registry};
+use crate::domain::registry::Registry;
 use crate::embedding::open_embedding_engine;
 use crate::inference::open_inference_engine;
 use crate::queue::InMemoryQueue;
@@ -22,7 +22,8 @@ use crate::runtime::WasmRuntime;
 pub struct Daemon {
     // Components (daemon owns all of these)
     registry: Arc<RwLock<Registry>>,
-    harness: Harness,
+    /// The API surface - use this for deploy/invoke/poll.
+    pub harness: Harness,
     runtime: WasmRuntime,
     provider: Provider,
 }
@@ -55,103 +56,70 @@ impl Daemon {
         let registry = Arc::new(RwLock::new(registry));
 
         Self {
+            harness: Harness::new(queue.clone(), Arc::clone(&registry)),
             registry: Arc::clone(&registry),
-            harness: Harness::new(queue.clone()),
             runtime,
             provider: Provider::new(queue, registry),
         }
     }
 
-    // ========================================================================
-    // API (delegates to Harness)
-    // ========================================================================
+    /// Register a model with the system.
+    ///
+    /// Models must be registered before agents that depend on them can be deployed.
+    pub fn register_model(&mut self, model_path: &Path) -> Result<(), String> {
+        let model = Model::load(model_path)
+            .map_err(|e| format!("failed to load model: {:?}", e))?;
 
-    /// Submit an agent manifest and input for execution.
-    pub fn invoke(&mut self, manifest_toml: &str, input: &str) -> Result<JobId, String> {
-        // Parse agent
-        let agent = Agent::from_toml(manifest_toml)
-            .map_err(|e| format!("failed to parse manifest: {:?}", e))?;
-
-        let agent_id = agent.id.clone();
-
-        // Register infrastructure if new agent
+        // Validate engine availability
         {
             let registry = self.registry.read().unwrap();
-            if registry.get_agent(&agent_id).is_some() {
-                // Agent already registered, just invoke
-                drop(registry);
-                let mut registry = self.registry.write().unwrap();
-                return self.harness.invoke(&mut registry, &agent_id, input);
+            match model.model_type {
+                ModelType::Inference => {
+                    if !registry.has_inference_engine(model.engine) {
+                        return Err(format!("inference engine not available: {:?}", model.engine));
+                    }
+                }
+                ModelType::Embedding => {
+                    if !registry.has_embedding_engine(model.engine) {
+                        return Err(format!("embedding engine not available: {:?}", model.engine));
+                    }
+                }
             }
         }
 
-        // New agent - register infrastructure
-        self.register_agent_infrastructure(&agent)?;
-        {
-            let mut registry = self.registry.write().unwrap();
-            registry.register_agent(agent);
-            self.harness.invoke(&mut registry, &agent_id, input)
+        // Open engine and register with provider
+        let model_name = model.name.clone();
+        match model.model_type {
+            ModelType::Inference => {
+                let engine = open_inference_engine(&model)
+                    .map_err(|e| format!("failed to open inference engine: {}", e))?;
+                self.provider.register_inference(&model_name, engine);
+            }
+            ModelType::Embedding => {
+                let engine = open_embedding_engine(&model)
+                    .map_err(|e| format!("failed to open embedding engine: {}", e))?;
+                self.provider.register_embedding(&model_name, engine);
+            }
         }
+
+        // Register model in registry
+        self.registry.write().unwrap().register_model(model);
+
+        Ok(())
     }
 
-    /// Poll for job completion.
-    pub fn poll(&self, job_id: &JobId) -> Option<String> {
+    /// Register an already-deployed agent with the runtime.
+    ///
+    /// Call this after harness.deploy() to enable agent execution.
+    pub fn activate_agent(&mut self, agent_id: &crate::domain::ResourceId) -> Result<(), String> {
         let registry = self.registry.read().unwrap();
-        self.harness.poll(&registry, job_id)
-    }
+        let agent = registry.get_agent(agent_id)
+            .ok_or_else(|| format!("agent not found: {}", agent_id))?;
 
-    // ========================================================================
-    // Control Loop
-    // ========================================================================
+        // Register with runtime based on type
+        let runtime_type = registry.select_runtime(agent)
+            .ok_or_else(|| format!("no runtime for agent: {}", agent_id))?;
 
-    /// Tick all components.
-    pub fn tick(&mut self) {
-        self.runtime.tick();
-        self.provider.tick();
-        self.harness.tick(&mut self.registry.write().unwrap());
-    }
-
-    // ========================================================================
-    // Infrastructure Setup
-    // ========================================================================
-
-    fn register_agent_infrastructure(&mut self, agent: &Agent) -> Result<(), String> {
-        // Validate runtime
-        let runtime_type = {
-            let registry = self.registry.read().unwrap();
-            registry.select_runtime(agent)
-                .ok_or_else(|| format!("no runtime available for agent: {}", agent.id.as_str()))?
-        };
-
-        // Validate object storage if declared
-        if let Some(ref storage_id) = agent.object_storage {
-            let storage_type = ObjectStorageType::from_scheme(storage_id.scheme())
-                .ok_or_else(|| format!("unknown object storage scheme: {:?}", storage_id.scheme()))?;
-            let registry = self.registry.read().unwrap();
-            if !registry.has_object_storage(storage_type) {
-                return Err(format!("object storage not available: {:?}", storage_type));
-            }
-        }
-
-        // Validate vector storage if declared
-        if let Some(ref storage_id) = agent.vector_storage {
-            let storage_type = VectorStorageType::from_scheme(storage_id.scheme())
-                .ok_or_else(|| format!("unknown vector storage scheme: {:?}", storage_id.scheme()))?;
-            let registry = self.registry.read().unwrap();
-            if !registry.has_vector_storage(storage_type) {
-                return Err(format!("vector storage not available: {:?}", storage_type));
-            }
-        }
-
-        // Validate and register models
-        for (model_name, model_uri) in &agent.requirements.models {
-            self.validate_and_register_model(model_name, model_uri.as_str())?;
-        }
-
-        // Storage is NOT opened here - workers lazy-open from agent's declared URI
-        // when they receive requests. See ADR 036.
-
-        // Register with selected runtime
         match runtime_type {
             RuntimeType::Wasm => self.runtime.register(agent.clone()),
         }
@@ -159,36 +127,11 @@ impl Daemon {
         Ok(())
     }
 
-    fn validate_and_register_model(&mut self, model_name: &str, model_uri: &str) -> Result<(), String> {
-        let path = model_uri.strip_prefix("file://").unwrap_or(model_uri);
-
-        let model = Model::load(Path::new(path))
-            .map_err(|e| format!("failed to load model {}: {:?}", model_name, e))?;
-
-        // Validate engine availability and register
-        let registry = self.registry.read().unwrap();
-        match model.model_type {
-            ModelType::Inference => {
-                if !registry.has_inference_engine(model.engine) {
-                    return Err(format!("inference engine not available: {:?}", model.engine));
-                }
-                drop(registry); // Release lock before opening engine
-                let engine = open_inference_engine(&model)
-                    .map_err(|e| format!("failed to open inference engine: {}", e))?;
-                self.provider.register_inference(model_name, engine);
-            }
-            ModelType::Embedding => {
-                if !registry.has_embedding_engine(model.engine) {
-                    return Err(format!("embedding engine not available: {:?}", model.engine));
-                }
-                drop(registry); // Release lock before opening engine
-                let engine = open_embedding_engine(&model)
-                    .map_err(|e| format!("failed to open embedding engine: {}", e))?;
-                self.provider.register_embedding(model_name, engine);
-            }
-        }
-
-        Ok(())
+    /// Tick all components.
+    pub fn tick(&mut self) {
+        self.runtime.tick();
+        self.provider.tick();
+        self.harness.tick();
     }
 }
 
@@ -203,8 +146,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn invoke_rejects_agent_with_no_matching_runtime() {
-        let mut daemon = Daemon::new();
+    fn deploy_rejects_agent_with_no_matching_runtime() {
+        let daemon = Daemon::new();
 
         // Agent with http:// scheme - no runtime supports this
         let manifest = r#"
@@ -215,9 +158,9 @@ mod tests {
             services = []
         "#;
 
-        let result = daemon.invoke(manifest, "hello");
+        let result = daemon.harness.deploy(manifest);
 
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("no runtime available"));
+        assert!(result.unwrap_err().contains("no runtime"));
     }
 }

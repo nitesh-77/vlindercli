@@ -38,14 +38,22 @@ fn run(path: Option<PathBuf>) {
     // Create daemon
     let mut daemon = Daemon::new();
 
+    // Deploy agent (register with Registry)
+    let agent_id = daemon.harness.deploy(&resolved_toml)
+        .expect("Failed to deploy agent");
+
+    // Activate agent (register with Runtime)
+    daemon.activate_agent(&agent_id)
+        .expect("Failed to activate agent");
+
     // Run REPL
     repl::run(|input| {
-        match daemon.invoke(&resolved_toml, input) {
+        match daemon.harness.invoke(&agent_id, input) {
             Ok(job_id) => {
                 // Tick until complete
                 loop {
                     daemon.tick();
-                    if let Some(result) = daemon.poll(&job_id) {
+                    if let Some(result) = daemon.harness.poll(&job_id) {
                         return result;
                     }
                     std::thread::sleep(std::time::Duration::from_millis(1));

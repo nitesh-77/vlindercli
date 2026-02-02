@@ -232,7 +232,7 @@ mod tests {
         let manifest = r#"
             name = "test-agent"
             description = "Test agent for object storage"
-            id = "file://test.wasm"
+            id = "file:///test.wasm"
             object_storage = "memory://"
             [requirements]
             services = []
@@ -244,17 +244,19 @@ mod tests {
     fn handles_put_and_get() {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
         let mut registry = Registry::new();
+        registry.register_runtime(crate::domain::RuntimeType::Wasm);
+        registry.register_object_storage(crate::domain::ObjectStorageType::InMemory);
 
         // Register test agent with memory:// object storage
         let agent = test_agent_with_object_storage();
-        registry.register_agent(agent);
+        registry.register_agent(agent).unwrap();
 
         let registry = Arc::new(RwLock::new(registry));
         let handler = ObjectServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry));
 
         // Send put request - worker will lazy-open storage from agent's URI
         let put_payload = serde_json::json!({
-            "agent_id": "file://test.wasm",
+            "agent_id": "file:///test.wasm",
             "path": "/hello.txt",
             "content": base64::engine::general_purpose::STANDARD.encode(b"hello world")
         });
@@ -271,7 +273,7 @@ mod tests {
 
         // Send get request
         let get_payload = serde_json::json!({
-            "agent_id": "file://test.wasm",
+            "agent_id": "file:///test.wasm",
             "path": "/hello.txt"
         });
         let get_msg = Message::request(

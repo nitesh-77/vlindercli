@@ -51,11 +51,16 @@ fn run_agent(name: &str, input: &str) -> String {
     let mut daemon = Daemon::new();
     let manifest_toml = load_resolved_manifest(&fixture(name));
 
-    let job_id = daemon.invoke(&manifest_toml, input).unwrap();
+    // Deploy and activate agent
+    let agent_id = daemon.harness.deploy(&manifest_toml).unwrap();
+    daemon.activate_agent(&agent_id).unwrap();
+
+    // Invoke
+    let job_id = daemon.harness.invoke(&agent_id, input).unwrap();
 
     loop {
         daemon.tick();
-        if let Some(result) = daemon.poll(&job_id) {
+        if let Some(result) = daemon.harness.poll(&job_id) {
             return result;
         }
         std::thread::sleep(std::time::Duration::from_millis(1));

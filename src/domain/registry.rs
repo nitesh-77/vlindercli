@@ -2,12 +2,13 @@
 //!
 //! Stores:
 //! - Runtimes (available at `/runtimes`)
+//! - Models (registered model definitions)
 //! - Agents (registered agent definitions)
 //! - Jobs (submitted, running, completed)
 
 use std::collections::{HashMap, HashSet};
 
-use crate::domain::{Agent, EngineType, ObjectStorageType, ResourceId, RuntimeType, VectorStorageType};
+use crate::domain::{Agent, EngineType, Model, ObjectStorageType, ResourceId, RuntimeType, VectorStorageType};
 
 /// Unique identifier for a submitted job.
 ///
@@ -45,12 +46,43 @@ pub enum JobStatus {
     Failed(String),
 }
 
+/// Error returned when agent registration fails validation.
+#[derive(Debug)]
+pub enum RegistrationError {
+    /// No runtime available for this agent's scheme/extension.
+    NoRuntime(ResourceId),
+    /// Agent declares object storage with unknown scheme.
+    UnknownObjectStorageScheme(String),
+    /// Agent declares object storage type not available.
+    ObjectStorageUnavailable(ObjectStorageType),
+    /// Agent declares vector storage with unknown scheme.
+    UnknownVectorStorageScheme(String),
+    /// Agent declares vector storage type not available.
+    VectorStorageUnavailable(VectorStorageType),
+    /// Agent requires a model that is not registered.
+    ModelNotRegistered(ResourceId),
+}
+
+impl std::fmt::Display for RegistrationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RegistrationError::NoRuntime(id) => write!(f, "no runtime available for agent: {}", id),
+            RegistrationError::UnknownObjectStorageScheme(s) => write!(f, "unknown object storage scheme: {}", s),
+            RegistrationError::ObjectStorageUnavailable(t) => write!(f, "object storage not available: {:?}", t),
+            RegistrationError::UnknownVectorStorageScheme(s) => write!(f, "unknown vector storage scheme: {}", s),
+            RegistrationError::VectorStorageUnavailable(t) => write!(f, "vector storage not available: {:?}", t),
+            RegistrationError::ModelNotRegistered(id) => write!(f, "model not registered: {}", id),
+        }
+    }
+}
+
 /// The registry - source of truth for all state.
 pub struct Registry {
     /// URI where this registry exposes its API.
     pub id: ResourceId,
     jobs: HashMap<JobId, Job>,
     agents: HashMap<ResourceId, Agent>,
+    models: HashMap<ResourceId, Model>,
     available_runtimes: HashSet<RuntimeType>,
     available_object_storage: HashSet<ObjectStorageType>,
     available_vector_storage: HashSet<VectorStorageType>,
@@ -64,6 +96,7 @@ impl Registry {
             id: ResourceId::new("http://127.0.0.1:9000"),
             jobs: HashMap::new(),
             agents: HashMap::new(),
+            models: HashMap::new(),
             available_runtimes: HashSet::new(),
             available_object_storage: HashSet::new(),
             available_vector_storage: HashSet::new(),
@@ -173,10 +206,63 @@ impl Registry {
             .collect()
     }
 
+    // --- Model operations ---
+
+    /// Register a model as available.
+    pub fn register_model(&mut self, model: Model) {
+        self.models.insert(model.id.clone(), model);
+    }
+
+    /// Get a registered model by URI.
+    pub fn get_model(&self, uri: &ResourceId) -> Option<&Model> {
+        self.models.get(uri)
+    }
+
     // --- Agent operations ---
 
-    pub fn register_agent(&mut self, agent: Agent) {
+    /// Register an agent after validating all its requirements can be met.
+    ///
+    /// Validates:
+    /// - A runtime is available for the agent's scheme/extension
+    /// - Declared object storage scheme is supported
+    /// - Declared vector storage scheme is supported
+    /// - All declared models are registered
+    pub fn register_agent(&mut self, agent: Agent) -> Result<(), RegistrationError> {
+        // Validate runtime
+        if self.select_runtime(&agent).is_none() {
+            return Err(RegistrationError::NoRuntime(agent.id.clone()));
+        }
+
+        // Validate object storage if declared
+        if let Some(ref uri) = agent.object_storage {
+            let scheme = uri.scheme().unwrap_or("unknown");
+            let storage_type = ObjectStorageType::from_scheme(uri.scheme())
+                .ok_or_else(|| RegistrationError::UnknownObjectStorageScheme(scheme.to_string()))?;
+            if !self.has_object_storage(storage_type) {
+                return Err(RegistrationError::ObjectStorageUnavailable(storage_type));
+            }
+        }
+
+        // Validate vector storage if declared
+        if let Some(ref uri) = agent.vector_storage {
+            let scheme = uri.scheme().unwrap_or("unknown");
+            let storage_type = VectorStorageType::from_scheme(uri.scheme())
+                .ok_or_else(|| RegistrationError::UnknownVectorStorageScheme(scheme.to_string()))?;
+            if !self.has_vector_storage(storage_type) {
+                return Err(RegistrationError::VectorStorageUnavailable(storage_type));
+            }
+        }
+
+        // Validate all declared models are registered
+        for (_name, model_uri) in &agent.requirements.models {
+            if self.get_model(model_uri).is_none() {
+                return Err(RegistrationError::ModelNotRegistered(model_uri.clone()));
+            }
+        }
+
+        // All validated - store agent
         self.agents.insert(agent.id.clone(), agent);
+        Ok(())
     }
 
     pub fn get_agent(&self, id: &ResourceId) -> Option<&Agent> {

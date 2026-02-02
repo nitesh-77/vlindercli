@@ -192,7 +192,7 @@ mod tests {
         let manifest = r#"
             name = "test-agent"
             description = "Test agent for vector storage"
-            id = "file://test.wasm"
+            id = "file:///test.wasm"
             vector_storage = "memory://"
             [requirements]
             services = []
@@ -204,10 +204,12 @@ mod tests {
     fn handles_store_and_search() {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
         let mut registry = Registry::new();
+        registry.register_runtime(crate::domain::RuntimeType::Wasm);
+        registry.register_vector_storage(crate::domain::VectorStorageType::InMemory);
 
         // Register test agent with memory:// vector storage
         let agent = test_agent_with_vector_storage();
-        registry.register_agent(agent);
+        registry.register_agent(agent).unwrap();
 
         let registry = Arc::new(RwLock::new(registry));
         let handler = VectorServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry));
@@ -215,7 +217,7 @@ mod tests {
         // Store embedding - worker will lazy-open storage from agent's URI
         let embedding: Vec<f32> = (0..768).map(|i| i as f32 * 0.001).collect();
         let store_payload = serde_json::json!({
-            "agent_id": "file://test.wasm",
+            "agent_id": "file:///test.wasm",
             "key": "doc1",
             "vector": embedding,
             "metadata": "test document"
@@ -232,7 +234,7 @@ mod tests {
 
         // Search
         let search_payload = serde_json::json!({
-            "agent_id": "file://test.wasm",
+            "agent_id": "file:///test.wasm",
             "vector": embedding,
             "limit": 1
         });
