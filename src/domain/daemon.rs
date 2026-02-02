@@ -10,7 +10,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::domain::{Agent, EmbeddingEngineType, InferenceEngineType, Model, ModelType, ObjectStorageType, Provider, Runtime, RuntimeType, VectorStorageType};
+use crate::domain::{Agent, EngineType, Model, ModelType, ObjectStorageType, Provider, Runtime, RuntimeType, VectorStorageType};
 use crate::domain::harness::Harness;
 use crate::domain::registry::{JobId, Registry};
 use crate::embedding::{open_embedding_engine, InMemoryEmbedding};
@@ -49,12 +49,12 @@ impl Daemon {
         registry.register_vector_storage(VectorStorageType::InMemory);
 
         // Register available inference engine implementations
-        registry.register_inference_engine(InferenceEngineType::Llama);
-        registry.register_inference_engine(InferenceEngineType::InMemory);
+        registry.register_inference_engine(EngineType::Llama);
+        registry.register_inference_engine(EngineType::InMemory);
 
         // Register available embedding engine implementations
-        registry.register_embedding_engine(EmbeddingEngineType::Nomic);
-        registry.register_embedding_engine(EmbeddingEngineType::InMemory);
+        registry.register_embedding_engine(EngineType::Llama);
+        registry.register_embedding_engine(EngineType::InMemory);
 
         Self {
             registry,
@@ -108,23 +108,40 @@ impl Daemon {
     // ========================================================================
 
     fn register_agent_infrastructure(&mut self, agent: &Agent) -> Result<(), String> {
-        // Select runtime first - fail fast if no suitable runtime
+        // Validate runtime
         let runtime_type = self.registry.select_runtime(agent)
             .ok_or_else(|| format!("no runtime available for agent: {}", agent.id.as_str()))?;
 
-        let name = &agent.name;
+        // Validate object storage if declared
+        if let Some(ref storage_id) = agent.object_storage {
+            let storage_type = ObjectStorageType::from_scheme(storage_id.scheme())
+                .ok_or_else(|| format!("unknown object storage scheme: {:?}", storage_id.scheme()))?;
+            if !self.registry.has_object_storage(storage_type) {
+                return Err(format!("object storage not available: {:?}", storage_type));
+            }
+        }
 
-        // Storage
+        // Validate vector storage if declared
+        if let Some(ref storage_id) = agent.vector_storage {
+            let storage_type = VectorStorageType::from_scheme(storage_id.scheme())
+                .ok_or_else(|| format!("unknown vector storage scheme: {:?}", storage_id.scheme()))?;
+            if !self.registry.has_vector_storage(storage_type) {
+                return Err(format!("vector storage not available: {:?}", storage_type));
+            }
+        }
+
+        // Validate and register models
+        for (model_name, model_uri) in &agent.requirements.models {
+            self.validate_and_register_model(model_name, model_uri.as_str())?;
+        }
+
+        // Setup storage (use in-memory for now, TODO: use declared storage)
+        let name = &agent.name;
         let storage = in_memory_storage();
         let object = open_object_storage(&storage).expect("in-memory always succeeds");
         let vector = open_vector_storage(&storage).expect("in-memory always succeeds");
         self.provider.register_object(name, object);
         self.provider.register_vector(name, vector);
-
-        // Models
-        for (model_name, model_uri) in &agent.requirements.models {
-            self.register_model(model_name, model_uri.as_str());
-        }
 
         // Register with selected runtime
         match runtime_type {
@@ -134,32 +151,33 @@ impl Daemon {
         Ok(())
     }
 
-    fn register_model(&mut self, model_name: &str, model_uri: &str) {
+    fn validate_and_register_model(&mut self, model_name: &str, model_uri: &str) -> Result<(), String> {
         let path = model_uri.strip_prefix("file://").unwrap_or(model_uri);
 
-        let model = match Model::load(Path::new(path)) {
-            Ok(m) => m,
-            Err(e) => {
-                eprintln!("[warning] Failed to load model {}: {}", model_name, e);
-                return;
-            }
-        };
+        let model = Model::load(Path::new(path))
+            .map_err(|e| format!("failed to load model {}: {:?}", model_name, e))?;
 
+        // Validate engine availability and register
         match model.model_type {
             ModelType::Inference => {
-                let engine = open_inference_engine(&model).unwrap_or_else(|_| {
-                    Arc::new(InMemoryInference::new("[placeholder]"))
-                });
+                if !self.registry.has_inference_engine(model.engine) {
+                    return Err(format!("inference engine not available: {:?}", model.engine));
+                }
+                let engine = open_inference_engine(&model)
+                    .map_err(|e| format!("failed to open inference engine: {}", e))?;
                 self.provider.register_inference(model_name, engine);
             }
             ModelType::Embedding => {
-                let engine = open_embedding_engine(&model).unwrap_or_else(|_| {
-                    let canned: Vec<f32> = (0..768).map(|i| i as f32 * 0.001).collect();
-                    Arc::new(InMemoryEmbedding::new(canned))
-                });
+                if !self.registry.has_embedding_engine(model.engine) {
+                    return Err(format!("embedding engine not available: {:?}", model.engine));
+                }
+                let engine = open_embedding_engine(&model)
+                    .map_err(|e| format!("failed to open embedding engine: {}", e))?;
                 self.provider.register_embedding(model_name, engine);
             }
         }
+
+        Ok(())
     }
 }
 
