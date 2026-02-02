@@ -1,5 +1,25 @@
 //! Inference capability domain types and traits.
 
+// ============================================================================
+// InferenceEngineType (available implementations)
+// ============================================================================
+
+/// Available inference engine implementations.
+///
+/// Registered with the Registry to track what backends are available.
+/// Follows the same pattern as `RuntimeType` and `ObjectStorageType`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum InferenceEngineType {
+    /// Llama.cpp-based inference.
+    Llama,
+    /// In-memory inference (for testing).
+    InMemory,
+}
+
+// ============================================================================
+// InferenceEngine Trait
+// ============================================================================
+
 /// Inference engine for text generation.
 pub trait InferenceEngine: Send + Sync {
     fn infer(&self, prompt: &str, max_tokens: u32) -> Result<String, String>;

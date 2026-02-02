@@ -7,7 +7,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::domain::{Agent, ObjectStorageType, ResourceId, RuntimeType, VectorStorageType};
+use crate::domain::{Agent, InferenceEngineType, ObjectStorageType, ResourceId, RuntimeType, VectorStorageType};
 
 /// Unique identifier for a submitted job.
 ///
@@ -54,6 +54,7 @@ pub struct Registry {
     available_runtimes: HashSet<RuntimeType>,
     available_object_storage: HashSet<ObjectStorageType>,
     available_vector_storage: HashSet<VectorStorageType>,
+    available_inference_engines: HashSet<InferenceEngineType>,
 }
 
 impl Registry {
@@ -65,6 +66,7 @@ impl Registry {
             available_runtimes: HashSet::new(),
             available_object_storage: HashSet::new(),
             available_vector_storage: HashSet::new(),
+            available_inference_engines: HashSet::new(),
         }
     }
 
@@ -112,6 +114,18 @@ impl Registry {
     /// Check if a vector storage type is available.
     pub fn has_vector_storage(&self, storage_type: VectorStorageType) -> bool {
         self.available_vector_storage.contains(&storage_type)
+    }
+
+    // --- Inference engine operations ---
+
+    /// Register an inference engine type as available.
+    pub fn register_inference_engine(&mut self, engine_type: InferenceEngineType) {
+        self.available_inference_engines.insert(engine_type);
+    }
+
+    /// Check if an inference engine type is available.
+    pub fn has_inference_engine(&self, engine_type: InferenceEngineType) -> bool {
+        self.available_inference_engines.contains(&engine_type)
     }
 
     // --- Job operations ---
@@ -352,5 +366,26 @@ mod tests {
         registry.register_vector_storage(VectorStorageType::InMemory);
         assert!(registry.has_vector_storage(VectorStorageType::SqliteVec));
         assert!(registry.has_vector_storage(VectorStorageType::InMemory));
+    }
+
+    // --- Inference engine tests ---
+
+    #[test]
+    fn register_inference_engine_types() {
+        let mut registry = Registry::new();
+
+        // Initially nothing available
+        assert!(!registry.has_inference_engine(InferenceEngineType::Llama));
+        assert!(!registry.has_inference_engine(InferenceEngineType::InMemory));
+
+        // Register Llama
+        registry.register_inference_engine(InferenceEngineType::Llama);
+        assert!(registry.has_inference_engine(InferenceEngineType::Llama));
+        assert!(!registry.has_inference_engine(InferenceEngineType::InMemory));
+
+        // Register InMemory
+        registry.register_inference_engine(InferenceEngineType::InMemory);
+        assert!(registry.has_inference_engine(InferenceEngineType::Llama));
+        assert!(registry.has_inference_engine(InferenceEngineType::InMemory));
     }
 }
