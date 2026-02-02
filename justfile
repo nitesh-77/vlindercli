@@ -35,6 +35,7 @@ build-agents:
     ln -sf ../../../../agents/reverse-agent/agent.toml {{fixtures}}/reverse-agent/agent.toml
     ln -sf ../../../../agents/pensieve/agent.wasm {{fixtures}}/pensieve/agent.wasm
     ln -sf ../../../../agents/pensieve/agent.toml {{fixtures}}/pensieve/agent.toml
+    ln -sf ../../../../agents/pensieve/models {{fixtures}}/pensieve/models
 
     # mount-test-agent and missing-mount-agent use echo-agent wasm
     ln -sf ../../../../agents/echo-agent/agent.wasm {{fixtures}}/mount-test-agent/agent.wasm
@@ -75,6 +76,7 @@ build-pensieve:
     mkdir -p {{dev_project}}/pensieve/mnt
     ln -sf ../../../../agents/pensieve/agent.wasm {{fixtures}}/pensieve/agent.wasm
     ln -sf ../../../../agents/pensieve/agent.toml {{fixtures}}/pensieve/agent.toml
+    ln -sf ../../../../agents/pensieve/models {{fixtures}}/pensieve/models
     ln -sf ../../agents/pensieve/agent.wasm {{dev_project}}/pensieve/agent.wasm
     ln -sf ../../agents/pensieve/agent.toml {{dev_project}}/pensieve/agent.toml
 
