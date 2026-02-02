@@ -13,8 +13,8 @@ use std::sync::Arc;
 use crate::domain::{Agent, EngineType, Model, ModelType, ObjectStorageType, Provider, Runtime, RuntimeType, VectorStorageType};
 use crate::domain::harness::Harness;
 use crate::domain::registry::{JobId, Registry};
-use crate::embedding::{open_embedding_engine, InMemoryEmbedding};
-use crate::inference::{open_inference_engine, InMemoryInference};
+use crate::embedding::open_embedding_engine;
+use crate::inference::open_inference_engine;
 use crate::queue::InMemoryQueue;
 use crate::runtime::WasmRuntime;
 use crate::storage::dispatch::{in_memory_storage, open_object_storage, open_vector_storage};
@@ -26,9 +26,6 @@ pub struct Daemon {
     harness: Harness,
     runtime: WasmRuntime,
     provider: Provider,
-
-    // Shared queue
-    queue: Arc<InMemoryQueue>,
 }
 
 impl Daemon {
@@ -60,8 +57,7 @@ impl Daemon {
             registry,
             harness: Harness::new(queue.clone()),
             runtime,
-            provider: Provider::new(queue.clone()),
-            queue,
+            provider: Provider::new(queue),
         }
     }
 

@@ -77,9 +77,6 @@ impl Harness {
         }
     }
 
-    pub fn reply_queue(&self) -> &str {
-        &self.reply_queue
-    }
 }
 
 #[cfg(test)]
@@ -146,14 +143,14 @@ mod tests {
         // Invoke creates job and queues message
         let job_id = harness.invoke(&mut registry, &agent_id, "hello").unwrap();
 
-        // Simulate worker processing: receive request, send response
+        // Simulate worker processing: receive request, send response to reply_to
         let request = queue.receive(agent_id.as_str()).unwrap();
         let response = Message::response(
             b"result".to_vec(),
-            harness.reply_queue(),
+            &request.reply_to,
             request.id.clone(),
         );
-        queue.send(harness.reply_queue(), response).unwrap();
+        queue.send(&request.reply_to, response).unwrap();
 
         // Before tick: job is still Running
         assert_eq!(registry.get_job(&job_id).unwrap().status, JobStatus::Running);

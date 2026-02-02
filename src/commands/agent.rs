@@ -32,13 +32,8 @@ fn run(path: Option<PathBuf>) {
         .canonicalize()
         .expect("Failed to resolve agent path");
 
-    // Read manifest as string
-    let manifest_path = absolute_path.join("agent.toml");
-    let manifest_toml = std::fs::read_to_string(&manifest_path)
-        .expect("Failed to read agent.toml");
-
     // Resolve relative paths in manifest to absolute
-    let resolved_toml = resolve_manifest_paths(&manifest_toml, &absolute_path);
+    let resolved_toml = resolve_manifest_paths(&absolute_path);
 
     // Create daemon
     let mut daemon = Daemon::new();
@@ -64,7 +59,7 @@ fn run(path: Option<PathBuf>) {
 /// Resolve relative paths in manifest to absolute paths.
 ///
 /// This is the CLI's job - daemon receives resolved TOML.
-fn resolve_manifest_paths(toml: &str, base_path: &std::path::Path) -> String {
+fn resolve_manifest_paths(base_path: &std::path::Path) -> String {
     // Simple approach: use AgentManifest to parse and resolve, then rebuild
     use vlindercli::domain::AgentManifest;
 
