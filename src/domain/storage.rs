@@ -25,6 +25,22 @@ pub enum ObjectStorageType {
 }
 
 // ============================================================================
+// VectorStorageType (available implementations)
+// ============================================================================
+
+/// Available vector storage implementations.
+///
+/// Registered with the Registry to track what backends are available.
+/// Follows the same pattern as `RuntimeType`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum VectorStorageType {
+    /// SQLite-backed storage with sqlite-vec extension.
+    SqliteVec,
+    /// In-memory storage (for testing).
+    InMemory,
+}
+
+// ============================================================================
 // ObjectStorage Trait
 // ============================================================================
 

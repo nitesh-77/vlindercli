@@ -7,7 +7,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::domain::{Agent, ObjectStorageType, ResourceId, RuntimeType};
+use crate::domain::{Agent, ObjectStorageType, ResourceId, RuntimeType, VectorStorageType};
 
 /// Unique identifier for a submitted job.
 ///
@@ -53,6 +53,7 @@ pub struct Registry {
     agents: HashMap<ResourceId, Agent>,
     available_runtimes: HashSet<RuntimeType>,
     available_object_storage: HashSet<ObjectStorageType>,
+    available_vector_storage: HashSet<VectorStorageType>,
 }
 
 impl Registry {
@@ -63,6 +64,7 @@ impl Registry {
             agents: HashMap::new(),
             available_runtimes: HashSet::new(),
             available_object_storage: HashSet::new(),
+            available_vector_storage: HashSet::new(),
         }
     }
 
@@ -98,6 +100,18 @@ impl Registry {
     /// Check if an object storage type is available.
     pub fn has_object_storage(&self, storage_type: ObjectStorageType) -> bool {
         self.available_object_storage.contains(&storage_type)
+    }
+
+    // --- Vector storage operations ---
+
+    /// Register a vector storage type as available.
+    pub fn register_vector_storage(&mut self, storage_type: VectorStorageType) {
+        self.available_vector_storage.insert(storage_type);
+    }
+
+    /// Check if a vector storage type is available.
+    pub fn has_vector_storage(&self, storage_type: VectorStorageType) -> bool {
+        self.available_vector_storage.contains(&storage_type)
     }
 
     // --- Job operations ---
@@ -317,5 +331,26 @@ mod tests {
         registry.register_object_storage(ObjectStorageType::InMemory);
         assert!(registry.has_object_storage(ObjectStorageType::Sqlite));
         assert!(registry.has_object_storage(ObjectStorageType::InMemory));
+    }
+
+    // --- Vector storage tests ---
+
+    #[test]
+    fn register_vector_storage_types() {
+        let mut registry = Registry::new();
+
+        // Initially nothing available
+        assert!(!registry.has_vector_storage(VectorStorageType::SqliteVec));
+        assert!(!registry.has_vector_storage(VectorStorageType::InMemory));
+
+        // Register SqliteVec
+        registry.register_vector_storage(VectorStorageType::SqliteVec);
+        assert!(registry.has_vector_storage(VectorStorageType::SqliteVec));
+        assert!(!registry.has_vector_storage(VectorStorageType::InMemory));
+
+        // Register InMemory
+        registry.register_vector_storage(VectorStorageType::InMemory);
+        assert!(registry.has_vector_storage(VectorStorageType::SqliteVec));
+        assert!(registry.has_vector_storage(VectorStorageType::InMemory));
     }
 }

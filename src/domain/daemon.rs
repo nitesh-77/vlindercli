@@ -10,7 +10,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::domain::{Agent, Model, ModelType, ObjectStorageType, Provider, Runtime, RuntimeType};
+use crate::domain::{Agent, Model, ModelType, ObjectStorageType, Provider, Runtime, RuntimeType, VectorStorageType};
 use crate::domain::harness::Harness;
 use crate::domain::registry::{JobId, Registry};
 use crate::embedding::{open_embedding_engine, InMemoryEmbedding};
@@ -43,6 +43,10 @@ impl Daemon {
         // Register available object storage implementations
         registry.register_object_storage(ObjectStorageType::Sqlite);
         registry.register_object_storage(ObjectStorageType::InMemory);
+
+        // Register available vector storage implementations
+        registry.register_vector_storage(VectorStorageType::SqliteVec);
+        registry.register_vector_storage(VectorStorageType::InMemory);
 
         Self {
             registry,
