@@ -99,4 +99,4 @@ pub use runtime::{Runtime, RuntimeType};
 // ============================================================================
 
 pub use daemon::Daemon;
-pub use registry::JobId;
+pub use registry::{JobId, JobStatus, Registry};

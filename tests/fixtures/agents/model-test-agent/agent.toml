@@ -1,0 +1,10 @@
+name = "model-test-agent"
+description = "Test agent for model loading tests"
+id = "file://./agent.wasm"
+
+[requirements]
+services = []
+
+[requirements.models]
+phi3 = "file://./models/inference.toml"
+nomic-embed = "file://./models/embedding.toml"

@@ -1,0 +1,31 @@
+# Pensieve Agent Manifest (test fixture)
+name = "pensieve"
+
+description = """
+A memory system for web articles. Save URLs to memory, search across your
+saved content with semantic search, and ask questions to get synthesized
+answers from your knowledge base.
+"""
+
+source = "https://github.com/vlindercli/pensieve"
+id = "agent.wasm"
+
+[requirements]
+services = [
+    "infer",
+    "embed",
+    "get_file",
+    "put_file",
+    "list_files",
+    "store_embedding",
+    "search_by_vector",
+]
+
+[requirements.models]
+phi3 = "file://./models/phi3.toml"
+nomic-embed = "file://./models/nomic-embed.toml"
+
+[[mounts]]
+host_path = "mnt"
+guest_path = "/"
+mode = "rw"

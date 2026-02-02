@@ -1,0 +1,6 @@
+name = "reverse-agent"
+description = "Reverses the input string"
+id = "agent.wasm"
+
+[requirements]
+services = []

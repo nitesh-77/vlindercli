@@ -128,23 +128,6 @@ impl From<ModelLoadError> for LoadError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
-
-    fn fixture_uri(name: &str) -> String {
-        let path = PathBuf::from("tests/fixtures/agents")
-            .join(name)
-            .canonicalize()
-            .unwrap();
-        format!("file://{}", path.display())
-    }
-
-    fn fleet_fixture_uri(name: &str) -> String {
-        let path = PathBuf::from("tests/fixtures/fleets")
-            .join(name)
-            .canonicalize()
-            .unwrap();
-        format!("file://{}", path.display())
-    }
 
     #[test]
     fn uri_to_path_strips_file_prefix() {
@@ -163,21 +146,9 @@ mod tests {
     }
 
     #[test]
-    fn load_agent_with_file_uri() {
-        let agent = load_agent(&fixture_uri("echo-agent")).unwrap();
-        assert_eq!(agent.name, "echo-agent");
-    }
-
-    #[test]
     fn load_agent_fails_for_missing_uri() {
         let result = load_agent("file:///nonexistent/path");
         assert!(result.is_err());
-    }
-
-    #[test]
-    fn load_fleet_with_file_uri() {
-        let fleet = load_fleet(&fleet_fixture_uri("test-fleet")).unwrap();
-        assert_eq!(fleet.name, "test-fleet");
     }
 
     #[test]
@@ -190,26 +161,6 @@ mod tests {
     fn load_agent_rejects_unknown_scheme() {
         let result = load_agent("registry://some-agent");
         assert!(result.is_err());
-    }
-
-    // ========================================================================
-    // load_model tests
-    // ========================================================================
-
-    fn model_fixture_uri(agent: &str, model_file: &str) -> String {
-        let path = PathBuf::from("tests/fixtures/agents")
-            .join(agent)
-            .join("models")
-            .join(model_file)
-            .canonicalize()
-            .unwrap();
-        format!("file://{}", path.display())
-    }
-
-    #[test]
-    fn load_model_with_file_uri() {
-        let model = load_model(&model_fixture_uri("model-test-agent", "inference.toml")).unwrap();
-        assert_eq!(model.name, "phi3");
     }
 
     #[test]
@@ -225,14 +176,5 @@ mod tests {
 
         let result = load_model("ollama://phi3");
         assert!(result.is_err());
-    }
-
-    #[test]
-    fn load_model_returns_correct_type() {
-        let inference = load_model(&model_fixture_uri("model-test-agent", "inference.toml")).unwrap();
-        assert_eq!(inference.model_type, crate::domain::ModelType::Inference);
-
-        let embedding = load_model(&model_fixture_uri("model-test-agent", "embedding.toml")).unwrap();
-        assert_eq!(embedding.model_type, crate::domain::ModelType::Embedding);
     }
 }

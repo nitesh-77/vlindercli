@@ -57,8 +57,8 @@ pub trait Runtime {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::Requirements;
     use std::collections::HashMap;
-    use std::path::Path;
 
     /// Mock runtime for testing - records registrations, returns canned responses.
     struct MockRuntime {
@@ -108,16 +108,28 @@ mod tests {
         }
     }
 
-    fn load_test_agent(name: &str) -> Agent {
-        let path = Path::new("tests/fixtures/agents").join(name);
-        Agent::load(&path).unwrap()
+    fn mock_agent(name: &str) -> Agent {
+        Agent {
+            name: name.to_string(),
+            description: format!("Mock {} for testing", name),
+            source: None,
+            requirements: Requirements {
+                models: HashMap::new(),
+                services: vec![],
+            },
+            prompts: None,
+            mounts: vec![],
+            id: ResourceId::new(format!("file:///mock/{}.wasm", name)),
+            object_storage: None,
+            vector_storage: None,
+        }
     }
 
     #[test]
     fn mock_runtime_implements_trait() {
         let mut runtime: Box<dyn Runtime> = Box::new(MockRuntime::new());
 
-        let agent = load_test_agent("reverse-agent");
+        let agent = mock_agent("test-agent");
         runtime.register(agent);
 
         // No work available
@@ -143,9 +155,9 @@ mod tests {
     fn different_runtimes_same_interface() {
         // Mock runtime
         let mut mock = MockRuntime::new();
-        let agent = load_test_agent("reverse-agent");
+        let agent = mock_agent("agent-a");
         mock.register(agent);
-        assert!(mock.has_agent("reverse-agent"));
+        assert!(mock.has_agent("agent-a"));
 
         // Both implement the same trait
         fn register_agent(runtime: &mut impl Runtime, agent: Agent) {
@@ -153,8 +165,8 @@ mod tests {
         }
 
         let mut mock2 = MockRuntime::new();
-        let agent2 = load_test_agent("echo-agent");
+        let agent2 = mock_agent("agent-b");
         register_agent(&mut mock2, agent2);
-        assert!(mock2.has_agent("echo-agent"));
+        assert!(mock2.has_agent("agent-b"));
     }
 }

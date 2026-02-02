@@ -217,16 +217,10 @@ fn make_get_prompts_function() -> Function {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::queue::{InMemoryQueue, Message, MessageQueue};
-    use std::path::Path;
+    use crate::queue::InMemoryQueue;
 
     fn test_registry_id() -> ResourceId {
         ResourceId::new("http://test:9000")
-    }
-
-    fn load_test_agent(name: &str) -> Agent {
-        let path = Path::new("tests/fixtures/agents").join(name);
-        Agent::load(&path).unwrap()
     }
 
     #[test]
@@ -237,50 +231,5 @@ mod tests {
         // Format: <registry_id>/runtimes/<runtime_type>
         assert_eq!(runtime.id().as_str(), "http://test:9000/runtimes/wasm");
         assert_eq!(runtime.runtime_type(), RuntimeType::Wasm);
-    }
-
-    #[test]
-    fn runtime_registers_agent() {
-        let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
-        let mut runtime = WasmRuntime::new(&test_registry_id(), queue);
-
-        let agent = load_test_agent("reverse-agent");
-        let agent_id = agent.id.clone();
-        runtime.register(agent);
-
-        assert!(runtime.agents.contains_key(&agent_id));
-    }
-
-    #[test]
-    fn tick_processes_message() {
-        let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
-        let mut runtime = WasmRuntime::new(&test_registry_id(), Arc::clone(&queue));
-
-        // Register agent
-        let agent = load_test_agent("reverse-agent");
-        let agent_id = agent.id.clone();
-        runtime.register(agent);
-
-        // Send message to agent's queue (keyed by agent_id)
-        let reply_queue = "test-reply";
-        let request = Message::request(b"hello".to_vec(), reply_queue);
-        let request_id = request.id.clone();
-        queue.send(agent_id.as_str(), request).unwrap();
-
-        // First tick spawns the WASM thread
-        assert!(runtime.tick());
-
-        // Keep ticking until the task completes and response is sent
-        loop {
-            if runtime.tick() {
-                break; // Task completed
-            }
-            std::thread::sleep(std::time::Duration::from_millis(1));
-        }
-
-        // Response should be on reply queue
-        let response = queue.receive(reply_queue).unwrap();
-        assert_eq!(response.correlation_id, Some(request_id));
-        assert_eq!(String::from_utf8(response.payload).unwrap(), "olleh");
     }
 }

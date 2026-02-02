@@ -96,7 +96,11 @@ fn agent_loads_requirements_from_manifest() {
 /// 3. Chunks content and stores embeddings for semantic search
 /// 4. Calls infer("phi3", "Summarize...") → runtime validates & runs inference
 /// 5. Returns formatted output with stats, content preview, and summary
+///
+/// NOTE: Requires real GGUF model weights in tests/fixtures/agents/pensieve/models/weights/
+/// Run with: cargo test --test wasm_tests pensieve -- --ignored
 #[test]
+#[ignore = "requires real GGUF model weights"]
 fn pensieve_agent_fetches_and_summarizes() {
     let result = run_agent("pensieve", "https://httpbin.org/html");
 

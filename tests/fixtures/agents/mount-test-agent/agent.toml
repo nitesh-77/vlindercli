@@ -1,0 +1,16 @@
+name = "mount-test-agent"
+description = "Test agent with explicit mounts"
+id = "agent.wasm"
+
+[requirements]
+services = []
+
+[[mounts]]
+host_path = "data"
+guest_path = "/data"
+mode = "ro"
+
+[[mounts]]
+host_path = "output"
+guest_path = "/output"
+mode = "rw"
