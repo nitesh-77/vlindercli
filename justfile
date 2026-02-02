@@ -96,6 +96,7 @@ build: build-agents
 clean:
     cargo clean
     rm -rf agents/*/target
+    rm -rf agents/*/models/models
     rm -rf {{fixtures}}
     rm -rf {{dev_project}}
 
