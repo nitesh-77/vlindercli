@@ -18,7 +18,7 @@ build-agents:
     cp agents/reverse-agent/target/wasm32-unknown-unknown/release/reverse_agent.wasm agents/reverse-agent/agent.wasm
     cp agents/pensieve/target/wasm32-wasip1/release/pensieve.wasm agents/pensieve/agent.wasm
 
-    # Deploy to test fixtures (agent.toml + agent.wasm convention)
+    # Deploy to test fixtures (symlinks to source agents)
     mkdir -p {{fixtures}}/echo-agent
     mkdir -p {{fixtures}}/upper-agent
     mkdir -p {{fixtures}}/reverse-agent
@@ -27,50 +27,50 @@ build-agents:
     mkdir -p {{fixtures}}/mount-test-agent/output
     mkdir -p {{fixtures}}/missing-mount-agent
 
-    cp agents/echo-agent/target/wasm32-unknown-unknown/release/echo_agent.wasm {{fixtures}}/echo-agent/agent.wasm
-    cp agents/echo-agent/agent.toml {{fixtures}}/echo-agent/
-    cp agents/upper-agent/target/wasm32-unknown-unknown/release/upper_agent.wasm {{fixtures}}/upper-agent/agent.wasm
-    cp agents/upper-agent/agent.toml {{fixtures}}/upper-agent/
-    cp agents/reverse-agent/target/wasm32-unknown-unknown/release/reverse_agent.wasm {{fixtures}}/reverse-agent/agent.wasm
-    cp agents/reverse-agent/agent.toml {{fixtures}}/reverse-agent/
-    cp agents/pensieve/target/wasm32-wasip1/release/pensieve.wasm {{fixtures}}/pensieve/agent.wasm
-    cp agents/pensieve/agent.toml {{fixtures}}/pensieve/
+    ln -sf ../../../../agents/echo-agent/agent.wasm {{fixtures}}/echo-agent/agent.wasm
+    ln -sf ../../../../agents/echo-agent/agent.toml {{fixtures}}/echo-agent/agent.toml
+    ln -sf ../../../../agents/upper-agent/agent.wasm {{fixtures}}/upper-agent/agent.wasm
+    ln -sf ../../../../agents/upper-agent/agent.toml {{fixtures}}/upper-agent/agent.toml
+    ln -sf ../../../../agents/reverse-agent/agent.wasm {{fixtures}}/reverse-agent/agent.wasm
+    ln -sf ../../../../agents/reverse-agent/agent.toml {{fixtures}}/reverse-agent/agent.toml
+    ln -sf ../../../../agents/pensieve/agent.wasm {{fixtures}}/pensieve/agent.wasm
+    ln -sf ../../../../agents/pensieve/agent.toml {{fixtures}}/pensieve/agent.toml
 
     # mount-test-agent and missing-mount-agent use echo-agent wasm
-    cp {{fixtures}}/echo-agent/agent.wasm {{fixtures}}/mount-test-agent/agent.wasm
-    cp agents/mount-test-agent/agent.toml {{fixtures}}/mount-test-agent/
-    cp {{fixtures}}/echo-agent/agent.wasm {{fixtures}}/missing-mount-agent/agent.wasm
-    cp agents/missing-mount-agent/agent.toml {{fixtures}}/missing-mount-agent/
+    ln -sf ../../../../agents/echo-agent/agent.wasm {{fixtures}}/mount-test-agent/agent.wasm
+    ln -sf ../../../../agents/mount-test-agent/agent.toml {{fixtures}}/mount-test-agent/agent.toml
+    ln -sf ../../../../agents/echo-agent/agent.wasm {{fixtures}}/missing-mount-agent/agent.wasm
+    ln -sf ../../../../agents/missing-mount-agent/agent.toml {{fixtures}}/missing-mount-agent/agent.toml
 
     # Setup fleet fixtures (symlinks to agent fixtures)
     mkdir -p tests/fixtures/fleets/test-fleet/agents
     ln -sf ../../../agents/echo-agent tests/fixtures/fleets/test-fleet/agents/echo-agent
     ln -sf ../../../agents/upper-agent tests/fixtures/fleets/test-fleet/agents/upper-agent
 
-    # Deploy to dev-project (for vlinder -p dev-project/agents/pensieve)
+    # Deploy to dev-project (symlinks for development)
     mkdir -p {{dev_project}}/echo-agent
     mkdir -p {{dev_project}}/upper-agent
     mkdir -p {{dev_project}}/pensieve/mnt
 
-    cp {{fixtures}}/echo-agent/agent.wasm {{dev_project}}/echo-agent/
-    cp {{fixtures}}/echo-agent/agent.toml {{dev_project}}/echo-agent/
-    cp {{fixtures}}/upper-agent/agent.wasm {{dev_project}}/upper-agent/
-    cp {{fixtures}}/upper-agent/agent.toml {{dev_project}}/upper-agent/
-    cp {{fixtures}}/pensieve/agent.wasm {{dev_project}}/pensieve/
-    cp {{fixtures}}/pensieve/agent.toml {{dev_project}}/pensieve/
+    ln -sf ../../agents/echo-agent/agent.wasm {{dev_project}}/echo-agent/agent.wasm
+    ln -sf ../../agents/echo-agent/agent.toml {{dev_project}}/echo-agent/agent.toml
+    ln -sf ../../agents/upper-agent/agent.wasm {{dev_project}}/upper-agent/agent.wasm
+    ln -sf ../../agents/upper-agent/agent.toml {{dev_project}}/upper-agent/agent.toml
+    ln -sf ../../agents/pensieve/agent.wasm {{dev_project}}/pensieve/agent.wasm
+    ln -sf ../../agents/pensieve/agent.toml {{dev_project}}/pensieve/agent.toml
 
 # Build and deploy pensieve agent only
 build-pensieve:
     cd agents/pensieve && cargo build --target wasm32-wasip1 --release
     # Copy to source dir (for running from agents/pensieve/)
     cp agents/pensieve/target/wasm32-wasip1/release/pensieve.wasm agents/pensieve/agent.wasm
-    # Deploy to fixtures and dev-project
+    # Deploy to fixtures and dev-project (symlinks)
     mkdir -p {{fixtures}}/pensieve/mnt
     mkdir -p {{dev_project}}/pensieve/mnt
-    cp agents/pensieve/agent.wasm {{fixtures}}/pensieve/agent.wasm
-    cp agents/pensieve/agent.toml {{fixtures}}/pensieve/
-    cp agents/pensieve/agent.wasm {{dev_project}}/pensieve/
-    cp agents/pensieve/agent.toml {{dev_project}}/pensieve/
+    ln -sf ../../../../agents/pensieve/agent.wasm {{fixtures}}/pensieve/agent.wasm
+    ln -sf ../../../../agents/pensieve/agent.toml {{fixtures}}/pensieve/agent.toml
+    ln -sf ../../agents/pensieve/agent.wasm {{dev_project}}/pensieve/agent.wasm
+    ln -sf ../../agents/pensieve/agent.toml {{dev_project}}/pensieve/agent.toml
 
 # Run a specific agent (usage: just run pensieve)
 run agent:
