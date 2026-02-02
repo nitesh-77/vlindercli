@@ -104,57 +104,7 @@ pub trait VectorStorage: Send + Sync {
 }
 
 // ============================================================================
-// Storage (top-level capability)
-// ============================================================================
-
-/// A storage capability for agent data persistence.
-///
-/// Agents can optionally have storage. When present, it provides
-/// both object storage (files) and vector storage (embeddings).
-#[derive(Clone, Debug)]
-pub struct Storage {
-    pub backend: StorageBackend,
-}
-
-// ============================================================================
-// StorageBackend (shared config + kind)
-// ============================================================================
-
-/// Backend configuration for storage.
-///
-/// Contains common settings (agent_id) plus the specific kind.
-#[derive(Clone, Debug)]
-pub struct StorageBackend {
-    /// Agent ID for isolation.
-    pub agent_id: String,
-    pub kind: StorageKind,
-}
-
-// ============================================================================
-// StorageKind (enum for exhaustive matching)
-// ============================================================================
-
-/// The specific storage implementation.
-#[derive(Clone, Debug)]
-pub enum StorageKind {
-    Sqlite(SqliteConfig),
-    /// In-memory storage for testing. No persistence, no disk I/O.
-    InMemory,
-}
-
-// ============================================================================
-// Kind-specific configs
-// ============================================================================
-
-/// Configuration for SQLite storage.
-#[derive(Clone, Debug)]
-pub struct SqliteConfig {
-    /// Path to the database file.
-    pub db_path: PathBuf,
-}
-
-// ============================================================================
-// ObjectStorageManifest (new - independent config)
+// ObjectStorageManifest
 // ============================================================================
 
 /// Manifest for object storage configuration.
@@ -171,7 +121,7 @@ pub enum ObjectStorageManifest {
 }
 
 // ============================================================================
-// VectorStorageManifest (new - independent config)
+// VectorStorageManifest
 // ============================================================================
 
 /// Manifest for vector storage configuration.
