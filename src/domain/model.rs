@@ -10,7 +10,7 @@ use super::resource_id::ResourceId;
 pub struct Model {
     pub name: String,
     pub model_type: ModelType,
-    pub engine: ModelEngine,
+    pub engine: EngineType,
     /// Resource URI pointing to model weights (e.g., GGUF file, Ollama model)
     pub id: ResourceId,
 }
@@ -21,9 +21,16 @@ pub enum ModelType {
     Embedding,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ModelEngine {
+/// Engine type for running models.
+///
+/// Used by both model manifests (what the model requires) and
+/// the registry (what implementations are available).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum EngineType {
+    /// Llama.cpp-based engine.
     Llama,
+    /// In-memory engine (for testing).
+    InMemory,
 }
 
 impl Model {
@@ -55,10 +62,10 @@ impl From<ModelTypeConfig> for ModelType {
     }
 }
 
-impl From<ModelEngineConfig> for ModelEngine {
+impl From<ModelEngineConfig> for EngineType {
     fn from(config: ModelEngineConfig) -> Self {
         match config {
-            ModelEngineConfig::Llama => ModelEngine::Llama,
+            ModelEngineConfig::Llama => EngineType::Llama,
         }
     }
 }

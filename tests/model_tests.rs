@@ -1,6 +1,6 @@
 //! Model and ModelManifest tests.
 
-use vlindercli::domain::{Model, ModelManifest, ModelType, ModelTypeConfig, ModelEngine, ModelEngineConfig};
+use vlindercli::domain::{Model, ModelManifest, ModelType, ModelTypeConfig, EngineType, ModelEngineConfig};
 
 // ============================================================================
 // ModelManifest Tests (inline TOML - no fixtures needed)
@@ -84,7 +84,7 @@ fn model_load_parses_manifest() {
     let model = Model::load(&temp_dir.join("model.toml")).unwrap();
     assert_eq!(model.name, "phi3");
     assert_eq!(model.model_type, ModelType::Inference);
-    assert_eq!(model.engine, ModelEngine::Llama);
+    assert_eq!(model.engine, EngineType::Llama);
     assert_eq!(model.id.scheme(), Some("file"));
     assert!(model.id.path().unwrap().ends_with("phi3.gguf"));
 
@@ -188,7 +188,7 @@ fn model_engine_is_llama() {
     std::fs::write(temp_dir.join("model.toml"), manifest).unwrap();
 
     let model = Model::load(&temp_dir.join("model.toml")).unwrap();
-    assert_eq!(model.engine, ModelEngine::Llama);
+    assert_eq!(model.engine, EngineType::Llama);
 
     let _ = std::fs::remove_dir_all(&temp_dir);
 }

@@ -7,7 +7,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::domain::{Agent, EmbeddingEngineType, InferenceEngineType, ObjectStorageType, ResourceId, RuntimeType, VectorStorageType};
+use crate::domain::{Agent, EngineType, ObjectStorageType, ResourceId, RuntimeType, VectorStorageType};
 
 /// Unique identifier for a submitted job.
 ///
@@ -54,8 +54,8 @@ pub struct Registry {
     available_runtimes: HashSet<RuntimeType>,
     available_object_storage: HashSet<ObjectStorageType>,
     available_vector_storage: HashSet<VectorStorageType>,
-    available_inference_engines: HashSet<InferenceEngineType>,
-    available_embedding_engines: HashSet<EmbeddingEngineType>,
+    available_inference_engines: HashSet<EngineType>,
+    available_embedding_engines: HashSet<EngineType>,
 }
 
 impl Registry {
@@ -121,24 +121,24 @@ impl Registry {
     // --- Inference engine operations ---
 
     /// Register an inference engine type as available.
-    pub fn register_inference_engine(&mut self, engine_type: InferenceEngineType) {
+    pub fn register_inference_engine(&mut self, engine_type: EngineType) {
         self.available_inference_engines.insert(engine_type);
     }
 
     /// Check if an inference engine type is available.
-    pub fn has_inference_engine(&self, engine_type: InferenceEngineType) -> bool {
+    pub fn has_inference_engine(&self, engine_type: EngineType) -> bool {
         self.available_inference_engines.contains(&engine_type)
     }
 
     // --- Embedding engine operations ---
 
     /// Register an embedding engine type as available.
-    pub fn register_embedding_engine(&mut self, engine_type: EmbeddingEngineType) {
+    pub fn register_embedding_engine(&mut self, engine_type: EngineType) {
         self.available_embedding_engines.insert(engine_type);
     }
 
     /// Check if an embedding engine type is available.
-    pub fn has_embedding_engine(&self, engine_type: EmbeddingEngineType) -> bool {
+    pub fn has_embedding_engine(&self, engine_type: EngineType) -> bool {
         self.available_embedding_engines.contains(&engine_type)
     }
 
@@ -389,18 +389,18 @@ mod tests {
         let mut registry = Registry::new();
 
         // Initially nothing available
-        assert!(!registry.has_inference_engine(InferenceEngineType::Llama));
-        assert!(!registry.has_inference_engine(InferenceEngineType::InMemory));
+        assert!(!registry.has_inference_engine(EngineType::Llama));
+        assert!(!registry.has_inference_engine(EngineType::InMemory));
 
         // Register Llama
-        registry.register_inference_engine(InferenceEngineType::Llama);
-        assert!(registry.has_inference_engine(InferenceEngineType::Llama));
-        assert!(!registry.has_inference_engine(InferenceEngineType::InMemory));
+        registry.register_inference_engine(EngineType::Llama);
+        assert!(registry.has_inference_engine(EngineType::Llama));
+        assert!(!registry.has_inference_engine(EngineType::InMemory));
 
         // Register InMemory
-        registry.register_inference_engine(InferenceEngineType::InMemory);
-        assert!(registry.has_inference_engine(InferenceEngineType::Llama));
-        assert!(registry.has_inference_engine(InferenceEngineType::InMemory));
+        registry.register_inference_engine(EngineType::InMemory);
+        assert!(registry.has_inference_engine(EngineType::Llama));
+        assert!(registry.has_inference_engine(EngineType::InMemory));
     }
 
     // --- Embedding engine tests ---
@@ -410,17 +410,17 @@ mod tests {
         let mut registry = Registry::new();
 
         // Initially nothing available
-        assert!(!registry.has_embedding_engine(EmbeddingEngineType::Nomic));
-        assert!(!registry.has_embedding_engine(EmbeddingEngineType::InMemory));
+        assert!(!registry.has_embedding_engine(EngineType::Llama));
+        assert!(!registry.has_embedding_engine(EngineType::InMemory));
 
-        // Register Nomic
-        registry.register_embedding_engine(EmbeddingEngineType::Nomic);
-        assert!(registry.has_embedding_engine(EmbeddingEngineType::Nomic));
-        assert!(!registry.has_embedding_engine(EmbeddingEngineType::InMemory));
+        // Register Llama
+        registry.register_embedding_engine(EngineType::Llama);
+        assert!(registry.has_embedding_engine(EngineType::Llama));
+        assert!(!registry.has_embedding_engine(EngineType::InMemory));
 
         // Register InMemory
-        registry.register_embedding_engine(EmbeddingEngineType::InMemory);
-        assert!(registry.has_embedding_engine(EmbeddingEngineType::Nomic));
-        assert!(registry.has_embedding_engine(EmbeddingEngineType::InMemory));
+        registry.register_embedding_engine(EngineType::InMemory);
+        assert!(registry.has_embedding_engine(EngineType::Llama));
+        assert!(registry.has_embedding_engine(EngineType::InMemory));
     }
 }

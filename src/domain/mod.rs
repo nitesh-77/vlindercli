@@ -56,7 +56,7 @@ pub use resource_id::ResourceId;
 // ============================================================================
 
 pub use inference::{
-    InferenceEngine, InferenceEngineType,
+    InferenceEngine,
     Inference, InferenceBackend, InferenceKind, LlamaConfig,
 };
 
@@ -65,15 +65,15 @@ pub use inference::{
 // ============================================================================
 
 pub use embedding::{
-    EmbeddingEngine, EmbeddingEngineType,
+    EmbeddingEngine,
     Embedding, EmbeddingBackend, EmbeddingKind, NomicConfig,
 };
 
 // ============================================================================
-// Model
+// Model & EngineType
 // ============================================================================
 
-pub use model::{Model, ModelType, ModelEngine, LoadError as ModelLoadError};
+pub use model::{Model, ModelType, EngineType, LoadError as ModelLoadError};
 pub use model_manifest::{ModelManifest, ModelTypeConfig, ModelEngineConfig};
 
 // ============================================================================
