@@ -21,6 +21,10 @@ pub struct Agent {
     pub mounts: Vec<Mount>,
     /// Resource URI identifying the executable (WASM file, Lambda ARN, Docker image, etc.)
     pub id: ResourceId,
+    /// Object storage configuration (optional).
+    pub object_storage: Option<ResourceId>,
+    /// Vector storage configuration (optional).
+    pub vector_storage: Option<ResourceId>,
 }
 
 impl Agent {
@@ -55,6 +59,8 @@ impl Agent {
             prompts: manifest.prompts.map(|p| p.into()),
             mounts,
             id,
+            object_storage: manifest.object_storage,
+            vector_storage: manifest.vector_storage,
         })
     }
 

@@ -24,6 +24,17 @@ pub enum ObjectStorageType {
     InMemory,
 }
 
+impl ObjectStorageType {
+    /// Determine storage type from URI scheme.
+    pub fn from_scheme(scheme: Option<&str>) -> Option<Self> {
+        match scheme {
+            Some("sqlite") => Some(ObjectStorageType::Sqlite),
+            Some("memory") => Some(ObjectStorageType::InMemory),
+            _ => None,
+        }
+    }
+}
+
 // ============================================================================
 // VectorStorageType (available implementations)
 // ============================================================================
@@ -38,6 +49,17 @@ pub enum VectorStorageType {
     SqliteVec,
     /// In-memory storage (for testing).
     InMemory,
+}
+
+impl VectorStorageType {
+    /// Determine storage type from URI scheme.
+    pub fn from_scheme(scheme: Option<&str>) -> Option<Self> {
+        match scheme {
+            Some("sqlite") => Some(VectorStorageType::SqliteVec),
+            Some("memory") => Some(VectorStorageType::InMemory),
+            _ => None,
+        }
+    }
 }
 
 // ============================================================================
