@@ -42,6 +42,12 @@ build-agents:
     ln -sf ../../../../agents/echo-agent/agent.wasm {{fixtures}}/missing-mount-agent/agent.wasm
     ln -sf ../../../../agents/missing-mount-agent/agent.toml {{fixtures}}/missing-mount-agent/agent.toml
 
+    # model-test-agent (for model loading tests, uses echo-agent wasm)
+    mkdir -p {{fixtures}}/model-test-agent
+    ln -sf ../../../../agents/echo-agent/agent.wasm {{fixtures}}/model-test-agent/agent.wasm
+    ln -sf ../../../../agents/model-test-agent/agent.toml {{fixtures}}/model-test-agent/agent.toml
+    ln -sf ../../../../agents/model-test-agent/models {{fixtures}}/model-test-agent/models
+
     # Setup fleet fixtures (symlinks to agent fixtures)
     mkdir -p tests/fixtures/fleets/test-fleet/agents
     ln -sf ../../../agents/echo-agent tests/fixtures/fleets/test-fleet/agents/echo-agent

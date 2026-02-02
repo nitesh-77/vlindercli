@@ -1,0 +1,4 @@
+name = "nomic-embed"
+type = "embedding"
+engine = "llama"
+id = "file://../../../.vlinder/models/nomic-embed.gguf"
