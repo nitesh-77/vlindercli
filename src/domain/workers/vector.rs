@@ -10,9 +10,11 @@ use std::sync::{Arc, RwLock};
 
 use serde::Deserialize;
 
-use crate::domain::VectorStorage;
+use crate::domain::registry::Registry;
+use crate::domain::{VectorStorage, ResourceId};
 use crate::queue::{Message, MessageQueue};
 use crate::services::vector_storage;
+use crate::storage::dispatch::open_vector_storage_from_uri;
 
 // ============================================================================
 // Request Types (queue protocol)
@@ -45,20 +47,43 @@ struct DeleteRequest {
 
 pub struct VectorServiceWorker {
     queue: Arc<dyn MessageQueue + Send + Sync>,
+    registry: Arc<RwLock<Registry>>,
     stores: RwLock<HashMap<String, Arc<dyn VectorStorage>>>,
 }
 
 impl VectorServiceWorker {
-    pub fn new(queue: Arc<dyn MessageQueue + Send + Sync>) -> Self {
+    pub fn new(queue: Arc<dyn MessageQueue + Send + Sync>, registry: Arc<RwLock<Registry>>) -> Self {
         Self {
             queue,
+            registry,
             stores: RwLock::new(HashMap::new()),
         }
     }
 
-    /// Register storage for an agent (keyed by agent ID).
-    pub fn register(&self, agent_id: &str, storage: Arc<dyn VectorStorage>) {
-        self.stores.write().unwrap().insert(agent_id.to_string(), storage);
+    /// Get storage for an agent, opening lazily if needed.
+    fn get_or_open(&self, agent_id: &str) -> Result<Arc<dyn VectorStorage>, String> {
+        // Check cache first
+        if let Some(storage) = self.stores.read().unwrap().get(agent_id) {
+            return Ok(storage.clone());
+        }
+
+        // Look up agent in Registry and clone the URI
+        let uri = {
+            let registry = self.registry.read().unwrap();
+            let resource_id = ResourceId::new(agent_id);
+            let agent = registry.get_agent(&resource_id)
+                .ok_or_else(|| format!("unknown agent: {}", agent_id))?;
+            agent.vector_storage.clone()
+                .ok_or_else(|| format!("agent has no vector_storage declared: {}", agent_id))?
+        };
+
+        // Open storage (lock released)
+        let storage = open_vector_storage_from_uri(&uri)
+            .map_err(|e| format!("failed to open vector storage: {}", e))?;
+
+        // Cache and return
+        self.stores.write().unwrap().insert(agent_id.to_string(), storage.clone());
+        Ok(storage)
     }
 
     /// Process one message if available. Returns true if processed.
@@ -107,10 +132,9 @@ impl VectorServiceWorker {
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
 
-        let stores = self.stores.read().unwrap();
-        let store = match stores.get(&req.agent_id) {
-            Some(s) => s,
-            None => return format!("[error] unknown agent_id: {}", req.agent_id).into_bytes(),
+        let store = match self.get_or_open(&req.agent_id) {
+            Ok(s) => s,
+            Err(e) => return format!("[error] {}", e).into_bytes(),
         };
 
         // Call pure service function (vec variant)
@@ -126,10 +150,9 @@ impl VectorServiceWorker {
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
 
-        let stores = self.stores.read().unwrap();
-        let store = match stores.get(&req.agent_id) {
-            Some(s) => s,
-            None => return format!("[error] unknown agent_id: {}", req.agent_id).into_bytes(),
+        let store = match self.get_or_open(&req.agent_id) {
+            Ok(s) => s,
+            Err(e) => return format!("[error] {}", e).into_bytes(),
         };
 
         // Call pure service function (vec variant)
@@ -145,10 +168,9 @@ impl VectorServiceWorker {
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
 
-        let stores = self.stores.read().unwrap();
-        let store = match stores.get(&req.agent_id) {
-            Some(s) => s,
-            None => return format!("[error] unknown agent_id: {}", req.agent_id).into_bytes(),
+        let store = match self.get_or_open(&req.agent_id) {
+            Ok(s) => s,
+            Err(e) => return format!("[error] {}", e).into_bytes(),
         };
 
         // Call trait method directly (no pure function needed for simple delete)
@@ -163,23 +185,37 @@ impl VectorServiceWorker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::Agent;
     use crate::queue::{InMemoryQueue, Message};
-    use crate::storage::dispatch::{in_memory_storage, open_vector_storage};
+
+    fn test_agent_with_vector_storage() -> Agent {
+        let manifest = r#"
+            name = "test-agent"
+            description = "Test agent for vector storage"
+            id = "file://test.wasm"
+            vector_storage = "memory://"
+            [requirements]
+            services = []
+        "#;
+        Agent::from_toml(manifest).unwrap()
+    }
 
     #[test]
     fn handles_store_and_search() {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
-        let handler = VectorServiceWorker::new(Arc::clone(&queue));
+        let mut registry = Registry::new();
 
-        // Register storage
-        let storage = in_memory_storage();
-        let vector = open_vector_storage(&storage).unwrap();
-        handler.register("test", vector);
+        // Register test agent with memory:// vector storage
+        let agent = test_agent_with_vector_storage();
+        registry.register_agent(agent);
 
-        // Store embedding
+        let registry = Arc::new(RwLock::new(registry));
+        let handler = VectorServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry));
+
+        // Store embedding - worker will lazy-open storage from agent's URI
         let embedding: Vec<f32> = (0..768).map(|i| i as f32 * 0.001).collect();
         let store_payload = serde_json::json!({
-            "agent_id": "test",
+            "agent_id": "file://test.wasm",
             "key": "doc1",
             "vector": embedding,
             "metadata": "test document"
@@ -196,7 +232,7 @@ mod tests {
 
         // Search
         let search_payload = serde_json::json!({
-            "agent_id": "test",
+            "agent_id": "file://test.wasm",
             "vector": embedding,
             "limit": 1
         });

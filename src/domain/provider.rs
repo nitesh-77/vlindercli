@@ -1,11 +1,13 @@
 //! Provider - service worker aggregation.
 //!
 //! Aggregates service workers and routes messages to backends.
-//! Registration maps agent IDs to backend implementations.
+//! Storage workers look up agent info from Registry.
+//! Inference/embedding workers use model registration (for now).
 
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
-use super::{ObjectStorage, VectorStorage, InferenceEngine, EmbeddingEngine};
+use super::{InferenceEngine, EmbeddingEngine};
+use super::registry::Registry;
 use super::workers::{
     ObjectServiceWorker, VectorServiceWorker,
     InferenceServiceWorker, EmbeddingServiceWorker,
@@ -15,9 +17,8 @@ use crate::queue::MessageQueue;
 /// Aggregates service workers for the runtime.
 ///
 /// Each worker handles one service type (object storage, vector storage,
-/// inference, embedding). Registration maps agent IDs/models to backends.
-/// Supports heterogeneous deployments — different agents can use different
-/// backends within the same Provider.
+/// inference, embedding). Storage workers lazy-open based on agent's
+/// manifest URI. Supports heterogeneous deployments.
 pub struct Provider {
     object: ObjectServiceWorker,
     vector: VectorServiceWorker,
@@ -27,23 +28,13 @@ pub struct Provider {
 
 impl Provider {
     /// Create a new Provider with all service workers.
-    pub fn new(queue: Arc<dyn MessageQueue + Send + Sync>) -> Self {
+    pub fn new(queue: Arc<dyn MessageQueue + Send + Sync>, registry: Arc<RwLock<Registry>>) -> Self {
         Self {
-            object: ObjectServiceWorker::new(Arc::clone(&queue)),
-            vector: VectorServiceWorker::new(Arc::clone(&queue)),
+            object: ObjectServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry)),
+            vector: VectorServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry)),
             inference: InferenceServiceWorker::new(Arc::clone(&queue)),
             embedding: EmbeddingServiceWorker::new(Arc::clone(&queue)),
         }
-    }
-
-    /// Register object storage for an agent.
-    pub fn register_object(&self, agent_id: &str, storage: Arc<dyn ObjectStorage>) {
-        self.object.register(agent_id, storage);
-    }
-
-    /// Register vector storage for an agent.
-    pub fn register_vector(&self, agent_id: &str, storage: Arc<dyn VectorStorage>) {
-        self.vector.register(agent_id, storage);
     }
 
     /// Register inference engine for a model name.
@@ -69,27 +60,38 @@ impl Provider {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::Agent;
     use crate::queue::{InMemoryQueue, Message};
-    use crate::storage::dispatch::{in_memory_storage, open_object_storage};
+
+    fn test_agent(id: &str) -> Agent {
+        let manifest = format!(r#"
+            name = "test-agent"
+            description = "Test agent"
+            id = "{}"
+            object_storage = "memory://"
+            [requirements]
+            services = []
+        "#, id);
+        Agent::from_toml(&manifest).unwrap()
+    }
 
     #[test]
     fn heterogeneous_backends() {
         // One Provider can serve multiple agents with different backends
+        // Each agent gets its own isolated storage (lazy-opened from memory://)
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
-        let provider = Provider::new(Arc::clone(&queue));
+        let mut registry = Registry::new();
 
-        // Register different storage backends for different agents
-        let storage_a = in_memory_storage();
-        let storage_b = in_memory_storage();
-        let object_a = open_object_storage(&storage_a).unwrap();
-        let object_b = open_object_storage(&storage_b).unwrap();
+        // Register agents - each declares memory:// storage (each gets separate instance)
+        registry.register_agent(test_agent("file://agent-a.wasm"));
+        registry.register_agent(test_agent("file://agent-b.wasm"));
 
-        provider.register_object("agent-a", object_a);
-        provider.register_object("agent-b", object_b);
+        let registry = Arc::new(RwLock::new(registry));
+        let provider = Provider::new(Arc::clone(&queue), Arc::clone(&registry));
 
         // Write to agent-a's storage
         let put_a = serde_json::json!({
-            "agent_id": "agent-a",
+            "agent_id": "file://agent-a.wasm",
             "path": "/data.txt",
             "content": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, b"data for A")
         });
@@ -100,7 +102,7 @@ mod tests {
 
         // Write to agent-b's storage
         let put_b = serde_json::json!({
-            "agent_id": "agent-b",
+            "agent_id": "file://agent-b.wasm",
             "path": "/data.txt",
             "content": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, b"data for B")
         });
@@ -110,7 +112,7 @@ mod tests {
         let _ = queue.receive("reply-put-b").unwrap(); // consume put response
 
         // Read from agent-a - gets A's data
-        let get_a = serde_json::json!({ "agent_id": "agent-a", "path": "/data.txt" });
+        let get_a = serde_json::json!({ "agent_id": "file://agent-a.wasm", "path": "/data.txt" });
         let msg = Message::request(serde_json::to_vec(&get_a).unwrap(), "reply-get-a");
         queue.send("kv-get", msg).unwrap();
         provider.tick();
@@ -118,7 +120,7 @@ mod tests {
         assert_eq!(response.payload, b"data for A");
 
         // Read from agent-b - gets B's data (isolated)
-        let get_b = serde_json::json!({ "agent_id": "agent-b", "path": "/data.txt" });
+        let get_b = serde_json::json!({ "agent_id": "file://agent-b.wasm", "path": "/data.txt" });
         let msg = Message::request(serde_json::to_vec(&get_b).unwrap(), "reply-get-b");
         queue.send("kv-get", msg).unwrap();
         provider.tick();

@@ -4,14 +4,18 @@ use std::sync::Arc;
 
 use crate::domain::{
     ObjectStorage, ObjectStorageManifest,
-    Storage, StorageKind,
     VectorStorage, VectorStorageManifest,
 };
+
+#[cfg(test)]
+use crate::domain::{Storage, StorageKind};
 
 use super::object::{InMemoryObjectStorage, SqliteObjectStorage};
 use super::vector::{InMemoryVectorStorage, SqliteVectorStorage};
 
 /// Open object storage for the given storage configuration.
+/// Only used in tests - production code uses URI-based dispatch.
+#[cfg(test)]
 pub(crate) fn open_object_storage(storage: &Storage) -> Result<Arc<dyn ObjectStorage>, DispatchError> {
     match &storage.backend.kind {
         StorageKind::Sqlite(_) => {
@@ -26,6 +30,8 @@ pub(crate) fn open_object_storage(storage: &Storage) -> Result<Arc<dyn ObjectSto
 }
 
 /// Open vector storage for the given storage configuration.
+/// Only used in tests - production code uses URI-based dispatch.
+#[cfg(test)]
 pub(crate) fn open_vector_storage(storage: &Storage) -> Result<Arc<dyn VectorStorage>, DispatchError> {
     match &storage.backend.kind {
         StorageKind::Sqlite(_) => {
@@ -40,6 +46,7 @@ pub(crate) fn open_vector_storage(storage: &Storage) -> Result<Arc<dyn VectorSto
 }
 
 /// Create in-memory storage for testing.
+#[cfg(test)]
 pub(crate) fn in_memory_storage() -> Storage {
     Storage {
         backend: crate::domain::StorageBackend {
@@ -81,15 +88,68 @@ pub fn open_vector_storage_from(manifest: &VectorStorageManifest) -> Result<Arc<
     }
 }
 
+// ============================================================================
+// URI-based dispatch (for lazy opening)
+// ============================================================================
+
+use crate::domain::ResourceId;
+use std::path::Path;
+
+/// Open object storage from a URI.
+///
+/// Dispatches based on URI scheme:
+/// - `sqlite://path` → SQLite storage at path
+/// - `memory://` → In-memory storage
+pub fn open_object_storage_from_uri(uri: &ResourceId) -> Result<Arc<dyn ObjectStorage>, DispatchError> {
+    match uri.scheme() {
+        Some("sqlite") => {
+            let path = uri.path().ok_or_else(|| {
+                DispatchError::InvalidUri("sqlite URI missing path".to_string())
+            })?;
+            SqliteObjectStorage::open_at(Path::new(path))
+                .map(|s| Arc::new(s) as Arc<dyn ObjectStorage>)
+                .map_err(DispatchError::Sqlite)
+        }
+        Some("memory") => Ok(Arc::new(InMemoryObjectStorage::new())),
+        Some(scheme) => Err(DispatchError::UnknownScheme(scheme.to_string())),
+        None => Err(DispatchError::InvalidUri("missing scheme".to_string())),
+    }
+}
+
+/// Open vector storage from a URI.
+///
+/// Dispatches based on URI scheme:
+/// - `sqlite://path` → SQLite storage at path
+/// - `memory://` → In-memory storage
+pub fn open_vector_storage_from_uri(uri: &ResourceId) -> Result<Arc<dyn VectorStorage>, DispatchError> {
+    match uri.scheme() {
+        Some("sqlite") => {
+            let path = uri.path().ok_or_else(|| {
+                DispatchError::InvalidUri("sqlite URI missing path".to_string())
+            })?;
+            SqliteVectorStorage::open_at(Path::new(path))
+                .map(|s| Arc::new(s) as Arc<dyn VectorStorage>)
+                .map_err(DispatchError::Sqlite)
+        }
+        Some("memory") => Ok(Arc::new(InMemoryVectorStorage::new())),
+        Some(scheme) => Err(DispatchError::UnknownScheme(scheme.to_string())),
+        None => Err(DispatchError::InvalidUri("missing scheme".to_string())),
+    }
+}
+
 #[derive(Debug)]
 pub enum DispatchError {
     Sqlite(String),
+    UnknownScheme(String),
+    InvalidUri(String),
 }
 
 impl std::fmt::Display for DispatchError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             DispatchError::Sqlite(msg) => write!(f, "sqlite storage error: {}", msg),
+            DispatchError::UnknownScheme(scheme) => write!(f, "unknown storage scheme: {}", scheme),
+            DispatchError::InvalidUri(msg) => write!(f, "invalid storage URI: {}", msg),
         }
     }
 }

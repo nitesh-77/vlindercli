@@ -12,9 +12,11 @@ use std::sync::{Arc, RwLock};
 use base64::Engine as _;
 use serde::Deserialize;
 
-use crate::domain::ObjectStorage;
+use crate::domain::registry::Registry;
+use crate::domain::{ObjectStorage, ResourceId};
 use crate::queue::{Message, MessageQueue};
 use crate::services::object_storage;
+use crate::storage::dispatch::open_object_storage_from_uri;
 
 // ============================================================================
 // Request Types (queue protocol)
@@ -51,20 +53,43 @@ struct DeleteRequest {
 
 pub struct ObjectServiceWorker {
     queue: Arc<dyn MessageQueue + Send + Sync>,
+    registry: Arc<RwLock<Registry>>,
     stores: RwLock<HashMap<String, Arc<dyn ObjectStorage>>>,
 }
 
 impl ObjectServiceWorker {
-    pub fn new(queue: Arc<dyn MessageQueue + Send + Sync>) -> Self {
+    pub fn new(queue: Arc<dyn MessageQueue + Send + Sync>, registry: Arc<RwLock<Registry>>) -> Self {
         Self {
             queue,
+            registry,
             stores: RwLock::new(HashMap::new()),
         }
     }
 
-    /// Register storage for an agent (keyed by agent ID).
-    pub fn register(&self, agent_id: &str, storage: Arc<dyn ObjectStorage>) {
-        self.stores.write().unwrap().insert(agent_id.to_string(), storage);
+    /// Get storage for an agent, opening lazily if needed.
+    fn get_or_open(&self, agent_id: &str) -> Result<Arc<dyn ObjectStorage>, String> {
+        // Check cache first
+        if let Some(storage) = self.stores.read().unwrap().get(agent_id) {
+            return Ok(storage.clone());
+        }
+
+        // Look up agent in Registry and clone the URI
+        let uri = {
+            let registry = self.registry.read().unwrap();
+            let resource_id = ResourceId::new(agent_id);
+            let agent = registry.get_agent(&resource_id)
+                .ok_or_else(|| format!("unknown agent: {}", agent_id))?;
+            agent.object_storage.clone()
+                .ok_or_else(|| format!("agent has no object_storage declared: {}", agent_id))?
+        };
+
+        // Open storage (lock released)
+        let storage = open_object_storage_from_uri(&uri)
+            .map_err(|e| format!("failed to open object storage: {}", e))?;
+
+        // Cache and return
+        self.stores.write().unwrap().insert(agent_id.to_string(), storage.clone());
+        Ok(storage)
     }
 
     /// Process one message if available. Returns true if processed.
@@ -123,10 +148,9 @@ impl ObjectServiceWorker {
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
 
-        let stores = self.stores.read().unwrap();
-        let store = match stores.get(&req.agent_id) {
-            Some(s) => s,
-            None => return format!("[error] unknown agent_id: {}", req.agent_id).into_bytes(),
+        let store = match self.get_or_open(&req.agent_id) {
+            Ok(s) => s,
+            Err(e) => return format!("[error] {}", e).into_bytes(),
         };
 
         // Call pure service function
@@ -143,10 +167,9 @@ impl ObjectServiceWorker {
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
 
-        let stores = self.stores.read().unwrap();
-        let store = match stores.get(&req.agent_id) {
-            Some(s) => s,
-            None => return format!("[error] unknown agent_id: {}", req.agent_id).into_bytes(),
+        let store = match self.get_or_open(&req.agent_id) {
+            Ok(s) => s,
+            Err(e) => return format!("[error] {}", e).into_bytes(),
         };
 
         // Decode base64 (protocol concern)
@@ -168,10 +191,9 @@ impl ObjectServiceWorker {
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
 
-        let stores = self.stores.read().unwrap();
-        let store = match stores.get(&req.agent_id) {
-            Some(s) => s,
-            None => return format!("[error] unknown agent_id: {}", req.agent_id).into_bytes(),
+        let store = match self.get_or_open(&req.agent_id) {
+            Ok(s) => s,
+            Err(e) => return format!("[error] {}", e).into_bytes(),
         };
 
         // Call pure service function
@@ -187,10 +209,9 @@ impl ObjectServiceWorker {
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
 
-        let stores = self.stores.read().unwrap();
-        let store = match stores.get(&req.agent_id) {
-            Some(s) => s,
-            None => return format!("[error] unknown agent_id: {}", req.agent_id).into_bytes(),
+        let store = match self.get_or_open(&req.agent_id) {
+            Ok(s) => s,
+            Err(e) => return format!("[error] {}", e).into_bytes(),
         };
 
         // Call pure service function
@@ -204,22 +225,36 @@ impl ObjectServiceWorker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::Agent;
     use crate::queue::{InMemoryQueue, Message};
-    use crate::storage::dispatch::{in_memory_storage, open_object_storage};
+
+    fn test_agent_with_object_storage() -> Agent {
+        let manifest = r#"
+            name = "test-agent"
+            description = "Test agent for object storage"
+            id = "file://test.wasm"
+            object_storage = "memory://"
+            [requirements]
+            services = []
+        "#;
+        Agent::from_toml(manifest).unwrap()
+    }
 
     #[test]
     fn handles_put_and_get() {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
-        let handler = ObjectServiceWorker::new(Arc::clone(&queue));
+        let mut registry = Registry::new();
 
-        // Register storage
-        let storage = in_memory_storage();
-        let object = open_object_storage(&storage).unwrap();
-        handler.register("test", object);
+        // Register test agent with memory:// object storage
+        let agent = test_agent_with_object_storage();
+        registry.register_agent(agent);
 
-        // Send put request
+        let registry = Arc::new(RwLock::new(registry));
+        let handler = ObjectServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry));
+
+        // Send put request - worker will lazy-open storage from agent's URI
         let put_payload = serde_json::json!({
-            "agent_id": "test",
+            "agent_id": "file://test.wasm",
             "path": "/hello.txt",
             "content": base64::engine::general_purpose::STANDARD.encode(b"hello world")
         });
@@ -236,7 +271,7 @@ mod tests {
 
         // Send get request
         let get_payload = serde_json::json!({
-            "agent_id": "test",
+            "agent_id": "file://test.wasm",
             "path": "/hello.txt"
         });
         let get_msg = Message::request(

@@ -8,7 +8,7 @@
 //! - Runs tick loop (controller reconciliation)
 
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use crate::domain::{Agent, EngineType, Model, ModelType, ObjectStorageType, Provider, Runtime, RuntimeType, VectorStorageType};
 use crate::domain::harness::Harness;
@@ -17,12 +17,11 @@ use crate::embedding::open_embedding_engine;
 use crate::inference::open_inference_engine;
 use crate::queue::InMemoryQueue;
 use crate::runtime::WasmRuntime;
-use crate::storage::dispatch::{in_memory_storage, open_object_storage, open_vector_storage};
 
 /// The daemon - owns all system components.
 pub struct Daemon {
     // Components (daemon owns all of these)
-    registry: Registry,
+    registry: Arc<RwLock<Registry>>,
     harness: Harness,
     runtime: WasmRuntime,
     provider: Provider,
@@ -53,11 +52,13 @@ impl Daemon {
         registry.register_embedding_engine(EngineType::Llama);
         registry.register_embedding_engine(EngineType::InMemory);
 
+        let registry = Arc::new(RwLock::new(registry));
+
         Self {
-            registry,
+            registry: Arc::clone(&registry),
             harness: Harness::new(queue.clone()),
             runtime,
-            provider: Provider::new(queue),
+            provider: Provider::new(queue, registry),
         }
     }
 
@@ -74,18 +75,29 @@ impl Daemon {
         let agent_id = agent.id.clone();
 
         // Register infrastructure if new agent
-        if self.registry.get_agent(&agent_id).is_none() {
-            self.register_agent_infrastructure(&agent)?;
-            self.registry.register_agent(agent);
+        {
+            let registry = self.registry.read().unwrap();
+            if registry.get_agent(&agent_id).is_some() {
+                // Agent already registered, just invoke
+                drop(registry);
+                let mut registry = self.registry.write().unwrap();
+                return self.harness.invoke(&mut registry, &agent_id, input);
+            }
         }
 
-        // Delegate to harness
-        self.harness.invoke(&mut self.registry, &agent_id, input)
+        // New agent - register infrastructure
+        self.register_agent_infrastructure(&agent)?;
+        {
+            let mut registry = self.registry.write().unwrap();
+            registry.register_agent(agent);
+            self.harness.invoke(&mut registry, &agent_id, input)
+        }
     }
 
     /// Poll for job completion.
     pub fn poll(&self, job_id: &JobId) -> Option<String> {
-        self.harness.poll(&self.registry, job_id)
+        let registry = self.registry.read().unwrap();
+        self.harness.poll(&registry, job_id)
     }
 
     // ========================================================================
@@ -96,7 +108,7 @@ impl Daemon {
     pub fn tick(&mut self) {
         self.runtime.tick();
         self.provider.tick();
-        self.harness.tick(&mut self.registry);
+        self.harness.tick(&mut self.registry.write().unwrap());
     }
 
     // ========================================================================
@@ -105,14 +117,18 @@ impl Daemon {
 
     fn register_agent_infrastructure(&mut self, agent: &Agent) -> Result<(), String> {
         // Validate runtime
-        let runtime_type = self.registry.select_runtime(agent)
-            .ok_or_else(|| format!("no runtime available for agent: {}", agent.id.as_str()))?;
+        let runtime_type = {
+            let registry = self.registry.read().unwrap();
+            registry.select_runtime(agent)
+                .ok_or_else(|| format!("no runtime available for agent: {}", agent.id.as_str()))?
+        };
 
         // Validate object storage if declared
         if let Some(ref storage_id) = agent.object_storage {
             let storage_type = ObjectStorageType::from_scheme(storage_id.scheme())
                 .ok_or_else(|| format!("unknown object storage scheme: {:?}", storage_id.scheme()))?;
-            if !self.registry.has_object_storage(storage_type) {
+            let registry = self.registry.read().unwrap();
+            if !registry.has_object_storage(storage_type) {
                 return Err(format!("object storage not available: {:?}", storage_type));
             }
         }
@@ -121,7 +137,8 @@ impl Daemon {
         if let Some(ref storage_id) = agent.vector_storage {
             let storage_type = VectorStorageType::from_scheme(storage_id.scheme())
                 .ok_or_else(|| format!("unknown vector storage scheme: {:?}", storage_id.scheme()))?;
-            if !self.registry.has_vector_storage(storage_type) {
+            let registry = self.registry.read().unwrap();
+            if !registry.has_vector_storage(storage_type) {
                 return Err(format!("vector storage not available: {:?}", storage_type));
             }
         }
@@ -131,13 +148,8 @@ impl Daemon {
             self.validate_and_register_model(model_name, model_uri.as_str())?;
         }
 
-        // Setup storage (use in-memory for now, TODO: use declared storage)
-        let agent_id = agent.id.as_str();
-        let storage = in_memory_storage();
-        let object = open_object_storage(&storage).expect("in-memory always succeeds");
-        let vector = open_vector_storage(&storage).expect("in-memory always succeeds");
-        self.provider.register_object(agent_id, object);
-        self.provider.register_vector(agent_id, vector);
+        // Storage is NOT opened here - workers lazy-open from agent's declared URI
+        // when they receive requests. See ADR 036.
 
         // Register with selected runtime
         match runtime_type {
@@ -154,19 +166,22 @@ impl Daemon {
             .map_err(|e| format!("failed to load model {}: {:?}", model_name, e))?;
 
         // Validate engine availability and register
+        let registry = self.registry.read().unwrap();
         match model.model_type {
             ModelType::Inference => {
-                if !self.registry.has_inference_engine(model.engine) {
+                if !registry.has_inference_engine(model.engine) {
                     return Err(format!("inference engine not available: {:?}", model.engine));
                 }
+                drop(registry); // Release lock before opening engine
                 let engine = open_inference_engine(&model)
                     .map_err(|e| format!("failed to open inference engine: {}", e))?;
                 self.provider.register_inference(model_name, engine);
             }
             ModelType::Embedding => {
-                if !self.registry.has_embedding_engine(model.engine) {
+                if !registry.has_embedding_engine(model.engine) {
                     return Err(format!("embedding engine not available: {:?}", model.engine));
                 }
+                drop(registry); // Release lock before opening engine
                 let engine = open_embedding_engine(&model)
                     .map_err(|e| format!("failed to open embedding engine: {}", e))?;
                 self.provider.register_embedding(model_name, engine);
