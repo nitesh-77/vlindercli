@@ -14,13 +14,12 @@
 //! - Injects `agent_id` for storage isolation
 //! - Manages reply queue creation and response waiting
 
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::thread::{self, JoinHandle};
 
 use extism::{CurrentPlugin, Function, Manifest, Plugin, UserData, Val, Wasm};
 
-use crate::domain::{Agent, ResourceId, Runtime, RuntimeType};
+use crate::domain::{Registry, ResourceId, Runtime, RuntimeType};
 use crate::queue::{Message, MessageId, MessageQueue};
 
 /// Tracks a WASM execution running in a background thread.
@@ -33,12 +32,16 @@ struct RunningTask {
 pub struct WasmRuntime {
     id: ResourceId,
     queue: Arc<dyn MessageQueue + Send + Sync>,
-    agents: HashMap<ResourceId, Agent>,
+    registry: Arc<RwLock<Registry>>,
     running: Option<RunningTask>,
 }
 
 impl WasmRuntime {
-    pub fn new(registry_id: &ResourceId, queue: Arc<dyn MessageQueue + Send + Sync>) -> Self {
+    pub fn new(
+        registry_id: &ResourceId,
+        queue: Arc<dyn MessageQueue + Send + Sync>,
+        registry: Arc<RwLock<Registry>>,
+    ) -> Self {
         let id = ResourceId::new(format!(
             "{}/runtimes/{}",
             registry_id.as_str(),
@@ -47,7 +50,7 @@ impl WasmRuntime {
         Self {
             id,
             queue,
-            agents: HashMap::new(),
+            registry,
             running: None,
         }
     }
@@ -60,10 +63,6 @@ impl Runtime for WasmRuntime {
 
     fn runtime_type(&self) -> RuntimeType {
         RuntimeType::Wasm
-    }
-
-    fn register(&mut self, agent: Agent) {
-        self.agents.insert(agent.id.clone(), agent);
     }
 
     fn tick(&mut self) -> bool {
@@ -82,17 +81,23 @@ impl Runtime for WasmRuntime {
             }
         }
 
-        // No running task, check for new work
-        for (agent_id, agent) in &self.agents {
-            if let Ok(request) = self.queue.receive(agent_id.as_str()) {
-                // Prepare data for the thread
+        // Collect WASM agents from registry (need to release lock before spawning thread)
+        let wasm_agents: Vec<_> = {
+            let registry = self.registry.read().unwrap();
+            registry
+                .get_agents()
+                .filter(|agent| registry.select_runtime(agent) == Some(RuntimeType::Wasm))
+                .map(|agent| {
+                    let wasm_path = agent.id.path().unwrap_or(agent.id.as_str()).to_string();
+                    (agent.id.as_str().to_string(), wasm_path)
+                })
+                .collect()
+        };
+
+        // Check for work (registry lock released)
+        for (agent_id_str, wasm_path) in wasm_agents {
+            if let Ok(request) = self.queue.receive(&agent_id_str) {
                 let queue = Arc::clone(&self.queue);
-                let wasm_path = agent
-                    .id
-                    .path()
-                    .unwrap_or(agent.id.as_str())
-                    .to_string();
-                let agent_id_str = agent_id.as_str().to_string();
                 let payload = request.payload.clone();
 
                 // Spawn WASM execution in background thread
@@ -224,10 +229,14 @@ mod tests {
         ResourceId::new("http://test:9000")
     }
 
+    fn test_registry() -> Arc<RwLock<Registry>> {
+        Arc::new(RwLock::new(Registry::new()))
+    }
+
     #[test]
     fn runtime_id_format() {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
-        let runtime = WasmRuntime::new(&test_registry_id(), queue);
+        let runtime = WasmRuntime::new(&test_registry_id(), queue, test_registry());
 
         // Format: <registry_id>/runtimes/<runtime_type>
         assert_eq!(runtime.id().as_str(), "http://test:9000/runtimes/wasm");

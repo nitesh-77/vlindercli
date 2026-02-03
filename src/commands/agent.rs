@@ -35,13 +35,9 @@ fn run(path: Option<PathBuf>) {
     // Create daemon
     let mut daemon = Daemon::new();
 
-    // Deploy agent (register with Registry)
+    // Deploy agent (register with Registry - runtime discovers automatically)
     let agent_id = daemon.harness.deploy_from_path(&absolute_path)
         .expect("Failed to deploy agent");
-
-    // Activate agent (register with Runtime)
-    daemon.activate_agent(&agent_id)
-        .expect("Failed to activate agent");
 
     // Run REPL
     repl::run(|input| {

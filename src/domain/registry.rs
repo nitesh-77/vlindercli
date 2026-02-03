@@ -280,6 +280,11 @@ impl Registry {
     pub fn get_agent(&self, id: &ResourceId) -> Option<&Agent> {
         self.agents.get(id)
     }
+
+    /// Get all registered agents.
+    pub fn get_agents(&self) -> impl Iterator<Item = &Agent> {
+        self.agents.values()
+    }
 }
 
 impl Default for Registry {

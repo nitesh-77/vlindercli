@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use vlindercli::domain::{Agent, AgentManifest, Daemon};
+use vlindercli::domain::{Agent, Daemon};
 
 const FIXTURES: &str = "tests/fixtures/agents";
 
@@ -7,53 +7,11 @@ fn fixture(name: &str) -> PathBuf {
     Path::new(FIXTURES).join(name)
 }
 
-/// Resolve manifest paths and return TOML string
-fn load_resolved_manifest(agent_path: &Path) -> String {
-    let manifest_path = agent_path.join("agent.toml");
-    let manifest = AgentManifest::load(&manifest_path).unwrap();
-
-    // Rebuild TOML with resolved paths
-    let mut result = format!("name = \"{}\"\n", manifest.name);
-
-    if manifest.description.contains('\n') {
-        result.push_str(&format!("description = \"\"\"\n{}\"\"\"\n", manifest.description));
-    } else {
-        result.push_str(&format!("description = \"{}\"\n", manifest.description));
-    }
-
-    result.push_str(&format!("id = \"{}\"\n", manifest.id));
-
-    if let Some(ref source) = manifest.source {
-        result.push_str(&format!("source = \"{}\"\n", source));
-    }
-
-    result.push_str("\n[requirements]\n");
-    result.push_str(&format!("services = {:?}\n", manifest.requirements.services));
-
-    if !manifest.requirements.models.is_empty() {
-        result.push_str("\n[requirements.models]\n");
-        for (name, uri) in &manifest.requirements.models {
-            result.push_str(&format!("{} = \"{}\"\n", name, uri));
-        }
-    }
-
-    for mount in &manifest.mounts {
-        result.push_str(&format!(
-            "\n[[mounts]]\nhost_path = \"{}\"\nguest_path = \"{}\"\nmode = \"{}\"\n",
-            mount.host_path, mount.guest_path, mount.mode
-        ));
-    }
-
-    result
-}
-
 fn run_agent(name: &str, input: &str) -> String {
     let mut daemon = Daemon::new();
-    let manifest_toml = load_resolved_manifest(&fixture(name));
 
-    // Deploy and activate agent
-    let agent_id = daemon.harness.deploy(&manifest_toml).unwrap();
-    daemon.activate_agent(&agent_id).unwrap();
+    // Deploy agent (runtime discovers automatically)
+    let agent_id = daemon.harness.deploy_from_path(&fixture(name)).unwrap();
 
     // Invoke
     let job_id = daemon.harness.invoke(&agent_id, input).unwrap();

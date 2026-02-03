@@ -28,11 +28,8 @@ fn reverse_agent_toml() -> String {
 fn daemon_invokes_agent_and_returns_result() {
     let mut daemon = Daemon::new();
 
-    // Deploy agent
+    // Deploy agent (runtime discovers automatically)
     let agent_id = daemon.harness.deploy(&reverse_agent_toml()).unwrap();
-
-    // Activate agent (register with runtime)
-    daemon.activate_agent(&agent_id).unwrap();
 
     // Invoke via harness
     let job_id = daemon.harness.invoke(&agent_id, "hello").unwrap();

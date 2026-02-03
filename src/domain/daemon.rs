@@ -30,7 +30,7 @@ impl Daemon {
     pub fn new() -> Self {
         let queue = Arc::new(InMemoryQueue::new());
         let mut registry = Registry::new();
-        let runtime = WasmRuntime::new(&registry.id, queue.clone());
+        let registry_id = registry.id.clone();
 
         // Register available runtimes
         registry.register_runtime(RuntimeType::Wasm);
@@ -58,29 +58,10 @@ impl Daemon {
 
         Self {
             harness: Harness::new(queue.clone(), Arc::clone(&registry)),
+            runtime: WasmRuntime::new(&registry_id, queue.clone(), Arc::clone(&registry)),
             registry: Arc::clone(&registry),
-            runtime,
             provider: Provider::new(queue, registry),
         }
-    }
-
-    /// Register an already-deployed agent with the runtime.
-    ///
-    /// Call this after harness.deploy() to enable agent execution.
-    pub fn activate_agent(&mut self, agent_id: &crate::domain::ResourceId) -> Result<(), String> {
-        let registry = self.registry.read().unwrap();
-        let agent = registry.get_agent(agent_id)
-            .ok_or_else(|| format!("agent not found: {}", agent_id))?;
-
-        // Register with runtime based on type
-        let runtime_type = registry.select_runtime(agent)
-            .ok_or_else(|| format!("no runtime for agent: {}", agent_id))?;
-
-        match runtime_type {
-            RuntimeType::Wasm => self.runtime.register(agent.clone()),
-        }
-
-        Ok(())
     }
 
     /// Tick all components.
