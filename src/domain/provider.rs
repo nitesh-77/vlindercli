@@ -1,12 +1,10 @@
 //! Provider - service worker aggregation.
 //!
 //! Aggregates service workers and routes messages to backends.
-//! Storage workers look up agent info from Registry.
-//! Inference/embedding workers use model registration (for now).
+//! All workers lazy-load resources from Registry on first use.
 
 use std::sync::{Arc, RwLock};
 
-use super::{InferenceEngine, EmbeddingEngine};
 use super::registry::Registry;
 use super::workers::{
     ObjectServiceWorker, VectorServiceWorker,
@@ -32,19 +30,9 @@ impl Provider {
         Self {
             object: ObjectServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry)),
             vector: VectorServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry)),
-            inference: InferenceServiceWorker::new(Arc::clone(&queue)),
-            embedding: EmbeddingServiceWorker::new(Arc::clone(&queue)),
+            inference: InferenceServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry)),
+            embedding: EmbeddingServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry)),
         }
-    }
-
-    /// Register inference engine for a model name.
-    pub fn register_inference(&self, model: &str, engine: Arc<dyn InferenceEngine>) {
-        self.inference.register(model, engine);
-    }
-
-    /// Register embedding engine for a model name.
-    pub fn register_embedding(&self, model: &str, engine: Arc<dyn EmbeddingEngine>) {
-        self.embedding.register(model, engine);
     }
 
     /// Process one service message if available. Returns true if processed.

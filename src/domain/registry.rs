@@ -60,7 +60,7 @@ pub enum RegistrationError {
     /// Agent declares vector storage type not available.
     VectorStorageUnavailable(VectorStorageType),
     /// Agent requires a model that is not registered.
-    ModelNotRegistered(ResourceId),
+    ModelNotRegistered(String),
 }
 
 impl std::fmt::Display for RegistrationError {
@@ -71,7 +71,7 @@ impl std::fmt::Display for RegistrationError {
             RegistrationError::ObjectStorageUnavailable(t) => write!(f, "object storage not available: {:?}", t),
             RegistrationError::UnknownVectorStorageScheme(s) => write!(f, "unknown vector storage scheme: {}", s),
             RegistrationError::VectorStorageUnavailable(t) => write!(f, "vector storage not available: {:?}", t),
-            RegistrationError::ModelNotRegistered(id) => write!(f, "model not registered: {}", id),
+            RegistrationError::ModelNotRegistered(name) => write!(f, "model not registered: {}", name),
         }
     }
 }
@@ -209,13 +209,25 @@ impl Registry {
     // --- Model operations ---
 
     /// Register a model as available.
-    pub fn register_model(&mut self, model: Model) {
-        self.models.insert(model.id.clone(), model);
+    ///
+    /// Assigns the model's identity: `<registry_id>/models/<name>`.
+    pub fn register_model(&mut self, mut model: Model) {
+        let model_id = self.model_id(&model.name);
+        model.id = model_id.clone();
+        self.models.insert(model_id, model);
     }
 
-    /// Get a registered model by URI.
-    pub fn get_model(&self, uri: &ResourceId) -> Option<&Model> {
-        self.models.get(uri)
+    /// Get a registered model by name.
+    pub fn get_model(&self, name: &str) -> Option<&Model> {
+        let model_id = self.model_id(name);
+        self.models.get(&model_id)
+    }
+
+    /// Get the registry-issued ID for a model.
+    ///
+    /// Format: `<registry_id>/models/<name>`
+    pub fn model_id(&self, name: &str) -> ResourceId {
+        ResourceId::new(format!("{}/models/{}", self.id.as_str(), name))
     }
 
     // --- Agent operations ---
@@ -253,10 +265,10 @@ impl Registry {
             }
         }
 
-        // Validate all declared models are registered
-        for (_name, model_uri) in &agent.requirements.models {
-            if self.get_model(model_uri).is_none() {
-                return Err(RegistrationError::ModelNotRegistered(model_uri.clone()));
+        // Validate all declared models are registered (by name)
+        for (model_name, _manifest_uri) in &agent.requirements.models {
+            if self.get_model(model_name).is_none() {
+                return Err(RegistrationError::ModelNotRegistered(model_name.clone()));
             }
         }
 

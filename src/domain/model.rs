@@ -8,11 +8,14 @@ use super::resource_id::ResourceId;
 /// A model with resolved paths, ready for use.
 #[derive(Clone, Debug)]
 pub struct Model {
+    /// Registry-assigned identity: `<registry_id>/models/<name>`.
+    /// Set by the registry during registration.
+    pub id: ResourceId,
     pub name: String,
     pub model_type: ModelType,
     pub engine: EngineType,
-    /// Resource URI pointing to model weights (e.g., GGUF file, Ollama model)
-    pub id: ResourceId,
+    /// Path to the model file (e.g., GGUF).
+    pub model_path: ResourceId,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -36,13 +39,17 @@ pub enum EngineType {
 impl Model {
     /// Create a model from a manifest.
     ///
-    /// The manifest's `id` field is already a resolved URI.
+    /// The `id` field is set to a placeholder. The registry assigns the real
+    /// id (`<registry_id>/models/<name>`) during registration.
     pub fn from_manifest(manifest: ModelManifest) -> Model {
+        let name = manifest.name.clone();
         Model {
+            // Placeholder - registry assigns real id during registration
+            id: ResourceId::new(format!("unregistered://models/{}", name)),
             name: manifest.name,
             model_type: manifest.model_type.into(),
             engine: manifest.engine.into(),
-            id: ResourceId::new(manifest.id),
+            model_path: ResourceId::new(manifest.model_path),
         }
     }
 
@@ -85,7 +92,7 @@ impl From<ParseError> for LoadError {
         match e {
             ParseError::Io(e) => LoadError::Io(e),
             ParseError::Toml(s) => LoadError::Parse(s),
-            ParseError::IdNotFound(s) => LoadError::Parse(s),
+            ParseError::ModelPathNotFound(s) => LoadError::Parse(s),
         }
     }
 }

@@ -16,13 +16,13 @@ fn model_manifest_parses_inference_type() {
         name = "phi3"
         type = "inference"
         engine = "llama"
-        id = "file://./phi3.gguf"
+        model_path = "file://./phi3.gguf"
     "#).unwrap();
 
     assert_eq!(manifest.name, "phi3");
     assert_eq!(manifest.model_type, ModelTypeConfig::Inference);
     assert_eq!(manifest.engine, ModelEngineConfig::Llama);
-    assert_eq!(manifest.id, "file://./phi3.gguf");
+    assert_eq!(manifest.model_path, "file://./phi3.gguf");
 }
 
 #[test]
@@ -31,7 +31,7 @@ fn model_manifest_parses_embedding_type() {
         name = "nomic-embed"
         type = "embedding"
         engine = "llama"
-        id = "file://./nomic.gguf"
+        model_path = "file://./nomic.gguf"
     "#).unwrap();
 
     assert_eq!(manifest.name, "nomic-embed");
@@ -45,7 +45,7 @@ fn model_manifest_fails_for_invalmodel_type() {
         name = "bad"
         type = "unknown"
         engine = "llama"
-        id = "file://./model.gguf"
+        model_path = "file://./model.gguf"
     "#);
     assert!(result.is_err());
 }
@@ -77,7 +77,7 @@ fn model_load_parses_manifest() {
         name = "phi3"
         type = "inference"
         engine = "llama"
-        id = "file://./phi3.gguf"
+        model_path = "file://./phi3.gguf"
     "#;
     std::fs::write(temp_dir.join("model.toml"), manifest).unwrap();
 
@@ -85,8 +85,8 @@ fn model_load_parses_manifest() {
     assert_eq!(model.name, "phi3");
     assert_eq!(model.model_type, ModelType::Inference);
     assert_eq!(model.engine, EngineType::Llama);
-    assert_eq!(model.id.scheme(), Some("file"));
-    assert!(model.id.path().unwrap().ends_with("phi3.gguf"));
+    assert_eq!(model.model_path.scheme(), Some("file"));
+    assert!(model.model_path.path().unwrap().ends_with("phi3.gguf"));
 
     let _ = std::fs::remove_dir_all(&temp_dir);
 }
@@ -101,7 +101,7 @@ fn model_load_fails_for_missing_model_file() {
         name = "phi3"
         type = "inference"
         engine = "llama"
-        id = "file://./nonexistent.gguf"
+        model_path = "file://./nonexistent.gguf"
     "#;
     std::fs::write(temp_dir.join("model.toml"), manifest).unwrap();
 
@@ -124,7 +124,7 @@ fn model_type_from_manifest() {
         name = "inference-model"
         type = "inference"
         engine = "llama"
-        id = "file://./model.gguf"
+        model_path = "file://./model.gguf"
     "#;
     std::fs::write(temp_dir.join("inference.toml"), inference_manifest).unwrap();
     let model = Model::load(&temp_dir.join("inference.toml")).unwrap();
@@ -135,7 +135,7 @@ fn model_type_from_manifest() {
         name = "embedding-model"
         type = "embedding"
         engine = "llama"
-        id = "file://./model.gguf"
+        model_path = "file://./model.gguf"
     "#;
     std::fs::write(temp_dir.join("embedding.toml"), embedding_manifest).unwrap();
     let model = Model::load(&temp_dir.join("embedding.toml")).unwrap();
@@ -159,7 +159,7 @@ fn model_type_can_be_compared() {
         name = "test"
         type = "inference"
         engine = "llama"
-        id = "file://./model.gguf"
+        model_path = "file://./model.gguf"
     "#;
     std::fs::write(temp_dir.join("model.toml"), manifest).unwrap();
 
@@ -183,7 +183,7 @@ fn model_engine_is_llama() {
         name = "test"
         type = "inference"
         engine = "llama"
-        id = "file://./model.gguf"
+        model_path = "file://./model.gguf"
     "#;
     std::fs::write(temp_dir.join("model.toml"), manifest).unwrap();
 
@@ -191,4 +191,44 @@ fn model_engine_is_llama() {
     assert_eq!(model.engine, EngineType::Llama);
 
     let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+// ============================================================================
+// .vlinder/models/ Integration Tests
+// ============================================================================
+
+#[test]
+fn vlinder_models_load_correctly() {
+    use std::path::Path;
+
+    let models_dir = Path::new(".vlinder/models");
+    if !models_dir.exists() {
+        // Skip if .vlinder/models doesn't exist (CI environment)
+        return;
+    }
+
+    // Test phi3
+    let phi3_path = models_dir.join("phi3/model.toml");
+    if phi3_path.exists() {
+        let model = Model::load(&phi3_path).unwrap();
+        assert_eq!(model.name, "phi3");
+        assert_eq!(model.model_type, ModelType::Inference);
+        assert_eq!(model.model_path.scheme(), Some("file"));
+    }
+
+    // Test nomic-embed
+    let nomic_path = models_dir.join("nomic-embed/model.toml");
+    if nomic_path.exists() {
+        let model = Model::load(&nomic_path).unwrap();
+        assert_eq!(model.name, "nomic-embed");
+        assert_eq!(model.model_type, ModelType::Embedding);
+    }
+
+    // Test qwen
+    let qwen_path = models_dir.join("qwen/model.toml");
+    if qwen_path.exists() {
+        let model = Model::load(&qwen_path).unwrap();
+        assert_eq!(model.name, "qwen");
+        assert_eq!(model.model_type, ModelType::Inference);
+    }
 }

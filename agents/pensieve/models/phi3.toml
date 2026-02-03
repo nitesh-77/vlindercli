@@ -1,4 +1,0 @@
-name = "phi3"
-type = "inference"
-engine = "llama"
-id = "file://../../../.vlinder/models/phi3.gguf"

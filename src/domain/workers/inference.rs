@@ -2,6 +2,8 @@
 //!
 //! Queue:
 //! - `infer`: Run inference with a model
+//!
+//! Engines are lazy-loaded on first use from Registry model metadata.
 
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -9,6 +11,8 @@ use std::sync::{Arc, RwLock};
 use serde::Deserialize;
 
 use crate::domain::InferenceEngine;
+use crate::domain::registry::Registry;
+use crate::inference::open_inference_engine;
 use crate::queue::{Message, MessageQueue};
 use crate::services::inference;
 
@@ -34,18 +38,20 @@ fn default_max_tokens() -> u32 {
 
 pub struct InferenceServiceWorker {
     queue: Arc<dyn MessageQueue + Send + Sync>,
+    registry: Arc<RwLock<Registry>>,
     engines: RwLock<HashMap<String, Arc<dyn InferenceEngine>>>,
 }
 
 impl InferenceServiceWorker {
-    pub fn new(queue: Arc<dyn MessageQueue + Send + Sync>) -> Self {
+    pub fn new(queue: Arc<dyn MessageQueue + Send + Sync>, registry: Arc<RwLock<Registry>>) -> Self {
         Self {
             queue,
+            registry,
             engines: RwLock::new(HashMap::new()),
         }
     }
 
-    /// Register an inference engine by model name.
+    /// Register an inference engine by model name (for testing).
     pub fn register(&self, model_name: &str, engine: Arc<dyn InferenceEngine>) {
         self.engines.write().unwrap().insert(model_name.to_string(), engine);
     }
@@ -71,10 +77,10 @@ impl InferenceServiceWorker {
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
 
-        let engines = self.engines.read().unwrap();
-        let engine = match engines.get(&req.model) {
-            Some(e) => e,
-            None => return format!("[error] unknown model: {}", req.model).into_bytes(),
+        // Try to get cached engine, or lazy-load from registry
+        let engine = match self.get_or_load_engine(&req.model) {
+            Ok(e) => e,
+            Err(e) => return format!("[error] {}", e).into_bytes(),
         };
 
         // Call pure service function
@@ -82,6 +88,37 @@ impl InferenceServiceWorker {
             Ok(result) => result.into_bytes(),
             Err(e) => format!("[error] {}", e).into_bytes(),
         }
+    }
+
+    /// Get cached engine or lazy-load from registry.
+    fn get_or_load_engine(&self, model_name: &str) -> Result<Arc<dyn InferenceEngine>, String> {
+        // Check cache first
+        {
+            let engines = self.engines.read().unwrap();
+            if let Some(engine) = engines.get(model_name) {
+                return Ok(Arc::clone(engine));
+            }
+        }
+
+        // Not cached - look up in registry and load
+        let model = {
+            let registry = self.registry.read().unwrap();
+            registry.get_model(model_name)
+                .cloned()
+                .ok_or_else(|| format!("model not registered: {}", model_name))?
+        };
+
+        // Load engine
+        let engine = open_inference_engine(&model)
+            .map_err(|e| format!("failed to load engine: {}", e))?;
+
+        // Cache it
+        {
+            let mut engines = self.engines.write().unwrap();
+            engines.insert(model_name.to_string(), Arc::clone(&engine));
+        }
+
+        Ok(engine)
     }
 }
 
@@ -91,10 +128,15 @@ mod tests {
     use crate::queue::{InMemoryQueue, Message};
     use crate::inference::InMemoryInference;
 
+    fn test_registry() -> Arc<RwLock<Registry>> {
+        Arc::new(RwLock::new(Registry::new()))
+    }
+
     #[test]
     fn handles_infer_request() {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
-        let handler = InferenceServiceWorker::new(Arc::clone(&queue));
+        let registry = test_registry();
+        let handler = InferenceServiceWorker::new(Arc::clone(&queue), registry);
 
         // Register mock engine
         let engine = Arc::new(InMemoryInference::new("test response"));
@@ -120,7 +162,8 @@ mod tests {
     #[test]
     fn returns_error_for_unknown_model() {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
-        let handler = InferenceServiceWorker::new(Arc::clone(&queue));
+        let registry = test_registry();
+        let handler = InferenceServiceWorker::new(Arc::clone(&queue), registry);
 
         let payload = serde_json::json!({
             "model": "unknown",
@@ -136,6 +179,6 @@ mod tests {
         let response = queue.receive("reply").unwrap();
         let text = String::from_utf8(response.payload).unwrap();
         assert!(text.contains("[error]"));
-        assert!(text.contains("unknown"));
+        assert!(text.contains("not registered"));
     }
 }

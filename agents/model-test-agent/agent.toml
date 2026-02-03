@@ -6,5 +6,5 @@ id = "file://./agent.wasm"
 services = []
 
 [requirements.models]
-phi3 = "file://./models/inference.toml"
-nomic-embed = "file://./models/embedding.toml"
+phi3 = "http://127.0.0.1:9000/models/phi3"
+nomic-embed = "http://127.0.0.1:9000/models/nomic-embed"

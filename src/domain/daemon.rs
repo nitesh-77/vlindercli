@@ -10,11 +10,9 @@
 use std::path::Path;
 use std::sync::{Arc, RwLock};
 
-use crate::domain::{EngineType, Model, ModelType, ObjectStorageType, Provider, Runtime, RuntimeType, VectorStorageType};
+use crate::domain::{EngineType, Model, ObjectStorageType, Provider, Runtime, RuntimeType, VectorStorageType};
 use crate::domain::harness::Harness;
 use crate::domain::registry::Registry;
-use crate::embedding::open_embedding_engine;
-use crate::inference::open_inference_engine;
 use crate::queue::InMemoryQueue;
 use crate::runtime::WasmRuntime;
 
@@ -53,6 +51,9 @@ impl Daemon {
         registry.register_embedding_engine(EngineType::Llama);
         registry.register_embedding_engine(EngineType::InMemory);
 
+        // Register known models (hardcoded for now)
+        Self::register_known_models(&mut registry);
+
         let registry = Arc::new(RwLock::new(registry));
 
         Self {
@@ -61,51 +62,6 @@ impl Daemon {
             runtime,
             provider: Provider::new(queue, registry),
         }
-    }
-
-    /// Register a model with the system.
-    ///
-    /// Models must be registered before agents that depend on them can be deployed.
-    pub fn register_model(&mut self, model_path: &Path) -> Result<(), String> {
-        let model = Model::load(model_path)
-            .map_err(|e| format!("failed to load model: {:?}", e))?;
-
-        // Validate engine availability
-        {
-            let registry = self.registry.read().unwrap();
-            match model.model_type {
-                ModelType::Inference => {
-                    if !registry.has_inference_engine(model.engine) {
-                        return Err(format!("inference engine not available: {:?}", model.engine));
-                    }
-                }
-                ModelType::Embedding => {
-                    if !registry.has_embedding_engine(model.engine) {
-                        return Err(format!("embedding engine not available: {:?}", model.engine));
-                    }
-                }
-            }
-        }
-
-        // Open engine and register with provider
-        let model_name = model.name.clone();
-        match model.model_type {
-            ModelType::Inference => {
-                let engine = open_inference_engine(&model)
-                    .map_err(|e| format!("failed to open inference engine: {}", e))?;
-                self.provider.register_inference(&model_name, engine);
-            }
-            ModelType::Embedding => {
-                let engine = open_embedding_engine(&model)
-                    .map_err(|e| format!("failed to open embedding engine: {}", e))?;
-                self.provider.register_embedding(&model_name, engine);
-            }
-        }
-
-        // Register model in registry
-        self.registry.write().unwrap().register_model(model);
-
-        Ok(())
     }
 
     /// Register an already-deployed agent with the runtime.
@@ -132,6 +88,24 @@ impl Daemon {
         self.runtime.tick();
         self.provider.tick();
         self.harness.tick();
+    }
+
+    /// Register known models (hardcoded paths for now).
+    fn register_known_models(registry: &mut Registry) {
+        let model_paths = [
+            "/Users/ashwnacharya/repos/vlindercli/.vlinder/models/phi3/model.toml",
+            "/Users/ashwnacharya/repos/vlindercli/.vlinder/models/nomic-embed/model.toml",
+            "/Users/ashwnacharya/repos/vlindercli/.vlinder/models/qwen/model.toml",
+        ];
+
+        for path in model_paths {
+            let manifest_path = Path::new(path);
+            if manifest_path.exists() {
+                if let Ok(model) = Model::load(manifest_path) {
+                    registry.register_model(model);
+                }
+            }
+        }
     }
 }
 
@@ -162,5 +136,22 @@ mod tests {
 
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("no runtime"));
+    }
+
+    #[test]
+    fn registers_known_models() {
+        let daemon = Daemon::new();
+        let registry = daemon.registry.read().unwrap();
+
+        // Check that known models are registered
+        let phi3 = registry.get_model("phi3");
+        assert!(phi3.is_some(), "phi3 should be registered");
+        assert_eq!(phi3.unwrap().name, "phi3");
+
+        let nomic = registry.get_model("nomic-embed");
+        assert!(nomic.is_some(), "nomic-embed should be registered");
+
+        let qwen = registry.get_model("qwen");
+        assert!(qwen.is_some(), "qwen should be registered");
     }
 }

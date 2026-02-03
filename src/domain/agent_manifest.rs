@@ -108,9 +108,15 @@ fn resolve_id_uri(id: &str, agent_dir: &Path) -> Result<String, ParseError> {
 
 /// Resolve a URI, making relative file:// URIs absolute.
 ///
-/// - If already absolute or non-file URI, return as-is
-/// - If relative file:// URI, resolve against agent_dir
+/// - Non-file URIs (http://, etc.) are returned as-is
+/// - Absolute file:// URIs are returned as-is
+/// - Relative file:// URIs are resolved against agent_dir
 fn resolve_uri(uri: &str, agent_dir: &Path) -> String {
+    // Non-file URIs pass through unchanged (e.g., http://127.0.0.1:9000/models/phi3)
+    if uri.contains("://") && !uri.starts_with("file://") {
+        return uri.to_string();
+    }
+
     if let Some(path) = uri.strip_prefix("file://") {
         if path.starts_with("./") || !Path::new(path).is_absolute() {
             let clean_path = path.strip_prefix("./").unwrap_or(path);
