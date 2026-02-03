@@ -2,6 +2,10 @@
 //!
 //! The trait is defined in the domain module.
 
+mod ollama;
+
+pub use ollama::OllamaEmbeddingEngine;
+
 use std::num::NonZeroU32;
 use std::path::Path;
 use std::sync::Arc;
