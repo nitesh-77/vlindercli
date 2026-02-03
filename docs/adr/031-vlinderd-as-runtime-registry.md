@@ -173,13 +173,50 @@ Everything is in-process. **This is the accepted architecture for now.**
 | Entity | Status | Notes |
 |--------|--------|-------|
 | ResourceId | ✓ | URI-based key for registry lookups |
-| Registry | ✓ | Stores jobs, agents, models, available runtimes |
+| Registry | ✓ | Trait with `InMemoryRegistry` implementation |
 | Daemon | ✓ | Control plane owning all components |
 | Harness | ✓ | API surface: deploy_from_path, deploy, invoke, poll |
 | Runtime | ✓ | Discovers agents from Registry, executes WASM |
 | Provider | ✓ | Workers lazy-load from Registry |
 | JobId/Job/JobStatus | ✓ | Full job lifecycle tracking |
 | Model | ✓ | Registry-assigned identity, lazy engine loading |
+
+### Registry Trait
+
+Registry is a trait enabling distributed deployment where the registry becomes a remote HTTP/gRPC endpoint.
+
+**Source**: [`src/domain/registry.rs`](../../src/domain/registry.rs)
+
+```
+trait Registry
+    # Identity
+    id() → ResourceId
+
+    # Agents
+    register_agent(agent) → Result
+    get_agent(id) → Option<Agent>
+    get_agents() → Vec<Agent>
+    select_runtime(agent) → Option<RuntimeType>
+
+    # Models
+    register_model(model)
+    get_model(name) → Option<Model>
+
+    # Jobs
+    create_job(agent_id, input) → JobId
+    get_job(id) → Option<Job>
+    update_job_status(id, status)
+    pending_jobs() → Vec<Job>
+
+    # Capabilities
+    register_*/has_* for: runtime, object_storage, vector_storage, inference_engine, embedding_engine
+```
+
+**Design decisions:**
+- Returns owned values (not references) — enables network serialization
+- Interior mutability — consumers use `Arc<dyn Registry>` without `RwLock` wrapping
+- `InMemoryRegistry`: in-process implementation
+- Future `RegistryClient`: HTTP/gRPC client to remote registry
 
 ## Future State (Deferred)
 

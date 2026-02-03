@@ -26,6 +26,7 @@ cargo run -- agent run -p agents/pensieve/
 |----------|-------------|
 | [Vision](docs/VISION.md) | What VlinderCLI is and who it's for |
 | [Domain Model](docs/DOMAIN_MODEL.md) | Core types, traits, and their relationships |
+| [Request Flow](docs/REQUEST_FLOW.md) | How requests travel through the system |
 | [ADRs](docs/adr/) | Architecture Decision Records |
 
 ### Key ADRs
@@ -34,7 +35,7 @@ cargo run -- agent run -p agents/pensieve/
 |-----|-------|
 | [018](docs/adr/018-protocol-first-architecture.md) | Protocol-First Architecture (queue-based message passing) |
 | [020](docs/adr/020-agent-directory-structure.md) | Agent Directory Structure |
-| [023](docs/adr/023-model-manifest-format.md) | Model Manifest Format |
+| [031](docs/adr/031-vlinderd-as-runtime-registry.md) | Registry as Runtime Authority |
 
 ## Project Structure
 

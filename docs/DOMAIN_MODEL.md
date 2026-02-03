@@ -144,12 +144,32 @@ Free functions (`load_agent()`, `load_fleet()`, `load_model()`) dispatch by URI 
 
 ---
 
+## Core Trait Inventory
+
+These traits define the system's extension points. Each trait has one or more implementations that can be swapped for different deployment scenarios.
+
+| Trait | Purpose | In-Process Impl | Future/Network Impl |
+|-------|---------|-----------------|---------------------|
+| `Registry` | System state, agent/job tracking | `InMemoryRegistry` | `RegistryClient` (HTTP) |
+| `MessageQueue` | Message passing | `InMemoryQueue` | Redis, SQS |
+| `Runtime` | Agent execution | `WasmRuntime` | Lambda, K8s |
+| `InferenceEngine` | Text generation | `LlamaEngine` | Ollama, OpenAI |
+| `EmbeddingEngine` | Vector embeddings | `LlamaEmbeddingEngine` | Ollama, OpenAI |
+| `ObjectStorage` | File storage | `SqliteObjectStorage`, `InMemoryObjectStorage` | S3 |
+| `VectorStorage` | Embedding search | `SqliteVecStorage`, `InMemoryVectorStorage` | Pinecone, Qdrant |
+| `Loader` | Load configs from URIs | `FileLoader` | S3, Consul |
+
+**Design principle**: Local development uses in-process implementations. Production swaps to network implementations. Agent code doesn't change.
+
+---
+
 ## Capability Traits
 
 These traits define the **runtime protocol**. They are the contracts that implementations must fulfill.
 
 | Trait | Purpose | Definition |
 |-------|---------|------------|
+| `Registry` | System state and coordination | [`src/domain/registry.rs`](../src/domain/registry.rs) |
 | `InferenceEngine` | Text generation from prompts | [`src/domain/inference.rs`](../src/domain/inference.rs) |
 | `EmbeddingEngine` | Text to vector embeddings | [`src/domain/embedding.rs`](../src/domain/embedding.rs) |
 | `ObjectStorage` | Key-value file storage | [`src/domain/storage.rs`](../src/domain/storage.rs) |
