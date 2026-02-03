@@ -96,7 +96,7 @@ The control plane that owns all system components. Like k8s, it coordinates Regi
 
 ### Registry
 
-Source of truth for all system state. Stores jobs and agent definitions. Has an `id` (ResourceId) representing its API endpoint.
+Source of truth for all system state. Stores jobs, agents, models, and tracks available capabilities (runtimes, storage types, engine types). Has an `id` (ResourceId) representing its API endpoint.
 
 - **Type**: [`src/domain/registry.rs`](../src/domain/registry.rs)
 
@@ -120,7 +120,7 @@ Job lifecycle states: Pending → Running → Completed/Failed.
 
 ### Harness (Daemon-owned)
 
-API surface owned by Daemon. Handles job submission and status tracking via Registry.
+API surface owned by Daemon. Handles agent deployment (from filesystem or TOML), job submission, and status tracking via Registry.
 
 - **Type**: [`src/domain/harness.rs`](../src/domain/harness.rs)
 
@@ -156,7 +156,6 @@ These traits define the **runtime protocol**. They are the contracts that implem
 | `VectorStorage` | Embedding storage with similarity search | [`src/domain/storage.rs`](../src/domain/storage.rs) |
 | `MessageQueue` | Message passing abstraction | [`src/queue/traits.rs`](../src/queue/traits.rs) |
 | `Runtime` | Agent execution protocol | [`src/domain/runtime.rs`](../src/domain/runtime.rs) |
-| `Harness` | User-facing interface to runtime | [`src/domain/harness.rs`](../src/domain/harness.rs) |
 | `Loader` | Load agents/fleets/models from URIs | [`src/loader.rs`](../src/loader.rs) |
 
 ---
@@ -204,8 +203,8 @@ EmbeddingEngine          VectorStorage              Runtime
  ├── LlamaEmbeddingEngine ├── SqliteVecStorage       └── WasmRuntime
  └── InMemoryEmbedding    └── InMemoryVectorStorage
 
-Harness                  Loader
- └── CliHarness           └── FileLoader
+Loader
+ └── FileLoader
 ```
 
 ### Dependencies ("uses")
@@ -213,19 +212,18 @@ Harness                  Loader
 ```
 Daemon (control plane)
  ├── owns Registry
- │    ├── stores Job (agent_id, input, status)
- │    └── stores Agent (by ResourceId)
+ │    ├── stores Job, Agent, Model
+ │    └── tracks available capabilities
  ├── owns Harness
- │    ├── creates jobs in Registry
- │    ├── queues messages to Runtime
- │    └── reconciles completed jobs from reply queue
+ │    └── API surface for deploy/invoke/poll
  ├── owns WasmRuntime (implements Runtime trait)
+ │    ├── discovers agents from Registry
  │    └── uses MessageQueue
  └── owns Provider (aggregates workers)
-      ├── ObjectServiceWorker → ObjectStorage
-      ├── VectorServiceWorker → VectorStorage
-      ├── InferenceServiceWorker → InferenceEngine
-      └── EmbeddingServiceWorker → EmbeddingEngine
+      ├── ObjectServiceWorker → Registry → ObjectStorage (lazy)
+      ├── VectorServiceWorker → Registry → VectorStorage (lazy)
+      ├── InferenceServiceWorker → Registry → InferenceEngine (lazy)
+      └── EmbeddingServiceWorker → Registry → EmbeddingEngine (lazy)
 ```
 
 ### Loading Flow
@@ -336,7 +334,7 @@ The `Runtime` trait defines agent execution protocol. See ADR 030.
 
 ### WasmRuntime
 
-Executes WASM agents via Extism. Provides host functions: `send`, `receive`, `get_prompts`.
+Executes WASM agents via Extism. Discovers agents from Registry, polls their input queues, executes WASM on message arrival. Provides host functions `send` and `get_prompts` to guests.
 
 - **Implementation**: [`src/runtime/wasm.rs`](../src/runtime/wasm.rs)
 
@@ -344,7 +342,7 @@ Executes WASM agents via Extism. Provides host functions: `send`, `receive`, `ge
 
 ## Service Workers (Domain)
 
-Service workers are **domain entities** that define the protocol handlers (see ADR 030). They depend only on capability traits, not concrete implementations.
+Service workers are **domain entities** that define the protocol handlers (see ADR 030). They have Registry access and lazy-load resources on first use (see ADR 036). Inference and embedding workers validate agents declared the model before invoking.
 
 Location: [`src/domain/workers/`](../src/domain/workers/mod.rs)
 
@@ -371,10 +369,7 @@ Supports heterogeneous deployments: different agents can use different backends 
 
 Location: [`src/domain/harness.rs`](../src/domain/harness.rs)
 
-`Harness` is the API surface for job submission and status. Owned by `Daemon`, it:
-- Creates jobs in Registry
-- Queues messages to Runtime
-- Monitors reply queue and updates job status
+`Harness` is a struct that provides the API surface for agent deployment and job management. Owned by `Daemon`, it deploys agents, submits jobs to Registry, queues messages to Runtime, and reconciles completed jobs from the reply queue.
 
 The CLI (`vlinder agent run`) uses Daemon which owns Harness internally.
 
