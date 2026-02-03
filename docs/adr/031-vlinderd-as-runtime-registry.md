@@ -2,7 +2,9 @@
 
 ## Status
 
-Proposed
+Accepted (in-process architecture)
+
+The core abstractions (Daemon, Registry, Harness, Runtime, Provider) are implemented and working in-process. Process separation (Desired State section below) is deferred to future work.
 
 ## Context
 
@@ -147,41 +149,41 @@ vlinderd
         └── my-fleet → { agents: [...], status: deployed }
 ```
 
-## Current State vs Desired State
-
-### Current State
+## Current State (Accepted)
 
 ```
-CliHarness (single process)
-├── embeds WasmRuntime
-├── embeds Provider (object, vector, inference, embedding)
-├── embeds InMemoryQueue
-└── register() does everything: creates storage, loads models, registers agent
+Daemon (single process)
+├── Registry (source of truth for agents, models, jobs)
+├── Harness (API surface: deploy, invoke, poll)
+├── WasmRuntime (discovers agents from Registry)
+├── Provider (workers: object, vector, inference, embedding)
+└── InMemoryQueue
 ```
 
-Everything is in-process. Harness IS the system.
+Everything is in-process. **This is the accepted architecture for now.**
+
+**Key design:**
+- Registry is the single source of truth
+- Runtime discovers agents from Registry on tick (no explicit registration)
+- Workers lazy-load resources (storage, engines) from Registry
+- Harness provides `deploy_from_path()` for CLI, `deploy()` for future web harness
 
 **Domain entities implemented:**
 
 | Entity | Status | Notes |
 |--------|--------|-------|
 | ResourceId | ✓ | URI-based key for registry lookups |
-| ObjectStorageManifest | ✓ | Serde-deserializable, tagged enum |
-| VectorStorageManifest | ✓ | Serde-deserializable, tagged enum |
-| AgentManifest.object_storage | ✓ | Optional ResourceId field |
-| AgentManifest.vector_storage | ✓ | Optional ResourceId field |
-| Registry | ✓ | Stores jobs, agents, and available runtimes |
-| JobId | ✓ | Full URI: `<registry_id>/jobs/<uuid>` |
-| Job | ✓ | agent_id (ResourceId), input, status |
-| JobStatus | ✓ | Pending, Running, Completed, Failed |
-| Daemon | ✓ | Control plane owning Registry, Harness, Runtime, Provider |
-| Harness (Daemon-owned) | ✓ | API surface for invoke/poll, owned by Daemon |
-| Runtime uses ResourceId | ✓ | Agents keyed by ResourceId, queue routing by agent_id |
-| RuntimeType | ✓ | Compile-time enum: Wasm (future: Lambda, Container) |
-| Runtime.id() | ✓ | Returns ResourceId: `<registry_id>/runtimes/<type>` |
-| Runtime dispatch | ✓ | Registry.select_runtime() - see ADR 034 |
+| Registry | ✓ | Stores jobs, agents, models, available runtimes |
+| Daemon | ✓ | Control plane owning all components |
+| Harness | ✓ | API surface: deploy_from_path, deploy, invoke, poll |
+| Runtime | ✓ | Discovers agents from Registry, executes WASM |
+| Provider | ✓ | Workers lazy-load from Registry |
+| JobId/Job/JobStatus | ✓ | Full job lifecycle tracking |
+| Model | ✓ | Registry-assigned identity, lazy engine loading |
 
-### Desired State
+## Future State (Deferred)
+
+Process separation for distributed deployment:
 
 ```
 vlinderd (daemon) ────spawns────┬── discovery service (HTTP)
@@ -195,20 +197,7 @@ harness (thin client) ──────────┬── reads manifests
                                 └── queues message
 ```
 
-All separate processes communicating via queues.
-
-### Key Gaps
-
-| Component | Current | Desired |
-|-----------|---------|---------|
-| vlinderd | **Daemon exists** (in-process) | spawns all processes |
-| registry | **Registry exists** (in-process) | HTTP discovery service |
-| harness | **Harness owned by Daemon** | thin client (separate process) |
-| runtime | embedded in Daemon | separate process |
-| services | embedded in Daemon | separate processes |
-| queue | in-memory, in-process | separate (or cloud proxy) |
-
-**Progress**: Core abstractions (Daemon, Registry, Harness, Job) are implemented in-process. Next step is process separation.
+This is deferred until we need distributed deployment or remote runtimes.
 
 ### ResourceId
 

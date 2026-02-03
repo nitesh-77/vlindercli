@@ -2,7 +2,9 @@
 
 ## Status
 
-Proposed
+Superseded by ADR 033 (Agent URI Scheme) and ADR 034 (Runtime Dispatch Policy)
+
+We chose URI pattern matching over explicit executor declaration. The `id` field's URI scheme and extension determine the runtime (e.g., `file://.../.wasm` → WasmRuntime). This is simpler and avoids manifest format changes.
 
 ## Context
 

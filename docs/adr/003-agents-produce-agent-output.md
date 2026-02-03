@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Superceded by ADR 018 (Agent outputs are queue messages)
 
 ## Context
 
