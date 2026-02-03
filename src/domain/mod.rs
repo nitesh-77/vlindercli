@@ -9,6 +9,7 @@
 
 mod agent;
 mod agent_manifest;
+mod catalog;
 mod daemon;
 mod embedding;
 mod fleet;
@@ -74,6 +75,12 @@ pub use embedding::{
 
 pub use model::{Model, ModelType, EngineType, LoadError as ModelLoadError};
 pub use model_manifest::{ModelManifest, ModelTypeConfig, ModelEngineConfig};
+
+// ============================================================================
+// Model Catalog (trait)
+// ============================================================================
+
+pub use catalog::{ModelCatalog, ModelInfo, CatalogError};
 
 // ============================================================================
 // Provider
