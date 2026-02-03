@@ -7,6 +7,7 @@
 //! - tick: Reconcile completed jobs from reply queue
 
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::{Arc, RwLock};
 
 use crate::domain::registry::{JobId, JobStatus, Registry};
@@ -34,13 +35,30 @@ impl Harness {
         }
     }
 
-    /// Deploy an agent by parsing manifest and registering with Registry.
+    /// Deploy an agent from a local directory path.
     ///
-    /// Validates all requirements (runtime, storage, models) before registration.
+    /// Loads the manifest, resolves relative paths, validates requirements,
+    /// and registers the agent. This is the preferred method for CLI usage.
+    pub fn deploy_from_path(&self, path: &Path) -> Result<ResourceId, String> {
+        let agent = Agent::load(path)
+            .map_err(|e| format!("failed to load agent: {:?}", e))?;
+
+        self.register_agent(agent)
+    }
+
+    /// Deploy an agent from TOML content with pre-resolved URIs.
+    ///
+    /// Use this when the manifest comes from a non-filesystem source (e.g., HTTP request)
+    /// where URIs are already absolute.
     pub fn deploy(&self, manifest_toml: &str) -> Result<ResourceId, String> {
         let agent = Agent::from_toml(manifest_toml)
             .map_err(|e| format!("failed to parse manifest: {:?}", e))?;
 
+        self.register_agent(agent)
+    }
+
+    /// Internal: register an agent after loading/parsing.
+    fn register_agent(&self, agent: Agent) -> Result<ResourceId, String> {
         let agent_id = agent.id.clone();
 
         let mut registry = self.registry.write().unwrap();
@@ -108,9 +126,14 @@ mod tests {
     use super::*;
     use crate::domain::RuntimeType;
     use crate::queue::InMemoryQueue;
+    use std::path::PathBuf;
 
     fn test_agent_id() -> ResourceId {
         ResourceId::new("file:///test/agent.wasm")
+    }
+
+    fn fixture_path(name: &str) -> PathBuf {
+        PathBuf::from("tests/fixtures/agents").join(name)
     }
 
     /// Create a registry with Wasm runtime registered (required for agent deployment).
@@ -233,5 +256,44 @@ mod tests {
                 JobStatus::Completed("result".to_string())
             );
         }
+    }
+
+    #[test]
+    fn deploy_from_path_loads_and_registers_agent() {
+        let queue = Arc::new(InMemoryQueue::new());
+        let registry = test_registry();
+        let harness = Harness::new(queue, registry.clone());
+
+        let agent_id = harness.deploy_from_path(&fixture_path("echo-agent")).unwrap();
+
+        // Agent is registered
+        let reg = registry.read().unwrap();
+        let agent = reg.get_agent(&agent_id).unwrap();
+        assert_eq!(agent.name, "echo-agent");
+    }
+
+    #[test]
+    fn deploy_from_path_fails_for_nonexistent_path() {
+        let queue = Arc::new(InMemoryQueue::new());
+        let registry = test_registry();
+        let harness = Harness::new(queue, registry);
+
+        let result = harness.deploy_from_path(Path::new("/nonexistent/path"));
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("failed to load agent"));
+    }
+
+    #[test]
+    fn deploy_from_path_fails_for_path_without_manifest() {
+        let queue = Arc::new(InMemoryQueue::new());
+        let registry = test_registry();
+        let harness = Harness::new(queue, registry);
+
+        // Use tests/ directory which exists but has no agent.toml
+        let result = harness.deploy_from_path(Path::new("tests"));
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("failed to load agent"));
     }
 }
