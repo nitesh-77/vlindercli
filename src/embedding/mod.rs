@@ -15,16 +15,29 @@ use llama_cpp_2::llama_batch::LlamaBatch;
 use llama_cpp_2::model::params::LlamaModelParams;
 use llama_cpp_2::model::LlamaModel;
 
-use crate::domain::{EmbeddingEngine, Model};
+use crate::domain::{EmbeddingEngine, EngineType, Model};
 use crate::inference::get_backend;  // Use shared backend from inference
 
 /// Open an embedding engine for the given model.
 pub fn open_embedding_engine(model: &Model) -> Result<Arc<dyn EmbeddingEngine>, String> {
-    let path = model.model_path.path()
-        .ok_or_else(|| format!("unsupported model path: {}", model.model_path))?;
-
-    let engine = LlamaEmbeddingEngine::load(Path::new(path))?;
-    Ok(Arc::new(engine))
+    match model.engine {
+        EngineType::Llama => {
+            let path = model.model_path.path()
+                .ok_or_else(|| format!("unsupported model path: {}", model.model_path))?;
+            let engine = LlamaEmbeddingEngine::load(Path::new(path))?;
+            Ok(Arc::new(engine))
+        }
+        EngineType::Ollama => {
+            let endpoint = model.model_path.authority()
+                .map(|a| format!("http://{}", a))
+                .unwrap_or_else(|| "http://localhost:11434".to_string());
+            let model_name = model.name.clone();
+            Ok(Arc::new(OllamaEmbeddingEngine::new(endpoint, model_name)))
+        }
+        EngineType::InMemory => {
+            Err("InMemory engine should be injected directly in tests".to_string())
+        }
+    }
 }
 
 // ============================================================================

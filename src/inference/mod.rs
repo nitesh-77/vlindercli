@@ -17,7 +17,7 @@ use llama_cpp_2::model::params::LlamaModelParams;
 use llama_cpp_2::model::LlamaModel;
 use llama_cpp_2::sampling::LlamaSampler;
 
-use crate::domain::{InferenceEngine, Model};
+use crate::domain::{EngineType, InferenceEngine, Model};
 
 // Shared backend - initialized once, used by both inference and embedding
 static LLAMA_BACKEND: OnceLock<LlamaBackend> = OnceLock::new();
@@ -32,11 +32,24 @@ pub fn get_backend() -> Result<&'static LlamaBackend, String> {
 
 /// Open an inference engine for the given model.
 pub fn open_inference_engine(model: &Model) -> Result<Arc<dyn InferenceEngine>, String> {
-    let path = model.model_path.path()
-        .ok_or_else(|| format!("unsupported model path: {}", model.model_path))?;
-
-    let engine = LlamaEngine::load(Path::new(path))?;
-    Ok(Arc::new(engine))
+    match model.engine {
+        EngineType::Llama => {
+            let path = model.model_path.path()
+                .ok_or_else(|| format!("unsupported model path: {}", model.model_path))?;
+            let engine = LlamaEngine::load(Path::new(path))?;
+            Ok(Arc::new(engine))
+        }
+        EngineType::Ollama => {
+            let endpoint = model.model_path.authority()
+                .map(|a| format!("http://{}", a))
+                .unwrap_or_else(|| "http://localhost:11434".to_string());
+            let model_name = model.name.clone();
+            Ok(Arc::new(OllamaInferenceEngine::new(endpoint, model_name)))
+        }
+        EngineType::InMemory => {
+            Err("InMemory engine should be injected directly in tests".to_string())
+        }
+    }
 }
 
 // ============================================================================
