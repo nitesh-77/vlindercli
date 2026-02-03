@@ -14,7 +14,7 @@
 //! - Injects `agent_id` for storage isolation
 //! - Manages reply queue creation and response waiting
 
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
 use extism::{CurrentPlugin, Function, Manifest, Plugin, UserData, Val, Wasm};
@@ -32,7 +32,7 @@ struct RunningTask {
 pub struct WasmRuntime {
     id: ResourceId,
     queue: Arc<dyn MessageQueue + Send + Sync>,
-    registry: Arc<RwLock<Registry>>,
+    registry: Arc<dyn Registry>,
     running: Option<RunningTask>,
 }
 
@@ -40,7 +40,7 @@ impl WasmRuntime {
     pub fn new(
         registry_id: &ResourceId,
         queue: Arc<dyn MessageQueue + Send + Sync>,
-        registry: Arc<RwLock<Registry>>,
+        registry: Arc<dyn Registry>,
     ) -> Self {
         let id = ResourceId::new(format!(
             "{}/runtimes/{}",
@@ -81,18 +81,16 @@ impl Runtime for WasmRuntime {
             }
         }
 
-        // Collect WASM agents from registry (need to release lock before spawning thread)
-        let wasm_agents: Vec<_> = {
-            let registry = self.registry.read().unwrap();
-            registry
-                .get_agents()
-                .filter(|agent| registry.select_runtime(agent) == Some(RuntimeType::Wasm))
-                .map(|agent| {
-                    let wasm_path = agent.id.path().unwrap_or(agent.id.as_str()).to_string();
-                    (agent.id.as_str().to_string(), wasm_path)
-                })
-                .collect()
-        };
+        // Collect WASM agents from registry
+        let wasm_agents: Vec<_> = self.registry
+            .get_agents()
+            .into_iter()
+            .filter(|agent| self.registry.select_runtime(agent) == Some(RuntimeType::Wasm))
+            .map(|agent| {
+                let wasm_path = agent.id.path().unwrap_or(agent.id.as_str()).to_string();
+                (agent.id.as_str().to_string(), wasm_path)
+            })
+            .collect();
 
         // Check for work (registry lock released)
         for (agent_id_str, wasm_path) in wasm_agents {
@@ -223,14 +221,15 @@ fn make_get_prompts_function() -> Function {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::InMemoryRegistry;
     use crate::queue::InMemoryQueue;
 
     fn test_registry_id() -> ResourceId {
         ResourceId::new("http://test:9000")
     }
 
-    fn test_registry() -> Arc<RwLock<Registry>> {
-        Arc::new(RwLock::new(Registry::new()))
+    fn test_registry() -> Arc<dyn Registry> {
+        Arc::new(InMemoryRegistry::new())
     }
 
     #[test]

@@ -47,12 +47,12 @@ struct DeleteRequest {
 
 pub struct VectorServiceWorker {
     queue: Arc<dyn MessageQueue + Send + Sync>,
-    registry: Arc<RwLock<Registry>>,
+    registry: Arc<dyn Registry>,
     stores: RwLock<HashMap<String, Arc<dyn VectorStorage>>>,
 }
 
 impl VectorServiceWorker {
-    pub fn new(queue: Arc<dyn MessageQueue + Send + Sync>, registry: Arc<RwLock<Registry>>) -> Self {
+    pub fn new(queue: Arc<dyn MessageQueue + Send + Sync>, registry: Arc<dyn Registry>) -> Self {
         Self {
             queue,
             registry,
@@ -67,17 +67,14 @@ impl VectorServiceWorker {
             return Ok(storage.clone());
         }
 
-        // Look up agent in Registry and clone the URI
-        let uri = {
-            let registry = self.registry.read().unwrap();
-            let resource_id = ResourceId::new(agent_id);
-            let agent = registry.get_agent(&resource_id)
-                .ok_or_else(|| format!("unknown agent: {}", agent_id))?;
-            agent.vector_storage.clone()
-                .ok_or_else(|| format!("agent has no vector_storage declared: {}", agent_id))?
-        };
+        // Look up agent in Registry
+        let resource_id = ResourceId::new(agent_id);
+        let agent = self.registry.get_agent(&resource_id)
+            .ok_or_else(|| format!("unknown agent: {}", agent_id))?;
+        let uri = agent.vector_storage
+            .ok_or_else(|| format!("agent has no vector_storage declared: {}", agent_id))?;
 
-        // Open storage (lock released)
+        // Open storage
         let storage = open_vector_storage_from_uri(&uri)
             .map_err(|e| format!("failed to open vector storage: {}", e))?;
 
@@ -185,7 +182,7 @@ impl VectorServiceWorker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::Agent;
+    use crate::domain::{Agent, InMemoryRegistry, Registry};
     use crate::queue::{InMemoryQueue, Message};
 
     fn test_agent_with_vector_storage() -> Agent {
@@ -203,7 +200,7 @@ mod tests {
     #[test]
     fn handles_store_and_search() {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
-        let mut registry = Registry::new();
+        let registry = InMemoryRegistry::new();
         registry.register_runtime(crate::domain::RuntimeType::Wasm);
         registry.register_vector_storage(crate::domain::VectorStorageType::InMemory);
 
@@ -211,7 +208,7 @@ mod tests {
         let agent = test_agent_with_vector_storage();
         registry.register_agent(agent).unwrap();
 
-        let registry = Arc::new(RwLock::new(registry));
+        let registry: Arc<dyn Registry> = Arc::new(registry);
         let handler = VectorServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry));
 
         // Store embedding - worker will lazy-open storage from agent's URI

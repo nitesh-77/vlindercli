@@ -33,12 +33,12 @@ struct EmbedRequest {
 
 pub struct EmbeddingServiceWorker {
     queue: Arc<dyn MessageQueue + Send + Sync>,
-    registry: Arc<RwLock<Registry>>,
+    registry: Arc<dyn Registry>,
     engines: RwLock<HashMap<String, Arc<dyn EmbeddingEngine>>>,
 }
 
 impl EmbeddingServiceWorker {
-    pub fn new(queue: Arc<dyn MessageQueue + Send + Sync>, registry: Arc<RwLock<Registry>>) -> Self {
+    pub fn new(queue: Arc<dyn MessageQueue + Send + Sync>, registry: Arc<dyn Registry>) -> Self {
         Self {
             queue,
             registry,
@@ -98,9 +98,8 @@ impl EmbeddingServiceWorker {
 
     /// Validate that an agent declared the model in its requirements.
     fn validate_agent_model(&self, agent_id: &str, model_name: &str) -> Result<(), String> {
-        let registry = self.registry.read().unwrap();
         let agent_rid = crate::domain::ResourceId::new(agent_id);
-        let agent = registry.get_agent(&agent_rid)
+        let agent = self.registry.get_agent(&agent_rid)
             .ok_or_else(|| format!("agent not found: {}", agent_id))?;
 
         if !agent.has_model(model_name) {
@@ -124,12 +123,8 @@ impl EmbeddingServiceWorker {
         }
 
         // Not cached - look up in registry and load
-        let model = {
-            let registry = self.registry.read().unwrap();
-            registry.get_model(model_name)
-                .cloned()
-                .ok_or_else(|| format!("model not registered: {}", model_name))?
-        };
+        let model = self.registry.get_model(model_name)
+            .ok_or_else(|| format!("model not registered: {}", model_name))?;
 
         // Load engine
         let engine = open_embedding_engine(&model)
@@ -148,7 +143,7 @@ impl EmbeddingServiceWorker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{Agent, EngineType, Model, ModelType};
+    use crate::domain::{Agent, EngineType, InMemoryRegistry, Model, ModelType};
     use crate::queue::{InMemoryQueue, Message};
     use crate::embedding::InMemoryEmbedding;
 
@@ -177,12 +172,12 @@ mod tests {
         Agent::from_toml(&manifest).unwrap()
     }
 
-    fn test_registry_with_agent_and_model(agent: Agent, model_name: &str) -> Arc<RwLock<Registry>> {
-        let mut registry = Registry::new();
+    fn test_registry_with_agent_and_model(agent: Agent, model_name: &str) -> Arc<dyn Registry> {
+        let registry = InMemoryRegistry::new();
         registry.register_runtime(crate::domain::RuntimeType::Wasm);
         registry.register_model(test_model(model_name));
         registry.register_agent(agent).unwrap();
-        Arc::new(RwLock::new(registry))
+        Arc::new(registry)
     }
 
     #[test]
@@ -250,7 +245,7 @@ mod tests {
     fn rejects_unknown_agent() {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
         // Registry with no agents registered
-        let registry = Arc::new(RwLock::new(Registry::new()));
+        let registry: Arc<dyn Registry> = Arc::new(InMemoryRegistry::new());
         let handler = EmbeddingServiceWorker::new(Arc::clone(&queue), registry);
 
         // Register mock engine

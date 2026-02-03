@@ -1,9 +1,9 @@
 //! Integration tests for WasmRuntime.
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
-use vlindercli::domain::{Agent, Registry, ResourceId, Runtime, RuntimeType};
+use vlindercli::domain::{Agent, InMemoryRegistry, Registry, ResourceId, Runtime, RuntimeType};
 use vlindercli::queue::{InMemoryQueue, Message, MessageQueue};
 use vlindercli::runtime::WasmRuntime;
 
@@ -26,12 +26,12 @@ fn runtime_executes_agent_and_returns_response() {
     let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
 
     // Create registry with agent registered
-    let mut registry = Registry::new();
+    let registry = InMemoryRegistry::new();
     registry.register_runtime(RuntimeType::Wasm);
     let agent = load_agent("reverse-agent");
     let agent_id = agent.id.clone();
     registry.register_agent(agent).unwrap();
-    let registry = Arc::new(RwLock::new(registry));
+    let registry: Arc<dyn Registry> = Arc::new(registry);
 
     let mut runtime = WasmRuntime::new(&test_registry_id(), Arc::clone(&queue), registry);
 

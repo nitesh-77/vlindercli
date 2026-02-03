@@ -8,9 +8,9 @@
 //! - Runs tick loop (controller reconciliation)
 
 use std::path::Path;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
-use crate::domain::{EngineType, Model, ObjectStorageType, Provider, Runtime, RuntimeType, VectorStorageType};
+use crate::domain::{EngineType, InMemoryRegistry, Model, ObjectStorageType, Provider, Runtime, RuntimeType, VectorStorageType};
 use crate::domain::harness::Harness;
 use crate::domain::registry::Registry;
 use crate::queue::InMemoryQueue;
@@ -19,7 +19,7 @@ use crate::runtime::WasmRuntime;
 /// The daemon - owns all system components.
 pub struct Daemon {
     // Components (daemon owns all of these)
-    registry: Arc<RwLock<Registry>>,
+    registry: Arc<dyn Registry>,
     /// The API surface - use this for deploy/invoke/poll.
     pub harness: Harness,
     runtime: WasmRuntime,
@@ -29,8 +29,8 @@ pub struct Daemon {
 impl Daemon {
     pub fn new() -> Self {
         let queue = Arc::new(InMemoryQueue::new());
-        let mut registry = Registry::new();
-        let registry_id = registry.id.clone();
+        let registry = InMemoryRegistry::new();
+        let registry_id = registry.id();
 
         // Register available runtimes
         registry.register_runtime(RuntimeType::Wasm);
@@ -52,9 +52,9 @@ impl Daemon {
         registry.register_embedding_engine(EngineType::InMemory);
 
         // Register known models (hardcoded for now)
-        Self::register_known_models(&mut registry);
+        Self::register_known_models(&registry);
 
-        let registry = Arc::new(RwLock::new(registry));
+        let registry: Arc<dyn Registry> = Arc::new(registry);
 
         Self {
             harness: Harness::new(queue.clone(), Arc::clone(&registry)),
@@ -72,7 +72,7 @@ impl Daemon {
     }
 
     /// Register known models (hardcoded paths for now).
-    fn register_known_models(registry: &mut Registry) {
+    fn register_known_models(registry: &dyn Registry) {
         let model_paths = [
             "/Users/ashwnacharya/repos/vlindercli/.vlinder/models/phi3/model.toml",
             "/Users/ashwnacharya/repos/vlindercli/.vlinder/models/nomic-embed/model.toml",
@@ -122,17 +122,16 @@ mod tests {
     #[test]
     fn registers_known_models() {
         let daemon = Daemon::new();
-        let registry = daemon.registry.read().unwrap();
 
         // Check that known models are registered
-        let phi3 = registry.get_model("phi3");
+        let phi3 = daemon.registry.get_model("phi3");
         assert!(phi3.is_some(), "phi3 should be registered");
         assert_eq!(phi3.unwrap().name, "phi3");
 
-        let nomic = registry.get_model("nomic-embed");
+        let nomic = daemon.registry.get_model("nomic-embed");
         assert!(nomic.is_some(), "nomic-embed should be registered");
 
-        let qwen = registry.get_model("qwen");
+        let qwen = daemon.registry.get_model("qwen");
         assert!(qwen.is_some(), "qwen should be registered");
     }
 }

@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use vlindercli::domain::{Agent, Registry, ResourceId, RuntimeType};
+use vlindercli::domain::{Agent, InMemoryRegistry, Registry, ResourceId, RuntimeType};
 
 const FIXTURES: &str = "tests/fixtures/agents";
 
@@ -20,7 +20,7 @@ fn load_agent(name: &str) -> Agent {
 
 #[test]
 fn agent_registration() {
-    let mut registry = Registry::new();
+    let registry = InMemoryRegistry::new();
     registry.register_runtime(RuntimeType::Wasm);
     let fake_id = ResourceId::new("file:///nonexistent/agent.wasm");
 
@@ -43,7 +43,7 @@ fn agent_registration() {
 
 #[test]
 fn select_runtime_for_file_wasm() {
-    let mut registry = Registry::new();
+    let registry = InMemoryRegistry::new();
     registry.register_runtime(RuntimeType::Wasm);
 
     let agent = load_agent("echo-agent");
@@ -54,7 +54,7 @@ fn select_runtime_for_file_wasm() {
 
 #[test]
 fn select_runtime_returns_none_without_registered_runtime() {
-    let registry = Registry::new(); // No runtimes registered
+    let registry = InMemoryRegistry::new(); // No runtimes registered
 
     let agent = load_agent("echo-agent");
 
@@ -64,7 +64,7 @@ fn select_runtime_returns_none_without_registered_runtime() {
 
 #[test]
 fn select_runtime_returns_none_for_non_file_scheme() {
-    let mut registry = Registry::new();
+    let registry = InMemoryRegistry::new();
     registry.register_runtime(RuntimeType::Wasm);
 
     // Load agent and modify its id to use http:// scheme
@@ -77,7 +77,7 @@ fn select_runtime_returns_none_for_non_file_scheme() {
 
 #[test]
 fn select_runtime_returns_none_for_non_wasm_extension() {
-    let mut registry = Registry::new();
+    let registry = InMemoryRegistry::new();
     registry.register_runtime(RuntimeType::Wasm);
 
     // Load agent and modify its id to use non-.wasm extension

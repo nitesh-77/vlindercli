@@ -3,7 +3,7 @@
 //! Aggregates service workers and routes messages to backends.
 //! All workers lazy-load resources from Registry on first use.
 
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use super::registry::Registry;
 use super::workers::{
@@ -26,7 +26,7 @@ pub struct Provider {
 
 impl Provider {
     /// Create a new Provider with all service workers.
-    pub fn new(queue: Arc<dyn MessageQueue + Send + Sync>, registry: Arc<RwLock<Registry>>) -> Self {
+    pub fn new(queue: Arc<dyn MessageQueue + Send + Sync>, registry: Arc<dyn Registry>) -> Self {
         Self {
             object: ObjectServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry)),
             vector: VectorServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry)),
@@ -48,7 +48,7 @@ impl Provider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::Agent;
+    use crate::domain::{Agent, InMemoryRegistry};
     use crate::queue::{InMemoryQueue, Message};
 
     fn test_agent(id: &str) -> Agent {
@@ -68,7 +68,7 @@ mod tests {
         // One Provider can serve multiple agents with different backends
         // Each agent gets its own isolated storage (lazy-opened from memory://)
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
-        let mut registry = Registry::new();
+        let registry = InMemoryRegistry::new();
         registry.register_runtime(crate::domain::RuntimeType::Wasm);
         registry.register_object_storage(crate::domain::ObjectStorageType::InMemory);
 
@@ -76,7 +76,7 @@ mod tests {
         registry.register_agent(test_agent("file:///agent-a.wasm")).unwrap();
         registry.register_agent(test_agent("file:///agent-b.wasm")).unwrap();
 
-        let registry = Arc::new(RwLock::new(registry));
+        let registry: Arc<dyn Registry> = Arc::new(registry);
         let provider = Provider::new(Arc::clone(&queue), Arc::clone(&registry));
 
         // Write to agent-a's storage

@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use crate::domain::registry::{JobId, JobStatus, Registry};
 use crate::domain::{Agent, ResourceId};
@@ -17,7 +17,7 @@ use crate::queue::{Message, MessageId, MessageQueue};
 /// The harness - API surface for agent deployment and job management.
 pub struct Harness {
     queue: Arc<dyn MessageQueue + Send + Sync>,
-    registry: Arc<RwLock<Registry>>,
+    registry: Arc<dyn Registry>,
     reply_queue: String,
     inflight: HashMap<MessageId, JobId>,
 }
@@ -25,7 +25,7 @@ pub struct Harness {
 impl Harness {
     pub fn new(
         queue: Arc<dyn MessageQueue + Send + Sync>,
-        registry: Arc<RwLock<Registry>>,
+        registry: Arc<dyn Registry>,
     ) -> Self {
         Self {
             queue,
@@ -61,8 +61,7 @@ impl Harness {
     fn register_agent(&self, agent: Agent) -> Result<ResourceId, String> {
         let agent_id = agent.id.clone();
 
-        let mut registry = self.registry.write().unwrap();
-        registry.register_agent(agent)
+        self.registry.register_agent(agent)
             .map_err(|e| format!("registration failed: {}", e))?;
 
         Ok(agent_id)
@@ -72,15 +71,13 @@ impl Harness {
     ///
     /// Creates job in registry, queues message, returns job ID.
     pub fn invoke(&mut self, agent_id: &ResourceId, input: &str) -> Result<JobId, String> {
-        let mut registry = self.registry.write().unwrap();
-
         // Verify agent is deployed
-        if registry.get_agent(agent_id).is_none() {
+        if self.registry.get_agent(agent_id).is_none() {
             return Err(format!("agent not deployed: {}", agent_id));
         }
 
         // Create job in registry
-        let job_id = registry.create_job(agent_id.clone(), input.to_string());
+        let job_id = self.registry.create_job(agent_id.clone(), input.to_string());
 
         // Queue message to agent
         let message = Message::request(input.as_bytes().to_vec(), &self.reply_queue);
@@ -92,15 +89,14 @@ impl Harness {
 
         // Track for response correlation
         self.inflight.insert(message_id, job_id.clone());
-        registry.update_job_status(&job_id, JobStatus::Running);
+        self.registry.update_job_status(&job_id, JobStatus::Running);
 
         Ok(job_id)
     }
 
     /// Poll for job completion.
     pub fn poll(&self, job_id: &JobId) -> Option<String> {
-        let registry = self.registry.read().unwrap();
-        match registry.get_job(job_id)?.status {
+        match self.registry.get_job(job_id)?.status {
             JobStatus::Completed(ref result) => Some(result.clone()),
             JobStatus::Failed(ref error) => Some(format!("[error] {}", error)),
             _ => None,
@@ -113,8 +109,7 @@ impl Harness {
             if let Some(correlation_id) = &response.correlation_id {
                 if let Some(job_id) = self.inflight.remove(correlation_id) {
                     let result = String::from_utf8_lossy(&response.payload).to_string();
-                    let mut registry = self.registry.write().unwrap();
-                    registry.update_job_status(&job_id, JobStatus::Completed(result));
+                    self.registry.update_job_status(&job_id, JobStatus::Completed(result));
                 }
             }
         }
@@ -124,7 +119,7 @@ impl Harness {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::RuntimeType;
+    use crate::domain::{InMemoryRegistry, RuntimeType};
     use crate::queue::InMemoryQueue;
     use std::path::PathBuf;
 
@@ -137,10 +132,10 @@ mod tests {
     }
 
     /// Create a registry with Wasm runtime registered (required for agent deployment).
-    fn test_registry() -> Arc<RwLock<Registry>> {
-        let mut registry = Registry::new();
+    fn test_registry() -> Arc<dyn Registry> {
+        let registry = InMemoryRegistry::new();
         registry.register_runtime(RuntimeType::Wasm);
-        Arc::new(RwLock::new(registry))
+        Arc::new(registry)
     }
 
     /// Deploy a minimal test agent.
@@ -168,8 +163,7 @@ mod tests {
         let job_id = harness.invoke(&agent_id, "hello").unwrap();
 
         // Job exists in registry with Running status
-        let reg = registry.read().unwrap();
-        let job = reg.get_job(&job_id).unwrap();
+        let job = registry.get_job(&job_id).unwrap();
         assert_eq!(job.status, JobStatus::Running);
         assert_eq!(job.agent_id, agent_id);
 
@@ -211,12 +205,8 @@ mod tests {
         let harness = Harness::new(queue, registry.clone());
 
         let agent_id = test_agent_id();
-        let job_id = {
-            let mut reg = registry.write().unwrap();
-            let job_id = reg.create_job(agent_id, "input".to_string());
-            reg.update_job_status(&job_id, JobStatus::Completed("done".to_string()));
-            job_id
-        };
+        let job_id = registry.create_job(agent_id, "input".to_string());
+        registry.update_job_status(&job_id, JobStatus::Completed("done".to_string()));
 
         assert_eq!(harness.poll(&job_id), Some("done".to_string()));
     }
@@ -240,22 +230,16 @@ mod tests {
         queue.send(&request.reply_to, response).unwrap();
 
         // Before tick: job is still Running
-        {
-            let reg = registry.read().unwrap();
-            assert_eq!(reg.get_job(&job_id).unwrap().status, JobStatus::Running);
-        }
+        assert_eq!(registry.get_job(&job_id).unwrap().status, JobStatus::Running);
 
         // Tick reconciles
         harness.tick();
 
         // After tick: job is Completed
-        {
-            let reg = registry.read().unwrap();
-            assert_eq!(
-                reg.get_job(&job_id).unwrap().status,
-                JobStatus::Completed("result".to_string())
-            );
-        }
+        assert_eq!(
+            registry.get_job(&job_id).unwrap().status,
+            JobStatus::Completed("result".to_string())
+        );
     }
 
     #[test]
@@ -267,8 +251,7 @@ mod tests {
         let agent_id = harness.deploy_from_path(&fixture_path("echo-agent")).unwrap();
 
         // Agent is registered
-        let reg = registry.read().unwrap();
-        let agent = reg.get_agent(&agent_id).unwrap();
+        let agent = registry.get_agent(&agent_id).unwrap();
         assert_eq!(agent.name, "echo-agent");
     }
 

@@ -5,8 +5,13 @@
 //! - Models (registered model definitions)
 //! - Agents (registered agent definitions)
 //! - Jobs (submitted, running, completed)
+//!
+//! The `Registry` trait abstracts state storage. Implementations:
+//! - `InMemoryRegistry` — in-process with RwLock (current)
+//! - Future: HTTP/gRPC client for distributed deployment
 
 use std::collections::{HashMap, HashSet};
+use std::sync::RwLock;
 
 use crate::domain::{Agent, EngineType, Model, ObjectStorageType, ResourceId, RuntimeType, VectorStorageType};
 
@@ -76,10 +81,79 @@ impl std::fmt::Display for RegistrationError {
     }
 }
 
-/// The registry - source of truth for all state.
-pub struct Registry {
+// ============================================================================
+// Registry Trait
+// ============================================================================
+
+/// Source of truth for all system state.
+///
+/// All methods take `&self` — implementations handle internal synchronization.
+/// Returns owned values (not references) for network compatibility.
+pub trait Registry: Send + Sync {
     /// URI where this registry exposes its API.
-    pub id: ResourceId,
+    fn id(&self) -> ResourceId;
+
+    // --- Agent operations ---
+
+    /// Register an agent after validating requirements.
+    fn register_agent(&self, agent: Agent) -> Result<(), RegistrationError>;
+
+    /// Get an agent by ID.
+    fn get_agent(&self, id: &ResourceId) -> Option<Agent>;
+
+    /// Get all registered agents.
+    fn get_agents(&self) -> Vec<Agent>;
+
+    /// Select the appropriate runtime for an agent.
+    fn select_runtime(&self, agent: &Agent) -> Option<RuntimeType>;
+
+    // --- Model operations ---
+
+    /// Register a model (assigns registry-issued identity).
+    fn register_model(&self, model: Model);
+
+    /// Get a model by name.
+    fn get_model(&self, name: &str) -> Option<Model>;
+
+    /// Get the registry-issued ID for a model name.
+    fn model_id(&self, name: &str) -> ResourceId;
+
+    // --- Job operations ---
+
+    /// Create a new job.
+    fn create_job(&self, agent_id: ResourceId, input: String) -> JobId;
+
+    /// Get a job by ID.
+    fn get_job(&self, id: &JobId) -> Option<Job>;
+
+    /// Update job status.
+    fn update_job_status(&self, id: &JobId, status: JobStatus);
+
+    /// Get all pending jobs.
+    fn pending_jobs(&self) -> Vec<Job>;
+
+    // --- Capability registration ---
+
+    fn register_runtime(&self, runtime_type: RuntimeType);
+    fn register_object_storage(&self, storage_type: ObjectStorageType);
+    fn register_vector_storage(&self, storage_type: VectorStorageType);
+    fn register_inference_engine(&self, engine_type: EngineType);
+    fn register_embedding_engine(&self, engine_type: EngineType);
+
+    // --- Capability queries ---
+
+    fn has_object_storage(&self, storage_type: ObjectStorageType) -> bool;
+    fn has_vector_storage(&self, storage_type: VectorStorageType) -> bool;
+    fn has_inference_engine(&self, engine_type: EngineType) -> bool;
+    fn has_embedding_engine(&self, engine_type: EngineType) -> bool;
+}
+
+// ============================================================================
+// In-Memory Implementation
+// ============================================================================
+
+/// Internal state for InMemoryRegistry.
+struct RegistryState {
     jobs: HashMap<JobId, Job>,
     agents: HashMap<ResourceId, Agent>,
     models: HashMap<ResourceId, Model>,
@@ -90,158 +164,61 @@ pub struct Registry {
     available_embedding_engines: HashSet<EngineType>,
 }
 
-impl Registry {
+/// In-memory registry with internal RwLock for thread-safe access.
+pub struct InMemoryRegistry {
+    /// URI where this registry exposes its API.
+    registry_id: ResourceId,
+    state: RwLock<RegistryState>,
+}
+
+impl InMemoryRegistry {
     pub fn new() -> Self {
         Self {
-            id: ResourceId::new("http://127.0.0.1:9000"),
-            jobs: HashMap::new(),
-            agents: HashMap::new(),
-            models: HashMap::new(),
-            available_runtimes: HashSet::new(),
-            available_object_storage: HashSet::new(),
-            available_vector_storage: HashSet::new(),
-            available_inference_engines: HashSet::new(),
-            available_embedding_engines: HashSet::new(),
+            registry_id: ResourceId::new("http://127.0.0.1:9000"),
+            state: RwLock::new(RegistryState {
+                jobs: HashMap::new(),
+                agents: HashMap::new(),
+                models: HashMap::new(),
+                available_runtimes: HashSet::new(),
+                available_object_storage: HashSet::new(),
+                available_vector_storage: HashSet::new(),
+                available_inference_engines: HashSet::new(),
+                available_embedding_engines: HashSet::new(),
+            }),
         }
     }
 
-    // --- Runtime operations ---
-
-    /// Register a runtime type as available.
-    pub fn register_runtime(&mut self, runtime_type: RuntimeType) {
-        self.available_runtimes.insert(runtime_type);
-    }
-
-    /// Select the appropriate runtime for an agent based on its id.
-    ///
-    /// Returns None if no suitable runtime is available.
-    pub fn select_runtime(&self, agent: &Agent) -> Option<RuntimeType> {
-        // file:// scheme + .wasm extension → Wasm runtime
+    /// Internal: check if runtime is available for agent (needs read lock held).
+    fn select_runtime_internal(&self, agent: &Agent, state: &RegistryState) -> Option<RuntimeType> {
         if agent.id.scheme() == Some("file") {
             if let Some(path) = agent.id.path() {
-                if path.ends_with(".wasm") && self.available_runtimes.contains(&RuntimeType::Wasm) {
+                if path.ends_with(".wasm") && state.available_runtimes.contains(&RuntimeType::Wasm) {
                     return Some(RuntimeType::Wasm);
                 }
             }
         }
         None
     }
+}
 
-    // --- Object storage operations ---
-
-    /// Register an object storage type as available.
-    pub fn register_object_storage(&mut self, storage_type: ObjectStorageType) {
-        self.available_object_storage.insert(storage_type);
+impl Default for InMemoryRegistry {
+    fn default() -> Self {
+        Self::new()
     }
+}
 
-    /// Check if an object storage type is available.
-    pub fn has_object_storage(&self, storage_type: ObjectStorageType) -> bool {
-        self.available_object_storage.contains(&storage_type)
-    }
-
-    // --- Vector storage operations ---
-
-    /// Register a vector storage type as available.
-    pub fn register_vector_storage(&mut self, storage_type: VectorStorageType) {
-        self.available_vector_storage.insert(storage_type);
-    }
-
-    /// Check if a vector storage type is available.
-    pub fn has_vector_storage(&self, storage_type: VectorStorageType) -> bool {
-        self.available_vector_storage.contains(&storage_type)
-    }
-
-    // --- Inference engine operations ---
-
-    /// Register an inference engine type as available.
-    pub fn register_inference_engine(&mut self, engine_type: EngineType) {
-        self.available_inference_engines.insert(engine_type);
-    }
-
-    /// Check if an inference engine type is available.
-    pub fn has_inference_engine(&self, engine_type: EngineType) -> bool {
-        self.available_inference_engines.contains(&engine_type)
-    }
-
-    // --- Embedding engine operations ---
-
-    /// Register an embedding engine type as available.
-    pub fn register_embedding_engine(&mut self, engine_type: EngineType) {
-        self.available_embedding_engines.insert(engine_type);
-    }
-
-    /// Check if an embedding engine type is available.
-    pub fn has_embedding_engine(&self, engine_type: EngineType) -> bool {
-        self.available_embedding_engines.contains(&engine_type)
-    }
-
-    // --- Job operations ---
-
-    pub fn create_job(&mut self, agent_id: ResourceId, input: String) -> JobId {
-        let id = JobId::new(&self.id);
-        let job = Job {
-            id: id.clone(),
-            agent_id,
-            input,
-            status: JobStatus::Pending,
-        };
-        self.jobs.insert(id.clone(), job);
-        id
-    }
-
-    pub fn get_job(&self, id: &JobId) -> Option<&Job> {
-        self.jobs.get(id)
-    }
-
-    pub fn update_job_status(&mut self, id: &JobId, status: JobStatus) {
-        if let Some(job) = self.jobs.get_mut(id) {
-            job.status = status;
-        }
-    }
-
-    pub fn pending_jobs(&self) -> Vec<&Job> {
-        self.jobs
-            .values()
-            .filter(|j| j.status == JobStatus::Pending)
-            .collect()
-    }
-
-    // --- Model operations ---
-
-    /// Register a model as available.
-    ///
-    /// Assigns the model's identity: `<registry_id>/models/<name>`.
-    pub fn register_model(&mut self, mut model: Model) {
-        let model_id = self.model_id(&model.name);
-        model.id = model_id.clone();
-        self.models.insert(model_id, model);
-    }
-
-    /// Get a registered model by name.
-    pub fn get_model(&self, name: &str) -> Option<&Model> {
-        let model_id = self.model_id(name);
-        self.models.get(&model_id)
-    }
-
-    /// Get the registry-issued ID for a model.
-    ///
-    /// Format: `<registry_id>/models/<name>`
-    pub fn model_id(&self, name: &str) -> ResourceId {
-        ResourceId::new(format!("{}/models/{}", self.id.as_str(), name))
+impl Registry for InMemoryRegistry {
+    fn id(&self) -> ResourceId {
+        self.registry_id.clone()
     }
 
     // --- Agent operations ---
 
-    /// Register an agent after validating all its requirements can be met.
-    ///
-    /// Validates:
-    /// - A runtime is available for the agent's scheme/extension
-    /// - Declared object storage scheme is supported
-    /// - Declared vector storage scheme is supported
-    /// - All declared models are registered
-    pub fn register_agent(&mut self, agent: Agent) -> Result<(), RegistrationError> {
+    fn register_agent(&self, agent: Agent) -> Result<(), RegistrationError> {
+        let mut state = self.state.write().unwrap();
+
         // Validate runtime
-        if self.select_runtime(&agent).is_none() {
+        if self.select_runtime_internal(&agent, &state).is_none() {
             return Err(RegistrationError::NoRuntime(agent.id.clone()));
         }
 
@@ -250,7 +227,7 @@ impl Registry {
             let scheme = uri.scheme().unwrap_or("unknown");
             let storage_type = ObjectStorageType::from_scheme(uri.scheme())
                 .ok_or_else(|| RegistrationError::UnknownObjectStorageScheme(scheme.to_string()))?;
-            if !self.has_object_storage(storage_type) {
+            if !state.available_object_storage.contains(&storage_type) {
                 return Err(RegistrationError::ObjectStorageUnavailable(storage_type));
             }
         }
@@ -260,36 +237,142 @@ impl Registry {
             let scheme = uri.scheme().unwrap_or("unknown");
             let storage_type = VectorStorageType::from_scheme(uri.scheme())
                 .ok_or_else(|| RegistrationError::UnknownVectorStorageScheme(scheme.to_string()))?;
-            if !self.has_vector_storage(storage_type) {
+            if !state.available_vector_storage.contains(&storage_type) {
                 return Err(RegistrationError::VectorStorageUnavailable(storage_type));
             }
         }
 
         // Validate all declared models are registered (by name)
+        let model_id_prefix = format!("{}/models/", self.registry_id.as_str());
         for (model_name, _manifest_uri) in &agent.requirements.models {
-            if self.get_model(model_name).is_none() {
+            let model_id = ResourceId::new(format!("{}{}", model_id_prefix, model_name));
+            if !state.models.contains_key(&model_id) {
                 return Err(RegistrationError::ModelNotRegistered(model_name.clone()));
             }
         }
 
         // All validated - store agent
-        self.agents.insert(agent.id.clone(), agent);
+        state.agents.insert(agent.id.clone(), agent);
         Ok(())
     }
 
-    pub fn get_agent(&self, id: &ResourceId) -> Option<&Agent> {
-        self.agents.get(id)
+    fn get_agent(&self, id: &ResourceId) -> Option<Agent> {
+        let state = self.state.read().unwrap();
+        state.agents.get(id).cloned()
     }
 
-    /// Get all registered agents.
-    pub fn get_agents(&self) -> impl Iterator<Item = &Agent> {
-        self.agents.values()
+    fn get_agents(&self) -> Vec<Agent> {
+        let state = self.state.read().unwrap();
+        state.agents.values().cloned().collect()
     }
-}
 
-impl Default for Registry {
-    fn default() -> Self {
-        Self::new()
+    fn select_runtime(&self, agent: &Agent) -> Option<RuntimeType> {
+        let state = self.state.read().unwrap();
+        self.select_runtime_internal(agent, &state)
+    }
+
+    // --- Model operations ---
+
+    fn register_model(&self, mut model: Model) {
+        let model_id = self.model_id(&model.name);
+        model.id = model_id.clone();
+        let mut state = self.state.write().unwrap();
+        state.models.insert(model_id, model);
+    }
+
+    fn get_model(&self, name: &str) -> Option<Model> {
+        let model_id = self.model_id(name);
+        let state = self.state.read().unwrap();
+        state.models.get(&model_id).cloned()
+    }
+
+    fn model_id(&self, name: &str) -> ResourceId {
+        ResourceId::new(format!("{}/models/{}", self.registry_id.as_str(), name))
+    }
+
+    // --- Job operations ---
+
+    fn create_job(&self, agent_id: ResourceId, input: String) -> JobId {
+        let id = JobId::new(&self.registry_id);
+        let job = Job {
+            id: id.clone(),
+            agent_id,
+            input,
+            status: JobStatus::Pending,
+        };
+        let mut state = self.state.write().unwrap();
+        state.jobs.insert(id.clone(), job);
+        id
+    }
+
+    fn get_job(&self, id: &JobId) -> Option<Job> {
+        let state = self.state.read().unwrap();
+        state.jobs.get(id).cloned()
+    }
+
+    fn update_job_status(&self, id: &JobId, status: JobStatus) {
+        let mut state = self.state.write().unwrap();
+        if let Some(job) = state.jobs.get_mut(id) {
+            job.status = status;
+        }
+    }
+
+    fn pending_jobs(&self) -> Vec<Job> {
+        let state = self.state.read().unwrap();
+        state.jobs
+            .values()
+            .filter(|j| j.status == JobStatus::Pending)
+            .cloned()
+            .collect()
+    }
+
+    // --- Capability registration ---
+
+    fn register_runtime(&self, runtime_type: RuntimeType) {
+        let mut state = self.state.write().unwrap();
+        state.available_runtimes.insert(runtime_type);
+    }
+
+    fn register_object_storage(&self, storage_type: ObjectStorageType) {
+        let mut state = self.state.write().unwrap();
+        state.available_object_storage.insert(storage_type);
+    }
+
+    fn register_vector_storage(&self, storage_type: VectorStorageType) {
+        let mut state = self.state.write().unwrap();
+        state.available_vector_storage.insert(storage_type);
+    }
+
+    fn register_inference_engine(&self, engine_type: EngineType) {
+        let mut state = self.state.write().unwrap();
+        state.available_inference_engines.insert(engine_type);
+    }
+
+    fn register_embedding_engine(&self, engine_type: EngineType) {
+        let mut state = self.state.write().unwrap();
+        state.available_embedding_engines.insert(engine_type);
+    }
+
+    // --- Capability queries ---
+
+    fn has_object_storage(&self, storage_type: ObjectStorageType) -> bool {
+        let state = self.state.read().unwrap();
+        state.available_object_storage.contains(&storage_type)
+    }
+
+    fn has_vector_storage(&self, storage_type: VectorStorageType) -> bool {
+        let state = self.state.read().unwrap();
+        state.available_vector_storage.contains(&storage_type)
+    }
+
+    fn has_inference_engine(&self, engine_type: EngineType) -> bool {
+        let state = self.state.read().unwrap();
+        state.available_inference_engines.contains(&engine_type)
+    }
+
+    fn has_embedding_engine(&self, engine_type: EngineType) -> bool {
+        let state = self.state.read().unwrap();
+        state.available_embedding_engines.contains(&engine_type)
     }
 }
 
@@ -303,28 +386,29 @@ mod tests {
 
     #[test]
     fn registry_has_api_endpoint() {
-        let registry = Registry::new();
+        let registry = InMemoryRegistry::new();
 
         // Registry exposes an HTTP API endpoint
-        assert_eq!(registry.id.scheme(), Some("http"));
-        assert!(registry.id.as_str().starts_with("http://127.0.0.1:"));
+        let id = registry.id();
+        assert_eq!(id.scheme(), Some("http"));
+        assert!(id.as_str().starts_with("http://127.0.0.1:"));
     }
 
     #[test]
     fn job_id_includes_registry_id() {
-        let mut registry = Registry::new();
+        let registry = InMemoryRegistry::new();
         let agent_id = test_agent_id();
 
         let job_id = registry.create_job(agent_id, "test".to_string());
 
         // JobId format: <registry_id>/jobs/<uuid>
-        assert!(job_id.as_str().starts_with(registry.id.as_str()));
+        assert!(job_id.as_str().starts_with(registry.id().as_str()));
         assert!(job_id.as_str().contains("/jobs/"));
     }
 
     #[test]
     fn job_lifecycle() {
-        let mut registry = Registry::new();
+        let registry = InMemoryRegistry::new();
         let agent_id = test_agent_id();
 
         // Create job
@@ -350,7 +434,7 @@ mod tests {
 
     #[test]
     fn pending_jobs_filters_by_status() {
-        let mut registry = Registry::new();
+        let registry = InMemoryRegistry::new();
         let agent_id = test_agent_id();
 
         let job1 = registry.create_job(agent_id.clone(), "a".to_string());
@@ -372,7 +456,7 @@ mod tests {
 
     #[test]
     fn register_object_storage_types() {
-        let mut registry = Registry::new();
+        let registry = InMemoryRegistry::new();
 
         // Initially nothing available
         assert!(!registry.has_object_storage(ObjectStorageType::Sqlite));
@@ -393,7 +477,7 @@ mod tests {
 
     #[test]
     fn register_vector_storage_types() {
-        let mut registry = Registry::new();
+        let registry = InMemoryRegistry::new();
 
         // Initially nothing available
         assert!(!registry.has_vector_storage(VectorStorageType::SqliteVec));
@@ -414,7 +498,7 @@ mod tests {
 
     #[test]
     fn register_inference_engine_types() {
-        let mut registry = Registry::new();
+        let registry = InMemoryRegistry::new();
 
         // Initially nothing available
         assert!(!registry.has_inference_engine(EngineType::Llama));
@@ -435,7 +519,7 @@ mod tests {
 
     #[test]
     fn register_embedding_engine_types() {
-        let mut registry = Registry::new();
+        let registry = InMemoryRegistry::new();
 
         // Initially nothing available
         assert!(!registry.has_embedding_engine(EngineType::Llama));

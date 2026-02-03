@@ -53,12 +53,12 @@ struct DeleteRequest {
 
 pub struct ObjectServiceWorker {
     queue: Arc<dyn MessageQueue + Send + Sync>,
-    registry: Arc<RwLock<Registry>>,
+    registry: Arc<dyn Registry>,
     stores: RwLock<HashMap<String, Arc<dyn ObjectStorage>>>,
 }
 
 impl ObjectServiceWorker {
-    pub fn new(queue: Arc<dyn MessageQueue + Send + Sync>, registry: Arc<RwLock<Registry>>) -> Self {
+    pub fn new(queue: Arc<dyn MessageQueue + Send + Sync>, registry: Arc<dyn Registry>) -> Self {
         Self {
             queue,
             registry,
@@ -73,17 +73,14 @@ impl ObjectServiceWorker {
             return Ok(storage.clone());
         }
 
-        // Look up agent in Registry and clone the URI
-        let uri = {
-            let registry = self.registry.read().unwrap();
-            let resource_id = ResourceId::new(agent_id);
-            let agent = registry.get_agent(&resource_id)
-                .ok_or_else(|| format!("unknown agent: {}", agent_id))?;
-            agent.object_storage.clone()
-                .ok_or_else(|| format!("agent has no object_storage declared: {}", agent_id))?
-        };
+        // Look up agent in Registry
+        let resource_id = ResourceId::new(agent_id);
+        let agent = self.registry.get_agent(&resource_id)
+            .ok_or_else(|| format!("unknown agent: {}", agent_id))?;
+        let uri = agent.object_storage
+            .ok_or_else(|| format!("agent has no object_storage declared: {}", agent_id))?;
 
-        // Open storage (lock released)
+        // Open storage
         let storage = open_object_storage_from_uri(&uri)
             .map_err(|e| format!("failed to open object storage: {}", e))?;
 
@@ -225,7 +222,7 @@ impl ObjectServiceWorker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::Agent;
+    use crate::domain::{Agent, InMemoryRegistry};
     use crate::queue::{InMemoryQueue, Message};
 
     fn test_agent_with_object_storage() -> Agent {
@@ -243,7 +240,7 @@ mod tests {
     #[test]
     fn handles_put_and_get() {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
-        let mut registry = Registry::new();
+        let registry = InMemoryRegistry::new();
         registry.register_runtime(crate::domain::RuntimeType::Wasm);
         registry.register_object_storage(crate::domain::ObjectStorageType::InMemory);
 
@@ -251,7 +248,7 @@ mod tests {
         let agent = test_agent_with_object_storage();
         registry.register_agent(agent).unwrap();
 
-        let registry = Arc::new(RwLock::new(registry));
+        let registry: Arc<dyn Registry> = Arc::new(registry);
         let handler = ObjectServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry));
 
         // Send put request - worker will lazy-open storage from agent's URI
