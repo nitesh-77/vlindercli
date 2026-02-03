@@ -30,8 +30,10 @@ pub enum ModelType {
 /// the registry (what implementations are available).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum EngineType {
-    /// Llama.cpp-based engine.
+    /// Llama.cpp-based engine (local GGUF files).
     Llama,
+    /// Ollama HTTP API.
+    Ollama,
     /// In-memory engine (for testing).
     InMemory,
 }
@@ -73,6 +75,7 @@ impl From<ModelEngineConfig> for EngineType {
     fn from(config: ModelEngineConfig) -> Self {
         match config {
             ModelEngineConfig::Llama => EngineType::Llama,
+            ModelEngineConfig::Ollama => EngineType::Ollama,
         }
     }
 }

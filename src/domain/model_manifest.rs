@@ -25,6 +25,7 @@ pub enum ModelTypeConfig {
 #[serde(rename_all = "lowercase")]
 pub enum ModelEngineConfig {
     Llama,
+    Ollama,
 }
 
 impl ModelManifest {
