@@ -1,0 +1,54 @@
+# Machine 2: Inference + Embedding Workers
+#
+# This machine runs:
+# - Ollama inference workers
+# - Ollama embedding workers
+#
+# Prerequisites:
+# - Ollama must be running: ollama serve
+# - Models must be pulled: ollama pull phi3, ollama pull nomic-embed-text
+#
+# Copy to ~/.vlinder/config.toml or set VLINDER_DIR
+
+[logging]
+level = "info"
+llama_level = "error"
+
+[queue]
+backend = "nats"
+nats_url = "nats://nats.local:4222"
+
+[ollama]
+# Ollama runs locally on this machine
+endpoint = "http://localhost:11434"
+
+[distributed]
+enabled = true
+# Connect to registry on machine1
+registry_addr = "http://machine1.local:9090"
+
+[distributed.workers]
+# No registry on this machine
+registry = 0
+
+[distributed.workers.agent]
+# No agent workers here - they run on machine1
+wasm = 0
+
+[distributed.workers.inference]
+# Run 2 inference workers to handle concurrent requests
+ollama = 2
+
+[distributed.workers.embedding]
+# Run 1 embedding worker
+ollama = 1
+
+[distributed.workers.storage.object]
+# No storage workers here - they run on machine3
+sqlite = 0
+memory = 0
+
+[distributed.workers.storage.vector]
+# No storage workers here - they run on machine3
+sqlite = 0
+memory = 0

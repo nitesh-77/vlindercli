@@ -1,0 +1,45 @@
+# Single Machine Distributed Mode
+#
+# Run all services in distributed mode on one machine.
+# Useful for testing the multi-process architecture locally.
+#
+# Prerequisites:
+# - NATS with JetStream: nats-server -js
+# - Ollama: ollama serve
+#
+# Copy to ~/.vlinder/config.toml or set VLINDER_DIR
+
+[logging]
+level = "info"
+llama_level = "error"
+
+[queue]
+backend = "nats"
+nats_url = "nats://localhost:4222"
+
+[ollama]
+endpoint = "http://localhost:11434"
+
+[distributed]
+enabled = true
+registry_addr = "127.0.0.1:9090"
+
+[distributed.workers]
+registry = 1
+
+[distributed.workers.agent]
+wasm = 1
+
+[distributed.workers.inference]
+ollama = 1
+
+[distributed.workers.embedding]
+ollama = 1
+
+[distributed.workers.storage.object]
+sqlite = 1
+memory = 0
+
+[distributed.workers.storage.vector]
+sqlite = 1
+memory = 0

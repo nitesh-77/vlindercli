@@ -1,0 +1,53 @@
+# Machine 3: Storage Workers
+#
+# This machine runs:
+# - Object storage workers (SQLite-backed)
+# - Vector storage workers (SQLite-vec)
+#
+# Storage is isolated per-agent. Each agent's data lives in its own
+# SQLite database under VLINDER_DIR/agents/<agent-name>/
+#
+# Copy to ~/.vlinder/config.toml or set VLINDER_DIR
+
+[logging]
+level = "info"
+llama_level = "error"
+
+[queue]
+backend = "nats"
+nats_url = "nats://nats.local:4222"
+
+[ollama]
+# Not used on this machine
+endpoint = "http://machine2.local:11434"
+
+[distributed]
+enabled = true
+# Connect to registry on machine1
+registry_addr = "http://machine1.local:9090"
+
+[distributed.workers]
+# No registry on this machine
+registry = 0
+
+[distributed.workers.agent]
+# No agent workers here - they run on machine1
+wasm = 0
+
+[distributed.workers.inference]
+# No inference workers here - they run on machine2
+ollama = 0
+
+[distributed.workers.embedding]
+# No embedding workers here - they run on machine2
+ollama = 0
+
+[distributed.workers.storage.object]
+# Run 2 SQLite object storage workers
+sqlite = 2
+memory = 0
+
+[distributed.workers.storage.vector]
+# Run 2 SQLite-vec vector storage workers
+sqlite = 2
+memory = 0
