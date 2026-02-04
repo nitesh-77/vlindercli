@@ -35,5 +35,13 @@ async-nats = "0.38"
 tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
 futures = "0.3"
 
+# gRPC for registry service
+tonic = "0.12"
+prost = "0.13"
+
 [dev-dependencies]
 tempfile = "3"
+tokio-stream = { version = "0.1.18", features = ["net"] }
+
+[build-dependencies]
+tonic-build = "0.12"

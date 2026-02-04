@@ -1,0 +1,182 @@
+syntax = "proto3";
+
+package vlinder.registry;
+
+// =============================================================================
+// Registry Service
+// =============================================================================
+
+service Registry {
+  // Agent operations
+  rpc GetAgent(GetAgentRequest) returns (GetAgentResponse);
+  rpc GetAgentByName(GetAgentByNameRequest) returns (GetAgentResponse);
+  rpc RegisterAgent(RegisterAgentRequest) returns (RegisterAgentResponse);
+  rpc ListAgents(ListAgentsRequest) returns (ListAgentsResponse);
+
+  // Model operations
+  rpc GetModel(GetModelRequest) returns (GetModelResponse);
+  rpc RegisterModel(RegisterModelRequest) returns (RegisterModelResponse);
+
+  // Job operations
+  rpc CreateJob(CreateJobRequest) returns (CreateJobResponse);
+  rpc GetJob(GetJobRequest) returns (GetJobResponse);
+  rpc UpdateJobStatus(UpdateJobStatusRequest) returns (UpdateJobStatusResponse);
+  rpc ListPendingJobs(ListPendingJobsRequest) returns (ListPendingJobsResponse);
+}
+
+// =============================================================================
+// Common Types
+// =============================================================================
+
+message ResourceId {
+  string uri = 1;
+}
+
+message JobId {
+  string id = 1;
+}
+
+// =============================================================================
+// Agent
+// =============================================================================
+
+message Agent {
+  string name = 1;
+  string description = 2;
+  ResourceId id = 3;
+  repeated string required_services = 4;
+  map<string, string> models = 5;  // name -> uri
+  ObjectStorageConfig object_storage = 6;
+  VectorStorageConfig vector_storage = 7;
+}
+
+message ObjectStorageConfig {
+  ResourceId resource_id = 1;
+}
+
+message VectorStorageConfig {
+  ResourceId resource_id = 1;
+  uint32 dimensions = 2;
+}
+
+message GetAgentRequest {
+  ResourceId id = 1;
+}
+
+message GetAgentByNameRequest {
+  string name = 1;
+}
+
+message GetAgentResponse {
+  optional Agent agent = 1;
+}
+
+message RegisterAgentRequest {
+  Agent agent = 1;
+}
+
+message RegisterAgentResponse {
+  bool success = 1;
+  optional string error = 2;
+}
+
+message ListAgentsRequest {}
+
+message ListAgentsResponse {
+  repeated Agent agents = 1;
+}
+
+// =============================================================================
+// Model
+// =============================================================================
+
+message Model {
+  ResourceId id = 1;
+  string name = 2;
+  ModelType model_type = 3;
+  EngineType engine = 4;
+  ResourceId model_path = 5;
+  string digest = 6;
+}
+
+enum ModelType {
+  MODEL_TYPE_UNSPECIFIED = 0;
+  MODEL_TYPE_INFERENCE = 1;
+  MODEL_TYPE_EMBEDDING = 2;
+}
+
+enum EngineType {
+  ENGINE_TYPE_UNSPECIFIED = 0;
+  ENGINE_TYPE_LLAMA = 1;
+  ENGINE_TYPE_OLLAMA = 2;
+  ENGINE_TYPE_IN_MEMORY = 3;
+}
+
+message GetModelRequest {
+  string name = 1;
+}
+
+message GetModelResponse {
+  optional Model model = 1;
+}
+
+message RegisterModelRequest {
+  Model model = 1;
+}
+
+message RegisterModelResponse {
+  bool success = 1;
+}
+
+// =============================================================================
+// Job
+// =============================================================================
+
+message Job {
+  JobId id = 1;
+  ResourceId agent_id = 2;
+  string input = 3;
+  JobStatus status = 4;
+  optional string output = 5;
+}
+
+enum JobStatus {
+  JOB_STATUS_UNSPECIFIED = 0;
+  JOB_STATUS_PENDING = 1;
+  JOB_STATUS_RUNNING = 2;
+  JOB_STATUS_COMPLETED = 3;
+  JOB_STATUS_FAILED = 4;
+}
+
+message CreateJobRequest {
+  ResourceId agent_id = 1;
+  string input = 2;
+}
+
+message CreateJobResponse {
+  JobId job_id = 1;
+}
+
+message GetJobRequest {
+  JobId id = 1;
+}
+
+message GetJobResponse {
+  optional Job job = 1;
+}
+
+message UpdateJobStatusRequest {
+  JobId id = 1;
+  JobStatus status = 2;
+  optional string output = 3;
+}
+
+message UpdateJobStatusResponse {
+  bool success = 1;
+}
+
+message ListPendingJobsRequest {}
+
+message ListPendingJobsResponse {
+  repeated Job jobs = 1;
+}
