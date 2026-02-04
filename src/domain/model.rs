@@ -39,6 +39,13 @@ pub enum EngineType {
 }
 
 impl Model {
+    /// Create a placeholder ID for models not yet registered.
+    ///
+    /// Registry replaces this with `<registry_id>/models/<name>` during registration.
+    pub fn placeholder_id(name: &str) -> ResourceId {
+        ResourceId::new(format!("pending-registration://models/{}", name))
+    }
+
     /// Create a model from a manifest.
     ///
     /// The `id` field is set to a placeholder. The registry assigns the real
@@ -46,8 +53,7 @@ impl Model {
     pub fn from_manifest(manifest: ModelManifest) -> Model {
         let name = manifest.name.clone();
         Model {
-            // Placeholder - registry assigns real id during registration
-            id: ResourceId::new(format!("unregistered://models/{}", name)),
+            id: Self::placeholder_id(&name),
             name: manifest.name,
             model_type: manifest.model_type.into(),
             engine: manifest.engine.into(),
