@@ -29,17 +29,22 @@ The Llama.cpp engine exists only for integration testing. It validates abstracti
 ### 1. Deployment Modes
 
 ```toml
-[deployment]
-mode = "local"        # Default: single process, tick-based
-# mode = "distributed"  # Multi-process via NATS
+[distributed]
+enabled = false  # Default: local mode
 ```
 
-| Mode | Queue | Workers | Use Case |
-|------|-------|---------|----------|
-| `local` | memory or nats | In-process | Development, testing |
-| `distributed` | nats (required) | Separate processes | Production, scaling |
+| Mode | Queue | Execution | Use Case |
+|------|-------|-----------|----------|
+| Local (`enabled = false`) | memory or nats | Single process, tick-based loop | Development, testing |
+| Distributed (`enabled = true`) | nats (required) | Separate processes per service | Production, scaling |
+
+**Local mode**: Daemon runs all services in a single process via sequential `tick()` calls. CLI commands like `vlinder agent run` block and wait for results.
+
+**Distributed mode**: Daemon runs as a system service, spawning worker processes. CLI commands (`vlinder agent deploy`, `vlinder agent run`) are separate processes that queue messages to NATS. Workers pick up messages and process them. No `harness.tick()` needed — the CLI is the client, workers are the servers, NATS is the broker.
 
 ### 2. Configuration
+
+Each count specifies the number of **separate OS processes** to spawn for that service type. These are not threads — they are independent processes with their own memory space, communicating via NATS (queue) and gRPC (registry).
 
 ```toml
 # ~/.vlinder/config.toml
@@ -55,33 +60,38 @@ endpoint = "http://localhost:11434"
 backend = "nats"
 nats_url = "nats://localhost:4222"
 
-[deployment]
-mode = "distributed"
-harness = true        # Run API on this machine (default: true)
+# Distributed mode configuration
+# Omit or set enabled = false for local (single-process) mode
+[distributed]
+enabled = true
+registry_addr = "http://127.0.0.1:9090"
 
-# Agent runtimes (by backend type)
-[workers.agent]
-wasm = 4              # WASM executors
-docker = 2            # Docker containers
-# firecracker = 0     # Not configured on this machine
+# Registry service — runs the gRPC registry server (ADR 042)
+# count = 1 means this machine hosts the registry
+# count = 0 (or omitted) means connect to registry_addr as client
+[distributed.registry]
+count = 1
 
-# Inference engines (by backend type)
-[workers.infer]
-ollama = 2            # Ollama proxy (stateless)
+# Agent runtimes — each count = number of OS processes
+[distributed.agent]
+wasm = 4              # 4 WASM executor processes
+docker = 2            # 2 Docker runtime processes
 
-# Embedding engines (by backend type)
-[workers.embed]
-ollama = 1            # Ollama proxy (stateless)
+# Inference engines — each count = number of OS processes
+[distributed.inference]
+ollama = 2            # 2 Ollama proxy processes
 
-# Object storage (by backend type)
-[workers.storage.object]
-sqlite = 1            # Local file, single writer
-# s3 = 4              # Remote proxy, scale freely
+# Embedding engines — each count = number of OS processes
+[distributed.embedding]
+ollama = 1            # 1 Ollama embedding process
 
-# Vector storage (by backend type)
-[workers.storage.vector]
-sqlite-vec = 1        # Local file
-# pinecone = 4        # Remote proxy, scale freely
+# Object storage — each count = number of OS processes
+[distributed.storage.object]
+sqlite = 1            # 1 SQLite storage process
+
+# Vector storage — each count = number of OS processes
+[distributed.storage.vector]
+sqlite-vec = 1        # 1 SQLite-vec process
 ```
 
 **Key insight:** Backends fall into two categories:
@@ -110,17 +120,20 @@ Workers subscribe to backends they can handle. A machine with Docker subscribes 
 
 Same binary, different configs:
 
-**Machine 1: API + WASM agents**
+**Machine 1: Registry + WASM agents**
 ```toml
 [queue]
 backend = "nats"
 nats_url = "nats://nats-server:4222"
 
-[deployment]
-mode = "distributed"
-harness = true
+[distributed]
+enabled = true
+registry_addr = "http://0.0.0.0:9090"
 
-[workers.agent]
+[distributed.registry]
+count = 1             # This machine hosts the registry
+
+[distributed.agent]
 wasm = 4
 ```
 
@@ -130,11 +143,13 @@ wasm = 4
 backend = "nats"
 nats_url = "nats://nats-server:4222"
 
-[deployment]
-mode = "distributed"
-harness = false
+[distributed]
+enabled = true
+registry_addr = "http://machine1:9090"  # Connect to Machine 1's registry
 
-[workers.agent]
+# No [distributed.registry] = connects as client
+
+[distributed.agent]
 docker = 8
 ```
 
@@ -144,21 +159,21 @@ docker = 8
 backend = "nats"
 nats_url = "nats://nats-server:4222"
 
-[deployment]
-mode = "distributed"
-harness = false
+[distributed]
+enabled = true
+registry_addr = "http://machine1:9090"
 
-[workers.infer]
+[distributed.inference]
 ollama = 4
 
-[workers.storage.object]
+[distributed.storage.object]
 s3 = 2
 
-[workers.storage.vector]
+[distributed.storage.vector]
 pinecone = 2
 ```
 
-Run `vlinder start` on each machine. Config determines role. Only configure backends that are available on that machine.
+Run `vlinder start` on each machine. Config determines role. Only configure services that are available on that machine.
 
 ### 4. Test-Only Backends
 
@@ -173,15 +188,25 @@ Some backends exist for testing, not production:
 No special code to exclude them. Convention: don't configure them in production.
 
 ```toml
-# Development machine
-[workers.infer]
+# Development machine (runs everything locally)
+[distributed]
+enabled = true
+registry_addr = "http://127.0.0.1:9090"
+
+[distributed.registry]
+count = 1
+
+[distributed.inference]
 llama = 1      # For tests
 ollama = 1     # For real work
 
-# Production machine
-[workers.infer]
+# Production machine (connects to shared registry)
+[distributed]
+enabled = true
+registry_addr = "http://registry:9090"
+
+[distributed.inference]
 ollama = 4     # Only production backends
-# llama not configured
 ```
 
 If an agent requires a backend that's not configured, routing fails — no workers subscribed to that subject. This is correct behavior: the deployment doesn't support that backend.
@@ -297,14 +322,71 @@ No application-level retry needed.
 - Update all callers
 - No functional change (local mode works as before)
 
-**Phase 2: Deployment config + worker spawning**
-- Add `[deployment]` config section
-- Add `[workers.*]` config sections (per backend type)
-- Daemon reads config, spawns workers
+**Phase 2: Distributed config + process spawning**
+- Add `[distributed]` config section with `enabled` and `registry_addr`
+- Add nested process count sections (`[distributed.agent]`, etc.)
+- Daemon spawns child processes, each running a single service's tick loop
 - Update NATS subjects to include backend type
 
+### Process Spawning Details
+
+In local mode, `Daemon.tick()` calls all service ticks sequentially in one loop:
+
+```
+daemon loop:
+    runtime.tick()        # agent
+    provider.tick()       # object, vector, inference, embedding (sequential)
+    harness.tick()        # job reconciliation
+```
+
+In distributed mode, the daemon spawns child processes via `std::process::Command`. Each child runs ONE service's tick loop.
+
+**Parent-child communication via environment variable:**
+
+```rust
+// Parent spawns children
+for _ in 0..config.distributed.agent.wasm {
+    Command::new(std::env::current_exe()?)
+        .args(["daemon"])
+        .env("VLINDER_WORKER_ROLE", "agent.wasm")
+        .spawn()?;
+}
+```
+
+```rust
+// Child checks env var to determine behavior
+if let Ok(role) = std::env::var("VLINDER_WORKER_ROLE") {
+    // I'm a worker — run tick loop for this role
+    run_worker_loop(&role);
+} else {
+    // I'm the parent — spawn children, wait for SIGTERM
+    spawn_children(&config);
+    wait_for_shutdown();
+}
+```
+
+**Process tree:**
+
+```
+vlinder daemon (parent)
+    ├── vlinder daemon [VLINDER_WORKER_ROLE=registry]
+    ├── vlinder daemon [VLINDER_WORKER_ROLE=agent.wasm]      (×4)
+    ├── vlinder daemon [VLINDER_WORKER_ROLE=inference.ollama] (×2)
+    ├── vlinder daemon [VLINDER_WORKER_ROLE=embedding.ollama]
+    ├── vlinder daemon [VLINDER_WORKER_ROLE=storage.object.sqlite]
+    └── vlinder daemon [VLINDER_WORKER_ROLE=storage.vector.sqlite-vec]
+```
+
+Each child process:
+1. Connects to registry (gRPC client, or runs server if role is `registry`)
+2. Connects to queue (NATS)
+3. Creates its specific service worker
+4. Runs `worker.tick()` in a loop until SIGTERM
+
+The env var approach is standard for Rust daemons — avoids fork() issues with async runtimes, keeps spawning logic in the binary rather than external orchestration.
+
 **Phase 3: Multi-machine support**
-- `harness = false` option (workers only)
+- Registry runs on one machine, others connect via `registry_addr`
 - Documentation for multi-machine setup
 - Example configs for common topologies
 
