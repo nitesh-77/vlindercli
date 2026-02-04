@@ -1,4 +1,5 @@
 mod agent;
+mod model;
 mod repl;
 
 use clap::{Parser, Subcommand};
@@ -18,6 +19,11 @@ pub enum Command {
         #[command(subcommand)]
         cmd: agent::AgentCommand,
     },
+    /// Manage models from catalogs
+    Model {
+        #[command(subcommand)]
+        cmd: model::ModelCommand,
+    },
 }
 
 pub fn run() {
@@ -25,6 +31,7 @@ pub fn run() {
 
     match cli.command {
         Command::Agent { cmd } => agent::execute(cmd),
+        Command::Model { cmd } => model::execute(cmd),
     }
 }
 
