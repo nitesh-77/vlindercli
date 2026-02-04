@@ -58,6 +58,7 @@ pub struct Config {
     pub logging: LoggingConfig,
     pub ollama: OllamaConfig,
     pub queue: QueueConfig,
+    pub distributed: DistributedConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -86,6 +87,95 @@ pub struct QueueConfig {
 }
 
 // ============================================================================
+// Distributed Config (ADR 043)
+// ============================================================================
+
+/// Configuration for distributed multi-process deployments.
+///
+/// When `enabled = true`, the daemon spawns separate worker processes
+/// for each service type. Workers communicate via NATS queues.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct DistributedConfig {
+    /// Enable distributed mode (spawn worker processes)
+    pub enabled: bool,
+    /// Registry gRPC address for worker coordination
+    pub registry_addr: String,
+    /// Worker process counts by type
+    pub workers: WorkerCounts,
+}
+
+/// Worker process counts for each service type.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct WorkerCounts {
+    /// Number of registry worker processes
+    pub registry: u32,
+    /// Agent runtime workers
+    pub agent: AgentWorkerCounts,
+    /// Inference service workers
+    pub inference: InferenceWorkerCounts,
+    /// Embedding service workers
+    pub embedding: EmbeddingWorkerCounts,
+    /// Storage service workers
+    pub storage: StorageWorkerCounts,
+}
+
+/// Agent runtime worker counts by backend.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct AgentWorkerCounts {
+    /// WASM runtime workers
+    pub wasm: u32,
+}
+
+/// Inference worker counts by engine.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct InferenceWorkerCounts {
+    /// Ollama inference workers
+    pub ollama: u32,
+}
+
+/// Embedding worker counts by engine.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct EmbeddingWorkerCounts {
+    /// Ollama embedding workers
+    pub ollama: u32,
+}
+
+/// Storage worker counts by backend.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct StorageWorkerCounts {
+    /// Object storage workers
+    pub object: ObjectStorageWorkerCounts,
+    /// Vector storage workers
+    pub vector: VectorStorageWorkerCounts,
+}
+
+/// Object storage worker counts by backend.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct ObjectStorageWorkerCounts {
+    /// SQLite object storage workers
+    pub sqlite: u32,
+    /// In-memory object storage workers
+    pub memory: u32,
+}
+
+/// Vector storage worker counts by backend.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct VectorStorageWorkerCounts {
+    /// SQLite-vec vector storage workers
+    pub sqlite: u32,
+    /// In-memory vector storage workers
+    pub memory: u32,
+}
+
+// ============================================================================
 // Defaults
 // ============================================================================
 
@@ -95,6 +185,7 @@ impl Default for Config {
             logging: LoggingConfig::default(),
             ollama: OllamaConfig::default(),
             queue: QueueConfig::default(),
+            distributed: DistributedConfig::default(),
         }
     }
 }
@@ -122,6 +213,67 @@ impl Default for QueueConfig {
             backend: "memory".to_string(),
             nats_url: "nats://localhost:4222".to_string(),
         }
+    }
+}
+
+impl Default for DistributedConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            registry_addr: "http://127.0.0.1:9090".to_string(),
+            workers: WorkerCounts::default(),
+        }
+    }
+}
+
+impl Default for WorkerCounts {
+    fn default() -> Self {
+        Self {
+            registry: 1,
+            agent: AgentWorkerCounts::default(),
+            inference: InferenceWorkerCounts::default(),
+            embedding: EmbeddingWorkerCounts::default(),
+            storage: StorageWorkerCounts::default(),
+        }
+    }
+}
+
+impl Default for AgentWorkerCounts {
+    fn default() -> Self {
+        Self { wasm: 1 }
+    }
+}
+
+impl Default for InferenceWorkerCounts {
+    fn default() -> Self {
+        Self { ollama: 1 }
+    }
+}
+
+impl Default for EmbeddingWorkerCounts {
+    fn default() -> Self {
+        Self { ollama: 1 }
+    }
+}
+
+impl Default for StorageWorkerCounts {
+    fn default() -> Self {
+        Self {
+            object: ObjectStorageWorkerCounts::default(),
+            vector: VectorStorageWorkerCounts::default(),
+        }
+    }
+}
+
+impl Default for ObjectStorageWorkerCounts {
+    fn default() -> Self {
+        Self { sqlite: 1, memory: 0 }
+    }
+}
+
+impl Default for VectorStorageWorkerCounts {
+    fn default() -> Self {
+        Self { sqlite: 1, memory: 0 }
     }
 }
 
@@ -174,6 +326,34 @@ impl Config {
         }
         if let Ok(v) = std::env::var("VLINDER_QUEUE_NATS_URL") {
             self.queue.nats_url = v;
+        }
+
+        // Distributed
+        if let Ok(v) = std::env::var("VLINDER_DISTRIBUTED_ENABLED") {
+            self.distributed.enabled = v.parse().unwrap_or(false);
+        }
+        if let Ok(v) = std::env::var("VLINDER_DISTRIBUTED_REGISTRY_ADDR") {
+            self.distributed.registry_addr = v;
+        }
+
+        // Worker counts (flat env vars for simplicity)
+        if let Ok(v) = std::env::var("VLINDER_WORKERS_REGISTRY") {
+            self.distributed.workers.registry = v.parse().unwrap_or(1);
+        }
+        if let Ok(v) = std::env::var("VLINDER_WORKERS_AGENT_WASM") {
+            self.distributed.workers.agent.wasm = v.parse().unwrap_or(1);
+        }
+        if let Ok(v) = std::env::var("VLINDER_WORKERS_INFERENCE_OLLAMA") {
+            self.distributed.workers.inference.ollama = v.parse().unwrap_or(1);
+        }
+        if let Ok(v) = std::env::var("VLINDER_WORKERS_EMBEDDING_OLLAMA") {
+            self.distributed.workers.embedding.ollama = v.parse().unwrap_or(1);
+        }
+        if let Ok(v) = std::env::var("VLINDER_WORKERS_STORAGE_OBJECT_SQLITE") {
+            self.distributed.workers.storage.object.sqlite = v.parse().unwrap_or(1);
+        }
+        if let Ok(v) = std::env::var("VLINDER_WORKERS_STORAGE_VECTOR_SQLITE") {
+            self.distributed.workers.storage.vector.sqlite = v.parse().unwrap_or(1);
         }
     }
 
@@ -274,5 +454,42 @@ mod tests {
         let config = Config::load_with(&loader);
 
         assert_eq!(config.ollama.endpoint, "http://custom:9999");
+    }
+
+    #[test]
+    fn default_distributed_config() {
+        let config = Config::default();
+        assert!(!config.distributed.enabled);
+        assert_eq!(config.distributed.registry_addr, "http://127.0.0.1:9090");
+        assert_eq!(config.distributed.workers.registry, 1);
+        assert_eq!(config.distributed.workers.agent.wasm, 1);
+        assert_eq!(config.distributed.workers.inference.ollama, 1);
+        assert_eq!(config.distributed.workers.embedding.ollama, 1);
+        assert_eq!(config.distributed.workers.storage.object.sqlite, 1);
+        assert_eq!(config.distributed.workers.storage.vector.sqlite, 1);
+    }
+
+    #[test]
+    fn env_override_distributed_enabled() {
+        std::env::set_var("VLINDER_DISTRIBUTED_ENABLED", "true");
+        std::env::set_var("VLINDER_DISTRIBUTED_REGISTRY_ADDR", "http://remote:9090");
+        let config = Config::load();
+        std::env::remove_var("VLINDER_DISTRIBUTED_ENABLED");
+        std::env::remove_var("VLINDER_DISTRIBUTED_REGISTRY_ADDR");
+
+        assert!(config.distributed.enabled);
+        assert_eq!(config.distributed.registry_addr, "http://remote:9090");
+    }
+
+    #[test]
+    fn env_override_worker_counts() {
+        std::env::set_var("VLINDER_WORKERS_AGENT_WASM", "4");
+        std::env::set_var("VLINDER_WORKERS_INFERENCE_OLLAMA", "2");
+        let config = Config::load();
+        std::env::remove_var("VLINDER_WORKERS_AGENT_WASM");
+        std::env::remove_var("VLINDER_WORKERS_INFERENCE_OLLAMA");
+
+        assert_eq!(config.distributed.workers.agent.wasm, 4);
+        assert_eq!(config.distributed.workers.inference.ollama, 2);
     }
 }

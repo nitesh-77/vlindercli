@@ -10,3 +10,4 @@ pub mod registry_service;
 pub mod runtime;
 pub mod services;
 pub mod storage;
+pub mod worker_role;
