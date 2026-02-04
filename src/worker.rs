@@ -115,23 +115,30 @@ fn run_registry_worker(config: &Config, shutdown: &AtomicBool) {
 }
 
 fn run_agent_wasm_worker(config: &Config, shutdown: &AtomicBool) {
-    use crate::domain::{InMemoryRegistry, ResourceId, RuntimeType};
+    use crate::domain::ResourceId;
     use crate::queue;
     use crate::runtime::WasmRuntime;
     use crate::domain::Runtime;
+    use crate::registry_service::GrpcRegistryClient;
 
     let queue = queue::from_config().expect("Failed to create queue");
 
-    // In distributed mode, we'd connect to the remote registry
-    // For now, use local registry (agents must be pre-registered)
-    let registry = Arc::new(InMemoryRegistry::new());
-    registry.register_runtime(RuntimeType::Wasm);
-    let registry: Arc<dyn crate::domain::Registry> = registry;
+    // Connect to central registry via gRPC
+    let registry_addr = if config.distributed.registry_addr.starts_with("http://") {
+        config.distributed.registry_addr.clone()
+    } else {
+        format!("http://{}", config.distributed.registry_addr)
+    };
+
+    let registry: Arc<dyn Registry> = Arc::new(
+        GrpcRegistryClient::connect(&registry_addr)
+            .expect("Failed to connect to registry")
+    );
 
     let registry_id = ResourceId::new(&config.distributed.registry_addr);
     let mut runtime = WasmRuntime::new(&registry_id, queue, Arc::clone(&registry));
 
-    tracing::info!("WASM agent worker ready");
+    tracing::info!(registry = %registry_addr, "WASM agent worker ready");
 
     while !shutdown.load(Ordering::Relaxed) {
         runtime.tick();
