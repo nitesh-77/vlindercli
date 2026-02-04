@@ -53,7 +53,8 @@ fn runtime_executes_agent_and_returns_response() {
     }
 
     // Response should be on reply queue
-    let response = queue.receive(reply_queue).unwrap();
-    assert_eq!(response.correlation_id, Some(request_id));
-    assert_eq!(String::from_utf8(response.payload).unwrap(), "olleh");
+    let pending = queue.receive(reply_queue).unwrap();
+    assert_eq!(pending.message.correlation_id, Some(request_id));
+    assert_eq!(String::from_utf8(pending.message.payload.clone()).unwrap(), "olleh");
+    pending.ack().unwrap();
 }

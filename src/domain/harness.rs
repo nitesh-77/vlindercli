@@ -105,13 +105,14 @@ impl Harness {
 
     /// Tick: monitor reply queue and update completed jobs in registry.
     pub fn tick(&mut self) {
-        while let Ok(response) = self.queue.receive(&self.reply_queue) {
-            if let Some(correlation_id) = &response.correlation_id {
+        while let Ok(pending) = self.queue.receive(&self.reply_queue) {
+            if let Some(correlation_id) = &pending.message.correlation_id {
                 if let Some(job_id) = self.inflight.remove(correlation_id) {
-                    let result = String::from_utf8_lossy(&response.payload).to_string();
+                    let result = String::from_utf8_lossy(&pending.message.payload).to_string();
                     self.registry.update_job_status(&job_id, JobStatus::Completed(result));
                 }
             }
+            let _ = pending.ack();
         }
     }
 }
@@ -168,8 +169,9 @@ mod tests {
         assert_eq!(job.agent_id, agent_id);
 
         // Message is in queue (keyed by agent_id string)
-        let msg = queue.receive(agent_id.as_str()).unwrap();
-        assert_eq!(msg.payload, b"hello");
+        let pending = queue.receive(agent_id.as_str()).unwrap();
+        assert_eq!(pending.message.payload, b"hello");
+        pending.ack().unwrap();
     }
 
     #[test]
@@ -221,13 +223,14 @@ mod tests {
         let job_id = harness.invoke(&agent_id, "hello").unwrap();
 
         // Simulate worker processing: receive request, send response to reply_to
-        let request = queue.receive(agent_id.as_str()).unwrap();
+        let pending = queue.receive(agent_id.as_str()).unwrap();
         let response = Message::response(
             b"result".to_vec(),
-            &request.reply_to,
-            request.id.clone(),
+            &pending.message.reply_to,
+            pending.message.id.clone(),
         );
-        queue.send(&request.reply_to, response).unwrap();
+        queue.send(&pending.message.reply_to, response).unwrap();
+        pending.ack().unwrap();
 
         // Before tick: job is still Running
         assert_eq!(registry.get_job(&job_id).unwrap().status, JobStatus::Running);

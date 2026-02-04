@@ -2,14 +2,21 @@
 //!
 //! Provides a sync facade over the async NATS client. The runtime is owned
 //! internally, so callers use simple blocking APIs while getting async I/O.
+//!
+//! ## PendingMessage Pattern (ADR 043)
+//!
+//! The `receive()` method returns a `PendingMessage` with deferred ACK/NACK.
+//! The JetStream message handle is captured in closures, allowing callers to
+//! explicitly acknowledge after successful processing.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_nats::jetstream::{self, stream, consumer};
+use async_nats::jetstream::message::Message as JetStreamMessage;
 use tokio::runtime::Runtime;
 
-use super::{Message, MessageId, MessageQueue, QueueError};
+use super::{Message, MessageId, MessageQueue, PendingMessage, QueueError};
 
 /// NATS queue with JetStream durability.
 ///
@@ -144,7 +151,7 @@ impl MessageQueue for NatsQueue {
         })
     }
 
-    fn receive(&self, queue: &str) -> Result<Message, QueueError> {
+    fn receive(&self, queue: &str) -> Result<PendingMessage, QueueError> {
         let subject = Self::to_subject(queue);
 
         self.inner.runtime.block_on(async {
@@ -177,16 +184,10 @@ impl MessageQueue for NatsQueue {
             let jetstream_msg = messages
                 .next()
                 .await
-                .ok_or_else(|| QueueError::ReceiveFailed("timeout waiting for message".to_string()))?
+                .ok_or(QueueError::Timeout)?
                 .map_err(|e| QueueError::ReceiveFailed(e.to_string()))?;
 
-            // Acknowledge receipt
-            jetstream_msg
-                .ack()
-                .await
-                .map_err(|e| QueueError::ReceiveFailed(format!("failed to ack: {}", e)))?;
-
-            // Extract headers
+            // Extract headers BEFORE capturing jetstream_msg in closure
             let headers = jetstream_msg.headers.as_ref();
             let reply_to = headers
                 .and_then(|h| h.get("reply-to"))
@@ -200,12 +201,51 @@ impl MessageQueue for NatsQueue {
                 .and_then(|h| h.get("correlation-id"))
                 .map(|v| MessageId::from(v.to_string()));
 
-            Ok(Message {
+            let message = Message {
                 id: MessageId::from(msg_id),
                 payload: jetstream_msg.payload.to_vec(),
                 reply_to,
                 correlation_id,
-            })
+            };
+
+            // Wrap JetStream message in Arc<Mutex<Option>> so both closures can access it
+            // Option allows us to take() the message in whichever closure runs first
+            let js_msg: Arc<Mutex<Option<JetStreamMessage>>> = Arc::new(Mutex::new(Some(jetstream_msg)));
+            let js_msg_for_ack = Arc::clone(&js_msg);
+            let js_msg_for_nack = js_msg;
+
+            // Get runtime handle for async operations in sync closures
+            let handle_for_ack = self.inner.runtime.handle().clone();
+            let handle_for_nack = self.inner.runtime.handle().clone();
+
+            let ack_fn = move || {
+                if let Some(msg) = js_msg_for_ack.lock().unwrap().take() {
+                    handle_for_ack.block_on(async {
+                        msg.ack()
+                            .await
+                            .map_err(|e| QueueError::ReceiveFailed(format!("ack failed: {}", e)))
+                    })
+                } else {
+                    // Already ACKed or NACKed
+                    Ok(())
+                }
+            };
+
+            let nack_fn = move || {
+                if let Some(msg) = js_msg_for_nack.lock().unwrap().take() {
+                    handle_for_nack.block_on(async {
+                        use async_nats::jetstream::AckKind;
+                        msg.ack_with(AckKind::Nak(None))
+                            .await
+                            .map_err(|e| QueueError::ReceiveFailed(format!("nack failed: {}", e)))
+                    })
+                } else {
+                    // Already ACKed or NACKed
+                    Ok(())
+                }
+            };
+
+            Ok(PendingMessage::new(message, ack_fn, nack_fn))
         })
     }
 }
@@ -257,7 +297,8 @@ mod tests {
 
         queue.send("infer.phi3", msg).unwrap();
 
-        let received = queue.receive("infer.phi3").unwrap();
-        assert_eq!(received.payload, b"hello");
+        let pending = queue.receive("infer.phi3").unwrap();
+        assert_eq!(pending.message.payload, b"hello");
+        pending.ack().unwrap();
     }
 }

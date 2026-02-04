@@ -88,7 +88,7 @@ mod tests {
         let msg_a = Message::request(serde_json::to_vec(&put_a).unwrap(), "reply-put-a");
         queue.send("kv-put", msg_a).unwrap();
         provider.tick();
-        let _ = queue.receive("reply-put-a").unwrap(); // consume put response
+        queue.receive("reply-put-a").unwrap().ack().unwrap(); // consume put response
 
         // Write to agent-b's storage
         let put_b = serde_json::json!({
@@ -99,22 +99,24 @@ mod tests {
         let msg_b = Message::request(serde_json::to_vec(&put_b).unwrap(), "reply-put-b");
         queue.send("kv-put", msg_b).unwrap();
         provider.tick();
-        let _ = queue.receive("reply-put-b").unwrap(); // consume put response
+        queue.receive("reply-put-b").unwrap().ack().unwrap(); // consume put response
 
         // Read from agent-a - gets A's data
         let get_a = serde_json::json!({ "agent_id": "file:///agent-a.wasm", "path": "/data.txt" });
         let msg = Message::request(serde_json::to_vec(&get_a).unwrap(), "reply-get-a");
         queue.send("kv-get", msg).unwrap();
         provider.tick();
-        let response = queue.receive("reply-get-a").unwrap();
-        assert_eq!(response.payload, b"data for A");
+        let pending = queue.receive("reply-get-a").unwrap();
+        assert_eq!(pending.message.payload, b"data for A");
+        pending.ack().unwrap();
 
         // Read from agent-b - gets B's data (isolated)
         let get_b = serde_json::json!({ "agent_id": "file:///agent-b.wasm", "path": "/data.txt" });
         let msg = Message::request(serde_json::to_vec(&get_b).unwrap(), "reply-get-b");
         queue.send("kv-get", msg).unwrap();
         provider.tick();
-        let response = queue.receive("reply-get-b").unwrap();
-        assert_eq!(response.payload, b"data for B");
+        let pending = queue.receive("reply-get-b").unwrap();
+        assert_eq!(pending.message.payload, b"data for B");
+        pending.ack().unwrap();
     }
 }

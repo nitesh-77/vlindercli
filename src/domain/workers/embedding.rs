@@ -53,12 +53,15 @@ impl EmbeddingServiceWorker {
 
     /// Process one message if available. Returns true if processed.
     pub fn tick(&self) -> bool {
-        if let Ok(msg) = self.queue.receive("embed") {
-            let response = self.handle_embed(&msg);
-            self.send_response(&msg, response);
-            return true;
+        match self.queue.receive("embed") {
+            Ok(pending) => {
+                let response = self.handle_embed(&pending.message);
+                self.send_response(&pending.message, response);
+                let _ = pending.ack();
+                true
+            }
+            Err(_) => false,
         }
-        false
     }
 
     fn send_response(&self, request: &Message, payload: Vec<u8>) {
@@ -207,10 +210,11 @@ mod tests {
 
         // Process
         assert!(handler.tick());
-        let response = queue.receive("reply").unwrap();
-        let vector: Vec<f32> = serde_json::from_slice(&response.payload).unwrap();
+        let pending = queue.receive("reply").unwrap();
+        let vector: Vec<f32> = serde_json::from_slice(&pending.message.payload).unwrap();
         assert_eq!(vector.len(), 768);
         assert_eq!(vector, canned);
+        pending.ack().unwrap();
     }
 
     #[test]
@@ -237,10 +241,11 @@ mod tests {
         queue.send("embed", msg).unwrap();
 
         assert!(handler.tick());
-        let response = queue.receive("reply").unwrap();
-        let text = String::from_utf8(response.payload).unwrap();
+        let pending = queue.receive("reply").unwrap();
+        let text = String::from_utf8(pending.message.payload.clone()).unwrap();
         assert!(text.contains("[error]"));
         assert!(text.contains("did not declare model"));
+        pending.ack().unwrap();
     }
 
     #[test]
@@ -267,9 +272,10 @@ mod tests {
         queue.send("embed", msg).unwrap();
 
         assert!(handler.tick());
-        let response = queue.receive("reply").unwrap();
-        let text = String::from_utf8(response.payload).unwrap();
+        let pending = queue.receive("reply").unwrap();
+        let text = String::from_utf8(pending.message.payload.clone()).unwrap();
         assert!(text.contains("[error]"));
         assert!(text.contains("agent not found"));
+        pending.ack().unwrap();
     }
 }

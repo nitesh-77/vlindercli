@@ -59,12 +59,15 @@ impl InferenceServiceWorker {
 
     /// Process one message if available. Returns true if processed.
     pub fn tick(&self) -> bool {
-        if let Ok(msg) = self.queue.receive("infer") {
-            let response = self.handle_infer(&msg);
-            self.send_response(&msg, response);
-            return true;
+        match self.queue.receive("infer") {
+            Ok(pending) => {
+                let response = self.handle_infer(&pending.message);
+                self.send_response(&pending.message, response);
+                let _ = pending.ack();
+                true
+            }
+            Err(_) => false,
         }
-        false
     }
 
     fn send_response(&self, request: &Message, payload: Vec<u8>) {
@@ -206,8 +209,9 @@ mod tests {
 
         // Process
         assert!(handler.tick());
-        let response = queue.receive("reply").unwrap();
-        assert_eq!(String::from_utf8(response.payload).unwrap(), "test response");
+        let pending = queue.receive("reply").unwrap();
+        assert_eq!(String::from_utf8(pending.message.payload.clone()).unwrap(), "test response");
+        pending.ack().unwrap();
     }
 
     #[test]
@@ -233,10 +237,11 @@ mod tests {
         queue.send("infer", msg).unwrap();
 
         assert!(handler.tick());
-        let response = queue.receive("reply").unwrap();
-        let text = String::from_utf8(response.payload).unwrap();
+        let pending = queue.receive("reply").unwrap();
+        let text = String::from_utf8(pending.message.payload.clone()).unwrap();
         assert!(text.contains("[error]"));
         assert!(text.contains("did not declare model"));
+        pending.ack().unwrap();
     }
 
     #[test]
@@ -262,9 +267,10 @@ mod tests {
         queue.send("infer", msg).unwrap();
 
         assert!(handler.tick());
-        let response = queue.receive("reply").unwrap();
-        let text = String::from_utf8(response.payload).unwrap();
+        let pending = queue.receive("reply").unwrap();
+        let text = String::from_utf8(pending.message.payload.clone()).unwrap();
         assert!(text.contains("[error]"));
         assert!(text.contains("agent not found"));
+        pending.ack().unwrap();
     }
 }

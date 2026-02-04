@@ -94,9 +94,14 @@ impl Runtime for WasmRuntime {
 
         // Check for work (registry lock released)
         for (agent_id_str, wasm_path) in wasm_agents {
-            if let Ok(request) = self.queue.receive(&agent_id_str) {
+            if let Ok(pending) = self.queue.receive(&agent_id_str) {
                 let queue = Arc::clone(&self.queue);
-                let payload = request.payload.clone();
+                let payload = pending.message.payload.clone();
+                let reply_to = pending.message.reply_to.clone();
+                let request_id = pending.message.id.clone();
+
+                // ACK the message now - we've taken ownership of processing
+                let _ = pending.ack();
 
                 // Spawn WASM execution in background thread
                 let handle = thread::spawn(move || {
@@ -115,8 +120,8 @@ impl Runtime for WasmRuntime {
 
                 self.running = Some(RunningTask {
                     handle,
-                    reply_to: request.reply_to.clone(),
-                    request_id: request.id,
+                    reply_to,
+                    request_id,
                 });
 
                 return true; // Started new work
@@ -192,8 +197,10 @@ fn make_send_function(queue: Arc<dyn MessageQueue + Send + Sync>, agent_id: Stri
 
             // Wait for response
             loop {
-                if let Ok(response) = data.queue.receive(&reply_to) {
-                    return write_output(plugin, outputs, &response.payload);
+                if let Ok(pending) = data.queue.receive(&reply_to) {
+                    let payload = pending.message.payload.clone();
+                    let _ = pending.ack();
+                    return write_output(plugin, outputs, &payload);
                 }
                 std::thread::sleep(std::time::Duration::from_millis(1));
             }

@@ -92,30 +92,39 @@ impl VectorServiceWorker {
     }
 
     fn try_store(&self) -> bool {
-        if let Ok(msg) = self.queue.receive("vector-store") {
-            let response = self.handle_store(&msg);
-            self.send_response(&msg, response);
-            return true;
+        match self.queue.receive("vector-store") {
+            Ok(pending) => {
+                let response = self.handle_store(&pending.message);
+                self.send_response(&pending.message, response);
+                let _ = pending.ack();
+                true
+            }
+            Err(_) => false,
         }
-        false
     }
 
     fn try_search(&self) -> bool {
-        if let Ok(msg) = self.queue.receive("vector-search") {
-            let response = self.handle_search(&msg);
-            self.send_response(&msg, response);
-            return true;
+        match self.queue.receive("vector-search") {
+            Ok(pending) => {
+                let response = self.handle_search(&pending.message);
+                self.send_response(&pending.message, response);
+                let _ = pending.ack();
+                true
+            }
+            Err(_) => false,
         }
-        false
     }
 
     fn try_delete(&self) -> bool {
-        if let Ok(msg) = self.queue.receive("vector-delete") {
-            let response = self.handle_delete(&msg);
-            self.send_response(&msg, response);
-            return true;
+        match self.queue.receive("vector-delete") {
+            Ok(pending) => {
+                let response = self.handle_delete(&pending.message);
+                self.send_response(&pending.message, response);
+                let _ = pending.ack();
+                true
+            }
+            Err(_) => false,
         }
-        false
     }
 
     fn send_response(&self, request: &Message, payload: Vec<u8>) {
@@ -226,8 +235,9 @@ mod tests {
         queue.send("vector-store", store_msg).unwrap();
 
         assert!(handler.tick());
-        let response = queue.receive("reply").unwrap();
-        assert_eq!(response.payload, b"ok");
+        let pending = queue.receive("reply").unwrap();
+        assert_eq!(pending.message.payload, b"ok");
+        pending.ack().unwrap();
 
         // Search
         let search_payload = serde_json::json!({
@@ -242,9 +252,10 @@ mod tests {
         queue.send("vector-search", search_msg).unwrap();
 
         assert!(handler.tick());
-        let response = queue.receive("reply").unwrap();
-        let results: Vec<serde_json::Value> = serde_json::from_slice(&response.payload).unwrap();
+        let pending = queue.receive("reply").unwrap();
+        let results: Vec<serde_json::Value> = serde_json::from_slice(&pending.message.payload).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0]["key"], "doc1");
+        pending.ack().unwrap();
     }
 }

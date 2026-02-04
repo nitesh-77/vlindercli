@@ -19,7 +19,7 @@ use std::sync::Arc;
 use crate::config::Config;
 
 pub use message::{Message, MessageId};
-pub use traits::{MessageQueue, QueueError};
+pub use traits::{MessageQueue, PendingMessage, QueueError};
 pub use in_memory::InMemoryQueue;
 pub use nats::NatsQueue;
 pub use worker::{process_one, WorkerError};

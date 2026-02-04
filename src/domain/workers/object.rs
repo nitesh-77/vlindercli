@@ -99,39 +99,51 @@ impl ObjectServiceWorker {
     }
 
     fn try_get(&self) -> bool {
-        if let Ok(msg) = self.queue.receive("kv-get") {
-            let response = self.handle_get(&msg);
-            self.send_response(&msg, response);
-            return true;
+        match self.queue.receive("kv-get") {
+            Ok(pending) => {
+                let response = self.handle_get(&pending.message);
+                self.send_response(&pending.message, response);
+                let _ = pending.ack();
+                true
+            }
+            Err(_) => false,
         }
-        false
     }
 
     fn try_put(&self) -> bool {
-        if let Ok(msg) = self.queue.receive("kv-put") {
-            let response = self.handle_put(&msg);
-            self.send_response(&msg, response);
-            return true;
+        match self.queue.receive("kv-put") {
+            Ok(pending) => {
+                let response = self.handle_put(&pending.message);
+                self.send_response(&pending.message, response);
+                let _ = pending.ack();
+                true
+            }
+            Err(_) => false,
         }
-        false
     }
 
     fn try_list(&self) -> bool {
-        if let Ok(msg) = self.queue.receive("kv-list") {
-            let response = self.handle_list(&msg);
-            self.send_response(&msg, response);
-            return true;
+        match self.queue.receive("kv-list") {
+            Ok(pending) => {
+                let response = self.handle_list(&pending.message);
+                self.send_response(&pending.message, response);
+                let _ = pending.ack();
+                true
+            }
+            Err(_) => false,
         }
-        false
     }
 
     fn try_delete(&self) -> bool {
-        if let Ok(msg) = self.queue.receive("kv-delete") {
-            let response = self.handle_delete(&msg);
-            self.send_response(&msg, response);
-            return true;
+        match self.queue.receive("kv-delete") {
+            Ok(pending) => {
+                let response = self.handle_delete(&pending.message);
+                self.send_response(&pending.message, response);
+                let _ = pending.ack();
+                true
+            }
+            Err(_) => false,
         }
-        false
     }
 
     fn send_response(&self, request: &Message, payload: Vec<u8>) {
@@ -265,8 +277,9 @@ mod tests {
 
         // Process
         assert!(handler.tick());
-        let response = queue.receive("reply").unwrap();
-        assert_eq!(response.payload, b"ok");
+        let pending = queue.receive("reply").unwrap();
+        assert_eq!(pending.message.payload, b"ok");
+        pending.ack().unwrap();
 
         // Send get request
         let get_payload = serde_json::json!({
@@ -281,7 +294,8 @@ mod tests {
 
         // Process
         assert!(handler.tick());
-        let response = queue.receive("reply").unwrap();
-        assert_eq!(response.payload, b"hello world");
+        let pending = queue.receive("reply").unwrap();
+        assert_eq!(pending.message.payload, b"hello world");
+        pending.ack().unwrap();
     }
 }

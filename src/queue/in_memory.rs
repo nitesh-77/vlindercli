@@ -1,10 +1,13 @@
 //! In-memory queue implementation.
 
-use super::{Message, MessageQueue, QueueError};
+use super::{Message, MessageQueue, PendingMessage, QueueError};
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
 /// In-memory message queue for single-process use.
+///
+/// ACK/NACK operations are no-ops since messages are removed from the queue
+/// immediately on receive (no durability or redelivery support).
 pub struct InMemoryQueue {
     queues: Arc<Mutex<HashMap<String, VecDeque<Message>>>>,
 }
@@ -33,14 +36,21 @@ impl MessageQueue for InMemoryQueue {
         Ok(())
     }
 
-    fn receive(&self, queue: &str) -> Result<Message, QueueError> {
+    fn receive(&self, queue: &str) -> Result<PendingMessage, QueueError> {
         let mut queues = self.queues.lock().unwrap();
         let q = queues
             .get_mut(queue)
             .ok_or_else(|| QueueError::QueueNotFound(queue.to_string()))?;
 
-        q.pop_front()
-            .ok_or_else(|| QueueError::ReceiveFailed("queue empty".to_string()))
+        let message = q.pop_front()
+            .ok_or_else(|| QueueError::ReceiveFailed("queue empty".to_string()))?;
+
+        // ACK/NACK are no-ops for in-memory queue (message already removed)
+        Ok(PendingMessage::new(
+            message,
+            || Ok(()),  // ack: no-op
+            || Ok(()),  // nack: no-op
+        ))
     }
 }
 
@@ -55,15 +65,17 @@ mod tests {
         let msg = Message::request(b"hello".to_vec(), "reply-queue");
         queue.send("test", msg).unwrap();
 
-        let received = queue.receive("test").unwrap();
-        assert_eq!(received.payload, b"hello");
+        let pending = queue.receive("test").unwrap();
+        assert_eq!(pending.message.payload, b"hello");
+        pending.ack().unwrap();
     }
 
     #[test]
     fn receive_from_empty_queue_fails() {
         let queue = InMemoryQueue::new();
         queue.send("test", Message::request(vec![], "reply")).unwrap(); // create queue
-        queue.receive("test").unwrap(); // drain it
+        let pending = queue.receive("test").unwrap(); // drain it
+        pending.ack().unwrap();
 
         let result = queue.receive("test");
         assert!(result.is_err());
@@ -86,8 +98,10 @@ mod tests {
         let first = queue.receive("test").unwrap();
         let second = queue.receive("test").unwrap();
 
-        assert_eq!(first.payload, b"first");
-        assert_eq!(second.payload, b"second");
+        assert_eq!(first.message.payload, b"first");
+        assert_eq!(second.message.payload, b"second");
+        first.ack().unwrap();
+        second.ack().unwrap();
     }
 
     #[test]
@@ -99,21 +113,23 @@ mod tests {
         queue.send("palindrome", request).unwrap();
 
         // Palindrome agent receives
-        let received = queue.receive("palindrome").unwrap();
-        let input = String::from_utf8(received.payload).unwrap();
+        let pending = queue.receive("palindrome").unwrap();
+        let input = String::from_utf8(pending.message.payload.clone()).unwrap();
 
         // Agent checks palindrome
         let is_palindrome = input.chars().eq(input.chars().rev());
         let response_payload: &[u8] = if is_palindrome { b"true" } else { b"false" };
 
         // Agent sends response to reply_to queue
-        let reply_to = &received.reply_to;
-        let response = Message::response(response_payload.to_vec(), reply_to, received.id.clone());
-        queue.send(reply_to, response).unwrap();
+        let reply_to = pending.message.reply_to.clone();
+        let response = Message::response(response_payload.to_vec(), &reply_to, pending.message.id.clone());
+        queue.send(&reply_to, response).unwrap();
+        pending.ack().unwrap();
 
         // Caller receives response
         let result = queue.receive("caller").unwrap();
-        assert_eq!(result.payload, b"true");
+        assert_eq!(result.message.payload, b"true");
+        result.ack().unwrap();
     }
 
     #[test]
@@ -133,15 +149,16 @@ mod tests {
 
         // Agent processes both
         for _ in 0..2 {
-            let received = queue.receive("palindrome").unwrap();
-            let input = String::from_utf8(received.payload.clone()).unwrap();
+            let pending = queue.receive("palindrome").unwrap();
+            let input = String::from_utf8(pending.message.payload.clone()).unwrap();
             let is_palindrome = input.chars().eq(input.chars().rev());
             let response_payload: &[u8] = if is_palindrome { b"true" } else { b"false" };
 
-            let reply_to = &received.reply_to;
+            let reply_to = pending.message.reply_to.clone();
             // Response includes correlation_id linking back to request
-            let response = Message::response(response_payload.to_vec(), reply_to, received.id.clone());
-            queue.send(reply_to, response).unwrap();
+            let response = Message::response(response_payload.to_vec(), &reply_to, pending.message.id.clone());
+            queue.send(&reply_to, response).unwrap();
+            pending.ack().unwrap();
         }
 
         // Caller receives TWO responses
@@ -151,9 +168,10 @@ mod tests {
         // Now we CAN correlate responses to requests!
         // Collect into a map by correlation_id
         let mut results = std::collections::HashMap::new();
-        for resp in [resp1, resp2] {
-            let corr_id = resp.correlation_id.expect("response should have correlation_id");
-            results.insert(corr_id, resp.payload);
+        for pending in [resp1, resp2] {
+            let corr_id = pending.message.correlation_id.clone().expect("response should have correlation_id");
+            results.insert(corr_id, pending.message.payload.clone());
+            pending.ack().unwrap();
         }
 
         // Match responses to original requests by ID

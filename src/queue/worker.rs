@@ -11,6 +11,7 @@ use super::{Message, MessageQueue, QueueError};
 /// 1. Receive message from queue
 /// 2. Process payload with handler
 /// 3. Send response to reply_to queue
+/// 4. Acknowledge the message
 pub fn process_one<Q, F>(
     queue: &Q,
     queue_name: &str,
@@ -21,18 +22,21 @@ where
     F: FnOnce(&[u8]) -> Vec<u8>,
 {
     // Receive
-    let request = queue.receive(queue_name).map_err(WorkerError::Receive)?;
+    let pending = queue.receive(queue_name).map_err(WorkerError::Receive)?;
 
     // Process
-    let response_payload = handler(&request.payload);
+    let response_payload = handler(&pending.message.payload);
 
     // Respond
     let response = Message::response(
         response_payload,
-        &request.reply_to,
-        request.id.clone(),
+        &pending.message.reply_to,
+        pending.message.id.clone(),
     );
-    queue.send(&request.reply_to, response).map_err(WorkerError::Send)?;
+    queue.send(&pending.message.reply_to, response).map_err(WorkerError::Send)?;
+
+    // Acknowledge
+    pending.ack().map_err(WorkerError::Receive)?;
 
     Ok(())
 }
@@ -77,8 +81,9 @@ mod tests {
         }).unwrap();
 
         // Caller receives response
-        let response = queue.receive("caller").unwrap();
-        assert_eq!(response.payload, b"true");
+        let pending = queue.receive("caller").unwrap();
+        assert_eq!(pending.message.payload, b"true");
+        pending.ack().unwrap();
     }
 
     #[test]
@@ -96,8 +101,14 @@ mod tests {
         }
 
         // All responses received
-        assert_eq!(queue.receive("caller").unwrap().payload, b"one");
-        assert_eq!(queue.receive("caller").unwrap().payload, b"two");
-        assert_eq!(queue.receive("caller").unwrap().payload, b"three");
+        let p1 = queue.receive("caller").unwrap();
+        assert_eq!(p1.message.payload, b"one");
+        p1.ack().unwrap();
+        let p2 = queue.receive("caller").unwrap();
+        assert_eq!(p2.message.payload, b"two");
+        p2.ack().unwrap();
+        let p3 = queue.receive("caller").unwrap();
+        assert_eq!(p3.message.payload, b"three");
+        p3.ack().unwrap();
     }
 }
