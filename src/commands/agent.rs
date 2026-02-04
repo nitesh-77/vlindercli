@@ -85,8 +85,16 @@ fn run_distributed(path: Option<PathBuf>, config: &Config) {
     tracing::info!("Connecting to distributed daemon...");
 
     // Connect to remote registry via gRPC
+    // Ensure URL has scheme (tonic requires it)
+    let registry_addr = if config.distributed.registry_addr.starts_with("http://")
+        || config.distributed.registry_addr.starts_with("https://") {
+        config.distributed.registry_addr.clone()
+    } else {
+        format!("http://{}", config.distributed.registry_addr)
+    };
+
     let registry: Arc<dyn Registry> = Arc::new(
-        GrpcRegistryClient::connect(&config.distributed.registry_addr)
+        GrpcRegistryClient::connect(&registry_addr)
             .expect("Failed to connect to registry")
     );
 
