@@ -7,14 +7,15 @@
 //! - Owns Provider (services)
 //! - Runs tick loop (controller reconciliation)
 
-use std::path::Path;
 use std::sync::Arc;
 
-use crate::domain::{EngineType, InMemoryRegistry, Model, ObjectStorageType, Provider, Runtime, RuntimeType, VectorStorageType};
+use crate::config::registry_db_path;
+use crate::domain::{EngineType, InMemoryRegistry, ObjectStorageType, Provider, RegistryRepository, Runtime, RuntimeType, VectorStorageType};
 use crate::domain::harness::Harness;
 use crate::domain::registry::Registry;
 use crate::queue::InMemoryQueue;
 use crate::runtime::WasmRuntime;
+use crate::storage::SqliteRegistryRepository;
 
 /// The daemon - owns all system components.
 pub struct Daemon {
@@ -53,8 +54,8 @@ impl Daemon {
         registry.register_embedding_engine(EngineType::Ollama);
         registry.register_embedding_engine(EngineType::InMemory);
 
-        // Register known models (hardcoded for now)
-        Self::register_known_models(&registry);
+        // Load registered models from persistent storage
+        Self::load_registered_models(&registry);
 
         let registry: Arc<dyn Registry> = Arc::new(registry);
 
@@ -73,20 +74,21 @@ impl Daemon {
         self.harness.tick();
     }
 
-    /// Register known models (hardcoded paths for now).
-    fn register_known_models(registry: &dyn Registry) {
-        let model_paths = [
-            "/Users/ashwnacharya/repos/vlindercli/.vlinder/models/phi3/model.toml",
-            "/Users/ashwnacharya/repos/vlindercli/.vlinder/models/nomic-embed/model.toml",
-            "/Users/ashwnacharya/repos/vlindercli/.vlinder/models/qwen/model.toml",
-        ];
+    /// Load models from the persistent registry.
+    fn load_registered_models(registry: &dyn Registry) {
+        let db_path = registry_db_path();
+        if !db_path.exists() {
+            return;
+        }
 
-        for path in model_paths {
-            let manifest_path = Path::new(path);
-            if manifest_path.exists() {
-                if let Ok(model) = Model::load(manifest_path) {
-                    registry.register_model(model);
-                }
+        let repo = match SqliteRegistryRepository::open(&db_path) {
+            Ok(r) => r,
+            Err(_) => return,
+        };
+
+        if let Ok(models) = repo.load_models() {
+            for model in models {
+                registry.register_model(model);
             }
         }
     }
@@ -101,6 +103,8 @@ impl Default for Daemon {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::{Model, ModelType, ResourceId};
+    use tempfile::TempDir;
 
     #[test]
     fn deploy_rejects_agent_with_no_matching_runtime() {
@@ -122,18 +126,35 @@ mod tests {
     }
 
     #[test]
-    fn registers_known_models() {
+    fn loads_models_from_registry_db() {
+        // Create a temp directory with a registry.db
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("registry.db");
+
+        // Pre-populate the registry
+        {
+            let repo = SqliteRegistryRepository::open(&db_path).unwrap();
+            let model = Model {
+                id: Model::placeholder_id("test-model"),
+                name: "test-model".to_string(),
+                model_type: ModelType::Inference,
+                engine: EngineType::Ollama,
+                model_path: ResourceId::new("ollama://localhost:11434/test-model"),
+            };
+            repo.save_model(&model).unwrap();
+        }
+
+        // Set VLINDER_DIR to temp directory
+        std::env::set_var("VLINDER_DIR", temp_dir.path());
+
         let daemon = Daemon::new();
 
-        // Check that known models are registered
-        let phi3 = daemon.registry.get_model("phi3");
-        assert!(phi3.is_some(), "phi3 should be registered");
-        assert_eq!(phi3.unwrap().name, "phi3");
+        // Clean up env
+        std::env::remove_var("VLINDER_DIR");
 
-        let nomic = daemon.registry.get_model("nomic-embed");
-        assert!(nomic.is_some(), "nomic-embed should be registered");
-
-        let qwen = daemon.registry.get_model("qwen");
-        assert!(qwen.is_some(), "qwen should be registered");
+        // Check that the model was loaded
+        let model = daemon.registry.get_model("test-model");
+        assert!(model.is_some(), "test-model should be loaded from registry.db");
+        assert_eq!(model.unwrap().name, "test-model");
     }
 }

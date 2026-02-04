@@ -1,7 +1,9 @@
 use clap::Subcommand;
 
 use vlindercli::catalog::OllamaCatalog;
-use vlindercli::domain::ModelCatalog;
+use vlindercli::config::registry_db_path;
+use vlindercli::domain::{ModelCatalog, RegistryRepository};
+use vlindercli::storage::SqliteRegistryRepository;
 
 #[derive(Subcommand, Debug, PartialEq)]
 pub enum ModelCommand {
@@ -29,12 +31,23 @@ pub enum ModelCommand {
         #[arg(long, default_value = "http://localhost:11434")]
         endpoint: String,
     },
+
+    /// List registered models (added via `model add`)
+    Registered,
+
+    /// Remove a registered model
+    Remove {
+        /// Model name to remove
+        name: String,
+    },
 }
 
 pub fn execute(cmd: ModelCommand) {
     match cmd {
         ModelCommand::Add { name, catalog, endpoint } => add(&name, &catalog, &endpoint),
         ModelCommand::List { catalog, endpoint } => list(&catalog, &endpoint),
+        ModelCommand::Registered => registered(),
+        ModelCommand::Remove { name } => remove(&name),
     }
 }
 
@@ -47,20 +60,33 @@ fn add(name: &str, catalog: &str, endpoint: &str) {
         }
     };
 
-    match catalog.resolve(name) {
-        Ok(model) => {
-            println!("Resolved model:");
-            println!("  Name:   {}", model.name);
-            println!("  Type:   {:?}", model.model_type);
-            println!("  Engine: {:?}", model.engine);
-            println!("  Path:   {}", model.model_path);
-            println!();
-            println!("Model ready. Registry integration pending.");
-        }
+    let model = match catalog.resolve(name) {
+        Ok(m) => m,
         Err(e) => {
             eprintln!("Failed to resolve model '{}': {}", name, e);
+            return;
         }
+    };
+
+    // Persist to registry
+    let db_path = registry_db_path();
+    let repo = match SqliteRegistryRepository::open(&db_path) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Failed to open registry: {}", e);
+            return;
+        }
+    };
+
+    if let Err(e) = repo.save_model(&model) {
+        eprintln!("Failed to save model: {}", e);
+        return;
     }
+
+    println!("Added model '{}':", model.name);
+    println!("  Type:   {:?}", model.model_type);
+    println!("  Engine: {:?}", model.engine);
+    println!("  Path:   {}", model.model_path);
 }
 
 fn list(catalog: &str, endpoint: &str) {
@@ -87,6 +113,57 @@ fn list(catalog: &str, endpoint: &str) {
         Err(e) => {
             eprintln!("Failed to list models: {}", e);
         }
+    }
+}
+
+fn registered() {
+    let db_path = registry_db_path();
+
+    if !db_path.exists() {
+        println!("No models registered yet. Use 'vlinder model add <name>' to add models.");
+        return;
+    }
+
+    let repo = match SqliteRegistryRepository::open(&db_path) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Failed to open registry: {}", e);
+            return;
+        }
+    };
+
+    match repo.load_models() {
+        Ok(models) => {
+            if models.is_empty() {
+                println!("No models registered yet. Use 'vlinder model add <name>' to add models.");
+                return;
+            }
+            println!("Registered models:");
+            for model in models {
+                println!("  {} ({:?}, {:?})", model.name, model.model_type, model.engine);
+            }
+        }
+        Err(e) => {
+            eprintln!("Failed to load models: {}", e);
+        }
+    }
+}
+
+fn remove(name: &str) {
+    let db_path = registry_db_path();
+
+    let repo = match SqliteRegistryRepository::open(&db_path) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Failed to open registry: {}", e);
+            return;
+        }
+    };
+
+    match repo.delete_model(name) {
+        Ok(true) => println!("Removed model '{}'", name),
+        Ok(false) => println!("Model '{}' not found", name),
+        Err(e) => eprintln!("Failed to remove model: {}", e),
     }
 }
 

@@ -9,6 +9,7 @@
 
 pub mod dispatch;
 mod object;
+mod registry;
 mod vector;
 
 // Re-export traits from domain for convenience
@@ -16,4 +17,5 @@ pub use crate::domain::{ObjectStorage, VectorStorage};
 
 // Re-export concrete implementations
 pub use object::{InMemoryObjectStorage, SqliteObjectStorage};
+pub use registry::SqliteRegistryRepository;
 pub use vector::{InMemoryVectorStorage, SqliteVectorStorage};

@@ -101,3 +101,7 @@ pub fn agent_manifest_path(name: &str) -> PathBuf {
 pub fn agent_db_path(name: &str) -> PathBuf {
     agent_dir(name).join(format!("{}.db", name))
 }
+
+pub fn registry_db_path() -> PathBuf {
+    vlinder_dir().join("registry.db")
+}

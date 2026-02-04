@@ -19,6 +19,7 @@ mod inference;
 mod model;
 mod provider;
 mod registry;
+mod registry_repository;
 mod runtime;
 mod model_manifest;
 mod path;
@@ -106,3 +107,4 @@ pub use runtime::{Runtime, RuntimeType};
 
 pub use daemon::Daemon;
 pub use registry::{InMemoryRegistry, Job, JobId, JobStatus, RegistrationError, Registry};
+pub use registry_repository::{RegistryRepository, RepositoryError, StoredModel};
