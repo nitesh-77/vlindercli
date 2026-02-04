@@ -72,13 +72,14 @@ impl EmbeddingServiceWorker {
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
 
-        // Validate agent declared this model
-        if let Err(e) = self.validate_agent_model(&req.agent_id, &req.model) {
-            return format!("[error] {}", e).into_bytes();
-        }
+        // Resolve model alias to model_path via agent's manifest
+        let model_path = match self.resolve_model_uri(&req.agent_id, &req.model) {
+            Ok(uri) => uri,
+            Err(e) => return format!("[error] {}", e).into_bytes(),
+        };
 
         // Try to get cached engine, or lazy-load from registry
-        let engine = match self.get_or_load_engine(&req.model) {
+        let engine = match self.get_or_load_engine(&req.model, &model_path) {
             Ok(e) => e,
             Err(e) => return format!("[error] {}", e).into_bytes(),
         };
@@ -96,44 +97,42 @@ impl EmbeddingServiceWorker {
         }
     }
 
-    /// Validate that an agent declared the model in its requirements.
-    fn validate_agent_model(&self, agent_id: &str, model_name: &str) -> Result<(), String> {
+    /// Validate that an agent declared the model and return its URI.
+    fn resolve_model_uri(&self, agent_id: &str, model_alias: &str) -> Result<crate::domain::ResourceId, String> {
         let agent_rid = crate::domain::ResourceId::new(agent_id);
         let agent = self.registry.get_agent(&agent_rid)
             .ok_or_else(|| format!("agent not found: {}", agent_id))?;
 
-        if !agent.has_model(model_name) {
-            return Err(format!(
+        agent.model_uri(model_alias)
+            .cloned()
+            .ok_or_else(|| format!(
                 "agent '{}' did not declare model '{}' in requirements",
-                agent.name, model_name
-            ));
-        }
-
-        Ok(())
+                agent.name, model_alias
+            ))
     }
 
-    /// Get cached engine or lazy-load from registry.
-    fn get_or_load_engine(&self, model_name: &str) -> Result<Arc<dyn EmbeddingEngine>, String> {
-        // Check cache first
+    /// Get cached engine or lazy-load from registry using model_path.
+    fn get_or_load_engine(&self, model_alias: &str, model_path: &crate::domain::ResourceId) -> Result<Arc<dyn EmbeddingEngine>, String> {
+        // Check cache first (keyed by alias for this agent's usage)
         {
             let engines = self.engines.read().unwrap();
-            if let Some(engine) = engines.get(model_name) {
+            if let Some(engine) = engines.get(model_alias) {
                 return Ok(Arc::clone(engine));
             }
         }
 
-        // Not cached - look up in registry and load
-        let model = self.registry.get_model(model_name)
-            .ok_or_else(|| format!("model not registered: {}", model_name))?;
+        // Not cached - look up in registry by model_path
+        let model = self.registry.get_model_by_path(model_path)
+            .ok_or_else(|| format!("model not registered with path: {}", model_path))?;
 
         // Load engine
         let engine = open_embedding_engine(&model)
             .map_err(|e| format!("failed to load engine: {}", e))?;
 
-        // Cache it
+        // Cache it (keyed by alias)
         {
             let mut engines = self.engines.write().unwrap();
-            engines.insert(model_name.to_string(), Arc::clone(&engine));
+            engines.insert(model_alias.to_string(), Arc::clone(&engine));
         }
 
         Ok(engine)
@@ -150,16 +149,18 @@ mod tests {
     const TEST_AGENT_ID: &str = "file:///test-agent.wasm";
 
     fn test_model(name: &str) -> Model {
+        // model_path must match the URI in the agent manifest
         Model {
             id: crate::domain::ResourceId::new(format!("http://127.0.0.1:9000/models/{}", name)),
             name: name.to_string(),
             model_type: ModelType::Embedding,
             engine: EngineType::InMemory,
-            model_path: crate::domain::ResourceId::new("file:///test.gguf"),
+            model_path: crate::domain::ResourceId::new(format!("memory://test/{}", name)),
         }
     }
 
-    fn test_agent_with_model(model_name: &str) -> Agent {
+    fn test_agent_with_model(model_alias: &str) -> Agent {
+        // The RHS URI must match test_model's model_path
         let manifest = format!(r#"
             name = "test-agent"
             description = "Test agent"
@@ -167,8 +168,8 @@ mod tests {
             [requirements]
             services = []
             [requirements.models]
-            {} = "http://127.0.0.1:9000/models/{}"
-        "#, TEST_AGENT_ID, model_name, model_name);
+            {} = "memory://test/{}"
+        "#, TEST_AGENT_ID, model_alias, model_alias);
         Agent::from_toml(&manifest).unwrap()
     }
 

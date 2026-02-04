@@ -74,10 +74,12 @@ services = [
 # - phi3: Small, fast inference model for intent classification and summarization
 # - nomic-embed: Embedding model for semantic search
 #
-# Want to try a different model? Change the name here and update prompts below.
+# The LHS is the alias used in code, the RHS is the model_path in the registry.
+# Register models with: vlinder model add phi3 --catalog ollama
+#                       vlinder model add nomic-embed-text --catalog ollama
 [requirements.models]
-phi3 = "http://127.0.0.1:9000/models/phi3"
-nomic-embed = "http://127.0.0.1:9000/models/nomic-embed"
+phi3 = "ollama://localhost:11434/phi3:latest"
+nomic-embed = "ollama://localhost:11434/nomic-embed-text:latest"
 
 
 # -----------------------------------------------------------------------------

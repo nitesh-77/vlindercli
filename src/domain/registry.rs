@@ -115,6 +115,9 @@ pub trait Registry: Send + Sync {
     /// Get a model by name.
     fn get_model(&self, name: &str) -> Option<Model>;
 
+    /// Get a model by its model_path (the URI that identifies the actual model resource).
+    fn get_model_by_path(&self, path: &ResourceId) -> Option<Model>;
+
     /// Get the registry-issued ID for a model name.
     fn model_id(&self, name: &str) -> ResourceId;
 
@@ -242,12 +245,12 @@ impl Registry for InMemoryRegistry {
             }
         }
 
-        // Validate all declared models are registered (by name)
-        let model_id_prefix = format!("{}/models/", self.registry_id.as_str());
-        for (model_name, _manifest_uri) in &agent.requirements.models {
-            let model_id = ResourceId::new(format!("{}{}", model_id_prefix, model_name));
-            if !state.models.contains_key(&model_id) {
-                return Err(RegistrationError::ModelNotRegistered(model_name.clone()));
+        // Validate all declared models are registered (by model_path URI)
+        for (model_alias, manifest_uri) in &agent.requirements.models {
+            let model_exists = state.models.values()
+                .any(|m| &m.model_path == manifest_uri);
+            if !model_exists {
+                return Err(RegistrationError::ModelNotRegistered(model_alias.clone()));
             }
         }
 
@@ -284,6 +287,13 @@ impl Registry for InMemoryRegistry {
         let model_id = self.model_id(name);
         let state = self.state.read().unwrap();
         state.models.get(&model_id).cloned()
+    }
+
+    fn get_model_by_path(&self, path: &ResourceId) -> Option<Model> {
+        let state = self.state.read().unwrap();
+        state.models.values()
+            .find(|m| &m.model_path == path)
+            .cloned()
     }
 
     fn model_id(&self, name: &str) -> ResourceId {
