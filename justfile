@@ -34,9 +34,10 @@ build-pensieve:
 # =============================================================================
 
 # Run a specific agent (usage: just run pensieve)
+# Uses ~/.vlinder by default (no VLINDER_DIR override needed)
 run agent:
     cargo build
-    cd agents/{{agent}} && VLINDER_DIR={{justfile_directory()}}/.vlinder ../../target/debug/vlindercli agent run -p .
+    cd agents/{{agent}} && ../../target/debug/vlindercli agent run -p .
 
 # =============================================================================
 # Model Catalog Commands
