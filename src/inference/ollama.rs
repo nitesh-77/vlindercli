@@ -14,7 +14,7 @@ impl OllamaInferenceEngine {
     /// Create a new Ollama inference engine.
     ///
     /// - `endpoint`: Ollama server URL (e.g., "http://localhost:11434")
-    /// - `model`: Model name (e.g., "llama3:8b")
+    /// - `model`: Model name (e.g., "phi3")
     pub fn new(endpoint: impl Into<String>, model: impl Into<String>) -> Self {
         Self {
             endpoint: endpoint.into(),
@@ -63,15 +63,15 @@ mod tests {
 
     #[test]
     fn creates_engine_with_endpoint_and_model() {
-        let engine = OllamaInferenceEngine::new("http://localhost:11434", "llama3:8b");
+        let engine = OllamaInferenceEngine::new("http://localhost:11434", "phi3");
         assert_eq!(engine.endpoint, "http://localhost:11434");
-        assert_eq!(engine.model, "llama3:8b");
+        assert_eq!(engine.model, "phi3");
     }
 
     #[test]
     #[ignore] // Requires running Ollama server
     fn infers_with_ollama_server() {
-        let engine = OllamaInferenceEngine::new("http://localhost:11434", "llama3:8b");
+        let engine = OllamaInferenceEngine::new("http://localhost:11434", "phi3");
         let result = engine.infer("Say hello", 10);
         assert!(result.is_ok());
         assert!(!result.unwrap().is_empty());

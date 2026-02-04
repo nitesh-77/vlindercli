@@ -22,8 +22,8 @@ services = [
 ]
 
 [requirements.models]
-phi3 = "http://127.0.0.1:9000/models/phi3"
-nomic-embed = "http://127.0.0.1:9000/models/nomic-embed"
+phi3 = "ollama://localhost:11434/phi3:latest"
+nomic-embed-text = "ollama://localhost:11434/nomic-embed-text:latest"
 
 [[mounts]]
 host_path = "mnt"

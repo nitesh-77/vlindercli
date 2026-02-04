@@ -1,5 +1,8 @@
 use std::path::{Path, PathBuf};
-use vlindercli::domain::{Agent, Daemon};
+use vlindercli::catalog::OllamaCatalog;
+use vlindercli::config::registry_db_path;
+use vlindercli::domain::{Agent, Daemon, ModelCatalog, RegistryRepository};
+use vlindercli::storage::SqliteRegistryRepository;
 
 const FIXTURES: &str = "tests/fixtures/agents";
 
@@ -49,7 +52,7 @@ fn agent_loads_requirements_from_manifest() {
     assert_eq!(agent.name, "pensieve");
     assert_eq!(agent.requirements.models.len(), 2);
     assert!(agent.has_model("phi3"));
-    assert!(agent.has_model("nomic-embed"));
+    assert!(agent.has_model("nomic-embed-text"));
     assert!(!agent.has_model("unknown"));
 }
 
@@ -60,14 +63,25 @@ fn agent_loads_requirements_from_manifest() {
 /// 4. Calls infer("phi3", "Summarize...") → runtime validates & runs inference
 /// 5. Returns formatted output with stats, content preview, and summary
 ///
-/// NOTE: Requires real GGUF model weights in tests/fixtures/agents/pensieve/models/weights/
+/// NOTE: Requires Ollama server with phi3 and nomic-embed-text models pulled
 /// Run with: cargo test --test wasm_tests pensieve -- --ignored
 #[test]
-#[ignore = "requires real GGUF model weights"]
+#[ignore = "requires Ollama server with phi3 and nomic-embed-text"]
 fn pensieve_agent_fetches_and_summarizes() {
+    // Arrange: Register required models from Ollama catalog
+    let catalog = OllamaCatalog::from_config();
+    let repo = SqliteRegistryRepository::open(&registry_db_path()).unwrap();
+
+    for model_name in ["phi3:latest", "nomic-embed-text:latest"] {
+        if let Ok(model) = catalog.resolve(model_name) {
+            let _ = repo.save_model(&model); // Ignore if already exists
+        }
+    }
+
+    // Act
     let result = run_agent("pensieve", "https://httpbin.org/html");
 
-    // Verify output contains the formatted sections from the agent
+    // Assert
     assert!(result.contains("Source:"), "Expected 'Source:' in output");
     assert!(result.contains("Summary:"), "Expected 'Summary:' in output");
 }

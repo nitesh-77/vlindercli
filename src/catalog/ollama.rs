@@ -137,7 +137,7 @@ mod tests {
     #[ignore] // Requires running Ollama server with model pulled
     fn resolves_model_from_ollama() {
         let catalog = OllamaCatalog::from_config();
-        let model = catalog.resolve("llama3");
+        let model = catalog.resolve("phi3");
         assert!(model.is_ok());
         let model = model.unwrap();
         assert_eq!(model.engine, EngineType::Ollama);

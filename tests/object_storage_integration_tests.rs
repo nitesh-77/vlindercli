@@ -1,6 +1,7 @@
 //! Integration tests for SqliteObjectStorage.
 //! Tests SQLite-specific behavior: persistence, isolation, security.
 
+use vlindercli::config::agent_dir;
 use vlindercli::storage::{ObjectStorage, SqliteObjectStorage};
 
 #[test]
@@ -8,7 +9,7 @@ fn sqlite_open_creates_db() {
     let storage = SqliteObjectStorage::open("test-agent-open").unwrap();
     drop(storage);
 
-    let _ = std::fs::remove_dir_all(".vlinder/agents/test-agent-open");
+    let _ = std::fs::remove_dir_all(agent_dir("test-agent-open"));
 }
 
 /// Verify data persists across close/reopen
@@ -29,7 +30,7 @@ fn sqlite_persistence() {
         assert_eq!(content, Some(b"survives restart".to_vec()));
     }
 
-    let _ = std::fs::remove_dir_all(format!(".vlinder/agents/{}", agent_name));
+    let _ = std::fs::remove_dir_all(agent_dir(agent_name));
 }
 
 /// Security test: Agents cannot access host filesystem via path traversal.
@@ -51,7 +52,7 @@ fn sqlite_cannot_read_host_filesystem() {
     assert!(system_files.is_empty());
 
     drop(storage);
-    let _ = std::fs::remove_dir_all(".vlinder/agents/test-agent-security");
+    let _ = std::fs::remove_dir_all(agent_dir("test-agent-security"));
 }
 
 /// Security test: Each agent's storage is isolated
@@ -81,6 +82,6 @@ fn sqlite_agent_isolation() {
 
     drop(storage_a);
     drop(storage_b);
-    let _ = std::fs::remove_dir_all(".vlinder/agents/test-agent-isolated-a");
-    let _ = std::fs::remove_dir_all(".vlinder/agents/test-agent-isolated-b");
+    let _ = std::fs::remove_dir_all(agent_dir("test-agent-isolated-a"));
+    let _ = std::fs::remove_dir_all(agent_dir("test-agent-isolated-b"));
 }

@@ -1,6 +1,7 @@
 //! Integration tests for SqliteVectorStorage.
 //! Tests SQLite-specific behavior: persistence, sqlite-vec functionality.
 
+use vlindercli::config::agent_dir;
 use vlindercli::storage::{VectorStorage, SqliteVectorStorage};
 
 /// Create a 768-dim test vector
@@ -27,7 +28,7 @@ fn sqlite_store_and_search() {
     assert_eq!(results[0].1, "first document");
 
     drop(storage);
-    let _ = std::fs::remove_dir_all(".vlinder/agents/test-agent-vec");
+    let _ = std::fs::remove_dir_all(agent_dir("test-agent-vec"));
 }
 
 /// Verify data persists across close/reopen
@@ -51,7 +52,7 @@ fn sqlite_persistence() {
         assert_eq!(results[0].1, "survives restart");
     }
 
-    let _ = std::fs::remove_dir_all(format!(".vlinder/agents/{}", agent_name));
+    let _ = std::fs::remove_dir_all(agent_dir(agent_name));
 }
 
 #[test]
@@ -71,7 +72,7 @@ fn sqlite_overwrite() {
     assert_eq!(results[0].1, "updated");
 
     drop(storage);
-    let _ = std::fs::remove_dir_all(".vlinder/agents/test-agent-vec-overwrite");
+    let _ = std::fs::remove_dir_all(agent_dir("test-agent-vec-overwrite"));
 }
 
 #[test]
@@ -91,7 +92,7 @@ fn sqlite_delete() {
     assert_eq!(results.len(), 0);
 
     drop(storage);
-    let _ = std::fs::remove_dir_all(".vlinder/agents/test-agent-vec-del");
+    let _ = std::fs::remove_dir_all(agent_dir("test-agent-vec-del"));
 }
 
 /// Security test: Each agent's vector storage is isolated
@@ -121,6 +122,6 @@ fn sqlite_agent_isolation() {
 
     drop(storage_a);
     drop(storage_b);
-    let _ = std::fs::remove_dir_all(".vlinder/agents/test-agent-vec-isolated-a");
-    let _ = std::fs::remove_dir_all(".vlinder/agents/test-agent-vec-isolated-b");
+    let _ = std::fs::remove_dir_all(agent_dir("test-agent-vec-isolated-a"));
+    let _ = std::fs::remove_dir_all(agent_dir("test-agent-vec-isolated-b"));
 }
