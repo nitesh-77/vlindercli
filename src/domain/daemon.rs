@@ -13,7 +13,7 @@ use crate::config::registry_db_path;
 use crate::domain::{EngineType, InMemoryRegistry, ObjectStorageType, Provider, RegistryRepository, Runtime, RuntimeType, VectorStorageType};
 use crate::domain::harness::Harness;
 use crate::domain::registry::Registry;
-use crate::queue::InMemoryQueue;
+use crate::queue;
 use crate::runtime::WasmRuntime;
 use crate::storage::SqliteRegistryRepository;
 
@@ -38,7 +38,8 @@ impl Daemon {
 
 impl Daemon {
     pub fn new() -> Self {
-        let queue = Arc::new(InMemoryQueue::new());
+        let queue = queue::from_config()
+            .expect("Failed to create queue from config");
         let registry = InMemoryRegistry::new();
         let registry_id = registry.id();
 
