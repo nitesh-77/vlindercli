@@ -34,6 +34,10 @@ answers from your knowledge base. Like Dumbledore's pensieve, but for the web.
 source = "https://github.com/vlindercli/pensieve"
 id = "agent.wasm"
 
+# Storage backends for this agent (SQLite files in agent directory)
+object_storage = "sqlite://data/objects.db"
+vector_storage = "sqlite://data/vectors.db"
+
 
 # -----------------------------------------------------------------------------
 # 2. REQUIREMENTS

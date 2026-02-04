@@ -61,6 +61,14 @@ impl AgentManifest {
             mount.host_path = resolve_host_path(&mount.host_path, &agent_dir);
         }
 
+        // Resolve storage URIs (sqlite:// paths need to be absolute)
+        if let Some(ref storage) = manifest.object_storage {
+            manifest.object_storage = Some(resolve_storage_uri(storage, &agent_dir));
+        }
+        if let Some(ref storage) = manifest.vector_storage {
+            manifest.vector_storage = Some(resolve_storage_uri(storage, &agent_dir));
+        }
+
         Ok(manifest)
     }
 }
@@ -134,6 +142,22 @@ fn resolve_host_path(host_path: &str, agent_dir: &Path) -> String {
     } else {
         agent_dir.join(host_path).display().to_string()
     }
+}
+
+/// Resolve a storage URI, making relative sqlite:// paths absolute.
+fn resolve_storage_uri(storage: &ResourceId, agent_dir: &Path) -> ResourceId {
+    let uri = storage.as_str();
+
+    // sqlite://path → resolve path relative to agent_dir
+    if let Some(path) = uri.strip_prefix("sqlite://") {
+        if !Path::new(path).is_absolute() {
+            let resolved = agent_dir.join(path);
+            return ResourceId::new(format!("sqlite://{}", resolved.display()));
+        }
+    }
+
+    // Other schemes (memory://, s3://, etc.) pass through unchanged
+    storage.clone()
 }
 
 #[derive(Debug)]

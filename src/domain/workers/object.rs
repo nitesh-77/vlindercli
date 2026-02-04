@@ -99,14 +99,19 @@ impl ObjectServiceWorker {
     }
 
     fn try_get(&self) -> bool {
+        tracing::debug!("ObjectServiceWorker: checking for kv-get messages");
         match self.queue.receive("kv-get") {
             Ok(pending) => {
+                tracing::info!("ObjectServiceWorker: received kv-get request");
                 let response = self.handle_get(&pending.message);
                 self.send_response(&pending.message, response);
                 let _ = pending.ack();
                 true
             }
-            Err(_) => false,
+            Err(e) => {
+                tracing::debug!("ObjectServiceWorker: no kv-get message: {:?}", e);
+                false
+            }
         }
     }
 

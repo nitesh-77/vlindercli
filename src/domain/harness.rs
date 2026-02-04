@@ -83,9 +83,17 @@ impl Harness {
         let message = Message::request(input.as_bytes().to_vec(), &self.reply_queue);
         let message_id = message.id.clone();
 
+        tracing::info!(
+            agent_id = %agent_id,
+            reply_queue = %self.reply_queue,
+            "Sending message to agent queue"
+        );
+
         self.queue
             .send(agent_id.as_str(), message)
             .map_err(|e| format!("failed to queue: {}", e))?;
+
+        tracing::info!(agent_id = %agent_id, "Message sent successfully");
 
         // Track for response correlation
         self.inflight.insert(message_id, job_id.clone());
@@ -105,10 +113,18 @@ impl Harness {
 
     /// Tick: monitor reply queue and update completed jobs in registry.
     pub fn tick(&mut self) {
+        tracing::debug!(reply_queue = %self.reply_queue, "Harness tick: checking for responses");
         while let Ok(pending) = self.queue.receive(&self.reply_queue) {
             if let Some(correlation_id) = &pending.message.correlation_id {
                 if let Some(job_id) = self.inflight.remove(correlation_id) {
                     let result = String::from_utf8_lossy(&pending.message.payload).to_string();
+                    let preview = if result.len() > 100 { &result[..100] } else { &result };
+                    tracing::info!(
+                        job_id = ?job_id,
+                        result_len = result.len(),
+                        preview = %preview,
+                        "Harness received agent response, job completed"
+                    );
                     self.registry.update_job_status(&job_id, JobStatus::Completed(result));
                 }
             }

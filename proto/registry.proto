@@ -15,6 +15,7 @@ service Registry {
 
   // Model operations
   rpc GetModel(GetModelRequest) returns (GetModelResponse);
+  rpc ListModels(ListModelsRequest) returns (ListModelsResponse);
   rpc RegisterModel(RegisterModelRequest) returns (RegisterModelResponse);
 
   // Job operations
@@ -118,6 +119,12 @@ message GetModelRequest {
 
 message GetModelResponse {
   optional Model model = 1;
+}
+
+message ListModelsRequest {}
+
+message ListModelsResponse {
+  repeated Model models = 1;
 }
 
 message RegisterModelRequest {

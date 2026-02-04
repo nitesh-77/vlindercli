@@ -11,6 +11,7 @@ use super::proto::{
     RegisterAgentRequest, RegisterAgentResponse,
     ListAgentsRequest, ListAgentsResponse,
     GetModelRequest, GetModelResponse,
+    ListModelsRequest, ListModelsResponse,
     RegisterModelRequest, RegisterModelResponse,
     CreateJobRequest, CreateJobResponse,
     GetJobRequest, GetJobResponse,
@@ -110,6 +111,18 @@ impl RegistryService for RegistryServiceServer {
         Ok(Response::new(GetModelResponse { model }))
     }
 
+    async fn list_models(
+        &self,
+        _request: Request<ListModelsRequest>,
+    ) -> Result<Response<ListModelsResponse>, Status> {
+        let models = self.registry.get_models()
+            .into_iter()
+            .map(|m| m.into())
+            .collect();
+
+        Ok(Response::new(ListModelsResponse { models }))
+    }
+
     async fn register_model(
         &self,
         request: Request<RegisterModelRequest>,
@@ -165,14 +178,15 @@ impl RegistryService for RegistryServiceServer {
             .ok_or_else(|| Status::invalid_argument("missing job id"))?
             .into();
 
-        let status: DomainJobStatus = proto::JobStatus::try_from(req.status)
-            .map_err(|_| Status::invalid_argument("invalid status"))?
-            .into();
+        // Convert proto status to domain status, including output if provided
+        let status: DomainJobStatus = match (proto::JobStatus::try_from(req.status), req.output) {
+            (Ok(proto::JobStatus::Completed), Some(output)) => DomainJobStatus::Completed(output),
+            (Ok(proto::JobStatus::Failed), Some(error)) => DomainJobStatus::Failed(error),
+            (Ok(s), _) => s.into(),
+            (Err(_), _) => return Err(Status::invalid_argument("invalid status")),
+        };
 
         self.registry.update_job_status(&job_id, status);
-
-        // If output provided, update it (need to get job, modify, and there's no direct method)
-        // For now, just update status. Output handling can be added if needed.
 
         Ok(Response::new(UpdateJobStatusResponse { success: true }))
     }

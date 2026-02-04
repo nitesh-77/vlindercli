@@ -93,24 +93,53 @@ impl NatsQueue {
     /// - `kv.default` → `vlinder.svc.kv.default`
     /// - `vec.default` → `vlinder.svc.vec.default`
     /// - `pensieve` (agent name) → `vlinder.agent.pensieve`
+    /// - `file:///path/to/pensieve.wasm` → `vlinder.agent.pensieve`
+    ///
+    /// NATS subjects can only contain alphanumeric, `.`, `_`, and `-`.
+    /// File URIs are sanitized to extract just the agent name.
     fn to_subject(queue: &str) -> String {
         // Already a full subject
         if queue.starts_with("vlinder.") || queue.starts_with("_INBOX.") {
             return queue.to_string();
         }
 
-        // Parse service.routing_key format
-        if let Some((service, routing_key)) = queue.split_once('.') {
+        // For file:// URIs, extract just the filename as agent name
+        // e.g., "file:///path/to/pensieve.wasm" → "pensieve"
+        let sanitized = if queue.starts_with("file://") {
+            queue
+                .rsplit('/')
+                .next()
+                .and_then(|f| f.strip_suffix(".wasm"))
+                .unwrap_or(queue)
+        } else {
+            queue
+        };
+
+        // Parse service.routing_key format (e.g., infer.phi3, embed.nomic)
+        if let Some((service, routing_key)) = sanitized.split_once('.') {
             match service {
                 "infer" => format!("vlinder.svc.infer.{}", routing_key),
                 "embed" => format!("vlinder.svc.embed.{}", routing_key),
                 "kv" => format!("vlinder.svc.kv.{}", routing_key),
                 "vec" => format!("vlinder.svc.vec.{}", routing_key),
-                _ => format!("vlinder.agent.{}", queue), // Unknown service, treat as agent
+                _ => format!("vlinder.agent.{}", sanitized), // Unknown service, treat as agent
+            }
+        } else if let Some((service, action)) = sanitized.split_once('-') {
+            // Parse service-action format (e.g., kv-get, kv-put, vec-search, vector-store)
+            match service {
+                "kv" => format!("vlinder.svc.kv.{}", action),
+                "vec" | "vector" => format!("vlinder.svc.vec.{}", action),
+                _ => format!("vlinder.agent.{}", sanitized), // Unknown, treat as agent
             }
         } else {
-            // No dot = agent name
-            format!("vlinder.agent.{}", queue)
+            // Bare service names map to exact subjects (no wildcard - works for both publish and subscribe)
+            match sanitized {
+                "infer" => "vlinder.svc.infer".to_string(),
+                "embed" => "vlinder.svc.embed".to_string(),
+                "kv" => "vlinder.svc.kv".to_string(),
+                "vec" => "vlinder.svc.vec".to_string(),
+                _ => format!("vlinder.agent.{}", sanitized), // Agent name
+            }
         }
     }
 
@@ -171,11 +200,11 @@ impl MessageQueue for NatsQueue {
                 .await
                 .map_err(|e| QueueError::ReceiveFailed(e.to_string()))?;
 
-            // Fetch one message with timeout
+            // Fetch one message with short timeout (workers need to cycle quickly)
             let mut messages = consumer
                 .fetch()
                 .max_messages(1)
-                .expires(Duration::from_secs(30))
+                .expires(Duration::from_millis(100))
                 .messages()
                 .await
                 .map_err(|e| QueueError::ReceiveFailed(e.to_string()))?;
@@ -265,9 +294,43 @@ mod tests {
     }
 
     #[test]
+    fn to_subject_maps_bare_services() {
+        // Bare service names map to exact subjects (works for both publish and subscribe)
+        assert_eq!(NatsQueue::to_subject("infer"), "vlinder.svc.infer");
+        assert_eq!(NatsQueue::to_subject("embed"), "vlinder.svc.embed");
+        assert_eq!(NatsQueue::to_subject("kv"), "vlinder.svc.kv");
+        assert_eq!(NatsQueue::to_subject("vec"), "vlinder.svc.vec");
+    }
+
+    #[test]
+    fn to_subject_maps_hyphenated_service_actions() {
+        // Storage services use service-action format (e.g., kv-get, vec-search)
+        assert_eq!(NatsQueue::to_subject("kv-get"), "vlinder.svc.kv.get");
+        assert_eq!(NatsQueue::to_subject("kv-put"), "vlinder.svc.kv.put");
+        assert_eq!(NatsQueue::to_subject("vec-search"), "vlinder.svc.vec.search");
+        assert_eq!(NatsQueue::to_subject("vec-upsert"), "vlinder.svc.vec.upsert");
+        // "vector" is an alias for "vec"
+        assert_eq!(NatsQueue::to_subject("vector-store"), "vlinder.svc.vec.store");
+        assert_eq!(NatsQueue::to_subject("vector-search"), "vlinder.svc.vec.search");
+    }
+
+    #[test]
     fn to_subject_maps_agents() {
         assert_eq!(NatsQueue::to_subject("pensieve"), "vlinder.agent.pensieve");
         assert_eq!(NatsQueue::to_subject("echo"), "vlinder.agent.echo");
+    }
+
+    #[test]
+    fn to_subject_sanitizes_file_uris() {
+        // file:// URIs with invalid NATS characters are sanitized to just the agent name
+        assert_eq!(
+            NatsQueue::to_subject("file:///Users/foo/agents/pensieve/target/pensieve.wasm"),
+            "vlinder.agent.pensieve"
+        );
+        assert_eq!(
+            NatsQueue::to_subject("file:///home/user/echo-agent.wasm"),
+            "vlinder.agent.echo-agent"
+        );
     }
 
     #[test]

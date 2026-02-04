@@ -131,11 +131,29 @@ impl Registry for GrpcRegistryClient {
         response.into_inner().model.and_then(|m| m.try_into().ok())
     }
 
-    fn get_model_by_path(&self, _path: &ResourceId) -> Option<Model> {
-        // Get all models and find by path (inefficient, but works for now)
-        // TODO: Add a dedicated RPC for this
-        self.get_agents(); // Just to verify connection works
-        None // Not implemented via gRPC yet
+    fn get_models(&self) -> Vec<Model> {
+        let request = proto::ListModelsRequest {};
+
+        let response = self.runtime.block_on(async {
+            self.client.lock().unwrap()
+                .list_models(request)
+                .await
+        });
+
+        match response {
+            Ok(resp) => resp.into_inner().models
+                .into_iter()
+                .filter_map(|m| m.try_into().ok())
+                .collect(),
+            Err(_) => vec![],
+        }
+    }
+
+    fn get_model_by_path(&self, path: &ResourceId) -> Option<Model> {
+        // Get all models and find by path
+        self.get_models()
+            .into_iter()
+            .find(|m| &m.model_path == path)
     }
 
     fn model_id(&self, name: &str) -> ResourceId {
@@ -179,10 +197,17 @@ impl Registry for GrpcRegistryClient {
     }
 
     fn update_job_status(&self, id: &JobId, status: JobStatus) {
+        // Extract output from Completed/Failed status
+        let output = match &status {
+            JobStatus::Completed(result) => Some(result.clone()),
+            JobStatus::Failed(error) => Some(error.clone()),
+            _ => None,
+        };
+
         let request = proto::UpdateJobStatusRequest {
             id: Some(id.into()),
             status: proto::JobStatus::from(status).into(),
-            output: None,
+            output,
         };
 
         let _ = self.runtime.block_on(async {

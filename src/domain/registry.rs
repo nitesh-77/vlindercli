@@ -120,6 +120,9 @@ pub trait Registry: Send + Sync {
     /// Get a model by name.
     fn get_model(&self, name: &str) -> Option<Model>;
 
+    /// Get all registered models.
+    fn get_models(&self) -> Vec<Model>;
+
     /// Get a model by its model_path (the URI that identifies the actual model resource).
     fn get_model_by_path(&self, path: &ResourceId) -> Option<Model>;
 
@@ -292,6 +295,11 @@ impl Registry for InMemoryRegistry {
         let model_id = self.model_id(name);
         let state = self.state.read().unwrap();
         state.models.get(&model_id).cloned()
+    }
+
+    fn get_models(&self) -> Vec<Model> {
+        let state = self.state.read().unwrap();
+        state.models.values().cloned().collect()
     }
 
     fn get_model_by_path(&self, path: &ResourceId) -> Option<Model> {

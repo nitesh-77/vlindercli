@@ -71,6 +71,14 @@ impl Runtime for WasmRuntime {
             if task.handle.is_finished() {
                 // Task done - send response
                 let output = task.handle.join().unwrap();
+                let preview = String::from_utf8_lossy(&output);
+                let preview = if preview.len() > 100 { &preview[..100] } else { &preview };
+                tracing::info!(
+                    reply_to = %task.reply_to,
+                    output_len = output.len(),
+                    preview = %preview,
+                    "WASM agent finished, sending response"
+                );
                 let response = Message::response(output, &task.reply_to, task.request_id);
                 self.queue.send(&task.reply_to, response).unwrap();
                 return true;
@@ -82,19 +90,24 @@ impl Runtime for WasmRuntime {
         }
 
         // Collect WASM agents from registry
-        let wasm_agents: Vec<_> = self.registry
-            .get_agents()
+        let all_agents = self.registry.get_agents();
+        tracing::debug!(agent_count = all_agents.len(), "Polling registry for agents");
+
+        let wasm_agents: Vec<_> = all_agents
             .into_iter()
             .filter(|agent| self.registry.select_runtime(agent) == Some(RuntimeType::Wasm))
             .map(|agent| {
                 let wasm_path = agent.id.path().unwrap_or(agent.id.as_str()).to_string();
+                tracing::debug!(agent_id = %agent.id, wasm_path = %wasm_path, "Found WASM agent");
                 (agent.id.as_str().to_string(), wasm_path)
             })
             .collect();
 
         // Check for work (registry lock released)
         for (agent_id_str, wasm_path) in wasm_agents {
+            tracing::debug!(agent_id = %agent_id_str, "Checking queue for messages");
             if let Ok(pending) = self.queue.receive(&agent_id_str) {
+                tracing::info!(agent_id = %agent_id_str, "Received message for agent");
                 let queue = Arc::clone(&self.queue);
                 let payload = pending.message.payload.clone();
                 let reply_to = pending.message.reply_to.clone();
@@ -179,13 +192,15 @@ fn make_send_function(queue: Arc<dyn MessageQueue + Send + Sync>, agent_id: Stri
                 .ok_or_else(|| extism::Error::msg("payload missing 'op' field"))?
                 .to_string();
 
+            tracing::info!(op = %op, "WASM agent calling service");
+
             // Inject agent_id for storage operations
             if let Some(obj) = json.as_object_mut() {
                 obj.insert("agent_id".to_string(), serde_json::Value::String(data.agent_id.clone()));
             }
 
-            // Generate reply queue
-            let reply_to = format!("{}-reply-{}", data.agent_id, uuid::Uuid::new_v4());
+            // Generate reply queue (must be valid NATS subject - no special chars)
+            let reply_to = format!("reply-{}", uuid::Uuid::new_v4());
 
             // Send request
             let enriched_payload = serde_json::to_vec(&json)
@@ -195,11 +210,16 @@ fn make_send_function(queue: Arc<dyn MessageQueue + Send + Sync>, agent_id: Stri
             data.queue.send(&op, message)
                 .map_err(|e| extism::Error::msg(format!("send error: {}", e)))?;
 
+            tracing::info!(op = %op, reply_to = %reply_to, "Message sent, waiting for response");
+
             // Wait for response
             loop {
                 if let Ok(pending) = data.queue.receive(&reply_to) {
                     let payload = pending.message.payload.clone();
                     let _ = pending.ack();
+                    let preview = String::from_utf8_lossy(&payload);
+                    let preview = if preview.len() > 100 { &preview[..100] } else { &preview };
+                    tracing::info!(op = %op, response_len = payload.len(), preview = %preview, "Service call completed");
                     return write_output(plugin, outputs, &payload);
                 }
                 std::thread::sleep(std::time::Duration::from_millis(1));

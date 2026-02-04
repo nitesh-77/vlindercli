@@ -20,6 +20,15 @@ use crate::config::Config;
 use crate::domain::Registry;
 use crate::worker_role::WorkerRole;
 
+/// Helper to get gRPC registry address with http:// prefix.
+fn grpc_registry_addr(config: &Config) -> String {
+    if config.distributed.registry_addr.starts_with("http://") {
+        config.distributed.registry_addr.clone()
+    } else {
+        format!("http://{}", config.distributed.registry_addr)
+    }
+}
+
 /// Run the worker loop for the given role.
 ///
 /// This function blocks until shutdown is signaled. Workers should be run
@@ -147,18 +156,22 @@ fn run_agent_wasm_worker(config: &Config, shutdown: &AtomicBool) {
 }
 
 fn run_inference_ollama_worker(config: &Config, shutdown: &AtomicBool) {
-    use crate::domain::{InMemoryRegistry, EngineType};
     use crate::domain::workers::InferenceServiceWorker;
     use crate::queue;
+    use crate::registry_service::GrpcRegistryClient;
 
     let queue = queue::from_config().expect("Failed to create queue");
-    let registry = Arc::new(InMemoryRegistry::new());
-    registry.register_inference_engine(EngineType::Ollama);
-    let registry: Arc<dyn crate::domain::Registry> = registry;
+
+    // Connect to central registry via gRPC
+    let registry_addr = grpc_registry_addr(config);
+    let registry: Arc<dyn Registry> = Arc::new(
+        GrpcRegistryClient::connect(&registry_addr)
+            .expect("Failed to connect to registry")
+    );
 
     let worker = InferenceServiceWorker::new(queue, registry);
 
-    tracing::info!(endpoint = %config.ollama.endpoint, "Ollama inference worker ready");
+    tracing::info!(endpoint = %config.ollama.endpoint, registry = %registry_addr, "Ollama inference worker ready");
 
     while !shutdown.load(Ordering::Relaxed) {
         worker.tick();
@@ -167,18 +180,22 @@ fn run_inference_ollama_worker(config: &Config, shutdown: &AtomicBool) {
 }
 
 fn run_embedding_ollama_worker(config: &Config, shutdown: &AtomicBool) {
-    use crate::domain::{InMemoryRegistry, EngineType};
     use crate::domain::workers::EmbeddingServiceWorker;
     use crate::queue;
+    use crate::registry_service::GrpcRegistryClient;
 
     let queue = queue::from_config().expect("Failed to create queue");
-    let registry = Arc::new(InMemoryRegistry::new());
-    registry.register_embedding_engine(EngineType::Ollama);
-    let registry: Arc<dyn crate::domain::Registry> = registry;
+
+    // Connect to central registry via gRPC
+    let registry_addr = grpc_registry_addr(config);
+    let registry: Arc<dyn Registry> = Arc::new(
+        GrpcRegistryClient::connect(&registry_addr)
+            .expect("Failed to connect to registry")
+    );
 
     let worker = EmbeddingServiceWorker::new(queue, registry);
 
-    tracing::info!(endpoint = %config.ollama.endpoint, "Ollama embedding worker ready");
+    tracing::info!(endpoint = %config.ollama.endpoint, registry = %registry_addr, "Ollama embedding worker ready");
 
     while !shutdown.load(Ordering::Relaxed) {
         worker.tick();
@@ -186,19 +203,23 @@ fn run_embedding_ollama_worker(config: &Config, shutdown: &AtomicBool) {
     }
 }
 
-fn run_storage_object_sqlite_worker(_config: &Config, shutdown: &AtomicBool) {
-    use crate::domain::{InMemoryRegistry, ObjectStorageType};
+fn run_storage_object_sqlite_worker(config: &Config, shutdown: &AtomicBool) {
     use crate::domain::workers::ObjectServiceWorker;
     use crate::queue;
+    use crate::registry_service::GrpcRegistryClient;
 
     let queue = queue::from_config().expect("Failed to create queue");
-    let registry = Arc::new(InMemoryRegistry::new());
-    registry.register_object_storage(ObjectStorageType::Sqlite);
-    let registry: Arc<dyn crate::domain::Registry> = registry;
+
+    // Connect to central registry via gRPC
+    let registry_addr = grpc_registry_addr(config);
+    let registry: Arc<dyn Registry> = Arc::new(
+        GrpcRegistryClient::connect(&registry_addr)
+            .expect("Failed to connect to registry")
+    );
 
     let worker = ObjectServiceWorker::new(queue, registry);
 
-    tracing::info!("SQLite object storage worker ready");
+    tracing::info!(registry = %registry_addr, "SQLite object storage worker ready");
 
     while !shutdown.load(Ordering::Relaxed) {
         worker.tick();
@@ -206,19 +227,22 @@ fn run_storage_object_sqlite_worker(_config: &Config, shutdown: &AtomicBool) {
     }
 }
 
-fn run_storage_object_memory_worker(_config: &Config, shutdown: &AtomicBool) {
-    use crate::domain::{InMemoryRegistry, ObjectStorageType};
+fn run_storage_object_memory_worker(config: &Config, shutdown: &AtomicBool) {
     use crate::domain::workers::ObjectServiceWorker;
     use crate::queue;
+    use crate::registry_service::GrpcRegistryClient;
 
     let queue = queue::from_config().expect("Failed to create queue");
-    let registry = Arc::new(InMemoryRegistry::new());
-    registry.register_object_storage(ObjectStorageType::InMemory);
-    let registry: Arc<dyn crate::domain::Registry> = registry;
+
+    let registry_addr = grpc_registry_addr(config);
+    let registry: Arc<dyn Registry> = Arc::new(
+        GrpcRegistryClient::connect(&registry_addr)
+            .expect("Failed to connect to registry")
+    );
 
     let worker = ObjectServiceWorker::new(queue, registry);
 
-    tracing::info!("In-memory object storage worker ready");
+    tracing::info!(registry = %registry_addr, "In-memory object storage worker ready");
 
     while !shutdown.load(Ordering::Relaxed) {
         worker.tick();
@@ -226,19 +250,22 @@ fn run_storage_object_memory_worker(_config: &Config, shutdown: &AtomicBool) {
     }
 }
 
-fn run_storage_vector_sqlite_worker(_config: &Config, shutdown: &AtomicBool) {
-    use crate::domain::{InMemoryRegistry, VectorStorageType};
+fn run_storage_vector_sqlite_worker(config: &Config, shutdown: &AtomicBool) {
     use crate::domain::workers::VectorServiceWorker;
     use crate::queue;
+    use crate::registry_service::GrpcRegistryClient;
 
     let queue = queue::from_config().expect("Failed to create queue");
-    let registry = Arc::new(InMemoryRegistry::new());
-    registry.register_vector_storage(VectorStorageType::SqliteVec);
-    let registry: Arc<dyn crate::domain::Registry> = registry;
+
+    let registry_addr = grpc_registry_addr(config);
+    let registry: Arc<dyn Registry> = Arc::new(
+        GrpcRegistryClient::connect(&registry_addr)
+            .expect("Failed to connect to registry")
+    );
 
     let worker = VectorServiceWorker::new(queue, registry);
 
-    tracing::info!("SQLite-vec vector storage worker ready");
+    tracing::info!(registry = %registry_addr, "SQLite-vec vector storage worker ready");
 
     while !shutdown.load(Ordering::Relaxed) {
         worker.tick();
@@ -246,19 +273,22 @@ fn run_storage_vector_sqlite_worker(_config: &Config, shutdown: &AtomicBool) {
     }
 }
 
-fn run_storage_vector_memory_worker(_config: &Config, shutdown: &AtomicBool) {
-    use crate::domain::{InMemoryRegistry, VectorStorageType};
+fn run_storage_vector_memory_worker(config: &Config, shutdown: &AtomicBool) {
     use crate::domain::workers::VectorServiceWorker;
     use crate::queue;
+    use crate::registry_service::GrpcRegistryClient;
 
     let queue = queue::from_config().expect("Failed to create queue");
-    let registry = Arc::new(InMemoryRegistry::new());
-    registry.register_vector_storage(VectorStorageType::InMemory);
-    let registry: Arc<dyn crate::domain::Registry> = registry;
+
+    let registry_addr = grpc_registry_addr(config);
+    let registry: Arc<dyn Registry> = Arc::new(
+        GrpcRegistryClient::connect(&registry_addr)
+            .expect("Failed to connect to registry")
+    );
 
     let worker = VectorServiceWorker::new(queue, registry);
 
-    tracing::info!("In-memory vector storage worker ready");
+    tracing::info!(registry = %registry_addr, "In-memory vector storage worker ready");
 
     while !shutdown.load(Ordering::Relaxed) {
         worker.tick();
