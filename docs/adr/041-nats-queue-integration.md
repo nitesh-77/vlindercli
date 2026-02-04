@@ -180,8 +180,77 @@ The sync facade buys time. When the codebase goes async (HTTP server, WASM async
 - Thread blocking — sync facade blocks OS threads (acceptable for MVP)
 - Two runtimes — main thread sync, NatsQueue owns tokio (isolated)
 
+## Subject and Stream Design
+
+### Subject Naming
+
+Use agent/model **names** (not full URIs) for subjects. URIs contain invalid characters (`://`, `/`) and are payload data, not routing keys.
+
+```
+vlinder.agent.{name}       Agent invocations (e.g., vlinder.agent.pensieve)
+vlinder.svc.infer          Inference requests
+vlinder.svc.embed          Embedding requests
+vlinder.svc.kv             Object storage operations
+vlinder.svc.vec            Vector storage operations
+_INBOX.{id}                Replies (Core NATS ephemeral inbox)
+```
+
+### Stream Configuration
+
+Start with one stream capturing everything:
+
+```rust
+stream::Config {
+    name: "VLINDER",
+    subjects: vec!["vlinder.>"],
+    retention: RetentionPolicy::WorkQueue,
+    storage: StorageType::File,
+    ..Default::default()
+}
+```
+
+**Why one stream:**
+- Wildcard `vlinder.>` captures all subjects
+- No per-agent/per-service setup needed
+- Refine into separate streams later if needed (observability, different retention)
+
+### Reply Pattern
+
+Use NATS native request/reply with ephemeral inboxes:
+
+```rust
+// Request with auto-generated reply inbox
+let response = client.request("vlinder.svc.infer", payload).await?;
+```
+
+NATS creates `_INBOX.{unique_id}` automatically. No JetStream needed for replies—they're ephemeral and short-lived.
+
+### Queue Name Mapping
+
+| Current (InMemoryQueue) | NATS Subject |
+|-------------------------|--------------|
+| `"infer"` | `vlinder.svc.infer` |
+| `"embed"` | `vlinder.svc.embed` |
+| `"kv-get"`, `"kv-put"`, etc. | `vlinder.svc.kv` |
+| `"vector-store"`, etc. | `vlinder.svc.vec` |
+| `"{agent_id}"` | `vlinder.agent.{name}` |
+| `"{reply_to}"` | `_INBOX.{id}` (auto) |
+
+### Why This Is Safe
+
+All decisions are reversible:
+
+| Change | Cost |
+|--------|------|
+| Rename subjects | Update string, redeploy |
+| Split stream | Create new stream, update subjects |
+| Add durability | Add JetStream to Core NATS subject |
+| Change retention | Update stream config |
+
+No one-way doors.
+
 ## Open Questions
 
-- Stream naming convention? (`vlinder.jobs.<agent_id>`, `vlinder.events.*`)
 - Consumer group strategy for scaling workers?
 - How to handle NATS connection failures gracefully?
+- Metrics/observability for queue depth?
