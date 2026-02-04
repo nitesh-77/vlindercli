@@ -57,6 +57,7 @@ impl ConfigLoader for TestLoader {
 pub struct Config {
     pub logging: LoggingConfig,
     pub ollama: OllamaConfig,
+    pub queue: QueueConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -75,6 +76,14 @@ pub struct OllamaConfig {
     pub endpoint: String,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct QueueConfig {
+    /// Queue backend: "memory" or "nats"
+    pub backend: String,
+    /// NATS server URL (if backend = "nats")
+    pub nats_url: String,
+}
 
 // ============================================================================
 // Defaults
@@ -85,6 +94,7 @@ impl Default for Config {
         Self {
             logging: LoggingConfig::default(),
             ollama: OllamaConfig::default(),
+            queue: QueueConfig::default(),
         }
     }
 }
@@ -106,6 +116,14 @@ impl Default for OllamaConfig {
     }
 }
 
+impl Default for QueueConfig {
+    fn default() -> Self {
+        Self {
+            backend: "memory".to_string(),
+            nats_url: "nats://localhost:4222".to_string(),
+        }
+    }
+}
 
 // ============================================================================
 // Config Implementation
@@ -148,6 +166,14 @@ impl Config {
         // Ollama
         if let Ok(v) = std::env::var("VLINDER_OLLAMA_ENDPOINT") {
             self.ollama.endpoint = v;
+        }
+
+        // Queue
+        if let Ok(v) = std::env::var("VLINDER_QUEUE_BACKEND") {
+            self.queue.backend = v;
+        }
+        if let Ok(v) = std::env::var("VLINDER_QUEUE_NATS_URL") {
+            self.queue.nats_url = v;
         }
     }
 

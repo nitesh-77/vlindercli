@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted
 
 ## Context
 
@@ -184,16 +184,24 @@ The sync facade buys time. When the codebase goes async (HTTP server, WASM async
 
 ### Subject Naming
 
-Use agent/model **names** (not full URIs) for subjects. URIs contain invalid characters (`://`, `/`) and are payload data, not routing keys.
+Use **hierarchical subjects** with routing dimensions. This lets NATS handle routing natively—workers subscribe only to subjects they can handle, no application-level message inspection needed.
 
 ```
-vlinder.agent.{name}       Agent invocations (e.g., vlinder.agent.pensieve)
-vlinder.svc.infer          Inference requests
-vlinder.svc.embed          Embedding requests
-vlinder.svc.kv             Object storage operations
-vlinder.svc.vec            Vector storage operations
-_INBOX.{id}                Replies (Core NATS ephemeral inbox)
+vlinder.agent.{name}              Agent invocations (e.g., vlinder.agent.pensieve)
+vlinder.svc.infer.{model}         Inference requests (e.g., vlinder.svc.infer.phi3)
+vlinder.svc.embed.{model}         Embedding requests (e.g., vlinder.svc.embed.nomic-embed-text)
+vlinder.svc.kv.{instance}         Object storage (e.g., vlinder.svc.kv.default)
+vlinder.svc.vec.{instance}        Vector storage (e.g., vlinder.svc.vec.default)
+_INBOX.{id}                       Replies (Core NATS ephemeral inbox)
 ```
+
+**Why hierarchical:**
+- NATS routes to the right worker—no NAK dance
+- Per-model/per-instance observability out of the box (`nats stream info`)
+- Workers subscribe to what they handle: `vlinder.svc.infer.phi3`
+- Wildcard subscriptions still work: `vlinder.svc.infer.>` for "all inference"
+
+**Names not URIs:** Use model/instance names (not full URIs). URIs contain invalid characters (`://`, `/`).
 
 ### Stream Configuration
 
@@ -220,21 +228,37 @@ Use NATS native request/reply with ephemeral inboxes:
 
 ```rust
 // Request with auto-generated reply inbox
-let response = client.request("vlinder.svc.infer", payload).await?;
+let response = client.request("vlinder.svc.infer.phi3", payload).await?;
 ```
 
 NATS creates `_INBOX.{unique_id}` automatically. No JetStream needed for replies—they're ephemeral and short-lived.
 
 ### Queue Name Mapping
 
-| Current (InMemoryQueue) | NATS Subject |
-|-------------------------|--------------|
-| `"infer"` | `vlinder.svc.infer` |
-| `"embed"` | `vlinder.svc.embed` |
-| `"kv-get"`, `"kv-put"`, etc. | `vlinder.svc.kv` |
-| `"vector-store"`, etc. | `vlinder.svc.vec` |
-| `"{agent_id}"` | `vlinder.agent.{name}` |
-| `"{reply_to}"` | `_INBOX.{id}` (auto) |
+| Operation | Routing Info | NATS Subject |
+|-----------|--------------|--------------|
+| Inference | model: `phi3` | `vlinder.svc.infer.phi3` |
+| Embedding | model: `nomic-embed-text` | `vlinder.svc.embed.nomic-embed-text` |
+| Object storage | instance: `default` | `vlinder.svc.kv.default` |
+| Vector storage | instance: `default` | `vlinder.svc.vec.default` |
+| Agent invocation | agent: `pensieve` | `vlinder.agent.pensieve` |
+| Reply | auto-generated | `_INBOX.{id}` |
+
+### Worker Subscriptions
+
+Workers subscribe to subjects matching their capabilities:
+
+```rust
+// Inference worker handling phi3
+consumer.subscribe("vlinder.svc.infer.phi3")
+
+// Inference worker handling multiple models
+consumer.subscribe("vlinder.svc.infer.phi3")
+consumer.subscribe("vlinder.svc.infer.llama3")
+
+// Inference worker handling ALL models (wildcard)
+consumer.subscribe("vlinder.svc.infer.>")
+```
 
 ### Why This Is Safe
 
@@ -248,6 +272,47 @@ All decisions are reversible:
 | Change retention | Update stream config |
 
 No one-way doors.
+
+## Future Considerations
+
+### Bi-temporality and Chronicle Pattern
+
+The current design uses `WorkQueue` retention (messages deleted after consumption). This conflicts with event sourcing / time travel, which requires keeping all events.
+
+**When bi-temporality is needed:**
+
+1. **Add a chronicle stream** alongside the work stream:
+```rust
+stream::Config {
+    name: "VLINDER_CHRONICLE",
+    subjects: vec!["vlinder.>"],
+    retention: RetentionPolicy::Limits,
+    max_messages: -1,  // Unlimited
+    storage: StorageType::File,
+    ..Default::default()
+}
+```
+
+2. **Extend Message format** with temporal fields:
+```rust
+Message {
+    // ... existing fields ...
+    transaction_time: Timestamp,      // When recorded in system
+    valid_time: Option<Timestamp>,    // When true in business terms
+    causation_id: Option<MessageId>,  // What caused this event
+}
+```
+
+3. **Publish to both streams** (or use NATS stream mirroring):
+   - `VLINDER` — real-time processing, ephemeral
+   - `VLINDER_CHRONICLE` — immutable event log, replay source
+
+**Why not do this now:**
+- Adds storage costs (unbounded growth)
+- Adds complexity (dual publish, replay logic)
+- YAGNI until time travel is actually needed
+
+**Migration cost:** Low. Stream config is changeable. Message fields are additive.
 
 ## Open Questions
 

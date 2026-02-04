@@ -63,3 +63,9 @@ impl fmt::Display for MessageId {
         write!(f, "{}", self.0)
     }
 }
+
+impl From<String> for MessageId {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}

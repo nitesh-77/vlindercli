@@ -154,7 +154,7 @@ fn agent_has_model_from_manifest() {
     let agent = Agent::load(&agent_fixture("pensieve")).unwrap();
 
     assert!(agent.has_model("phi3"));
-    assert!(agent.has_model("nomic-embed"));
+    assert!(agent.has_model("nomic-embed-text"));
     assert!(!agent.has_model("llama3"));
 }
 
