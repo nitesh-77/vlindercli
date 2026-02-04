@@ -49,8 +49,10 @@ pub fn run_worker_loop(role: WorkerRole, shutdown: Arc<AtomicBool>) {
 
 fn run_registry_worker(config: &Config, shutdown: &AtomicBool) {
     use tonic::transport::Server;
-    use crate::domain::{InMemoryRegistry, RuntimeType, ObjectStorageType, VectorStorageType, EngineType};
+    use crate::config::registry_db_path;
+    use crate::domain::{InMemoryRegistry, RegistryRepository, RuntimeType, ObjectStorageType, VectorStorageType, EngineType};
     use crate::registry_service::RegistryServiceServer;
+    use crate::storage::SqliteRegistryRepository;
 
     let registry = InMemoryRegistry::new();
 
@@ -66,6 +68,19 @@ fn run_registry_worker(config: &Config, shutdown: &AtomicBool) {
     registry.register_embedding_engine(EngineType::Llama);
     registry.register_embedding_engine(EngineType::Ollama);
     registry.register_embedding_engine(EngineType::InMemory);
+
+    // Load registered models from persistent storage
+    let db_path = registry_db_path();
+    if db_path.exists() {
+        if let Ok(repo) = SqliteRegistryRepository::open(&db_path) {
+            if let Ok(models) = repo.load_models() {
+                for model in models {
+                    tracing::info!(model = %model.name, "Loaded model from registry");
+                    registry.register_model(model);
+                }
+            }
+        }
+    }
 
     let registry: Arc<dyn Registry> = Arc::new(registry);
 
