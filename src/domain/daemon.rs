@@ -20,11 +20,20 @@ use crate::storage::SqliteRegistryRepository;
 /// The daemon - owns all system components.
 pub struct Daemon {
     // Components (daemon owns all of these)
+    #[allow(dead_code)] // Used via test-only accessor
     registry: Arc<dyn Registry>,
     /// The API surface - use this for deploy/invoke/poll.
     pub harness: Harness,
     runtime: WasmRuntime,
     provider: Provider,
+}
+
+#[cfg(test)]
+impl Daemon {
+    /// Test-only accessor for the registry.
+    pub fn registry(&self) -> &Arc<dyn Registry> {
+        &self.registry
+    }
 }
 
 impl Daemon {
@@ -140,6 +149,7 @@ mod tests {
                 model_type: ModelType::Inference,
                 engine: EngineType::Ollama,
                 model_path: ResourceId::new("ollama://localhost:11434/test-model"),
+                digest: "sha256:test-digest".to_string(),
             };
             repo.save_model(&model).unwrap();
         }
@@ -153,7 +163,7 @@ mod tests {
         std::env::remove_var("VLINDER_DIR");
 
         // Check that the model was loaded
-        let model = daemon.registry.get_model("test-model");
+        let model = daemon.registry().get_model("test-model");
         assert!(model.is_some(), "test-model should be loaded from registry.db");
         assert_eq!(model.unwrap().name, "test-model");
     }

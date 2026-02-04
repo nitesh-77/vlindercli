@@ -156,6 +156,7 @@ mod tests {
             model_type: ModelType::Inference,
             engine: EngineType::InMemory,
             model_path: crate::domain::ResourceId::new(format!("memory://test/{}", name)),
+            digest: format!("sha256:test-digest-{}", name),
         }
     }
 

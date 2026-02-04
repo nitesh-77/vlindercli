@@ -46,7 +46,8 @@ impl SqliteRegistryRepository {
                 name TEXT PRIMARY KEY,
                 model_type TEXT NOT NULL,
                 engine TEXT NOT NULL,
-                model_path TEXT NOT NULL
+                model_path TEXT NOT NULL,
+                digest TEXT NOT NULL
             )",
             [],
         ).map_err(|e| RepositoryError::Database(e.to_string()))?;
@@ -60,9 +61,9 @@ impl RegistryRepository for SqliteRegistryRepository {
         let conn = self.conn.lock().unwrap();
 
         conn.execute(
-            "INSERT OR REPLACE INTO models (name, model_type, engine, model_path)
-             VALUES (?1, ?2, ?3, ?4)",
-            [&stored.name, &stored.model_type, &stored.engine, &stored.model_path],
+            "INSERT OR REPLACE INTO models (name, model_type, engine, model_path, digest)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            [&stored.name, &stored.model_type, &stored.engine, &stored.model_path, &stored.digest],
         ).map_err(|e| RepositoryError::Database(e.to_string()))?;
 
         Ok(())
@@ -71,7 +72,7 @@ impl RegistryRepository for SqliteRegistryRepository {
     fn load_models(&self) -> Result<Vec<Model>, RepositoryError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
-            .prepare("SELECT name, model_type, engine, model_path FROM models")
+            .prepare("SELECT name, model_type, engine, model_path, digest FROM models")
             .map_err(|e| RepositoryError::Database(e.to_string()))?;
 
         let rows = stmt
@@ -81,6 +82,7 @@ impl RegistryRepository for SqliteRegistryRepository {
                     model_type: row.get(1)?,
                     engine: row.get(2)?,
                     model_path: row.get(3)?,
+                    digest: row.get(4)?,
                 })
             })
             .map_err(|e| RepositoryError::Database(e.to_string()))?;
@@ -126,6 +128,7 @@ mod tests {
             model_type: ModelType::Inference,
             engine: EngineType::Ollama,
             model_path: ResourceId::new(format!("ollama://localhost:11434/{}", name)),
+            digest: format!("sha256:test-digest-{}", name),
         }
     }
 

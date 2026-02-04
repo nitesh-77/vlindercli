@@ -28,6 +28,8 @@ pub struct ModelInfo {
     pub name: String,
     pub size: Option<String>,
     pub modified: Option<String>,
+    /// Content digest (e.g., sha256:a80c4f17...).
+    pub digest: Option<String>,
 }
 
 /// Errors that can occur when interacting with a catalog.

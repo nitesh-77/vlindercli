@@ -44,12 +44,16 @@ impl ModelCatalog for OllamaCatalog {
         };
 
         let host = self.endpoint.trim_start_matches("http://");
+        let digest = info.digest.clone()
+            .ok_or_else(|| CatalogError::Parse("missing digest from Ollama API".to_string()))?;
+
         Ok(Model {
             id: Model::placeholder_id(&info.name),
             name: info.name.clone(),
             model_type,
             engine: EngineType::Ollama,
             model_path: ResourceId::new(format!("ollama://{}/{}", host, info.name)),
+            digest,
         })
     }
 
@@ -71,6 +75,7 @@ impl ModelCatalog for OllamaCatalog {
                 name: m.name,
                 size: Some(format_size(m.size)),
                 modified: Some(m.modified_at),
+                digest: Some(format!("sha256:{}", m.digest)),
             })
             .collect())
     }
@@ -106,6 +111,7 @@ struct OllamaModel {
     name: String,
     size: u64,
     modified_at: String,
+    digest: String,
 }
 
 #[cfg(test)]

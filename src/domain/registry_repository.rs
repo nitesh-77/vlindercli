@@ -46,6 +46,7 @@ pub struct StoredModel {
     pub model_type: String,
     pub engine: String,
     pub model_path: String,
+    pub digest: String,
 }
 
 impl StoredModel {
@@ -62,6 +63,7 @@ impl StoredModel {
                 EngineType::InMemory => "inmemory".to_string(),
             },
             model_path: model.model_path.as_str().to_string(),
+            digest: model.digest.clone(),
         }
     }
 
@@ -89,6 +91,7 @@ impl StoredModel {
             model_type,
             engine,
             model_path: ResourceId::new(&self.model_path),
+            digest: self.digest.clone(),
         })
     }
 }
