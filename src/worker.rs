@@ -49,10 +49,25 @@ pub fn run_worker_loop(role: WorkerRole, shutdown: Arc<AtomicBool>) {
 
 fn run_registry_worker(config: &Config, shutdown: &AtomicBool) {
     use tonic::transport::Server;
-    use crate::domain::InMemoryRegistry;
+    use crate::domain::{InMemoryRegistry, RuntimeType, ObjectStorageType, VectorStorageType, EngineType};
     use crate::registry_service::RegistryServiceServer;
 
-    let registry: Arc<dyn Registry> = Arc::new(InMemoryRegistry::new());
+    let registry = InMemoryRegistry::new();
+
+    // Register available capabilities (same as Daemon::new_local)
+    registry.register_runtime(RuntimeType::Wasm);
+    registry.register_object_storage(ObjectStorageType::Sqlite);
+    registry.register_object_storage(ObjectStorageType::InMemory);
+    registry.register_vector_storage(VectorStorageType::SqliteVec);
+    registry.register_vector_storage(VectorStorageType::InMemory);
+    registry.register_inference_engine(EngineType::Llama);
+    registry.register_inference_engine(EngineType::Ollama);
+    registry.register_inference_engine(EngineType::InMemory);
+    registry.register_embedding_engine(EngineType::Llama);
+    registry.register_embedding_engine(EngineType::Ollama);
+    registry.register_embedding_engine(EngineType::InMemory);
+
+    let registry: Arc<dyn Registry> = Arc::new(registry);
 
     // Parse address, stripping http:// prefix if present
     let addr_str = config.distributed.registry_addr
