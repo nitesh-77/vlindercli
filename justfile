@@ -36,7 +36,27 @@ build-pensieve:
 # Run a specific agent (usage: just run pensieve)
 run agent:
     cargo build
-    cd agents/{{agent}} && ../../target/debug/vlindercli agent run -p .
+    cd agents/{{agent}} && VLINDER_DIR={{justfile_directory()}}/.vlinder ../../target/debug/vlindercli agent run -p .
+
+# =============================================================================
+# Model Catalog Commands
+# =============================================================================
+
+# List models from Ollama catalog
+model-list:
+    cargo run -q -- model list
+
+# Add a model from Ollama (usage: just model-add phi3)
+model-add name:
+    cargo run -q -- model add {{name}}
+
+# Show registered models
+model-registered:
+    cargo run -q -- model registered
+
+# Remove a registered model (usage: just model-remove phi3)
+model-remove name:
+    cargo run -q -- model remove {{name}}
 
 # Run tests
 test: build-echo-agent build-upper-agent build-reverse-agent
