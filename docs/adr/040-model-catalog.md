@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted
 
 ## Context
 
@@ -119,50 +119,28 @@ Dispatch by engine type → OllamaInferenceEngine
 HTTP POST to Ollama server
 ```
 
-### 7. Remove Hardcoded Models
+### 7. Registry Persistence
+
+Models are persisted via `RegistryRepository` trait with SQLite as the default implementation:
+
+```
+trait RegistryRepository
+    save_model(model) → Result<()>
+    load_models() → Result<Vec<Model>>
+    delete_model(name) → Result<bool>
+    model_exists(name) → Result<bool>
+```
+
+**Source**: `src/domain/registry_repository.rs` (trait), `src/storage/registry.rs` (SQLite implementation)
+
+**Storage location**: `.vlinder/registry.db`
+
+The Daemon loads models from SQLite on startup. CLI commands persist models via the repository.
+
+### 8. Remove Hardcoded Models
 
 Delete the vlinder models directory and daemon init hardcoding. Models only exist if explicitly added via `vlinder model add`.
 
-## Implementation Plan
-
-Small, incremental commits:
-
-1. **Add `EngineType::Ollama` variant**
-   - Extend enum in `src/domain/model.rs`
-   - Update any exhaustive matches
-
-2. **Add `OllamaInferenceEngine`**
-   - HTTP client implementing `InferenceEngine`
-   - Calls Ollama `/api/generate`
-
-3. **Add `OllamaEmbeddingEngine`**
-   - HTTP client implementing `EmbeddingEngine`
-   - Calls Ollama `/api/embeddings`
-
-4. **Add engine dispatch for Ollama**
-   - Update `open_inference_engine()` and `open_embedding_engine()`
-   - Route `EngineType::Ollama` to new engines
-
-5. **Add `ModelCatalog` trait**
-   - Define trait in `src/domain/catalog.rs`
-   - Export from domain module
-
-6. **Add `OllamaCatalog` implementation**
-   - Query Ollama `/api/tags`
-   - Resolve model names to Model structs
-
-7. **Add model CLI commands**
-   - `vlinder model add`
-   - `vlinder model list`
-   - `vlinder model remove`
-
-8. **Remove hardcoded models from daemon init**
-   - Delete vlinder models directory
-   - Clean up daemon initialization
-
-9. **Update documentation**
-   - Accept this ADR
-   - Update DOMAIN_MODEL.md with catalog trait
 
 ## Consequences
 
