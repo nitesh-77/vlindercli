@@ -4,19 +4,62 @@
 //! 1. Environment variable: VLINDER_<SECTION>_<KEY>
 //! 2. Config file: ~/.vlinder/config.toml
 //! 3. Default value
+//!
+//! The `ConfigLoader` trait allows custom loading strategies for testing
+//! or alternative config sources.
 
 use serde::Deserialize;
 use std::path::PathBuf;
 
+// ============================================================================
+// Config Loader Trait
+// ============================================================================
+
+/// Trait for loading configuration.
+///
+/// Implementations can load from different sources:
+/// - `DefaultLoader`: File + env overrides (production)
+/// - `TestLoader`: In-memory config (testing)
+/// - Future: Remote config services
+pub trait ConfigLoader: Send + Sync {
+    fn load(&self) -> Config;
+}
+
+/// Default loader: file + env overrides.
+pub struct DefaultLoader;
+
+impl ConfigLoader for DefaultLoader {
+    fn load(&self) -> Config {
+        let mut config = Config::load_from_file();
+        config.apply_env_overrides();
+        config
+    }
+}
+
+/// Test loader: returns a pre-configured Config.
+#[cfg(test)]
+pub struct TestLoader(pub Config);
+
+#[cfg(test)]
+impl ConfigLoader for TestLoader {
+    fn load(&self) -> Config {
+        self.0.clone()
+    }
+}
+
+// ============================================================================
+// Config Struct (Typed)
+// ============================================================================
+
 /// Application configuration loaded from ~/.vlinder/config.toml
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct Config {
     pub logging: LoggingConfig,
     pub ollama: OllamaConfig,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct LoggingConfig {
     /// App log level: trace, debug, info, warn, error
@@ -25,12 +68,16 @@ pub struct LoggingConfig {
     pub llama_level: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct OllamaConfig {
     /// Ollama server endpoint
     pub endpoint: String,
 }
+
+// ============================================================================
+// Defaults
+// ============================================================================
 
 impl Default for Config {
     fn default() -> Self {
@@ -58,12 +105,19 @@ impl Default for OllamaConfig {
     }
 }
 
+// ============================================================================
+// Config Implementation
+// ============================================================================
+
 impl Config {
-    /// Load config from ~/.vlinder/config.toml with env overrides.
+    /// Load config using the default loader (file + env).
     pub fn load() -> Self {
-        let mut config = Self::load_from_file();
-        config.apply_env_overrides();
-        config
+        DefaultLoader.load()
+    }
+
+    /// Load config using a custom loader.
+    pub fn load_with(loader: &dyn ConfigLoader) -> Self {
+        loader.load()
     }
 
     /// Load config from file only (no env overrides).
@@ -177,5 +231,20 @@ mod tests {
         std::env::remove_var("VLINDER_OLLAMA_ENDPOINT");
 
         assert_eq!(config.ollama.endpoint, "http://remote:11434");
+    }
+
+    #[test]
+    fn test_loader_returns_custom_config() {
+        let custom = Config {
+            ollama: OllamaConfig {
+                endpoint: "http://custom:9999".to_string(),
+            },
+            ..Default::default()
+        };
+
+        let loader = TestLoader(custom);
+        let config = Config::load_with(&loader);
+
+        assert_eq!(config.ollama.endpoint, "http://custom:9999");
     }
 }
