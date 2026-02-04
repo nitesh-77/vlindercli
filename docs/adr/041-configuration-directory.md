@@ -117,6 +117,47 @@ export VLINDER_DIR=/path/to/project/.vlinder
 - Global by default (some may prefer project-local)
 - Existing `.vlinder/` in repo roots will be ignored (migration needed)
 
+## Configuration Schema
+
+```toml
+# ~/.vlinder/config.toml
+
+[logging]
+level = "info"           # trace, debug, info, warn, error
+llama_level = "error"    # llama.cpp/ggml noise suppression
+
+[ollama]
+endpoint = "http://localhost:11434"
+```
+
+## Layering: Env Overrides Config
+
+Resolution order (highest priority first):
+1. Environment variable
+2. Config file (`~/.vlinder/config.toml`)
+3. Default value
+
+### Environment Variable Naming
+
+Pattern: `VLINDER_<SECTION>_<KEY>` (uppercase, underscores)
+
+| Config Key | Env Var |
+|------------|---------|
+| `logging.level` | `VLINDER_LOGGING_LEVEL` |
+| `ollama.endpoint` | `VLINDER_OLLAMA_ENDPOINT` |
+
+Special case: `VLINDER_DIR` overrides the base directory itself.
+
+### Example Usage
+
+```bash
+# Override Ollama endpoint for remote server
+VLINDER_OLLAMA_ENDPOINT=http://gpu-server:11434 vlinder model list
+
+# Full isolation for testing
+VLINDER_DIR=/tmp/test-vlinder vlinder model add phi3
+```
+
 ## Migration
 
 Users with existing `.vlinder/` directories in project roots:
