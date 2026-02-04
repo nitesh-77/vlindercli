@@ -1,4 +1,5 @@
 mod agent;
+mod daemon;
 mod model;
 mod repl;
 
@@ -24,6 +25,8 @@ pub enum Command {
         #[command(subcommand)]
         cmd: model::ModelCommand,
     },
+    /// Run the vlinder daemon
+    Daemon,
 }
 
 pub fn run() {
@@ -32,6 +35,7 @@ pub fn run() {
     match cli.command {
         Command::Agent { cmd } => agent::execute(cmd),
         Command::Model { cmd } => model::execute(cmd),
+        Command::Daemon => daemon::execute(),
     }
 }
 
