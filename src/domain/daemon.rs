@@ -150,11 +150,16 @@ impl Daemon {
         let mut workers = Vec::new();
         let counts = &config.distributed.workers;
 
-        // Registry workers
+        // Registry workers (start first, others depend on it)
         for _ in 0..counts.registry {
             if let Some(child) = Self::spawn_worker(WorkerRole::Registry) {
                 workers.push(child);
             }
+        }
+
+        // Give registry time to start before other workers connect
+        if counts.registry > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(500));
         }
 
         // Agent WASM workers
@@ -207,6 +212,8 @@ impl Daemon {
 
     /// Spawn a single worker process with the given role.
     fn spawn_worker(role: WorkerRole) -> Option<Child> {
+        use std::process::Stdio;
+
         let exe = std::env::current_exe().ok()?;
 
         tracing::debug!(role = %role, "Spawning worker");
@@ -214,6 +221,8 @@ impl Daemon {
         match Command::new(exe)
             .args(["daemon"])
             .env("VLINDER_WORKER_ROLE", role.as_env_value())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
             .spawn()
         {
             Ok(child) => {
