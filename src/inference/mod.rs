@@ -17,6 +17,7 @@ use llama_cpp_2::model::params::LlamaModelParams;
 use llama_cpp_2::model::LlamaModel;
 use llama_cpp_2::sampling::LlamaSampler;
 
+use crate::config::Config;
 use crate::domain::{EngineType, InferenceEngine, Model};
 
 // Shared backend - initialized once, used by both inference and embedding
@@ -42,7 +43,7 @@ pub fn open_inference_engine(model: &Model) -> Result<Arc<dyn InferenceEngine>, 
         EngineType::Ollama => {
             let endpoint = model.model_path.authority()
                 .map(|a| format!("http://{}", a))
-                .unwrap_or_else(|| "http://localhost:11434".to_string());
+                .unwrap_or_else(|| Config::load().ollama.endpoint);
             let model_name = model.name.clone();
             Ok(Arc::new(OllamaInferenceEngine::new(endpoint, model_name)))
         }

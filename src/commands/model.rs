@@ -1,7 +1,7 @@
 use clap::Subcommand;
 
 use vlindercli::catalog::OllamaCatalog;
-use vlindercli::config::registry_db_path;
+use vlindercli::config::{registry_db_path, Config};
 use vlindercli::domain::{ModelCatalog, RegistryRepository};
 use vlindercli::storage::SqliteRegistryRepository;
 
@@ -16,9 +16,9 @@ pub enum ModelCommand {
         #[arg(short, long, default_value = "ollama")]
         catalog: String,
 
-        /// Ollama endpoint (for ollama catalog)
-        #[arg(long, default_value = "http://localhost:11434")]
-        endpoint: String,
+        /// Ollama endpoint (overrides config)
+        #[arg(long)]
+        endpoint: Option<String>,
     },
 
     /// List models from a catalog
@@ -27,9 +27,9 @@ pub enum ModelCommand {
         #[arg(short, long, default_value = "ollama")]
         catalog: String,
 
-        /// Ollama endpoint (for ollama catalog)
-        #[arg(long, default_value = "http://localhost:11434")]
-        endpoint: String,
+        /// Ollama endpoint (overrides config)
+        #[arg(long)]
+        endpoint: Option<String>,
     },
 
     /// List registered models (added via `model add`)
@@ -43,9 +43,17 @@ pub enum ModelCommand {
 }
 
 pub fn execute(cmd: ModelCommand) {
+    let config = Config::load();
+
     match cmd {
-        ModelCommand::Add { name, catalog, endpoint } => add(&name, &catalog, &endpoint),
-        ModelCommand::List { catalog, endpoint } => list(&catalog, &endpoint),
+        ModelCommand::Add { name, catalog, endpoint } => {
+            let endpoint = endpoint.unwrap_or(config.ollama.endpoint);
+            add(&name, &catalog, &endpoint)
+        }
+        ModelCommand::List { catalog, endpoint } => {
+            let endpoint = endpoint.unwrap_or(config.ollama.endpoint);
+            list(&catalog, &endpoint)
+        }
         ModelCommand::Registered => registered(),
         ModelCommand::Remove { name } => remove(&name),
     }

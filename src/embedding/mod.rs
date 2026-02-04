@@ -15,6 +15,7 @@ use llama_cpp_2::llama_batch::LlamaBatch;
 use llama_cpp_2::model::params::LlamaModelParams;
 use llama_cpp_2::model::LlamaModel;
 
+use crate::config::Config;
 use crate::domain::{EmbeddingEngine, EngineType, Model};
 use crate::inference::get_backend;  // Use shared backend from inference
 
@@ -30,7 +31,7 @@ pub fn open_embedding_engine(model: &Model) -> Result<Arc<dyn EmbeddingEngine>, 
         EngineType::Ollama => {
             let endpoint = model.model_path.authority()
                 .map(|a| format!("http://{}", a))
-                .unwrap_or_else(|| "http://localhost:11434".to_string());
+                .unwrap_or_else(|| Config::load().ollama.endpoint);
             let model_name = model.name.clone();
             Ok(Arc::new(OllamaEmbeddingEngine::new(endpoint, model_name)))
         }

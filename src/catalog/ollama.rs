@@ -2,6 +2,7 @@
 
 use serde::Deserialize;
 
+use crate::config::Config;
 use crate::domain::{
     CatalogError, EngineType, Model, ModelCatalog, ModelInfo, ModelType, ResourceId,
 };
@@ -21,9 +22,9 @@ impl OllamaCatalog {
         }
     }
 
-    /// Default endpoint for local Ollama.
-    pub fn localhost() -> Self {
-        Self::new("http://localhost:11434")
+    /// Create catalog using endpoint from config.
+    pub fn from_config() -> Self {
+        Self::new(Config::load().ollama.endpoint)
     }
 }
 
@@ -125,15 +126,9 @@ mod tests {
     }
 
     #[test]
-    fn localhost_uses_default_endpoint() {
-        let catalog = OllamaCatalog::localhost();
-        assert_eq!(catalog.endpoint, "http://localhost:11434");
-    }
-
-    #[test]
     #[ignore] // Requires running Ollama server
     fn lists_models_from_ollama() {
-        let catalog = OllamaCatalog::localhost();
+        let catalog = OllamaCatalog::from_config();
         let models = catalog.list();
         assert!(models.is_ok());
     }
@@ -141,7 +136,7 @@ mod tests {
     #[test]
     #[ignore] // Requires running Ollama server with model pulled
     fn resolves_model_from_ollama() {
-        let catalog = OllamaCatalog::localhost();
+        let catalog = OllamaCatalog::from_config();
         let model = catalog.resolve("llama3");
         assert!(model.is_ok());
         let model = model.unwrap();
