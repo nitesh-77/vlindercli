@@ -96,10 +96,10 @@ pub use provider::Provider;
 pub use runtime::{Runtime, RuntimeType};
 
 // ============================================================================
-// Harness (internal to Daemon)
+// Harness (API surface for agent interaction)
 // ============================================================================
 
-// Harness is now owned by Daemon, not exported directly
+pub use harness::Harness;
 
 // ============================================================================
 // Daemon & Registry
