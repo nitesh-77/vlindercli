@@ -1,0 +1,141 @@
+//! Integration tests for gRPC registry service.
+
+use std::collections::HashMap;
+use std::net::SocketAddr;
+use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
+
+use vlindercli::domain::{Agent, InMemoryRegistry, Registry, Requirements, ResourceId, RuntimeType};
+use vlindercli::registry_service::{GrpcRegistryClient, RegistryServiceServer};
+
+fn empty_requirements() -> Requirements {
+    Requirements {
+        models: HashMap::new(),
+        services: vec![],
+    }
+}
+
+/// Start a gRPC server on a random port in a background thread, return the address.
+fn start_server_background(registry: Arc<dyn Registry>) -> SocketAddr {
+    use tonic::transport::Server;
+
+    // Use a channel to communicate the bound address
+    let (tx, rx) = std::sync::mpsc::channel();
+
+    thread::spawn(move || {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
+            let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+            let bound_addr = listener.local_addr().unwrap();
+
+            tx.send(bound_addr).unwrap();
+
+            let service = RegistryServiceServer::new(registry).into_service();
+            Server::builder()
+                .add_service(service)
+                .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
+                .await
+                .unwrap();
+        });
+    });
+
+    // Wait for server to start
+    let addr = rx.recv().unwrap();
+    thread::sleep(Duration::from_millis(100));
+    addr
+}
+
+#[test]
+fn grpc_register_and_get_agent() {
+    // Create in-memory registry and register WASM runtime
+    let registry = Arc::new(InMemoryRegistry::new());
+    registry.register_runtime(RuntimeType::Wasm);
+    let addr = start_server_background(registry.clone());
+
+    // Create gRPC client
+    let client = GrpcRegistryClient::connect(&format!("http://{}", addr)).unwrap();
+
+    // Register an agent via gRPC
+    let agent = Agent {
+        name: "test-agent".to_string(),
+        description: "A test agent".to_string(),
+        id: ResourceId::new("file:///tmp/test.wasm"),
+        requirements: empty_requirements(),
+        object_storage: None,
+        vector_storage: None,
+        mounts: vec![],
+        source: None,
+        prompts: None,
+    };
+
+    client.register_agent(agent.clone()).unwrap();
+
+    // Retrieve via gRPC
+    let retrieved = client.get_agent(&agent.id);
+    assert!(retrieved.is_some());
+    assert_eq!(retrieved.unwrap().name, "test-agent");
+}
+
+#[test]
+fn grpc_list_agents() {
+    let registry = Arc::new(InMemoryRegistry::new());
+    registry.register_runtime(RuntimeType::Wasm);
+    let addr = start_server_background(registry.clone());
+    let client = GrpcRegistryClient::connect(&format!("http://{}", addr)).unwrap();
+
+    // Register two agents
+    for i in 0..2 {
+        let agent = Agent {
+            name: format!("agent-{}", i),
+            description: "Test".to_string(),
+            id: ResourceId::new(&format!("file:///tmp/agent{}.wasm", i)),
+            requirements: empty_requirements(),
+            object_storage: None,
+            vector_storage: None,
+            mounts: vec![],
+            source: None,
+            prompts: None,
+        };
+        client.register_agent(agent).unwrap();
+    }
+
+    let agents = client.get_agents();
+    assert_eq!(agents.len(), 2);
+}
+
+#[test]
+fn grpc_job_lifecycle() {
+    let registry = Arc::new(InMemoryRegistry::new());
+    registry.register_runtime(RuntimeType::Wasm);
+    let addr = start_server_background(registry.clone());
+    let client = GrpcRegistryClient::connect(&format!("http://{}", addr)).unwrap();
+
+    // Register an agent first
+    let agent = Agent {
+        name: "job-test-agent".to_string(),
+        description: "Test".to_string(),
+        id: ResourceId::new("file:///tmp/job-test.wasm"),
+        requirements: empty_requirements(),
+        object_storage: None,
+        vector_storage: None,
+        mounts: vec![],
+        source: None,
+        prompts: None,
+    };
+    client.register_agent(agent.clone()).unwrap();
+
+    // Create a job via gRPC
+    let job_id = client.create_job(agent.id.clone(), "hello".to_string());
+
+    // Job should be pending
+    let pending = client.pending_jobs();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].input, "hello");
+
+    // Get specific job
+    let job = client.get_job(&job_id);
+    assert!(job.is_some());
+    assert_eq!(job.unwrap().input, "hello");
+}

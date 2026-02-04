@@ -29,6 +29,11 @@ impl JobId {
         Self(format!("{}/jobs/{}", registry_id.as_str(), uuid))
     }
 
+    /// Create a JobId from an existing string (e.g., from gRPC).
+    pub fn from_string(id: String) -> Self {
+        Self(id)
+    }
+
     pub fn as_str(&self) -> &str {
         &self.0
     }
