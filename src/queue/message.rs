@@ -146,6 +146,42 @@ impl From<u32> for Sequence {
     }
 }
 
+// --- HarnessType (ADR 044) ---
+
+/// The type of entry point that initiated a submission.
+///
+/// Each variant represents a concrete harness implementation.
+/// Used to route completion messages back to the correct harness type.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum HarnessType {
+    /// Command-line interface harness
+    Cli,
+    /// Web API harness
+    Web,
+    /// REST API harness
+    Api,
+    /// WhatsApp integration harness
+    Whatsapp,
+}
+
+impl HarnessType {
+    /// Get the string representation for use in subjects.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            HarnessType::Cli => "cli",
+            HarnessType::Web => "web",
+            HarnessType::Api => "api",
+            HarnessType::Whatsapp => "whatsapp",
+        }
+    }
+}
+
+impl fmt::Display for HarnessType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -233,5 +269,47 @@ mod tests {
 
         assert_eq!(seq1, seq2);
         assert_ne!(seq1, seq3);
+    }
+
+    // --- HarnessType tests ---
+
+    #[test]
+    fn harness_type_as_str() {
+        assert_eq!(HarnessType::Cli.as_str(), "cli");
+        assert_eq!(HarnessType::Web.as_str(), "web");
+        assert_eq!(HarnessType::Api.as_str(), "api");
+        assert_eq!(HarnessType::Whatsapp.as_str(), "whatsapp");
+    }
+
+    #[test]
+    fn harness_type_display() {
+        assert_eq!(format!("{}", HarnessType::Cli), "cli");
+        assert_eq!(format!("{}", HarnessType::Web), "web");
+        assert_eq!(format!("{}", HarnessType::Api), "api");
+        assert_eq!(format!("{}", HarnessType::Whatsapp), "whatsapp");
+    }
+
+    #[test]
+    fn harness_type_equality() {
+        assert_eq!(HarnessType::Cli, HarnessType::Cli);
+        assert_ne!(HarnessType::Cli, HarnessType::Web);
+    }
+
+    #[test]
+    fn harness_type_is_copy() {
+        let id = HarnessType::Cli;
+        let id2 = id; // Copy, not move
+        assert_eq!(id, id2); // Both still valid
+    }
+
+    #[test]
+    fn harness_type_hashable() {
+        let mut set = HashSet::new();
+        set.insert(HarnessType::Cli);
+        set.insert(HarnessType::Web);
+
+        assert!(set.contains(&HarnessType::Cli));
+        assert!(set.contains(&HarnessType::Web));
+        assert!(!set.contains(&HarnessType::Api));
     }
 }
