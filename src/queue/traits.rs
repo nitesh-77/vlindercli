@@ -8,6 +8,7 @@
 //! between receive and processing completion.
 
 use super::Message;
+use crate::domain::Agent;
 use std::fmt;
 
 // --- PendingMessage ---
@@ -87,6 +88,33 @@ pub trait MessageQueue {
     /// Returns a `PendingMessage` that must be explicitly acknowledged.
     /// Blocks until a message is available or times out.
     fn receive(&self, queue: &str) -> Result<PendingMessage, QueueError>;
+
+    // -------------------------------------------------------------------------
+    // Routing helpers - build queue names for backend-specific routing (ADR 043)
+    // -------------------------------------------------------------------------
+
+    /// Build queue name for a service call with backend type.
+    ///
+    /// Used by workers to subscribe and by agents to send service requests.
+    ///
+    /// # Arguments
+    /// - `service`: Service type (e.g., "kv", "vec", "infer", "embed")
+    /// - `backend`: Backend implementation (e.g., "sqlite", "ollama", "memory")
+    /// - `action`: Operation (e.g., "get", "put", "search") - empty for bare service
+    ///
+    /// # Examples
+    /// - `service_queue("kv", "sqlite", "get")` → queue name for SQLite kv-get
+    /// - `service_queue("infer", "ollama", "")` → queue name for Ollama inference
+    fn service_queue(&self, service: &str, backend: &str, action: &str) -> String;
+
+    /// Build queue name for an agent with runtime type.
+    ///
+    /// Used by harness to send to agents and by runtimes to receive.
+    ///
+    /// # Arguments
+    /// - `runtime`: Runtime type (e.g., "wasm", "docker")
+    /// - `agent`: The agent to build queue name for
+    fn agent_queue(&self, runtime: &str, agent: &Agent) -> String;
 }
 
 // --- Errors ---

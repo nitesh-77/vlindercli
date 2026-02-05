@@ -55,14 +55,25 @@ pub struct ObjectServiceWorker {
     queue: Arc<dyn MessageQueue + Send + Sync>,
     registry: Arc<dyn Registry>,
     stores: RwLock<HashMap<String, Arc<dyn ObjectStorage>>>,
+    backend: String,
 }
 
 impl ObjectServiceWorker {
-    pub fn new(queue: Arc<dyn MessageQueue + Send + Sync>, registry: Arc<dyn Registry>) -> Self {
+    /// Create a new object storage worker for a specific backend.
+    ///
+    /// The backend determines which queues this worker subscribes to:
+    /// - "sqlite" → `vlinder.svc.kv.sqlite.*`
+    /// - "memory" → `vlinder.svc.kv.memory.*`
+    pub fn new(
+        queue: Arc<dyn MessageQueue + Send + Sync>,
+        registry: Arc<dyn Registry>,
+        backend: &str,
+    ) -> Self {
         Self {
             queue,
             registry,
             stores: RwLock::new(HashMap::new()),
+            backend: backend.to_string(),
         }
     }
 
@@ -99,7 +110,8 @@ impl ObjectServiceWorker {
     }
 
     fn try_get(&self) -> bool {
-        match self.queue.receive("kv-get") {
+        let queue_name = self.queue.service_queue("kv", &self.backend, "get");
+        match self.queue.receive(&queue_name) {
             Ok(pending) => {
                 let response = self.handle_get(&pending.message);
                 self.send_response(&pending.message, response);
@@ -111,7 +123,8 @@ impl ObjectServiceWorker {
     }
 
     fn try_put(&self) -> bool {
-        match self.queue.receive("kv-put") {
+        let queue_name = self.queue.service_queue("kv", &self.backend, "put");
+        match self.queue.receive(&queue_name) {
             Ok(pending) => {
                 let response = self.handle_put(&pending.message);
                 self.send_response(&pending.message, response);
@@ -123,7 +136,8 @@ impl ObjectServiceWorker {
     }
 
     fn try_list(&self) -> bool {
-        match self.queue.receive("kv-list") {
+        let queue_name = self.queue.service_queue("kv", &self.backend, "list");
+        match self.queue.receive(&queue_name) {
             Ok(pending) => {
                 let response = self.handle_list(&pending.message);
                 self.send_response(&pending.message, response);
@@ -135,7 +149,8 @@ impl ObjectServiceWorker {
     }
 
     fn try_delete(&self) -> bool {
-        match self.queue.receive("kv-delete") {
+        let queue_name = self.queue.service_queue("kv", &self.backend, "delete");
+        match self.queue.receive(&queue_name) {
             Ok(pending) => {
                 let response = self.handle_delete(&pending.message);
                 self.send_response(&pending.message, response);
@@ -261,7 +276,7 @@ mod tests {
         registry.register_agent(agent).unwrap();
 
         let registry: Arc<dyn Registry> = Arc::new(registry);
-        let handler = ObjectServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry));
+        let handler = ObjectServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry), "memory");
 
         // Send put request - worker will lazy-open storage from agent's URI
         let put_payload = serde_json::json!({
@@ -273,7 +288,8 @@ mod tests {
             serde_json::to_vec(&put_payload).unwrap(),
             "reply",
         );
-        queue.send("kv-put", put_msg).unwrap();
+        // Use backend-qualified queue name (ADR 043)
+        queue.send("vlinder.svc.kv.memory.put", put_msg).unwrap();
 
         // Process
         assert!(handler.tick());
@@ -290,7 +306,8 @@ mod tests {
             serde_json::to_vec(&get_payload).unwrap(),
             "reply",
         );
-        queue.send("kv-get", get_msg).unwrap();
+        // Use backend-qualified queue name (ADR 043)
+        queue.send("vlinder.svc.kv.memory.get", get_msg).unwrap();
 
         // Process
         assert!(handler.tick());

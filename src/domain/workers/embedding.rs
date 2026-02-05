@@ -35,14 +35,24 @@ pub struct EmbeddingServiceWorker {
     queue: Arc<dyn MessageQueue + Send + Sync>,
     registry: Arc<dyn Registry>,
     engines: RwLock<HashMap<String, Arc<dyn EmbeddingEngine>>>,
+    backend: String,
 }
 
 impl EmbeddingServiceWorker {
-    pub fn new(queue: Arc<dyn MessageQueue + Send + Sync>, registry: Arc<dyn Registry>) -> Self {
+    /// Create a new embedding worker for a specific backend.
+    ///
+    /// The backend determines which queue this worker subscribes to:
+    /// - "ollama" → `vlinder.svc.embed.ollama`
+    pub fn new(
+        queue: Arc<dyn MessageQueue + Send + Sync>,
+        registry: Arc<dyn Registry>,
+        backend: &str,
+    ) -> Self {
         Self {
             queue,
             registry,
             engines: RwLock::new(HashMap::new()),
+            backend: backend.to_string(),
         }
     }
 
@@ -53,7 +63,8 @@ impl EmbeddingServiceWorker {
 
     /// Process one message if available. Returns true if processed.
     pub fn tick(&self) -> bool {
-        match self.queue.receive("embed") {
+        let queue_name = self.queue.service_queue("embed", &self.backend, "");
+        match self.queue.receive(&queue_name) {
             Ok(pending) => {
                 let response = self.handle_embed(&pending.message);
                 self.send_response(&pending.message, response);
@@ -189,7 +200,7 @@ mod tests {
     fn handles_embed_request() {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
         let registry = test_registry_with_agent_and_model(test_agent_with_model("test-model"), "test-model");
-        let handler = EmbeddingServiceWorker::new(Arc::clone(&queue), registry);
+        let handler = EmbeddingServiceWorker::new(Arc::clone(&queue), registry, "memory");
 
         // Register mock engine
         let canned: Vec<f32> = (0..768).map(|i| i as f32 * 0.001).collect();
@@ -206,7 +217,8 @@ mod tests {
             serde_json::to_vec(&payload).unwrap(),
             "reply",
         );
-        queue.send("embed", msg).unwrap();
+        // Use backend-qualified queue name (ADR 043)
+        queue.send("vlinder.svc.embed.memory", msg).unwrap();
 
         // Process
         assert!(handler.tick());
@@ -222,7 +234,7 @@ mod tests {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
         // Agent declares "allowed-model" but we'll request "other-model"
         let registry = test_registry_with_agent_and_model(test_agent_with_model("allowed-model"), "allowed-model");
-        let handler = EmbeddingServiceWorker::new(Arc::clone(&queue), registry);
+        let handler = EmbeddingServiceWorker::new(Arc::clone(&queue), registry, "memory");
 
         // Register mock engine (the model exists, but agent didn't declare it)
         let canned: Vec<f32> = (0..768).map(|i| i as f32 * 0.001).collect();
@@ -238,7 +250,8 @@ mod tests {
             serde_json::to_vec(&payload).unwrap(),
             "reply",
         );
-        queue.send("embed", msg).unwrap();
+        // Use backend-qualified queue name (ADR 043)
+        queue.send("vlinder.svc.embed.memory", msg).unwrap();
 
         assert!(handler.tick());
         let pending = queue.receive("reply").unwrap();
@@ -253,7 +266,7 @@ mod tests {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
         // Registry with no agents registered
         let registry: Arc<dyn Registry> = Arc::new(InMemoryRegistry::new());
-        let handler = EmbeddingServiceWorker::new(Arc::clone(&queue), registry);
+        let handler = EmbeddingServiceWorker::new(Arc::clone(&queue), registry, "memory");
 
         // Register mock engine
         let canned: Vec<f32> = (0..768).map(|i| i as f32 * 0.001).collect();
@@ -269,7 +282,8 @@ mod tests {
             serde_json::to_vec(&payload).unwrap(),
             "reply",
         );
-        queue.send("embed", msg).unwrap();
+        // Use backend-qualified queue name (ADR 043)
+        queue.send("vlinder.svc.embed.memory", msg).unwrap();
 
         assert!(handler.tick());
         let pending = queue.receive("reply").unwrap();

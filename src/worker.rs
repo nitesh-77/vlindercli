@@ -169,7 +169,7 @@ fn run_inference_ollama_worker(config: &Config, shutdown: &AtomicBool) {
             .expect("Failed to connect to registry")
     );
 
-    let worker = InferenceServiceWorker::new(queue, registry);
+    let worker = InferenceServiceWorker::new(queue, registry, "ollama");
 
     tracing::info!(endpoint = %config.ollama.endpoint, registry = %registry_addr, "Ollama inference worker ready");
 
@@ -193,7 +193,7 @@ fn run_embedding_ollama_worker(config: &Config, shutdown: &AtomicBool) {
             .expect("Failed to connect to registry")
     );
 
-    let worker = EmbeddingServiceWorker::new(queue, registry);
+    let worker = EmbeddingServiceWorker::new(queue, registry, "ollama");
 
     tracing::info!(endpoint = %config.ollama.endpoint, registry = %registry_addr, "Ollama embedding worker ready");
 
@@ -217,7 +217,7 @@ fn run_storage_object_sqlite_worker(config: &Config, shutdown: &AtomicBool) {
             .expect("Failed to connect to registry")
     );
 
-    let worker = ObjectServiceWorker::new(queue, registry);
+    let worker = ObjectServiceWorker::new(queue, registry, "sqlite");
 
     tracing::info!(registry = %registry_addr, "SQLite object storage worker ready");
 
@@ -240,7 +240,7 @@ fn run_storage_object_memory_worker(config: &Config, shutdown: &AtomicBool) {
             .expect("Failed to connect to registry")
     );
 
-    let worker = ObjectServiceWorker::new(queue, registry);
+    let worker = ObjectServiceWorker::new(queue, registry, "memory");
 
     tracing::info!(registry = %registry_addr, "In-memory object storage worker ready");
 
@@ -263,7 +263,7 @@ fn run_storage_vector_sqlite_worker(config: &Config, shutdown: &AtomicBool) {
             .expect("Failed to connect to registry")
     );
 
-    let worker = VectorServiceWorker::new(queue, registry);
+    let worker = VectorServiceWorker::new(queue, registry, "sqlite-vec");
 
     tracing::info!(registry = %registry_addr, "SQLite-vec vector storage worker ready");
 
@@ -286,7 +286,7 @@ fn run_storage_vector_memory_worker(config: &Config, shutdown: &AtomicBool) {
             .expect("Failed to connect to registry")
     );
 
-    let worker = VectorServiceWorker::new(queue, registry);
+    let worker = VectorServiceWorker::new(queue, registry, "memory");
 
     tracing::info!(registry = %registry_addr, "In-memory vector storage worker ready");
 

@@ -25,13 +25,16 @@ pub struct Provider {
 }
 
 impl Provider {
-    /// Create a new Provider with all service workers.
+    /// Create a new Provider with all service workers for local mode.
+    ///
+    /// Uses "memory" backend for storage and model workers.
+    /// For distributed mode with specific backends, use worker.rs instead.
     pub fn new(queue: Arc<dyn MessageQueue + Send + Sync>, registry: Arc<dyn Registry>) -> Self {
         Self {
-            object: ObjectServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry)),
-            vector: VectorServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry)),
-            inference: InferenceServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry)),
-            embedding: EmbeddingServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry)),
+            object: ObjectServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry), "memory"),
+            vector: VectorServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry), "memory"),
+            inference: InferenceServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry), "memory"),
+            embedding: EmbeddingServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry), "memory"),
         }
     }
 
@@ -86,7 +89,8 @@ mod tests {
             "content": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, b"data for A")
         });
         let msg_a = Message::request(serde_json::to_vec(&put_a).unwrap(), "reply-put-a");
-        queue.send("kv-put", msg_a).unwrap();
+        // Use backend-qualified queue name (ADR 043)
+        queue.send("vlinder.svc.kv.memory.put", msg_a).unwrap();
         provider.tick();
         queue.receive("reply-put-a").unwrap().ack().unwrap(); // consume put response
 
@@ -97,14 +101,16 @@ mod tests {
             "content": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, b"data for B")
         });
         let msg_b = Message::request(serde_json::to_vec(&put_b).unwrap(), "reply-put-b");
-        queue.send("kv-put", msg_b).unwrap();
+        // Use backend-qualified queue name (ADR 043)
+        queue.send("vlinder.svc.kv.memory.put", msg_b).unwrap();
         provider.tick();
         queue.receive("reply-put-b").unwrap().ack().unwrap(); // consume put response
 
         // Read from agent-a - gets A's data
         let get_a = serde_json::json!({ "agent_id": "file:///agent-a.wasm", "path": "/data.txt" });
         let msg = Message::request(serde_json::to_vec(&get_a).unwrap(), "reply-get-a");
-        queue.send("kv-get", msg).unwrap();
+        // Use backend-qualified queue name (ADR 043)
+        queue.send("vlinder.svc.kv.memory.get", msg).unwrap();
         provider.tick();
         let pending = queue.receive("reply-get-a").unwrap();
         assert_eq!(pending.message.payload, b"data for A");
@@ -113,7 +119,8 @@ mod tests {
         // Read from agent-b - gets B's data (isolated)
         let get_b = serde_json::json!({ "agent_id": "file:///agent-b.wasm", "path": "/data.txt" });
         let msg = Message::request(serde_json::to_vec(&get_b).unwrap(), "reply-get-b");
-        queue.send("kv-get", msg).unwrap();
+        // Use backend-qualified queue name (ADR 043)
+        queue.send("vlinder.svc.kv.memory.get", msg).unwrap();
         provider.tick();
         let pending = queue.receive("reply-get-b").unwrap();
         assert_eq!(pending.message.payload, b"data for B");

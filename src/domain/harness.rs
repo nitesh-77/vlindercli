@@ -71,20 +71,22 @@ impl Harness {
     ///
     /// Creates job in registry, queues message, returns job ID.
     pub fn invoke(&mut self, agent_id: &ResourceId, input: &str) -> Result<JobId, String> {
-        // Verify agent is deployed
-        if self.registry.get_agent(agent_id).is_none() {
-            return Err(format!("agent not deployed: {}", agent_id));
-        }
+        // Verify agent is deployed and get runtime type
+        let agent = self.registry.get_agent(agent_id)
+            .ok_or_else(|| format!("agent not deployed: {}", agent_id))?;
+        let runtime = self.registry.select_runtime(&agent)
+            .ok_or_else(|| format!("no runtime available for agent: {}", agent_id))?;
 
         // Create job in registry
         let job_id = self.registry.create_job(agent_id.clone(), input.to_string());
 
-        // Queue message to agent
+        // Queue message to agent using backend-qualified queue name (ADR 043)
+        let queue_name = self.queue.agent_queue(runtime.as_str(), &agent);
         let message = Message::request(input.as_bytes().to_vec(), &self.reply_queue);
         let message_id = message.id.clone();
 
         self.queue
-            .send(agent_id.as_str(), message)
+            .send(&queue_name, message)
             .map_err(|e| format!("failed to queue: {}", e))?;
 
         // Track for response correlation
@@ -168,8 +170,8 @@ mod tests {
         assert_eq!(job.status, JobStatus::Running);
         assert_eq!(job.agent_id, agent_id);
 
-        // Message is in queue (keyed by agent_id string)
-        let pending = queue.receive(agent_id.as_str()).unwrap();
+        // Message is in queue using backend-qualified name (ADR 043)
+        let pending = queue.receive("vlinder.agent.wasm.test-agent").unwrap();
         assert_eq!(pending.message.payload, b"hello");
         pending.ack().unwrap();
     }
@@ -223,7 +225,8 @@ mod tests {
         let job_id = harness.invoke(&agent_id, "hello").unwrap();
 
         // Simulate worker processing: receive request, send response to reply_to
-        let pending = queue.receive(agent_id.as_str()).unwrap();
+        // Queue name now uses backend-qualified format (ADR 043)
+        let pending = queue.receive("vlinder.agent.wasm.test-agent").unwrap();
         let response = Message::response(
             b"result".to_vec(),
             &pending.message.reply_to,

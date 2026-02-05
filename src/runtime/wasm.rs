@@ -85,15 +85,15 @@ impl Runtime for WasmRuntime {
         let wasm_agents: Vec<_> = self.registry.get_agents()
             .into_iter()
             .filter(|agent| self.registry.select_runtime(agent) == Some(RuntimeType::Wasm))
-            .map(|agent| {
-                let wasm_path = agent.id.path().unwrap_or(agent.id.as_str()).to_string();
-                (agent.id.as_str().to_string(), wasm_path)
-            })
             .collect();
 
         // Check for work (registry lock released)
-        for (agent_id_str, wasm_path) in wasm_agents {
-            if let Ok(pending) = self.queue.receive(&agent_id_str) {
+        for agent in wasm_agents {
+            // Use backend-qualified queue name (ADR 043)
+            let queue_name = self.queue.agent_queue("wasm", &agent);
+            if let Ok(pending) = self.queue.receive(&queue_name) {
+                let wasm_path = agent.id.path().unwrap_or(agent.id.as_str()).to_string();
+                let agent_id_str = agent.id.as_str().to_string();
                 let queue = Arc::clone(&self.queue);
                 let payload = pending.message.payload.clone();
                 let reply_to = pending.message.reply_to.clone();
@@ -102,10 +102,17 @@ impl Runtime for WasmRuntime {
                 // ACK the message now - we've taken ownership of processing
                 let _ = pending.ack();
 
+                // TECH DEBT: We pass registry to the thread to look up agent config for routing.
+                // This is wasteful - we already have the Agent here. Cleaner approach:
+                // extract (kv_backend, vec_backend) from agent before spawn, pass a closure
+                // to make_send_function. Deferring until we build another runtime (e.g., Docker)
+                // to clarify the contracts between runtime and host functions.
+                let registry_for_thread = Arc::clone(&self.registry);
+
                 // Spawn WASM execution in background thread
                 let handle = thread::spawn(move || {
                     let functions = [
-                        make_send_function(Arc::clone(&queue), agent_id_str),
+                        make_send_function(Arc::clone(&queue), agent_id_str, registry_for_thread),
                         make_get_prompts_function(),
                     ];
 
@@ -145,6 +152,7 @@ fn write_output(plugin: &mut CurrentPlugin, outputs: &mut [Val], response: &[u8]
 struct SendFunctionData {
     queue: Arc<dyn MessageQueue + Send + Sync>,
     agent_id: String,
+    registry: Arc<dyn Registry>,
 }
 
 /// Host function: send(payload) -> response
@@ -154,8 +162,12 @@ struct SendFunctionData {
 /// - Injects `agent_id` for storage isolation
 /// - Handles reply queue management
 /// - Returns the response payload directly
-fn make_send_function(queue: Arc<dyn MessageQueue + Send + Sync>, agent_id: String) -> Function {
-    let data = SendFunctionData { queue, agent_id };
+fn make_send_function(
+    queue: Arc<dyn MessageQueue + Send + Sync>,
+    agent_id: String,
+    registry: Arc<dyn Registry>,
+) -> Function {
+    let data = SendFunctionData { queue, agent_id, registry };
 
     Function::new(
         "send",
@@ -188,15 +200,18 @@ fn make_send_function(queue: Arc<dyn MessageQueue + Send + Sync>, agent_id: Stri
             // Generate reply queue (must be valid NATS subject - no special chars)
             let reply_to = format!("reply-{}", uuid::Uuid::new_v4());
 
+            // Determine the backend-qualified queue name (ADR 043)
+            let queue_name = resolve_service_queue(&data.queue, &data.registry, &data.agent_id, &op)?;
+
             // Send request
             let enriched_payload = serde_json::to_vec(&json)
                 .map_err(|e| extism::Error::msg(format!("serialize error: {}", e)))?;
             let message = Message::request(enriched_payload, &reply_to);
 
-            data.queue.send(&op, message)
+            data.queue.send(&queue_name, message)
                 .map_err(|e| extism::Error::msg(format!("send error: {}", e)))?;
 
-            tracing::debug!(op = %op, "Waiting for service response");
+            tracing::debug!(op = %op, queue = %queue_name, "Waiting for service response");
 
             // Wait for response
             loop {
@@ -209,6 +224,53 @@ fn make_send_function(queue: Arc<dyn MessageQueue + Send + Sync>, agent_id: Stri
             }
         },
     )
+}
+
+/// Resolve the backend-qualified queue name for a service operation.
+///
+/// Maps operation names to backend-specific queues based on agent configuration:
+/// - `kv-*` operations → look up agent's object_storage URI scheme
+/// - `vector-*` operations → look up agent's vector_storage URI scheme
+/// - `infer`/`embed` → hardcoded to "ollama" (only supported backend for now)
+fn resolve_service_queue(
+    queue: &Arc<dyn MessageQueue + Send + Sync>,
+    registry: &Arc<dyn Registry>,
+    agent_id: &str,
+    op: &str,
+) -> Result<String, extism::Error> {
+    // Look up agent from registry
+    let resource_id = ResourceId::new(agent_id);
+    let agent = registry.get_agent(&resource_id)
+        .ok_or_else(|| extism::Error::msg(format!("agent not found: {}", agent_id)))?;
+
+    // Determine service and backend based on operation
+    let queue_name = match op {
+        // KV storage operations
+        "kv-get" | "kv-put" | "kv-list" | "kv-delete" => {
+            let backend = agent.object_storage.as_ref()
+                .and_then(|uri| uri.as_str().split("://").next())
+                .unwrap_or("memory");
+            let action = op.strip_prefix("kv-").unwrap_or(op);
+            queue.service_queue("kv", backend, action)
+        }
+        // Vector storage operations
+        "vector-store" | "vector-search" | "vector-delete" => {
+            let backend = agent.vector_storage.as_ref()
+                .and_then(|uri| uri.as_str().split("://").next())
+                .map(|s| if s == "sqlite" { "sqlite-vec" } else { s })
+                .unwrap_or("memory");
+            let action = op.strip_prefix("vector-").unwrap_or(op);
+            queue.service_queue("vec", backend, action)
+        }
+        // Inference (currently only ollama supported)
+        "infer" => queue.service_queue("infer", "ollama", ""),
+        // Embedding (currently only ollama supported)
+        "embed" => queue.service_queue("embed", "ollama", ""),
+        // Unknown operation - treat as agent-to-agent message
+        _ => format!("vlinder.agent.{}", op),
+    };
+
+    Ok(queue_name)
 }
 
 /// Host function: get_prompts() -> JSON string

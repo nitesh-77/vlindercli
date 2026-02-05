@@ -41,14 +41,24 @@ pub struct InferenceServiceWorker {
     queue: Arc<dyn MessageQueue + Send + Sync>,
     registry: Arc<dyn Registry>,
     engines: RwLock<HashMap<String, Arc<dyn InferenceEngine>>>,
+    backend: String,
 }
 
 impl InferenceServiceWorker {
-    pub fn new(queue: Arc<dyn MessageQueue + Send + Sync>, registry: Arc<dyn Registry>) -> Self {
+    /// Create a new inference worker for a specific backend.
+    ///
+    /// The backend determines which queue this worker subscribes to:
+    /// - "ollama" → `vlinder.svc.infer.ollama`
+    pub fn new(
+        queue: Arc<dyn MessageQueue + Send + Sync>,
+        registry: Arc<dyn Registry>,
+        backend: &str,
+    ) -> Self {
         Self {
             queue,
             registry,
             engines: RwLock::new(HashMap::new()),
+            backend: backend.to_string(),
         }
     }
 
@@ -59,7 +69,8 @@ impl InferenceServiceWorker {
 
     /// Process one message if available. Returns true if processed.
     pub fn tick(&self) -> bool {
-        match self.queue.receive("infer") {
+        let queue_name = self.queue.service_queue("infer", &self.backend, "");
+        match self.queue.receive(&queue_name) {
             Ok(pending) => {
                 let response = self.handle_infer(&pending.message);
                 self.send_response(&pending.message, response);
@@ -189,7 +200,7 @@ mod tests {
     fn handles_infer_request() {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
         let registry = test_registry_with_agent_and_model(test_agent_with_model("test-model"), "test-model");
-        let handler = InferenceServiceWorker::new(Arc::clone(&queue), registry);
+        let handler = InferenceServiceWorker::new(Arc::clone(&queue), registry, "memory");
 
         // Register mock engine
         let engine = Arc::new(InMemoryInference::new("test response"));
@@ -205,7 +216,8 @@ mod tests {
             serde_json::to_vec(&payload).unwrap(),
             "reply",
         );
-        queue.send("infer", msg).unwrap();
+        // Use backend-qualified queue name (ADR 043)
+        queue.send("vlinder.svc.infer.memory", msg).unwrap();
 
         // Process
         assert!(handler.tick());
@@ -219,7 +231,7 @@ mod tests {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
         // Agent declares "allowed-model" but we'll request "other-model"
         let registry = test_registry_with_agent_and_model(test_agent_with_model("allowed-model"), "allowed-model");
-        let handler = InferenceServiceWorker::new(Arc::clone(&queue), registry);
+        let handler = InferenceServiceWorker::new(Arc::clone(&queue), registry, "memory");
 
         // Register mock engine (the model exists, but agent didn't declare it)
         let engine = Arc::new(InMemoryInference::new("test response"));
@@ -234,7 +246,8 @@ mod tests {
             serde_json::to_vec(&payload).unwrap(),
             "reply",
         );
-        queue.send("infer", msg).unwrap();
+        // Use backend-qualified queue name (ADR 043)
+        queue.send("vlinder.svc.infer.memory", msg).unwrap();
 
         assert!(handler.tick());
         let pending = queue.receive("reply").unwrap();
@@ -249,7 +262,7 @@ mod tests {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
         // Registry with no agents registered
         let registry: Arc<dyn Registry> = Arc::new(InMemoryRegistry::new());
-        let handler = InferenceServiceWorker::new(Arc::clone(&queue), registry);
+        let handler = InferenceServiceWorker::new(Arc::clone(&queue), registry, "memory");
 
         // Register mock engine
         let engine = Arc::new(InMemoryInference::new("test response"));
@@ -264,7 +277,8 @@ mod tests {
             serde_json::to_vec(&payload).unwrap(),
             "reply",
         );
-        queue.send("infer", msg).unwrap();
+        // Use backend-qualified queue name (ADR 043)
+        queue.send("vlinder.svc.infer.memory", msg).unwrap();
 
         assert!(handler.tick());
         let pending = queue.receive("reply").unwrap();

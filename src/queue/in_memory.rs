@@ -52,6 +52,18 @@ impl MessageQueue for InMemoryQueue {
             || Ok(()),  // nack: no-op
         ))
     }
+
+    fn service_queue(&self, service: &str, backend: &str, action: &str) -> String {
+        if action.is_empty() {
+            format!("vlinder.svc.{}.{}", service, backend)
+        } else {
+            format!("vlinder.svc.{}.{}.{}", service, backend, action)
+        }
+    }
+
+    fn agent_queue(&self, runtime: &str, agent: &crate::domain::Agent) -> String {
+        format!("vlinder.agent.{}.{}", runtime, agent.name)
+    }
 }
 
 #[cfg(test)]

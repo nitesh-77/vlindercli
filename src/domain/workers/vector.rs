@@ -49,14 +49,25 @@ pub struct VectorServiceWorker {
     queue: Arc<dyn MessageQueue + Send + Sync>,
     registry: Arc<dyn Registry>,
     stores: RwLock<HashMap<String, Arc<dyn VectorStorage>>>,
+    backend: String,
 }
 
 impl VectorServiceWorker {
-    pub fn new(queue: Arc<dyn MessageQueue + Send + Sync>, registry: Arc<dyn Registry>) -> Self {
+    /// Create a new vector storage worker for a specific backend.
+    ///
+    /// The backend determines which queues this worker subscribes to:
+    /// - "sqlite-vec" → `vlinder.svc.vec.sqlite-vec.*`
+    /// - "memory" → `vlinder.svc.vec.memory.*`
+    pub fn new(
+        queue: Arc<dyn MessageQueue + Send + Sync>,
+        registry: Arc<dyn Registry>,
+        backend: &str,
+    ) -> Self {
         Self {
             queue,
             registry,
             stores: RwLock::new(HashMap::new()),
+            backend: backend.to_string(),
         }
     }
 
@@ -92,7 +103,8 @@ impl VectorServiceWorker {
     }
 
     fn try_store(&self) -> bool {
-        match self.queue.receive("vector-store") {
+        let queue_name = self.queue.service_queue("vec", &self.backend, "store");
+        match self.queue.receive(&queue_name) {
             Ok(pending) => {
                 let response = self.handle_store(&pending.message);
                 self.send_response(&pending.message, response);
@@ -104,7 +116,8 @@ impl VectorServiceWorker {
     }
 
     fn try_search(&self) -> bool {
-        match self.queue.receive("vector-search") {
+        let queue_name = self.queue.service_queue("vec", &self.backend, "search");
+        match self.queue.receive(&queue_name) {
             Ok(pending) => {
                 let response = self.handle_search(&pending.message);
                 self.send_response(&pending.message, response);
@@ -116,7 +129,8 @@ impl VectorServiceWorker {
     }
 
     fn try_delete(&self) -> bool {
-        match self.queue.receive("vector-delete") {
+        let queue_name = self.queue.service_queue("vec", &self.backend, "delete");
+        match self.queue.receive(&queue_name) {
             Ok(pending) => {
                 let response = self.handle_delete(&pending.message);
                 self.send_response(&pending.message, response);
@@ -218,7 +232,7 @@ mod tests {
         registry.register_agent(agent).unwrap();
 
         let registry: Arc<dyn Registry> = Arc::new(registry);
-        let handler = VectorServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry));
+        let handler = VectorServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry), "memory");
 
         // Store embedding - worker will lazy-open storage from agent's URI
         let embedding: Vec<f32> = (0..768).map(|i| i as f32 * 0.001).collect();
@@ -232,7 +246,8 @@ mod tests {
             serde_json::to_vec(&store_payload).unwrap(),
             "reply",
         );
-        queue.send("vector-store", store_msg).unwrap();
+        // Use backend-qualified queue name (ADR 043)
+        queue.send("vlinder.svc.vec.memory.store", store_msg).unwrap();
 
         assert!(handler.tick());
         let pending = queue.receive("reply").unwrap();
@@ -249,7 +264,8 @@ mod tests {
             serde_json::to_vec(&search_payload).unwrap(),
             "reply",
         );
-        queue.send("vector-search", search_msg).unwrap();
+        // Use backend-qualified queue name (ADR 043)
+        queue.send("vlinder.svc.vec.memory.search", search_msg).unwrap();
 
         assert!(handler.tick());
         let pending = queue.receive("reply").unwrap();
