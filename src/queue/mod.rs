@@ -18,7 +18,14 @@ mod worker;
 use std::sync::Arc;
 use crate::config::Config;
 
-pub use message::{Message, MessageId};
+pub use message::{
+    // Legacy types (still used during transition)
+    Message, MessageId,
+    // New observability types (ADR 044)
+    SubmissionId, Sequence, HarnessType,
+    InvokeMessage, RequestMessage, ResponseMessage, CompleteMessage,
+    ExpectsReply, ObservableMessage,
+};
 pub use traits::{MessageQueue, PendingMessage, QueueError};
 pub use in_memory::InMemoryQueue;
 pub use nats::NatsQueue;
