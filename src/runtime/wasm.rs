@@ -20,13 +20,13 @@ use std::thread::{self, JoinHandle};
 use extism::{CurrentPlugin, Function, Manifest, Plugin, UserData, Val, Wasm};
 
 use crate::domain::{Registry, ResourceId, Runtime, RuntimeType};
-use crate::queue::{Message, MessageId, MessageQueue};
+use crate::queue::{ExpectsReply, InvokeMessage, Message, MessageQueue};
 
 /// Tracks a WASM execution running in a background thread.
 struct RunningTask {
     handle: JoinHandle<Vec<u8>>,
-    reply_to: String,
-    request_id: MessageId,
+    /// The original invoke message - used to construct CompleteMessage reply
+    invoke: InvokeMessage,
 }
 
 pub struct WasmRuntime {
@@ -69,10 +69,10 @@ impl Runtime for WasmRuntime {
         // First, check if a running task completed
         if let Some(task) = self.running.take() {
             if task.handle.is_finished() {
-                // Task done - send response
+                // Task done - send CompleteMessage using typed reply (ADR 044)
                 let output = task.handle.join().unwrap();
-                let response = Message::response(output, &task.reply_to, task.request_id);
-                self.queue.send(&task.reply_to, response).unwrap();
+                let complete = task.invoke.create_reply(output);
+                self.queue.send_complete(complete).unwrap();
                 return true;
             } else {
                 // Still running, put it back
@@ -87,20 +87,17 @@ impl Runtime for WasmRuntime {
             .filter(|agent| self.registry.select_runtime(agent) == Some(RuntimeType::Wasm))
             .collect();
 
-        // Check for work (registry lock released)
+        // Check for work using typed receive (ADR 044)
         for agent in wasm_agents {
-            // Use backend-qualified queue name (ADR 043)
-            let queue_name = self.queue.agent_queue("wasm", &agent);
-            if let Ok(pending) = self.queue.receive(&queue_name) {
+            // Try to receive typed InvokeMessage
+            if let Ok((invoke, ack)) = self.queue.receive_invoke(&agent.name) {
                 let wasm_path = agent.id.path().unwrap_or(agent.id.as_str()).to_string();
                 let agent_id_str = agent.id.as_str().to_string();
                 let queue = Arc::clone(&self.queue);
-                let payload = pending.message.payload.clone();
-                let reply_to = pending.message.reply_to.clone();
-                let request_id = pending.message.id.clone();
+                let payload = invoke.payload.clone();
 
                 // ACK the message now - we've taken ownership of processing
-                let _ = pending.ack();
+                let _ = ack();
 
                 // TECH DEBT: We pass registry to the thread to look up agent config for routing.
                 // This is wasteful - we already have the Agent here. Cleaner approach:
@@ -126,8 +123,7 @@ impl Runtime for WasmRuntime {
 
                 self.running = Some(RunningTask {
                     handle,
-                    reply_to,
-                    request_id,
+                    invoke,
                 });
 
                 return true; // Started new work
