@@ -374,6 +374,88 @@ impl ExpectsReply for RequestMessage {
 // They are terminal messages - attempting to get their Reply type is a
 // compile-time error.
 
+// ============================================================================
+// ObservableMessage enum
+// ============================================================================
+
+/// Unified message type wrapping all typed messages.
+///
+/// Used for polymorphic handling when the specific message type isn't known
+/// at compile time (e.g., receiving from a queue).
+#[derive(Clone, Debug)]
+pub enum ObservableMessage {
+    Invoke(InvokeMessage),
+    Request(RequestMessage),
+    Response(ResponseMessage),
+    Complete(CompleteMessage),
+}
+
+impl ObservableMessage {
+    /// Get the message ID.
+    pub fn id(&self) -> &MessageId {
+        match self {
+            ObservableMessage::Invoke(m) => &m.id,
+            ObservableMessage::Request(m) => &m.id,
+            ObservableMessage::Response(m) => &m.id,
+            ObservableMessage::Complete(m) => &m.id,
+        }
+    }
+
+    /// Get the submission ID.
+    pub fn submission(&self) -> &SubmissionId {
+        match self {
+            ObservableMessage::Invoke(m) => &m.submission,
+            ObservableMessage::Request(m) => &m.submission,
+            ObservableMessage::Response(m) => &m.submission,
+            ObservableMessage::Complete(m) => &m.submission,
+        }
+    }
+
+    /// Get the agent ID.
+    pub fn agent_id(&self) -> &ResourceId {
+        match self {
+            ObservableMessage::Invoke(m) => &m.agent_id,
+            ObservableMessage::Request(m) => &m.agent_id,
+            ObservableMessage::Response(m) => &m.agent_id,
+            ObservableMessage::Complete(m) => &m.agent_id,
+        }
+    }
+
+    /// Get the payload.
+    pub fn payload(&self) -> &[u8] {
+        match self {
+            ObservableMessage::Invoke(m) => &m.payload,
+            ObservableMessage::Request(m) => &m.payload,
+            ObservableMessage::Response(m) => &m.payload,
+            ObservableMessage::Complete(m) => &m.payload,
+        }
+    }
+}
+
+impl From<InvokeMessage> for ObservableMessage {
+    fn from(msg: InvokeMessage) -> Self {
+        ObservableMessage::Invoke(msg)
+    }
+}
+
+impl From<RequestMessage> for ObservableMessage {
+    fn from(msg: RequestMessage) -> Self {
+        ObservableMessage::Request(msg)
+    }
+}
+
+impl From<ResponseMessage> for ObservableMessage {
+    fn from(msg: ResponseMessage) -> Self {
+        ObservableMessage::Response(msg)
+    }
+}
+
+impl From<CompleteMessage> for ObservableMessage {
+    fn from(msg: CompleteMessage) -> Self {
+        ObservableMessage::Complete(msg)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -664,4 +746,64 @@ mod tests {
     //     let complete = CompleteMessage::new(...);
     //     complete.create_reply(...);  // ERROR: CompleteMessage doesn't implement ExpectsReply
     // }
+
+    // --- ObservableMessage tests ---
+
+    #[test]
+    fn observable_message_from_invoke() {
+        let invoke = InvokeMessage::new(
+            SubmissionId::new(),
+            HarnessType::Cli,
+            RuntimeType::Wasm,
+            test_agent_id(),
+            b"test".to_vec(),
+        );
+        let id = invoke.id.clone();
+        let submission = invoke.submission.clone();
+
+        let observable: ObservableMessage = invoke.into();
+
+        assert_eq!(observable.id(), &id);
+        assert_eq!(observable.submission(), &submission);
+        matches!(observable, ObservableMessage::Invoke(_));
+    }
+
+    #[test]
+    fn observable_message_from_request() {
+        let request = RequestMessage::new(
+            SubmissionId::new(),
+            test_agent_id(),
+            "kv",
+            "sqlite",
+            "get",
+            Sequence::first(),
+            b"test".to_vec(),
+        );
+        let id = request.id.clone();
+
+        let observable: ObservableMessage = request.into();
+
+        assert_eq!(observable.id(), &id);
+        matches!(observable, ObservableMessage::Request(_));
+    }
+
+    #[test]
+    fn observable_message_common_accessors() {
+        let submission = SubmissionId::new();
+        let agent_id = test_agent_id();
+        let invoke = InvokeMessage::new(
+            submission.clone(),
+            HarnessType::Cli,
+            RuntimeType::Wasm,
+            agent_id.clone(),
+            b"payload".to_vec(),
+        );
+
+        let observable: ObservableMessage = invoke.into();
+
+        // All common fields accessible through enum
+        assert_eq!(observable.submission(), &submission);
+        assert_eq!(observable.agent_id(), &agent_id);
+        assert_eq!(observable.payload(), b"payload");
+    }
 }
