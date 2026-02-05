@@ -3,6 +3,8 @@
 use std::fmt;
 use uuid::Uuid;
 
+use crate::domain::{ResourceId, RuntimeType};
+
 /// A message that travels through the queue.
 ///
 /// All messages expect a response - no fire-and-forget.
@@ -186,37 +188,52 @@ impl fmt::Display for HarnessType {
 // Typed Messages (ADR 044)
 // ============================================================================
 
+/// Trait for messages that expect a reply.
+///
+/// The associated type `Reply` specifies what message type is expected
+/// as a response. Use `create_reply()` to construct the reply - it ensures
+/// the correct type and echoes all relevant dimensions.
+///
+/// Terminal messages (Complete, Response) don't implement this trait
+/// because they ARE replies.
+pub trait ExpectsReply {
+    type Reply;
+
+    /// Create the reply for this message (recommended way to construct replies).
+    ///
+    /// Ensures the correct reply type and echoes all dimensions from the original.
+    fn create_reply(&self, payload: Vec<u8>) -> Self::Reply;
+}
+
 /// Invoke message: Harness → Runtime
 ///
 /// Starts a submission by invoking an agent.
+/// Expects a CompleteMessage in response (enforced by ExpectsReply trait).
 #[derive(Clone, Debug)]
 pub struct InvokeMessage {
     pub id: MessageId,
     pub submission: SubmissionId,
     pub harness: HarnessType,
-    pub runtime: String,
-    pub agent: String,
+    pub runtime: RuntimeType,
+    pub agent_id: ResourceId,
     pub payload: Vec<u8>,
-    pub reply_to: String,
 }
 
 impl InvokeMessage {
     pub fn new(
         submission: SubmissionId,
         harness: HarnessType,
-        runtime: impl Into<String>,
-        agent: impl Into<String>,
+        runtime: RuntimeType,
+        agent_id: ResourceId,
         payload: Vec<u8>,
-        reply_to: impl Into<String>,
     ) -> Self {
         Self {
             id: MessageId::new(),
             submission,
             harness,
-            runtime: runtime.into(),
-            agent: agent.into(),
+            runtime,
+            agent_id,
             payload,
-            reply_to: reply_to.into(),
         }
     }
 }
@@ -224,40 +241,38 @@ impl InvokeMessage {
 /// Request message: Runtime → Service
 ///
 /// Agent requests a service operation (kv, vec, infer, embed).
+/// Expects a ResponseMessage in response (enforced by ExpectsReply trait).
 #[derive(Clone, Debug)]
 pub struct RequestMessage {
     pub id: MessageId,
     pub submission: SubmissionId,
-    pub agent: String,
+    pub agent_id: ResourceId,
     pub service: String,
     pub backend: String,
     pub operation: String,
     pub sequence: Sequence,
     pub payload: Vec<u8>,
-    pub reply_to: String,
 }
 
 impl RequestMessage {
     pub fn new(
         submission: SubmissionId,
-        agent: impl Into<String>,
+        agent_id: ResourceId,
         service: impl Into<String>,
         backend: impl Into<String>,
         operation: impl Into<String>,
         sequence: Sequence,
         payload: Vec<u8>,
-        reply_to: impl Into<String>,
     ) -> Self {
         Self {
             id: MessageId::new(),
             submission,
-            agent: agent.into(),
+            agent_id,
             service: service.into(),
             backend: backend.into(),
             operation: operation.into(),
             sequence,
             payload,
-            reply_to: reply_to.into(),
         }
     }
 }
@@ -269,7 +284,7 @@ impl RequestMessage {
 pub struct ResponseMessage {
     pub id: MessageId,
     pub submission: SubmissionId,
-    pub agent: String,
+    pub agent_id: ResourceId,
     pub service: String,
     pub backend: String,
     pub operation: String,
@@ -284,7 +299,7 @@ impl ResponseMessage {
         Self {
             id: MessageId::new(),
             submission: request.submission.clone(),
-            agent: request.agent.clone(),
+            agent_id: request.agent_id.clone(),
             service: request.service.clone(),
             backend: request.backend.clone(),
             operation: request.operation.clone(),
@@ -302,7 +317,7 @@ impl ResponseMessage {
 pub struct CompleteMessage {
     pub id: MessageId,
     pub submission: SubmissionId,
-    pub agent: String,
+    pub agent_id: ResourceId,
     pub harness: HarnessType,
     pub payload: Vec<u8>,
     pub correlation_id: MessageId,
@@ -311,7 +326,7 @@ pub struct CompleteMessage {
 impl CompleteMessage {
     pub fn new(
         submission: SubmissionId,
-        agent: impl Into<String>,
+        agent_id: ResourceId,
         harness: HarnessType,
         payload: Vec<u8>,
         correlation_id: MessageId,
@@ -319,13 +334,45 @@ impl CompleteMessage {
         Self {
             id: MessageId::new(),
             submission,
-            agent: agent.into(),
+            agent_id,
             harness,
             payload,
             correlation_id,
         }
     }
 }
+
+// ============================================================================
+// ExpectsReply trait implementations
+// ============================================================================
+
+/// InvokeMessage expects CompleteMessage as its reply.
+impl ExpectsReply for InvokeMessage {
+    type Reply = CompleteMessage;
+
+    fn create_reply(&self, payload: Vec<u8>) -> CompleteMessage {
+        CompleteMessage::new(
+            self.submission.clone(),
+            self.agent_id.clone(),
+            self.harness,
+            payload,
+            self.id.clone(),
+        )
+    }
+}
+
+/// RequestMessage expects ResponseMessage as its reply.
+impl ExpectsReply for RequestMessage {
+    type Reply = ResponseMessage;
+
+    fn create_reply(&self, payload: Vec<u8>) -> ResponseMessage {
+        ResponseMessage::from_request(self, payload)
+    }
+}
+
+// Note: CompleteMessage and ResponseMessage do NOT implement ExpectsReply.
+// They are terminal messages - attempting to get their Reply type is a
+// compile-time error.
 
 #[cfg(test)]
 mod tests {
@@ -460,69 +507,71 @@ mod tests {
 
     // --- Typed message tests ---
 
+    fn test_agent_id() -> ResourceId {
+        ResourceId::new("file:///test/echo-agent.wasm")
+    }
+
     #[test]
     fn invoke_message_creation() {
         let submission = SubmissionId::new();
+        let agent_id = test_agent_id();
         let msg = InvokeMessage::new(
             submission.clone(),
             HarnessType::Cli,
-            "wasm",
-            "echo-agent",
+            RuntimeType::Wasm,
+            agent_id.clone(),
             b"hello".to_vec(),
-            "reply-queue",
         );
 
         assert_eq!(msg.submission, submission);
         assert_eq!(msg.harness, HarnessType::Cli);
-        assert_eq!(msg.runtime, "wasm");
-        assert_eq!(msg.agent, "echo-agent");
+        assert_eq!(msg.runtime, RuntimeType::Wasm);
+        assert_eq!(msg.agent_id, agent_id);
         assert_eq!(msg.payload, b"hello");
-        assert_eq!(msg.reply_to, "reply-queue");
     }
 
     #[test]
     fn request_message_creation() {
         let submission = SubmissionId::new();
+        let agent_id = test_agent_id();
         let msg = RequestMessage::new(
             submission.clone(),
-            "pensieve",
+            agent_id.clone(),
             "kv",
             "sqlite",
             "get",
             Sequence::first(),
             b"key".to_vec(),
-            "reply-queue",
         );
 
         assert_eq!(msg.submission, submission);
-        assert_eq!(msg.agent, "pensieve");
+        assert_eq!(msg.agent_id, agent_id);
         assert_eq!(msg.service, "kv");
         assert_eq!(msg.backend, "sqlite");
         assert_eq!(msg.operation, "get");
         assert_eq!(msg.sequence.as_u32(), 1);
         assert_eq!(msg.payload, b"key");
-        assert_eq!(msg.reply_to, "reply-queue");
     }
 
     #[test]
     fn response_from_request_echoes_dimensions() {
         let submission = SubmissionId::new();
+        let agent_id = test_agent_id();
         let request = RequestMessage::new(
             submission.clone(),
-            "pensieve",
+            agent_id.clone(),
             "kv",
             "sqlite",
             "get",
             Sequence::from(3),
             b"key".to_vec(),
-            "reply-queue",
         );
 
         let response = ResponseMessage::from_request(&request, b"value".to_vec());
 
         // Response echoes all request dimensions
         assert_eq!(response.submission, request.submission);
-        assert_eq!(response.agent, request.agent);
+        assert_eq!(response.agent_id, request.agent_id);
         assert_eq!(response.service, request.service);
         assert_eq!(response.backend, request.backend);
         assert_eq!(response.operation, request.operation);
@@ -539,19 +588,80 @@ mod tests {
     #[test]
     fn complete_message_creation() {
         let submission = SubmissionId::new();
+        let agent_id = test_agent_id();
         let invoke_id = MessageId::new();
         let msg = CompleteMessage::new(
             submission.clone(),
-            "echo-agent",
+            agent_id.clone(),
             HarnessType::Cli,
             b"result".to_vec(),
             invoke_id.clone(),
         );
 
         assert_eq!(msg.submission, submission);
-        assert_eq!(msg.agent, "echo-agent");
+        assert_eq!(msg.agent_id, agent_id);
         assert_eq!(msg.harness, HarnessType::Cli);
         assert_eq!(msg.payload, b"result");
         assert_eq!(msg.correlation_id, invoke_id);
     }
+
+    // --- ExpectsReply trait tests ---
+
+    #[test]
+    fn invoke_create_reply_returns_complete() {
+        let invoke = InvokeMessage::new(
+            SubmissionId::new(),
+            HarnessType::Cli,
+            RuntimeType::Wasm,
+            test_agent_id(),
+            b"input".to_vec(),
+        );
+
+        // create_reply returns CompleteMessage (compiler enforced)
+        let complete: CompleteMessage = invoke.create_reply(b"output".to_vec());
+
+        // Dimensions are echoed from invoke
+        assert_eq!(complete.submission, invoke.submission);
+        assert_eq!(complete.agent_id, invoke.agent_id);
+        assert_eq!(complete.harness, invoke.harness);
+        // Correlation links reply to original
+        assert_eq!(complete.correlation_id, invoke.id);
+        // Payload is the reply payload
+        assert_eq!(complete.payload, b"output");
+    }
+
+    #[test]
+    fn request_create_reply_returns_response() {
+        let request = RequestMessage::new(
+            SubmissionId::new(),
+            test_agent_id(),
+            "kv",
+            "sqlite",
+            "get",
+            Sequence::first(),
+            b"key".to_vec(),
+        );
+
+        // create_reply returns ResponseMessage (compiler enforced)
+        let response: ResponseMessage = request.create_reply(b"value".to_vec());
+
+        // Dimensions are echoed from request
+        assert_eq!(response.submission, request.submission);
+        assert_eq!(response.agent_id, request.agent_id);
+        assert_eq!(response.service, request.service);
+        assert_eq!(response.backend, request.backend);
+        assert_eq!(response.operation, request.operation);
+        assert_eq!(response.sequence, request.sequence);
+        // Correlation links reply to original
+        assert_eq!(response.correlation_id, request.id);
+        // Payload is the reply payload
+        assert_eq!(response.payload, b"value");
+    }
+
+    // Note: These would NOT compile (uncomment to verify):
+    //
+    // fn try_create_reply_from_complete() {
+    //     let complete = CompleteMessage::new(...);
+    //     complete.create_reply(...);  // ERROR: CompleteMessage doesn't implement ExpectsReply
+    // }
 }
