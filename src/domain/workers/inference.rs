@@ -13,7 +13,7 @@ use serde::Deserialize;
 use crate::domain::InferenceEngine;
 use crate::domain::registry::Registry;
 use crate::inference::open_inference_engine;
-use crate::queue::{Message, MessageQueue};
+use crate::queue::{ExpectsReply, MessageQueue, RequestMessage};
 use crate::services::inference;
 
 // ============================================================================
@@ -69,25 +69,22 @@ impl InferenceServiceWorker {
 
     /// Process one message if available. Returns true if processed.
     pub fn tick(&self) -> bool {
-        let queue_name = self.queue.service_queue("infer", &self.backend, "");
-        match self.queue.receive(&queue_name) {
-            Ok(pending) => {
-                let response = self.handle_infer(&pending.message);
-                self.send_response(&pending.message, response);
-                let _ = pending.ack();
+        // Receive typed RequestMessage (ADR 044)
+        match self.queue.receive_request("infer", &self.backend, "") {
+            Ok((request, ack)) => {
+                let response_payload = self.handle_infer(&request);
+                // Use ExpectsReply to build properly-correlated ResponseMessage
+                let response = request.create_reply(response_payload);
+                let _ = self.queue.send_response(response);
+                let _ = ack();
                 true
             }
             Err(_) => false,
         }
     }
 
-    fn send_response(&self, request: &Message, payload: Vec<u8>) {
-        let response = Message::response(payload, &request.reply_to, request.id.clone());
-        let _ = self.queue.send(&request.reply_to, response);
-    }
-
-    fn handle_infer(&self, msg: &Message) -> Vec<u8> {
-        let req: InferRequest = match serde_json::from_slice(&msg.payload) {
+    fn handle_infer(&self, request: &RequestMessage) -> Vec<u8> {
+        let req: InferRequest = match serde_json::from_slice(&request.payload) {
             Ok(r) => r,
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
@@ -156,11 +153,19 @@ impl InferenceServiceWorker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{Agent, EngineType, InMemoryRegistry, Model, ModelType};
-    use crate::queue::{InMemoryQueue, Message};
+    use crate::domain::{Agent, EngineType, InMemoryRegistry, Model, ModelType, ResourceId};
+    use crate::queue::{InMemoryQueue, Sequence, SubmissionId};
     use crate::inference::InMemoryInference;
 
     const TEST_AGENT_ID: &str = "file:///test-agent.wasm";
+
+    fn test_agent_id() -> ResourceId {
+        ResourceId::new(TEST_AGENT_ID)
+    }
+
+    fn test_submission() -> SubmissionId {
+        SubmissionId::from("sub-test-123".to_string())
+    }
 
     fn test_model(name: &str) -> Model {
         // model_path must match the URI in the agent manifest
@@ -206,24 +211,31 @@ mod tests {
         let engine = Arc::new(InMemoryInference::new("test response"));
         handler.register("test-model", engine);
 
-        // Send infer request
+        // Send typed RequestMessage (ADR 044)
         let payload = serde_json::json!({
             "agent_id": TEST_AGENT_ID,
             "model": "test-model",
             "prompt": "Hello"
         });
-        let msg = Message::request(
+        let request = RequestMessage::new(
+            test_submission(),
+            test_agent_id(),
+            "infer",
+            "memory",
+            "",
+            Sequence::first(),
             serde_json::to_vec(&payload).unwrap(),
-            "reply",
         );
-        // Use backend-qualified queue name (ADR 043)
-        queue.send("vlinder.svc.infer.memory", msg).unwrap();
+
+        queue.send_request(request).unwrap();
 
         // Process
         assert!(handler.tick());
-        let pending = queue.receive("reply").unwrap();
-        assert_eq!(String::from_utf8(pending.message.payload.clone()).unwrap(), "test response");
-        pending.ack().unwrap();
+
+        // Response is sent via typed queue - receive with pattern
+        let (response, ack) = queue.receive_response("res.infer.memory").unwrap();
+        assert_eq!(String::from_utf8(response.payload.clone()).unwrap(), "test response");
+        ack().unwrap();
     }
 
     #[test]
@@ -242,19 +254,24 @@ mod tests {
             "model": "other-model",
             "prompt": "Hello"
         });
-        let msg = Message::request(
+        let request = RequestMessage::new(
+            test_submission(),
+            test_agent_id(),
+            "infer",
+            "memory",
+            "",
+            Sequence::first(),
             serde_json::to_vec(&payload).unwrap(),
-            "reply",
         );
-        // Use backend-qualified queue name (ADR 043)
-        queue.send("vlinder.svc.infer.memory", msg).unwrap();
+
+        queue.send_request(request).unwrap();
 
         assert!(handler.tick());
-        let pending = queue.receive("reply").unwrap();
-        let text = String::from_utf8(pending.message.payload.clone()).unwrap();
+        let (response, ack) = queue.receive_response("res.infer.memory").unwrap();
+        let text = String::from_utf8(response.payload.clone()).unwrap();
         assert!(text.contains("[error]"));
         assert!(text.contains("did not declare model"));
-        pending.ack().unwrap();
+        ack().unwrap();
     }
 
     #[test]
@@ -273,18 +290,23 @@ mod tests {
             "model": "test-model",
             "prompt": "Hello"
         });
-        let msg = Message::request(
+        let request = RequestMessage::new(
+            test_submission(),
+            ResourceId::new("file:///unknown-agent.wasm"),
+            "infer",
+            "memory",
+            "",
+            Sequence::first(),
             serde_json::to_vec(&payload).unwrap(),
-            "reply",
         );
-        // Use backend-qualified queue name (ADR 043)
-        queue.send("vlinder.svc.infer.memory", msg).unwrap();
+
+        queue.send_request(request).unwrap();
 
         assert!(handler.tick());
-        let pending = queue.receive("reply").unwrap();
-        let text = String::from_utf8(pending.message.payload.clone()).unwrap();
+        let (response, ack) = queue.receive_response("res.infer.memory").unwrap();
+        let text = String::from_utf8(response.payload.clone()).unwrap();
         assert!(text.contains("[error]"));
         assert!(text.contains("agent not found"));
-        pending.ack().unwrap();
+        ack().unwrap();
     }
 }
