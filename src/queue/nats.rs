@@ -16,7 +16,11 @@ use async_nats::jetstream::{self, stream, consumer};
 use async_nats::jetstream::message::Message as JetStreamMessage;
 use tokio::runtime::Runtime;
 
-use super::{Message, MessageId, MessageQueue, PendingMessage, QueueError};
+use super::{
+    CompleteMessage, InvokeMessage, Message, MessageId, MessageQueue, PendingMessage, QueueError,
+    RequestMessage, ResponseMessage,
+};
+use crate::domain::ResourceId;
 
 /// NATS queue with JetStream durability.
 ///
@@ -289,6 +293,146 @@ impl MessageQueue for NatsQueue {
     fn agent_queue(&self, runtime: &str, agent: &crate::domain::Agent) -> String {
         format!("vlinder.agent.{}.{}", runtime, agent.name)
     }
+
+    fn send_invoke(&self, msg: InvokeMessage) -> Result<(), QueueError> {
+        let subject = format!(
+            "vlinder.{}.invoke.{}.{}.{}",
+            msg.submission,
+            msg.harness,
+            msg.runtime.as_str(),
+            agent_short_name(&msg.agent_id),
+        );
+
+        self.inner.runtime.block_on(async {
+            let mut headers = async_nats::HeaderMap::new();
+            headers.insert("msg-id", msg.id.as_str());
+            headers.insert("submission-id", msg.submission.as_str());
+            headers.insert("harness", msg.harness.as_str());
+            headers.insert("runtime", msg.runtime.as_str());
+            headers.insert("agent-id", msg.agent_id.as_str());
+
+            self.inner
+                .jetstream
+                .publish_with_headers(subject, headers, msg.payload.into())
+                .await
+                .map_err(|e| QueueError::SendFailed(e.to_string()))?
+                .await
+                .map_err(|e| QueueError::SendFailed(e.to_string()))?;
+
+            Ok(())
+        })
+    }
+
+    fn send_request(&self, msg: RequestMessage) -> Result<(), QueueError> {
+        let subject = format!(
+            "vlinder.{}.req.{}.{}.{}.{}.{}",
+            msg.submission,
+            agent_short_name(&msg.agent_id),
+            msg.service,
+            msg.backend,
+            msg.operation,
+            msg.sequence,
+        );
+
+        self.inner.runtime.block_on(async {
+            let mut headers = async_nats::HeaderMap::new();
+            headers.insert("msg-id", msg.id.as_str());
+            headers.insert("submission-id", msg.submission.as_str());
+            headers.insert("agent-id", msg.agent_id.as_str());
+            headers.insert("service", msg.service.as_str());
+            headers.insert("backend", msg.backend.as_str());
+            headers.insert("operation", msg.operation.as_str());
+            headers.insert("sequence", msg.sequence.to_string());
+
+            self.inner
+                .jetstream
+                .publish_with_headers(subject, headers, msg.payload.into())
+                .await
+                .map_err(|e| QueueError::SendFailed(e.to_string()))?
+                .await
+                .map_err(|e| QueueError::SendFailed(e.to_string()))?;
+
+            Ok(())
+        })
+    }
+
+    fn send_response(&self, msg: ResponseMessage) -> Result<(), QueueError> {
+        let subject = format!(
+            "vlinder.{}.res.{}.{}.{}.{}.{}",
+            msg.submission,
+            msg.service,
+            msg.backend,
+            agent_short_name(&msg.agent_id),
+            msg.operation,
+            msg.sequence,
+        );
+
+        self.inner.runtime.block_on(async {
+            let mut headers = async_nats::HeaderMap::new();
+            headers.insert("msg-id", msg.id.as_str());
+            headers.insert("submission-id", msg.submission.as_str());
+            headers.insert("agent-id", msg.agent_id.as_str());
+            headers.insert("service", msg.service.as_str());
+            headers.insert("backend", msg.backend.as_str());
+            headers.insert("operation", msg.operation.as_str());
+            headers.insert("sequence", msg.sequence.to_string());
+            headers.insert("correlation-id", msg.correlation_id.as_str());
+
+            self.inner
+                .jetstream
+                .publish_with_headers(subject, headers, msg.payload.into())
+                .await
+                .map_err(|e| QueueError::SendFailed(e.to_string()))?
+                .await
+                .map_err(|e| QueueError::SendFailed(e.to_string()))?;
+
+            Ok(())
+        })
+    }
+
+    fn send_complete(&self, msg: CompleteMessage) -> Result<(), QueueError> {
+        let subject = format!(
+            "vlinder.{}.complete.{}.{}",
+            msg.submission,
+            agent_short_name(&msg.agent_id),
+            msg.harness,
+        );
+
+        self.inner.runtime.block_on(async {
+            let mut headers = async_nats::HeaderMap::new();
+            headers.insert("msg-id", msg.id.as_str());
+            headers.insert("submission-id", msg.submission.as_str());
+            headers.insert("agent-id", msg.agent_id.as_str());
+            headers.insert("harness", msg.harness.as_str());
+            headers.insert("correlation-id", msg.correlation_id.as_str());
+
+            self.inner
+                .jetstream
+                .publish_with_headers(subject, headers, msg.payload.into())
+                .await
+                .map_err(|e| QueueError::SendFailed(e.to_string()))?
+                .await
+                .map_err(|e| QueueError::SendFailed(e.to_string()))?;
+
+            Ok(())
+        })
+    }
+}
+
+/// Extract a short name from a ResourceId for NATS subjects.
+fn agent_short_name(agent_id: &ResourceId) -> String {
+    if let Some(path) = agent_id.path() {
+        if let Some(filename) = path.rsplit('/').next() {
+            let name = filename.strip_suffix(".wasm").unwrap_or(filename);
+            if !name.is_empty() {
+                return name.to_string();
+            }
+        }
+    }
+    if let Some(authority) = agent_id.authority() {
+        return authority.to_string();
+    }
+    agent_id.as_str().to_string()
 }
 
 use futures::StreamExt;

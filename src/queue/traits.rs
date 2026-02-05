@@ -7,7 +7,7 @@
 //! This is critical for distributed mode where workers may crash
 //! between receive and processing completion.
 
-use super::Message;
+use super::{CompleteMessage, InvokeMessage, Message, RequestMessage, ResponseMessage};
 use crate::domain::Agent;
 use std::fmt;
 
@@ -115,6 +115,30 @@ pub trait MessageQueue {
     /// - `runtime`: Runtime type (e.g., "wasm", "docker")
     /// - `agent`: The agent to build queue name for
     fn agent_queue(&self, runtime: &str, agent: &Agent) -> String;
+
+    // -------------------------------------------------------------------------
+    // Typed message methods (ADR 044)
+    // -------------------------------------------------------------------------
+
+    /// Send an InvokeMessage (Harness → Runtime).
+    ///
+    /// Implementation determines routing from message dimensions.
+    fn send_invoke(&self, msg: InvokeMessage) -> Result<(), QueueError>;
+
+    /// Send a RequestMessage (Runtime → Service).
+    ///
+    /// Implementation determines routing from message dimensions.
+    fn send_request(&self, msg: RequestMessage) -> Result<(), QueueError>;
+
+    /// Send a ResponseMessage (Service → Runtime).
+    ///
+    /// Implementation determines routing from message dimensions.
+    fn send_response(&self, msg: ResponseMessage) -> Result<(), QueueError>;
+
+    /// Send a CompleteMessage (Runtime → Harness).
+    ///
+    /// Implementation determines routing from message dimensions.
+    fn send_complete(&self, msg: CompleteMessage) -> Result<(), QueueError>;
 }
 
 // --- Errors ---
