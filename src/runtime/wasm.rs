@@ -239,16 +239,12 @@ fn make_send_function(
             data.queue.send_request(request)
                 .map_err(|e| extism::Error::msg(format!("send error: {}", e)))?;
 
-            // TODO(ADR-044): Use this pattern with receive_response() once workers migrate
-            let _reply_pattern = format!("{}.res.{}.{}", data.submission, service, backend);
-
-            // Wait for response (still using untyped receive during migration)
-            let legacy_reply = format!("vlinder.{}.res.{}.{}.*.{}.{}",
-                data.submission, service, backend, operation, seq);
+            // Wait for typed ResponseMessage (ADR 044)
+            let reply_pattern = format!("{}.res.{}.{}", data.submission, service, backend);
             loop {
-                if let Ok(pending) = data.queue.receive(&legacy_reply) {
-                    let payload = pending.message.payload.clone();
-                    let _ = pending.ack();
+                if let Ok((response, ack)) = data.queue.receive_response(&reply_pattern) {
+                    let payload = response.payload.clone();
+                    let _ = ack();
                     return write_output(plugin, outputs, &payload);
                 }
                 std::thread::sleep(std::time::Duration::from_millis(1));

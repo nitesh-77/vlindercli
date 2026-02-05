@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use vlindercli::catalog::OllamaCatalog;
 use vlindercli::config::registry_db_path;
-use vlindercli::domain::{Agent, Daemon, ModelCatalog, RegistryRepository};
+use vlindercli::domain::{Agent, Daemon, Harness, ModelCatalog, RegistryRepository};
 use vlindercli::storage::SqliteRegistryRepository;
 
 const FIXTURES: &str = "tests/fixtures/agents";

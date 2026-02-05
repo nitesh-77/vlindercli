@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use vlindercli::domain::Daemon;
+use vlindercli::domain::{Daemon, Harness};
 
 fn fixture_path(relative: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -11,7 +11,7 @@ fn fixture_path(relative: &str) -> PathBuf {
 }
 
 fn reverse_agent_toml() -> String {
-    let wasm_path = fixture_path("agents/reverse-agent/agent.wasm");
+    let wasm_path = fixture_path("agents/reverse-agent/reverse-agent.wasm");
     format!(
         r#"
         name = "reverse-agent"

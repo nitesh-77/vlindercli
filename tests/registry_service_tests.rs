@@ -7,6 +7,7 @@ use std::thread;
 use std::time::Duration;
 
 use vlindercli::domain::{Agent, InMemoryRegistry, Registry, Requirements, ResourceId, RuntimeType};
+use vlindercli::queue::SubmissionId;
 use vlindercli::registry_service::{GrpcRegistryClient, RegistryServiceServer};
 
 fn empty_requirements() -> Requirements {
@@ -127,7 +128,7 @@ fn grpc_job_lifecycle() {
     client.register_agent(agent.clone()).unwrap();
 
     // Create a job via gRPC
-    let job_id = client.create_job(agent.id.clone(), "hello".to_string());
+    let job_id = client.create_job(SubmissionId::new(), agent.id.clone(), "hello".to_string());
 
     // Job should be pending
     let pending = client.pending_jobs();

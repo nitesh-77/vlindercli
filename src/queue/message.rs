@@ -1,42 +1,15 @@
-//! Message types for queue communication.
+//! Message types for queue communication (ADR 044).
+//!
+//! Typed messages with explicit fields for observability:
+//! - `InvokeMessage`: Harness → Runtime (start a submission)
+//! - `RequestMessage`: Runtime → Service (agent calls a service)
+//! - `ResponseMessage`: Service → Runtime (service replies)
+//! - `CompleteMessage`: Runtime → Harness (submission finished)
 
 use std::fmt;
 use uuid::Uuid;
 
 use crate::domain::{ResourceId, RuntimeType};
-
-/// A message that travels through the queue.
-///
-/// All messages expect a response - no fire-and-forget.
-#[derive(Clone, Debug)]
-pub struct Message {
-    pub id: MessageId,
-    pub payload: Vec<u8>,
-    pub reply_to: String,
-    pub correlation_id: Option<MessageId>,
-}
-
-impl Message {
-    /// Create a request that expects a response.
-    pub fn request(payload: Vec<u8>, reply_to: impl Into<String>) -> Self {
-        Self {
-            id: MessageId::new(),
-            payload,
-            reply_to: reply_to.into(),
-            correlation_id: None,
-        }
-    }
-
-    /// Create a response to a request.
-    pub fn response(payload: Vec<u8>, reply_to: impl Into<String>, correlation_id: MessageId) -> Self {
-        Self {
-            id: MessageId::new(),
-            payload,
-            reply_to: reply_to.into(),
-            correlation_id: Some(correlation_id),
-        }
-    }
-}
 
 // --- Supporting types ---
 

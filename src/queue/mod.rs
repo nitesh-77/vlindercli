@@ -1,9 +1,10 @@
-//! Message queue abstraction.
+//! Message queue abstraction (ADR 044).
 //!
-//! The queue is the universal abstraction for all communication:
-//! - Agent to runtime (infer, embed, store)
-//! - Agent to agent (call_agent)
-//! - Runtime to agent (invoke)
+//! The queue is the universal abstraction for all communication using typed messages:
+//! - `InvokeMessage`: Harness → Runtime (start a submission)
+//! - `RequestMessage`: Runtime → Service (agent calls a service)
+//! - `ResponseMessage`: Service → Runtime (service replies)
+//! - `CompleteMessage`: Runtime → Harness (submission finished)
 //!
 //! Implementations:
 //! - `InMemoryQueue`: Single-process, for local development
@@ -13,23 +14,18 @@ mod message;
 mod traits;
 mod in_memory;
 mod nats;
-mod worker;
 
 use std::sync::Arc;
 use crate::config::Config;
 
 pub use message::{
-    // Legacy types (still used during transition)
-    Message, MessageId,
-    // New observability types (ADR 044)
-    SubmissionId, Sequence, HarnessType,
+    MessageId, SubmissionId, Sequence, HarnessType,
     InvokeMessage, RequestMessage, ResponseMessage, CompleteMessage,
     ExpectsReply, ObservableMessage,
 };
-pub use traits::{MessageQueue, PendingMessage, QueueError};
+pub use traits::{MessageQueue, QueueError};
 pub use in_memory::InMemoryQueue;
 pub use nats::NatsQueue;
-pub use worker::{process_one, WorkerError};
 
 /// Create a queue from configuration.
 ///

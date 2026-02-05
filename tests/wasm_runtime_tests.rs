@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use vlindercli::domain::{Agent, InMemoryRegistry, Registry, ResourceId, Runtime, RuntimeType};
-use vlindercli::queue::{InMemoryQueue, Message, MessageQueue};
+use vlindercli::queue::{InMemoryQueue, InvokeMessage, MessageQueue, HarnessType, SubmissionId};
 use vlindercli::runtime::WasmRuntime;
 
 const FIXTURES: &str = "tests/fixtures/agents";
@@ -35,11 +35,16 @@ fn runtime_executes_agent_and_returns_response() {
 
     let mut runtime = WasmRuntime::new(&test_registry_id(), Arc::clone(&queue), registry);
 
-    // Send message to agent's queue (keyed by agent_id)
-    let reply_queue = "test-reply";
-    let request = Message::request(b"hello".to_vec(), reply_queue);
-    let request_id = request.id.clone();
-    queue.send(agent_id.as_str(), request).unwrap();
+    // Send typed InvokeMessage to start submission
+    let invoke = InvokeMessage::new(
+        SubmissionId::new(),
+        HarnessType::Cli,
+        RuntimeType::Wasm,
+        agent_id.clone(),
+        b"hello".to_vec(),
+    );
+    let invoke_id = invoke.id.clone();
+    queue.send_invoke(invoke).unwrap();
 
     // First tick spawns the WASM thread
     assert!(runtime.tick());
@@ -52,9 +57,9 @@ fn runtime_executes_agent_and_returns_response() {
         std::thread::sleep(std::time::Duration::from_millis(1));
     }
 
-    // Response should be on reply queue
-    let pending = queue.receive(reply_queue).unwrap();
-    assert_eq!(pending.message.correlation_id, Some(request_id));
-    assert_eq!(String::from_utf8(pending.message.payload.clone()).unwrap(), "olleh");
-    pending.ack().unwrap();
+    // CompleteMessage should be on harness queue
+    let (complete, ack) = queue.receive_complete("cli").unwrap();
+    assert_eq!(complete.correlation_id, invoke_id);
+    assert_eq!(String::from_utf8(complete.payload.clone()).unwrap(), "olleh");
+    ack().unwrap();
 }

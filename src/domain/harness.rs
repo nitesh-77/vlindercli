@@ -40,7 +40,6 @@ pub trait Harness {
 pub struct CliHarness {
     queue: Arc<dyn MessageQueue + Send + Sync>,
     registry: Arc<dyn Registry>,
-    reply_queue: String,
     inflight: HashMap<MessageId, JobId>,
 }
 
@@ -52,7 +51,6 @@ impl CliHarness {
         Self {
             queue,
             registry,
-            reply_queue: format!("harness-{}", uuid::Uuid::new_v4()),
             inflight: HashMap::new(),
         }
     }
