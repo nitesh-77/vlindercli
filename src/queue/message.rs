@@ -108,6 +108,44 @@ impl From<String> for SubmissionId {
     }
 }
 
+// --- Sequence (ADR 044) ---
+
+/// Sequence number for ordering interactions within a submission.
+///
+/// Starts at 1 and increments for each service request.
+/// Used to reconstruct the order of events when debugging.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Sequence(u32);
+
+impl Sequence {
+    /// Create the first sequence number (1).
+    pub fn first() -> Self {
+        Self(1)
+    }
+
+    /// Get the next sequence number.
+    pub fn next(&self) -> Self {
+        Self(self.0 + 1)
+    }
+
+    /// Get the raw sequence number.
+    pub fn as_u32(&self) -> u32 {
+        self.0
+    }
+}
+
+impl fmt::Display for Sequence {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<u32> for Sequence {
+    fn from(n: u32) -> Self {
+        Self(n)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -154,5 +192,46 @@ mod tests {
     fn submission_id_display() {
         let id = SubmissionId::from("sub-abc123".to_string());
         assert_eq!(format!("{}", id), "sub-abc123");
+    }
+
+    // --- Sequence tests ---
+
+    #[test]
+    fn sequence_first_is_one() {
+        let seq = Sequence::first();
+        assert_eq!(seq.as_u32(), 1);
+    }
+
+    #[test]
+    fn sequence_next_increments() {
+        let seq1 = Sequence::first();
+        let seq2 = seq1.next();
+        let seq3 = seq2.next();
+
+        assert_eq!(seq1.as_u32(), 1);
+        assert_eq!(seq2.as_u32(), 2);
+        assert_eq!(seq3.as_u32(), 3);
+    }
+
+    #[test]
+    fn sequence_display_format() {
+        let seq = Sequence::from(42);
+        assert_eq!(format!("{}", seq), "42");
+    }
+
+    #[test]
+    fn sequence_from_u32() {
+        let seq = Sequence::from(5);
+        assert_eq!(seq.as_u32(), 5);
+    }
+
+    #[test]
+    fn sequence_equality() {
+        let seq1 = Sequence::from(3);
+        let seq2 = Sequence::from(3);
+        let seq3 = Sequence::from(4);
+
+        assert_eq!(seq1, seq2);
+        assert_ne!(seq1, seq3);
     }
 }
