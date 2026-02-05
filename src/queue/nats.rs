@@ -5,16 +5,19 @@
 //!
 //! Uses typed messages exclusively for full observability.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-use async_nats::jetstream::{self, stream};
+use async_nats::jetstream::{self, consumer, stream};
+use async_nats::jetstream::message::Message as JetStreamMessage;
+use futures::StreamExt;
 use tokio::runtime::Runtime;
 
 use super::{
-    CompleteMessage, InvokeMessage, MessageQueue, QueueError,
-    RequestMessage, ResponseMessage,
+    CompleteMessage, HarnessType, InvokeMessage, MessageId, MessageQueue, QueueError,
+    RequestMessage, ResponseMessage, Sequence, SubmissionId,
 };
-use crate::domain::ResourceId;
+use crate::domain::{ResourceId, RuntimeType};
 
 /// NATS queue with JetStream durability.
 ///
@@ -91,6 +94,54 @@ impl NatsQueue {
     /// Escape hatch: access JetStream context directly.
     pub fn jetstream(&self) -> &jetstream::Context {
         &self.inner.jetstream
+    }
+
+    /// Fetch one message from a subject filter, returning the message and an ack closure.
+    async fn fetch_one(&self, filter: &str) -> Result<(JetStreamMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+        let stream = self.inner.jetstream
+            .get_stream("VLINDER")
+            .await
+            .map_err(|e| QueueError::ReceiveFailed(e.to_string()))?;
+
+        let consumer = stream
+            .create_consumer(consumer::pull::Config {
+                filter_subject: filter.to_string(),
+                ..Default::default()
+            })
+            .await
+            .map_err(|e| QueueError::ReceiveFailed(e.to_string()))?;
+
+        let mut messages = consumer
+            .fetch()
+            .max_messages(1)
+            .expires(Duration::from_millis(100))
+            .messages()
+            .await
+            .map_err(|e| QueueError::ReceiveFailed(e.to_string()))?;
+
+        let js_msg = messages
+            .next()
+            .await
+            .ok_or(QueueError::Timeout)?
+            .map_err(|e| QueueError::ReceiveFailed(e.to_string()))?;
+
+        // Wrap message for ack closure
+        let js_msg_for_ack: Arc<Mutex<Option<JetStreamMessage>>> = Arc::new(Mutex::new(Some(js_msg.clone())));
+        let handle = self.inner.runtime.handle().clone();
+
+        let ack_fn: Box<dyn FnOnce() -> Result<(), QueueError> + Send> = Box::new(move || {
+            if let Some(msg) = js_msg_for_ack.lock().unwrap().take() {
+                handle.block_on(async {
+                    msg.ack()
+                        .await
+                        .map_err(|e| QueueError::ReceiveFailed(format!("ack failed: {}", e)))
+                })
+            } else {
+                Ok(())
+            }
+        });
+
+        Ok((js_msg, ack_fn))
     }
 }
 
@@ -231,24 +282,106 @@ impl MessageQueue for NatsQueue {
         })
     }
 
-    fn receive_invoke(&self, _subject_pattern: &str) -> Result<(InvokeMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
-        // TODO: Implement NATS typed receive with header extraction
-        Err(QueueError::ReceiveFailed("typed receive not yet implemented for NATS".to_string()))
+    fn receive_invoke(&self, subject_pattern: &str) -> Result<(InvokeMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+        // Build filter: vlinder.*.invoke.*.*.{agent_pattern}
+        let filter = format!("vlinder.*.invoke.*.*.{}", subject_pattern);
+
+        self.inner.runtime.block_on(async {
+            let (js_msg, ack_fn) = self.fetch_one(&filter).await?;
+
+            // Extract typed message from headers
+            let headers = js_msg.headers.as_ref()
+                .ok_or_else(|| QueueError::ReceiveFailed("missing headers".to_string()))?;
+
+            let msg = InvokeMessage {
+                id: MessageId::from(get_header(headers, "msg-id")?),
+                submission: SubmissionId::from(get_header(headers, "submission-id")?),
+                harness: parse_harness_type(&get_header(headers, "harness")?)?,
+                runtime: parse_runtime_type(&get_header(headers, "runtime")?)?,
+                agent_id: ResourceId::new(&get_header(headers, "agent-id")?),
+                payload: js_msg.payload.to_vec(),
+            };
+
+            Ok((msg, ack_fn))
+        })
     }
 
-    fn receive_request(&self, _service: &str, _backend: &str, _operation: &str) -> Result<(RequestMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
-        // TODO: Implement NATS typed receive with header extraction
-        Err(QueueError::ReceiveFailed("typed receive not yet implemented for NATS".to_string()))
+    fn receive_request(&self, service: &str, backend: &str, operation: &str) -> Result<(RequestMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+        // Build filter: vlinder.*.req.*.{service}.{backend}.{operation}.*
+        let filter = if operation.is_empty() {
+            format!("vlinder.*.req.*.{}.{}.*", service, backend)
+        } else {
+            format!("vlinder.*.req.*.{}.{}.{}.*", service, backend, operation)
+        };
+
+        self.inner.runtime.block_on(async {
+            let (js_msg, ack_fn) = self.fetch_one(&filter).await?;
+
+            let headers = js_msg.headers.as_ref()
+                .ok_or_else(|| QueueError::ReceiveFailed("missing headers".to_string()))?;
+
+            let msg = RequestMessage {
+                id: MessageId::from(get_header(headers, "msg-id")?),
+                submission: SubmissionId::from(get_header(headers, "submission-id")?),
+                agent_id: ResourceId::new(&get_header(headers, "agent-id")?),
+                service: get_header(headers, "service")?,
+                backend: get_header(headers, "backend")?,
+                operation: get_header(headers, "operation")?,
+                sequence: Sequence::from(get_header(headers, "sequence")?.parse::<u32>().unwrap_or(1)),
+                payload: js_msg.payload.to_vec(),
+            };
+
+            Ok((msg, ack_fn))
+        })
     }
 
-    fn receive_response(&self, _subject_pattern: &str) -> Result<(ResponseMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
-        // TODO: Implement NATS typed receive with header extraction
-        Err(QueueError::ReceiveFailed("typed receive not yet implemented for NATS".to_string()))
+    fn receive_response(&self, subject_pattern: &str) -> Result<(ResponseMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+        // Build filter from pattern (e.g., "sub-xxx.res.kv.sqlite" -> "vlinder.sub-xxx.res.kv.sqlite.*.*")
+        let filter = format!("vlinder.{}.*.*", subject_pattern);
+
+        self.inner.runtime.block_on(async {
+            let (js_msg, ack_fn) = self.fetch_one(&filter).await?;
+
+            let headers = js_msg.headers.as_ref()
+                .ok_or_else(|| QueueError::ReceiveFailed("missing headers".to_string()))?;
+
+            let msg = ResponseMessage {
+                id: MessageId::from(get_header(headers, "msg-id")?),
+                submission: SubmissionId::from(get_header(headers, "submission-id")?),
+                agent_id: ResourceId::new(&get_header(headers, "agent-id")?),
+                service: get_header(headers, "service")?,
+                backend: get_header(headers, "backend")?,
+                operation: get_header(headers, "operation")?,
+                sequence: Sequence::from(get_header(headers, "sequence")?.parse::<u32>().unwrap_or(1)),
+                payload: js_msg.payload.to_vec(),
+                correlation_id: MessageId::from(get_header(headers, "correlation-id")?),
+            };
+
+            Ok((msg, ack_fn))
+        })
     }
 
-    fn receive_complete(&self, _harness_pattern: &str) -> Result<(CompleteMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
-        // TODO: Implement NATS typed receive with header extraction
-        Err(QueueError::ReceiveFailed("typed receive not yet implemented for NATS".to_string()))
+    fn receive_complete(&self, harness_pattern: &str) -> Result<(CompleteMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+        // Build filter: vlinder.*.complete.*.{harness}
+        let filter = format!("vlinder.*.complete.*.{}", harness_pattern);
+
+        self.inner.runtime.block_on(async {
+            let (js_msg, ack_fn) = self.fetch_one(&filter).await?;
+
+            let headers = js_msg.headers.as_ref()
+                .ok_or_else(|| QueueError::ReceiveFailed("missing headers".to_string()))?;
+
+            let msg = CompleteMessage {
+                id: MessageId::from(get_header(headers, "msg-id")?),
+                submission: SubmissionId::from(get_header(headers, "submission-id")?),
+                agent_id: ResourceId::new(&get_header(headers, "agent-id")?),
+                harness: parse_harness_type(&get_header(headers, "harness")?)?,
+                payload: js_msg.payload.to_vec(),
+                correlation_id: MessageId::from(get_header(headers, "correlation-id")?),
+            };
+
+            Ok((msg, ack_fn))
+        })
     }
 }
 
@@ -266,6 +399,33 @@ fn agent_short_name(agent_id: &ResourceId) -> String {
         return authority.to_string();
     }
     agent_id.as_str().to_string()
+}
+
+/// Extract a header value from NATS headers.
+fn get_header(headers: &async_nats::HeaderMap, key: &str) -> Result<String, QueueError> {
+    headers
+        .get(key)
+        .map(|v| v.to_string())
+        .ok_or_else(|| QueueError::ReceiveFailed(format!("missing header: {}", key)))
+}
+
+/// Parse a harness type string.
+fn parse_harness_type(s: &str) -> Result<HarnessType, QueueError> {
+    match s {
+        "cli" => Ok(HarnessType::Cli),
+        "web" => Ok(HarnessType::Web),
+        "api" => Ok(HarnessType::Api),
+        "whatsapp" => Ok(HarnessType::Whatsapp),
+        _ => Err(QueueError::ReceiveFailed(format!("unknown harness type: {}", s))),
+    }
+}
+
+/// Parse a runtime type string.
+fn parse_runtime_type(s: &str) -> Result<RuntimeType, QueueError> {
+    match s {
+        "wasm" => Ok(RuntimeType::Wasm),
+        _ => Err(QueueError::ReceiveFailed(format!("unknown runtime type: {}", s))),
+    }
 }
 
 #[cfg(test)]
