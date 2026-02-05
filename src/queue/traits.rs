@@ -139,6 +139,20 @@ pub trait MessageQueue {
     ///
     /// Implementation determines routing from message dimensions.
     fn send_complete(&self, msg: CompleteMessage) -> Result<(), QueueError>;
+
+    // -------------------------------------------------------------------------
+    // Typed receive methods (ADR 044)
+    // -------------------------------------------------------------------------
+
+    /// Receive an InvokeMessage from a subject pattern.
+    ///
+    /// Returns the typed message with all dimensions intact.
+    fn receive_invoke(&self, subject_pattern: &str) -> Result<(InvokeMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError>;
+
+    /// Receive a ResponseMessage from a subject pattern.
+    ///
+    /// Returns the typed message with all dimensions intact.
+    fn receive_response(&self, subject_pattern: &str) -> Result<(ResponseMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError>;
 }
 
 // --- Errors ---

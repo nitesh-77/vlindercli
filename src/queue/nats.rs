@@ -417,6 +417,16 @@ impl MessageQueue for NatsQueue {
             Ok(())
         })
     }
+
+    fn receive_invoke(&self, _subject_pattern: &str) -> Result<(InvokeMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+        // TODO: Implement NATS typed receive with header extraction
+        Err(QueueError::ReceiveFailed("typed receive not yet implemented for NATS".to_string()))
+    }
+
+    fn receive_response(&self, _subject_pattern: &str) -> Result<(ResponseMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+        // TODO: Implement NATS typed receive with header extraction
+        Err(QueueError::ReceiveFailed("typed receive not yet implemented for NATS".to_string()))
+    }
 }
 
 /// Extract a short name from a ResourceId for NATS subjects.

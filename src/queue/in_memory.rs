@@ -189,6 +189,40 @@ impl MessageQueue for InMemoryQueue {
         };
         self.send(&subject, untyped)
     }
+
+    fn receive_invoke(&self, subject_pattern: &str) -> Result<(InvokeMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+        let mut typed = self.typed_queues.lock().unwrap();
+
+        // Find first queue matching pattern with an Invoke message
+        for (subject, queue) in typed.iter_mut() {
+            if subject.contains(subject_pattern) || subject_pattern.contains("*") {
+                if let Some(ObservableMessage::Invoke(msg)) = queue.front() {
+                    let msg = msg.clone();
+                    queue.pop_front();
+                    return Ok((msg, Box::new(|| Ok(()))));
+                }
+            }
+        }
+
+        Err(QueueError::Timeout)
+    }
+
+    fn receive_response(&self, subject_pattern: &str) -> Result<(ResponseMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+        let mut typed = self.typed_queues.lock().unwrap();
+
+        // Find first queue matching pattern with a Response message
+        for (subject, queue) in typed.iter_mut() {
+            if subject.contains(subject_pattern) || subject_pattern.contains("*") {
+                if let Some(ObservableMessage::Response(msg)) = queue.front() {
+                    let msg = msg.clone();
+                    queue.pop_front();
+                    return Ok((msg, Box::new(|| Ok(()))));
+                }
+            }
+        }
+
+        Err(QueueError::Timeout)
+    }
 }
 
 // ============================================================================
@@ -460,5 +494,60 @@ mod tests {
     fn agent_short_name_extracts_from_memory_uri() {
         let id = ResourceId::new("memory://test-agent");
         assert_eq!(agent_short_name(&id), "test-agent");
+    }
+
+    // ========================================================================
+    // Typed receive tests
+    // ========================================================================
+
+    #[test]
+    fn receive_invoke_returns_typed_message() {
+        let queue = InMemoryQueue::new();
+
+        let invoke = InvokeMessage::new(
+            test_submission(),
+            HarnessType::Cli,
+            RuntimeType::Wasm,
+            test_agent_id(),
+            b"hello".to_vec(),
+        );
+        let original_id = invoke.id.clone();
+
+        queue.send_invoke(invoke).unwrap();
+
+        // Receive typed message
+        let (received, ack) = queue.receive_invoke("invoke").unwrap();
+
+        assert_eq!(received.id, original_id);
+        assert_eq!(received.harness, HarnessType::Cli);
+        assert_eq!(received.runtime, RuntimeType::Wasm);
+        assert_eq!(received.payload, b"hello");
+
+        ack().unwrap();
+    }
+
+    #[test]
+    fn receive_invoke_preserves_all_dimensions() {
+        let queue = InMemoryQueue::new();
+
+        let submission = test_submission();
+        let agent_id = test_agent_id();
+
+        let invoke = InvokeMessage::new(
+            submission.clone(),
+            HarnessType::Web,
+            RuntimeType::Wasm,
+            agent_id.clone(),
+            b"input".to_vec(),
+        );
+
+        queue.send_invoke(invoke).unwrap();
+
+        let (received, _) = queue.receive_invoke("invoke").unwrap();
+
+        // All dimensions preserved for reply construction
+        assert_eq!(received.submission, submission);
+        assert_eq!(received.agent_id, agent_id);
+        assert_eq!(received.harness, HarnessType::Web);
     }
 }
