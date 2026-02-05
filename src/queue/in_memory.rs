@@ -251,6 +251,23 @@ impl MessageQueue for InMemoryQueue {
 
         Err(QueueError::Timeout)
     }
+
+    fn receive_complete(&self, harness_pattern: &str) -> Result<(CompleteMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+        let mut typed = self.typed_queues.lock().unwrap();
+
+        // Match subjects containing "complete" and the harness pattern
+        for (subject, queue) in typed.iter_mut() {
+            if subject.contains("complete") && subject.contains(harness_pattern) {
+                if let Some(ObservableMessage::Complete(msg)) = queue.front() {
+                    let msg = msg.clone();
+                    queue.pop_front();
+                    return Ok((msg, Box::new(|| Ok(()))));
+                }
+            }
+        }
+
+        Err(QueueError::Timeout)
+    }
 }
 
 // ============================================================================

@@ -139,12 +139,18 @@ message RegisterModelResponse {
 // Job
 // =============================================================================
 
+// SubmissionId tracks user-initiated requests through the system (ADR 044)
+message SubmissionId {
+  string id = 1;  // Format: "sub-{uuid}"
+}
+
 message Job {
   JobId id = 1;
-  ResourceId agent_id = 2;
-  string input = 3;
-  JobStatus status = 4;
-  optional string output = 5;
+  SubmissionId submission_id = 2;  // ADR 044: links job to message flow
+  ResourceId agent_id = 3;
+  string input = 4;
+  JobStatus status = 5;
+  optional string output = 6;
 }
 
 enum JobStatus {
@@ -156,12 +162,14 @@ enum JobStatus {
 }
 
 message CreateJobRequest {
-  ResourceId agent_id = 1;
-  string input = 2;
+  SubmissionId submission_id = 1;  // ADR 044: caller provides submission context
+  ResourceId agent_id = 2;
+  string input = 3;
 }
 
 message CreateJobResponse {
   JobId job_id = 1;
+  SubmissionId submission_id = 2;  // Echo back for confirmation
 }
 
 message GetJobRequest {

@@ -162,8 +162,9 @@ impl Registry for GrpcRegistryClient {
 
     // --- Job operations ---
 
-    fn create_job(&self, agent_id: ResourceId, input: String) -> JobId {
+    fn create_job(&self, submission_id: crate::queue::SubmissionId, agent_id: ResourceId, input: String) -> JobId {
         let request = proto::CreateJobRequest {
+            submission_id: Some(submission_id.into()),
             agent_id: Some(agent_id.into()),
             input,
         };

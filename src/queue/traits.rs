@@ -159,6 +159,11 @@ pub trait MessageQueue {
     ///
     /// Returns the typed message with all dimensions intact.
     fn receive_response(&self, subject_pattern: &str) -> Result<(ResponseMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError>;
+
+    /// Receive a CompleteMessage for a harness.
+    ///
+    /// Used by harness to receive job completion notifications.
+    fn receive_complete(&self, harness_pattern: &str) -> Result<(CompleteMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError>;
 }
 
 // --- Errors ---

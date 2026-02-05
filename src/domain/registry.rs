@@ -43,6 +43,7 @@ impl JobId {
 #[derive(Clone, Debug)]
 pub struct Job {
     pub id: JobId,
+    pub submission_id: crate::queue::SubmissionId,  // ADR 044: tracks message flow
     pub agent_id: ResourceId,
     pub input: String,
     pub status: JobStatus,
@@ -131,8 +132,8 @@ pub trait Registry: Send + Sync {
 
     // --- Job operations ---
 
-    /// Create a new job.
-    fn create_job(&self, agent_id: ResourceId, input: String) -> JobId;
+    /// Create a new job with submission tracking (ADR 044).
+    fn create_job(&self, submission_id: crate::queue::SubmissionId, agent_id: ResourceId, input: String) -> JobId;
 
     /// Get a job by ID.
     fn get_job(&self, id: &JobId) -> Option<Job>;
@@ -315,10 +316,11 @@ impl Registry for InMemoryRegistry {
 
     // --- Job operations ---
 
-    fn create_job(&self, agent_id: ResourceId, input: String) -> JobId {
+    fn create_job(&self, submission_id: crate::queue::SubmissionId, agent_id: ResourceId, input: String) -> JobId {
         let id = JobId::new(&self.registry_id);
         let job = Job {
             id: id.clone(),
+            submission_id,
             agent_id,
             input,
             status: JobStatus::Pending,
@@ -402,6 +404,7 @@ impl Registry for InMemoryRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::queue::SubmissionId;
 
     fn test_agent_id() -> ResourceId {
         ResourceId::new("file:///test/agent.wasm")
@@ -422,7 +425,7 @@ mod tests {
         let registry = InMemoryRegistry::new();
         let agent_id = test_agent_id();
 
-        let job_id = registry.create_job(agent_id, "test".to_string());
+        let job_id = registry.create_job(SubmissionId::new(), agent_id, "test".to_string());
 
         // JobId format: <registry_id>/jobs/<uuid>
         assert!(job_id.as_str().starts_with(registry.id().as_str()));
@@ -435,7 +438,7 @@ mod tests {
         let agent_id = test_agent_id();
 
         // Create job
-        let job_id = registry.create_job(agent_id.clone(), "hello".to_string());
+        let job_id = registry.create_job(SubmissionId::new(), agent_id.clone(), "hello".to_string());
 
         // Initial state is Pending
         let job = registry.get_job(&job_id).unwrap();
@@ -460,9 +463,9 @@ mod tests {
         let registry = InMemoryRegistry::new();
         let agent_id = test_agent_id();
 
-        let job1 = registry.create_job(agent_id.clone(), "a".to_string());
-        let job2 = registry.create_job(agent_id.clone(), "b".to_string());
-        let _job3 = registry.create_job(agent_id.clone(), "c".to_string());
+        let job1 = registry.create_job(SubmissionId::new(), agent_id.clone(), "a".to_string());
+        let job2 = registry.create_job(SubmissionId::new(), agent_id.clone(), "b".to_string());
+        let _job3 = registry.create_job(SubmissionId::new(), agent_id.clone(), "c".to_string());
 
         // All three are pending
         assert_eq!(registry.pending_jobs().len(), 3);

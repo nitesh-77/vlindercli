@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use crate::domain::{
     Agent, EngineType, Job, JobId, JobStatus, Model, ModelType, Requirements, ResourceId,
 };
+use crate::queue::SubmissionId;
 use super::proto;
 
 // =============================================================================
@@ -47,6 +48,28 @@ impl From<proto::JobId> for JobId {
 
 impl From<&JobId> for proto::JobId {
     fn from(id: &JobId) -> Self {
+        Self { id: id.as_str().to_string() }
+    }
+}
+
+// =============================================================================
+// SubmissionId (ADR 044)
+// =============================================================================
+
+impl From<SubmissionId> for proto::SubmissionId {
+    fn from(id: SubmissionId) -> Self {
+        Self { id: id.as_str().to_string() }
+    }
+}
+
+impl From<proto::SubmissionId> for SubmissionId {
+    fn from(id: proto::SubmissionId) -> Self {
+        SubmissionId::from(id.id)
+    }
+}
+
+impl From<&SubmissionId> for proto::SubmissionId {
+    fn from(id: &SubmissionId) -> Self {
         Self { id: id.as_str().to_string() }
     }
 }
@@ -196,6 +219,7 @@ impl From<Job> for proto::Job {
 
         Self {
             id: Some(job.id.into()),
+            submission_id: Some(job.submission_id.into()),
             agent_id: Some(job.agent_id.into()),
             input: job.input,
             status: status.into(),
@@ -221,6 +245,7 @@ impl TryFrom<proto::Job> for Job {
 
         Ok(Self {
             id: job.id.ok_or("missing job id")?.into(),
+            submission_id: job.submission_id.ok_or("missing submission id")?.into(),
             agent_id: job.agent_id.ok_or("missing agent id")?.into(),
             input: job.input,
             status,

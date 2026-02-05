@@ -14,7 +14,7 @@ use std::sync::Arc;
 use crate::domain::registry::{JobId, JobStatus, Registry};
 use crate::domain::{Agent, ResourceId};
 use crate::queue::{
-    HarnessType, InvokeMessage, Message, MessageId, MessageQueue, SubmissionId,
+    HarnessType, InvokeMessage, MessageId, MessageQueue, SubmissionId,
 };
 
 /// Common harness operations shared across all harness types.
@@ -81,15 +81,16 @@ impl CliHarness {
     /// Tick: monitor reply queue and update completed jobs in registry.
     ///
     /// CLI-specific: runs until no more messages or shutdown signal.
+    /// Uses typed CompleteMessage (ADR 044) for job completion tracking.
     pub fn tick(&mut self) {
-        while let Ok(pending) = self.queue.receive(&self.reply_queue) {
-            if let Some(correlation_id) = &pending.message.correlation_id {
-                if let Some(job_id) = self.inflight.remove(correlation_id) {
-                    let result = String::from_utf8_lossy(&pending.message.payload).to_string();
-                    self.registry.update_job_status(&job_id, JobStatus::Completed(result));
-                }
+        // Receive typed CompleteMessage from harness pattern
+        while let Ok((complete, ack)) = self.queue.receive_complete("cli") {
+            // CompleteMessage.correlation_id links back to InvokeMessage.id
+            if let Some(job_id) = self.inflight.remove(&complete.correlation_id) {
+                let result = String::from_utf8_lossy(&complete.payload).to_string();
+                self.registry.update_job_status(&job_id, JobStatus::Completed(result));
             }
-            let _ = pending.ack();
+            let _ = ack();
         }
     }
 }
@@ -113,12 +114,15 @@ impl Harness for CliHarness {
         let runtime = self.registry.select_runtime(&agent)
             .ok_or_else(|| format!("no runtime available for agent: {}", agent_id))?;
 
-        // Create job in registry
-        let job_id = self.registry.create_job(agent_id.clone(), input.to_string());
+        // Create submission context (ADR 044) - shared by job and message flow
+        let submission = SubmissionId::new();
+
+        // Create job in registry with submission tracking
+        let job_id = self.registry.create_job(submission.clone(), agent_id.clone(), input.to_string());
 
         // Build and send typed InvokeMessage (ADR 044)
         let invoke = InvokeMessage::new(
-            SubmissionId::new(),
+            submission,
             HarnessType::Cli,
             runtime,
             agent_id.clone(),
@@ -250,7 +254,7 @@ mod tests {
         let harness = CliHarness::new(queue, registry.clone());
 
         let agent_id = test_agent_id();
-        let job_id = registry.create_job(agent_id, "input".to_string());
+        let job_id = registry.create_job(SubmissionId::new(), agent_id, "input".to_string());
         registry.update_job_status(&job_id, JobStatus::Completed("done".to_string()));
 
         assert_eq!(harness.poll(&job_id), Some("done".to_string()));
@@ -258,6 +262,8 @@ mod tests {
 
     #[test]
     fn tick_reconciles_completed_jobs() {
+        use crate::queue::ExpectsReply;
+
         let queue = Arc::new(InMemoryQueue::new());
         let registry = test_registry();
         let mut harness = CliHarness::new(queue.clone(), registry.clone());
@@ -265,29 +271,24 @@ mod tests {
         let agent_id = deploy_test_agent(&harness);
         let job_id = harness.invoke(&agent_id, "hello").unwrap();
 
-        // Get the InvokeMessage from typed queue to find its ID for correlation
-        let invoke_id = {
+        // Get the InvokeMessage from typed queue to build CompleteMessage reply
+        let invoke = {
             let typed = queue.typed_queues.lock().unwrap();
             let (_, messages) = typed.iter().next().unwrap();
             match &messages[0] {
-                crate::queue::ObservableMessage::Invoke(msg) => msg.id.clone(),
+                crate::queue::ObservableMessage::Invoke(msg) => msg.clone(),
                 _ => panic!("expected InvokeMessage"),
             }
         };
 
-        // Simulate worker sending CompleteMessage response via untyped queue
-        // (tick still uses untyped receive during migration)
-        let response = Message::response(
-            b"result".to_vec(),
-            &harness.reply_queue,
-            invoke_id,
-        );
-        queue.send(&harness.reply_queue, response).unwrap();
+        // Simulate runtime sending typed CompleteMessage (ADR 044)
+        let complete = invoke.create_reply(b"result".to_vec());
+        queue.send_complete(complete).unwrap();
 
         // Before tick: job is still Running
         assert_eq!(registry.get_job(&job_id).unwrap().status, JobStatus::Running);
 
-        // Tick reconciles
+        // Tick reconciles using typed receive
         harness.tick();
 
         // After tick: job is Completed

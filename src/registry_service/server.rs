@@ -144,14 +144,18 @@ impl RegistryService for RegistryServiceServer {
         request: Request<CreateJobRequest>,
     ) -> Result<Response<CreateJobResponse>, Status> {
         let req = request.into_inner();
+        let submission_id: crate::queue::SubmissionId = req.submission_id
+            .ok_or_else(|| Status::invalid_argument("missing submission_id"))?
+            .into();
         let agent_id: ResourceId = req.agent_id
             .ok_or_else(|| Status::invalid_argument("missing agent_id"))?
             .into();
 
-        let job_id = self.registry.create_job(agent_id, req.input);
+        let job_id = self.registry.create_job(submission_id.clone(), agent_id, req.input);
 
         Ok(Response::new(CreateJobResponse {
             job_id: Some(job_id.into()),
+            submission_id: Some(submission_id.into()),
         }))
     }
 

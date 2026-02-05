@@ -432,6 +432,11 @@ impl MessageQueue for NatsQueue {
         // TODO: Implement NATS typed receive with header extraction
         Err(QueueError::ReceiveFailed("typed receive not yet implemented for NATS".to_string()))
     }
+
+    fn receive_complete(&self, _harness_pattern: &str) -> Result<(CompleteMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+        // TODO: Implement NATS typed receive with header extraction
+        Err(QueueError::ReceiveFailed("typed receive not yet implemented for NATS".to_string()))
+    }
 }
 
 /// Extract a short name from a ResourceId for NATS subjects.
