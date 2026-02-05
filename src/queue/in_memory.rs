@@ -207,6 +207,34 @@ impl MessageQueue for InMemoryQueue {
         Err(QueueError::Timeout)
     }
 
+    fn receive_request(&self, service: &str, backend: &str, operation: &str) -> Result<(RequestMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+        let mut typed = self.typed_queues.lock().unwrap();
+
+        // Build pattern to match: vlinder.{submission}.req.{agent}.{service}.{backend}.{operation}.{seq}
+        // We match on service, backend, and operation (skip submission, agent, and seq)
+        let pattern = format!(".{}.{}.{}.", service, backend, operation);
+        let bare_pattern = format!(".{}.{}.", service, backend); // For operations without action
+
+        for (subject, queue) in typed.iter_mut() {
+            // Match either "service.backend.operation" or "service.backend." for bare services
+            let matches = if operation.is_empty() {
+                subject.contains(&bare_pattern) && subject.contains(".req.")
+            } else {
+                subject.contains(&pattern) && subject.contains(".req.")
+            };
+
+            if matches {
+                if let Some(ObservableMessage::Request(msg)) = queue.front() {
+                    let msg = msg.clone();
+                    queue.pop_front();
+                    return Ok((msg, Box::new(|| Ok(()))));
+                }
+            }
+        }
+
+        Err(QueueError::Timeout)
+    }
+
     fn receive_response(&self, subject_pattern: &str) -> Result<(ResponseMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
         let mut typed = self.typed_queues.lock().unwrap();
 
@@ -549,5 +577,86 @@ mod tests {
         assert_eq!(received.submission, submission);
         assert_eq!(received.agent_id, agent_id);
         assert_eq!(received.harness, HarnessType::Web);
+    }
+
+    #[test]
+    fn receive_request_returns_typed_message() {
+        let queue = InMemoryQueue::new();
+
+        let request = RequestMessage::new(
+            test_submission(),
+            test_agent_id(),
+            "kv",
+            "sqlite",
+            "get",
+            Sequence::first(),
+            b"key".to_vec(),
+        );
+        let original_id = request.id.clone();
+
+        queue.send_request(request).unwrap();
+
+        // Receive by service/backend/operation
+        let (received, ack) = queue.receive_request("kv", "sqlite", "get").unwrap();
+
+        assert_eq!(received.id, original_id);
+        assert_eq!(received.service, "kv");
+        assert_eq!(received.backend, "sqlite");
+        assert_eq!(received.operation, "get");
+        assert_eq!(received.payload, b"key");
+
+        ack().unwrap();
+    }
+
+    #[test]
+    fn receive_request_preserves_all_dimensions() {
+        let queue = InMemoryQueue::new();
+
+        let submission = test_submission();
+        let agent_id = test_agent_id();
+
+        let request = RequestMessage::new(
+            submission.clone(),
+            agent_id.clone(),
+            "vec",
+            "sqlite-vec",
+            "search",
+            Sequence::from(3),
+            b"query".to_vec(),
+        );
+
+        queue.send_request(request).unwrap();
+
+        let (received, _) = queue.receive_request("vec", "sqlite-vec", "search").unwrap();
+
+        // All dimensions preserved for reply construction
+        assert_eq!(received.submission, submission);
+        assert_eq!(received.agent_id, agent_id);
+        assert_eq!(received.sequence, Sequence::from(3));
+    }
+
+    #[test]
+    fn receive_request_matches_bare_service() {
+        let queue = InMemoryQueue::new();
+
+        // For inference, operation is empty
+        let request = RequestMessage::new(
+            test_submission(),
+            test_agent_id(),
+            "infer",
+            "ollama",
+            "",
+            Sequence::first(),
+            b"prompt".to_vec(),
+        );
+
+        queue.send_request(request).unwrap();
+
+        // Receive with empty operation
+        let (received, _) = queue.receive_request("infer", "ollama", "").unwrap();
+
+        assert_eq!(received.service, "infer");
+        assert_eq!(received.backend, "ollama");
+        assert_eq!(received.operation, "");
     }
 }

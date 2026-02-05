@@ -423,6 +423,11 @@ impl MessageQueue for NatsQueue {
         Err(QueueError::ReceiveFailed("typed receive not yet implemented for NATS".to_string()))
     }
 
+    fn receive_request(&self, _service: &str, _backend: &str, _operation: &str) -> Result<(RequestMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+        // TODO: Implement NATS typed receive with header extraction
+        Err(QueueError::ReceiveFailed("typed receive not yet implemented for NATS".to_string()))
+    }
+
     fn receive_response(&self, _subject_pattern: &str) -> Result<(ResponseMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
         // TODO: Implement NATS typed receive with header extraction
         Err(QueueError::ReceiveFailed("typed receive not yet implemented for NATS".to_string()))

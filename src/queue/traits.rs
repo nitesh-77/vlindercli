@@ -149,6 +149,12 @@ pub trait MessageQueue {
     /// Returns the typed message with all dimensions intact.
     fn receive_invoke(&self, subject_pattern: &str) -> Result<(InvokeMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError>;
 
+    /// Receive a RequestMessage for a service/backend/operation pattern.
+    ///
+    /// Used by workers to receive typed service requests.
+    /// Returns the typed message with all dimensions intact.
+    fn receive_request(&self, service: &str, backend: &str, operation: &str) -> Result<(RequestMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError>;
+
     /// Receive a ResponseMessage from a subject pattern.
     ///
     /// Returns the typed message with all dimensions intact.
