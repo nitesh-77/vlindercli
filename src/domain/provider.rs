@@ -51,8 +51,8 @@ impl Provider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{Agent, InMemoryRegistry};
-    use crate::queue::{InMemoryQueue, Message};
+    use crate::domain::{Agent, InMemoryRegistry, ResourceId};
+    use crate::queue::{InMemoryQueue, RequestMessage, Sequence, SubmissionId};
 
     fn test_agent(id: &str) -> Agent {
         let manifest = format!(r#"
@@ -64,6 +64,10 @@ mod tests {
             services = []
         "#, id);
         Agent::from_toml(&manifest).unwrap()
+    }
+
+    fn test_submission() -> SubmissionId {
+        SubmissionId::from("sub-test-123".to_string())
     }
 
     #[test]
@@ -82,17 +86,26 @@ mod tests {
         let registry: Arc<dyn Registry> = Arc::new(registry);
         let provider = Provider::new(Arc::clone(&queue), Arc::clone(&registry));
 
-        // Write to agent-a's storage
+        // Write to agent-a's storage using typed message (ADR 044)
         let put_a = serde_json::json!({
             "agent_id": "file:///agent-a.wasm",
             "path": "/data.txt",
             "content": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, b"data for A")
         });
-        let msg_a = Message::request(serde_json::to_vec(&put_a).unwrap(), "reply-put-a");
-        // Use backend-qualified queue name (ADR 043)
-        queue.send("vlinder.svc.kv.memory.put", msg_a).unwrap();
+        let request_a = RequestMessage::new(
+            test_submission(),
+            ResourceId::new("file:///agent-a.wasm"),
+            "kv",
+            "memory",
+            "put",
+            Sequence::first(),
+            serde_json::to_vec(&put_a).unwrap(),
+        );
+        queue.send_request(request_a).unwrap();
         provider.tick();
-        queue.receive("reply-put-a").unwrap().ack().unwrap(); // consume put response
+        let (response, ack) = queue.receive_response("res.kv.memory").unwrap();
+        assert_eq!(response.payload, b"ok");
+        ack().unwrap();
 
         // Write to agent-b's storage
         let put_b = serde_json::json!({
@@ -100,30 +113,53 @@ mod tests {
             "path": "/data.txt",
             "content": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, b"data for B")
         });
-        let msg_b = Message::request(serde_json::to_vec(&put_b).unwrap(), "reply-put-b");
-        // Use backend-qualified queue name (ADR 043)
-        queue.send("vlinder.svc.kv.memory.put", msg_b).unwrap();
+        let request_b = RequestMessage::new(
+            test_submission(),
+            ResourceId::new("file:///agent-b.wasm"),
+            "kv",
+            "memory",
+            "put",
+            Sequence::from(2),
+            serde_json::to_vec(&put_b).unwrap(),
+        );
+        queue.send_request(request_b).unwrap();
         provider.tick();
-        queue.receive("reply-put-b").unwrap().ack().unwrap(); // consume put response
+        let (response, ack) = queue.receive_response("res.kv.memory").unwrap();
+        assert_eq!(response.payload, b"ok");
+        ack().unwrap();
 
         // Read from agent-a - gets A's data
         let get_a = serde_json::json!({ "agent_id": "file:///agent-a.wasm", "path": "/data.txt" });
-        let msg = Message::request(serde_json::to_vec(&get_a).unwrap(), "reply-get-a");
-        // Use backend-qualified queue name (ADR 043)
-        queue.send("vlinder.svc.kv.memory.get", msg).unwrap();
+        let request_get_a = RequestMessage::new(
+            test_submission(),
+            ResourceId::new("file:///agent-a.wasm"),
+            "kv",
+            "memory",
+            "get",
+            Sequence::from(3),
+            serde_json::to_vec(&get_a).unwrap(),
+        );
+        queue.send_request(request_get_a).unwrap();
         provider.tick();
-        let pending = queue.receive("reply-get-a").unwrap();
-        assert_eq!(pending.message.payload, b"data for A");
-        pending.ack().unwrap();
+        let (response, ack) = queue.receive_response("res.kv.memory").unwrap();
+        assert_eq!(response.payload, b"data for A");
+        ack().unwrap();
 
         // Read from agent-b - gets B's data (isolated)
         let get_b = serde_json::json!({ "agent_id": "file:///agent-b.wasm", "path": "/data.txt" });
-        let msg = Message::request(serde_json::to_vec(&get_b).unwrap(), "reply-get-b");
-        // Use backend-qualified queue name (ADR 043)
-        queue.send("vlinder.svc.kv.memory.get", msg).unwrap();
+        let request_get_b = RequestMessage::new(
+            test_submission(),
+            ResourceId::new("file:///agent-b.wasm"),
+            "kv",
+            "memory",
+            "get",
+            Sequence::from(4),
+            serde_json::to_vec(&get_b).unwrap(),
+        );
+        queue.send_request(request_get_b).unwrap();
         provider.tick();
-        let pending = queue.receive("reply-get-b").unwrap();
-        assert_eq!(pending.message.payload, b"data for B");
-        pending.ack().unwrap();
+        let (response, ack) = queue.receive_response("res.kv.memory").unwrap();
+        assert_eq!(response.payload, b"data for B");
+        ack().unwrap();
     }
 }
