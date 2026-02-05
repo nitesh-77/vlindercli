@@ -182,6 +182,151 @@ impl fmt::Display for HarnessType {
     }
 }
 
+// ============================================================================
+// Typed Messages (ADR 044)
+// ============================================================================
+
+/// Invoke message: Harness → Runtime
+///
+/// Starts a submission by invoking an agent.
+#[derive(Clone, Debug)]
+pub struct InvokeMessage {
+    pub id: MessageId,
+    pub submission: SubmissionId,
+    pub harness: HarnessType,
+    pub runtime: String,
+    pub agent: String,
+    pub payload: Vec<u8>,
+    pub reply_to: String,
+}
+
+impl InvokeMessage {
+    pub fn new(
+        submission: SubmissionId,
+        harness: HarnessType,
+        runtime: impl Into<String>,
+        agent: impl Into<String>,
+        payload: Vec<u8>,
+        reply_to: impl Into<String>,
+    ) -> Self {
+        Self {
+            id: MessageId::new(),
+            submission,
+            harness,
+            runtime: runtime.into(),
+            agent: agent.into(),
+            payload,
+            reply_to: reply_to.into(),
+        }
+    }
+}
+
+/// Request message: Runtime → Service
+///
+/// Agent requests a service operation (kv, vec, infer, embed).
+#[derive(Clone, Debug)]
+pub struct RequestMessage {
+    pub id: MessageId,
+    pub submission: SubmissionId,
+    pub agent: String,
+    pub service: String,
+    pub backend: String,
+    pub operation: String,
+    pub sequence: Sequence,
+    pub payload: Vec<u8>,
+    pub reply_to: String,
+}
+
+impl RequestMessage {
+    pub fn new(
+        submission: SubmissionId,
+        agent: impl Into<String>,
+        service: impl Into<String>,
+        backend: impl Into<String>,
+        operation: impl Into<String>,
+        sequence: Sequence,
+        payload: Vec<u8>,
+        reply_to: impl Into<String>,
+    ) -> Self {
+        Self {
+            id: MessageId::new(),
+            submission,
+            agent: agent.into(),
+            service: service.into(),
+            backend: backend.into(),
+            operation: operation.into(),
+            sequence,
+            payload,
+            reply_to: reply_to.into(),
+        }
+    }
+}
+
+/// Response message: Service → Runtime
+///
+/// Service responds to a request, echoing all dimensions for traceability.
+#[derive(Clone, Debug)]
+pub struct ResponseMessage {
+    pub id: MessageId,
+    pub submission: SubmissionId,
+    pub agent: String,
+    pub service: String,
+    pub backend: String,
+    pub operation: String,
+    pub sequence: Sequence,
+    pub payload: Vec<u8>,
+    pub correlation_id: MessageId,
+}
+
+impl ResponseMessage {
+    /// Create a response from a request, echoing all dimensions.
+    pub fn from_request(request: &RequestMessage, payload: Vec<u8>) -> Self {
+        Self {
+            id: MessageId::new(),
+            submission: request.submission.clone(),
+            agent: request.agent.clone(),
+            service: request.service.clone(),
+            backend: request.backend.clone(),
+            operation: request.operation.clone(),
+            sequence: request.sequence,
+            payload,
+            correlation_id: request.id.clone(),
+        }
+    }
+}
+
+/// Complete message: Runtime → Harness
+///
+/// Signals that a submission has finished.
+#[derive(Clone, Debug)]
+pub struct CompleteMessage {
+    pub id: MessageId,
+    pub submission: SubmissionId,
+    pub agent: String,
+    pub harness: HarnessType,
+    pub payload: Vec<u8>,
+    pub correlation_id: MessageId,
+}
+
+impl CompleteMessage {
+    pub fn new(
+        submission: SubmissionId,
+        agent: impl Into<String>,
+        harness: HarnessType,
+        payload: Vec<u8>,
+        correlation_id: MessageId,
+    ) -> Self {
+        Self {
+            id: MessageId::new(),
+            submission,
+            agent: agent.into(),
+            harness,
+            payload,
+            correlation_id,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -311,5 +456,102 @@ mod tests {
         assert!(set.contains(&HarnessType::Cli));
         assert!(set.contains(&HarnessType::Web));
         assert!(!set.contains(&HarnessType::Api));
+    }
+
+    // --- Typed message tests ---
+
+    #[test]
+    fn invoke_message_creation() {
+        let submission = SubmissionId::new();
+        let msg = InvokeMessage::new(
+            submission.clone(),
+            HarnessType::Cli,
+            "wasm",
+            "echo-agent",
+            b"hello".to_vec(),
+            "reply-queue",
+        );
+
+        assert_eq!(msg.submission, submission);
+        assert_eq!(msg.harness, HarnessType::Cli);
+        assert_eq!(msg.runtime, "wasm");
+        assert_eq!(msg.agent, "echo-agent");
+        assert_eq!(msg.payload, b"hello");
+        assert_eq!(msg.reply_to, "reply-queue");
+    }
+
+    #[test]
+    fn request_message_creation() {
+        let submission = SubmissionId::new();
+        let msg = RequestMessage::new(
+            submission.clone(),
+            "pensieve",
+            "kv",
+            "sqlite",
+            "get",
+            Sequence::first(),
+            b"key".to_vec(),
+            "reply-queue",
+        );
+
+        assert_eq!(msg.submission, submission);
+        assert_eq!(msg.agent, "pensieve");
+        assert_eq!(msg.service, "kv");
+        assert_eq!(msg.backend, "sqlite");
+        assert_eq!(msg.operation, "get");
+        assert_eq!(msg.sequence.as_u32(), 1);
+        assert_eq!(msg.payload, b"key");
+        assert_eq!(msg.reply_to, "reply-queue");
+    }
+
+    #[test]
+    fn response_from_request_echoes_dimensions() {
+        let submission = SubmissionId::new();
+        let request = RequestMessage::new(
+            submission.clone(),
+            "pensieve",
+            "kv",
+            "sqlite",
+            "get",
+            Sequence::from(3),
+            b"key".to_vec(),
+            "reply-queue",
+        );
+
+        let response = ResponseMessage::from_request(&request, b"value".to_vec());
+
+        // Response echoes all request dimensions
+        assert_eq!(response.submission, request.submission);
+        assert_eq!(response.agent, request.agent);
+        assert_eq!(response.service, request.service);
+        assert_eq!(response.backend, request.backend);
+        assert_eq!(response.operation, request.operation);
+        assert_eq!(response.sequence, request.sequence);
+
+        // But has its own ID and the request's ID as correlation
+        assert_ne!(response.id, request.id);
+        assert_eq!(response.correlation_id, request.id);
+
+        // And its own payload
+        assert_eq!(response.payload, b"value");
+    }
+
+    #[test]
+    fn complete_message_creation() {
+        let submission = SubmissionId::new();
+        let invoke_id = MessageId::new();
+        let msg = CompleteMessage::new(
+            submission.clone(),
+            "echo-agent",
+            HarnessType::Cli,
+            b"result".to_vec(),
+            invoke_id.clone(),
+        );
+
+        assert_eq!(msg.submission, submission);
+        assert_eq!(msg.agent, "echo-agent");
+        assert_eq!(msg.harness, HarnessType::Cli);
+        assert_eq!(msg.payload, b"result");
+        assert_eq!(msg.correlation_id, invoke_id);
     }
 }
