@@ -4,7 +4,7 @@ use std::sync::Arc;
 use clap::Subcommand;
 
 use vlindercli::config::Config;
-use vlindercli::domain::{Daemon, Harness, Registry};
+use vlindercli::domain::{CliHarness, Daemon, Harness, Registry};
 use vlindercli::queue::{MessageQueue, NatsQueue};
 use vlindercli::registry_service::GrpcRegistryClient;
 
@@ -105,7 +105,7 @@ fn run_distributed(path: Option<PathBuf>, config: &Config) {
     );
 
     // Create harness with remote backends (no daemon, no workers)
-    let mut harness = Harness::new(queue, registry);
+    let mut harness = CliHarness::new(queue, registry);
 
     // Deploy agent via remote registry
     let agent_id = harness.deploy_from_path(&absolute_path)

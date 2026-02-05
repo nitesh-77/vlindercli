@@ -99,7 +99,7 @@ pub use runtime::{Runtime, RuntimeType};
 // Harness (API surface for agent interaction)
 // ============================================================================
 
-pub use harness::Harness;
+pub use harness::{Harness, CliHarness};
 
 // ============================================================================
 // Daemon & Registry

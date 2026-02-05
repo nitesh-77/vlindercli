@@ -19,7 +19,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::config::{registry_db_path, Config};
 use crate::domain::{EngineType, InMemoryRegistry, ObjectStorageType, Provider, RegistryRepository, Runtime, RuntimeType, VectorStorageType};
-use crate::domain::harness::Harness;
+use crate::domain::harness::CliHarness;
 use crate::domain::registry::Registry;
 use crate::queue;
 use crate::runtime::WasmRuntime;
@@ -32,7 +32,7 @@ pub struct Daemon {
     #[allow(dead_code)] // Used via test-only accessor
     registry: Arc<dyn Registry>,
     /// The API surface - use this for deploy/invoke/poll.
-    pub harness: Harness,
+    pub harness: CliHarness,
     /// Runtime for local mode (None in distributed mode)
     runtime: Option<WasmRuntime>,
     /// Provider for local mode (None in distributed mode)
@@ -96,7 +96,7 @@ impl Daemon {
         let registry: Arc<dyn Registry> = Arc::new(registry);
 
         Self {
-            harness: Harness::new(queue.clone(), Arc::clone(&registry)),
+            harness: CliHarness::new(queue.clone(), Arc::clone(&registry)),
             runtime: Some(WasmRuntime::new(&registry_id, queue.clone(), Arc::clone(&registry))),
             registry: Arc::clone(&registry),
             provider: Some(Provider::new(queue, registry)),
@@ -136,7 +136,7 @@ impl Daemon {
         );
 
         Self {
-            harness: Harness::new(queue, Arc::clone(&registry)),
+            harness: CliHarness::new(queue, Arc::clone(&registry)),
             runtime: None, // Workers handle this
             registry,
             provider: None, // Workers handle this
@@ -303,6 +303,7 @@ impl Default for Daemon {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::harness::Harness;
     use crate::domain::{Model, ModelType, ResourceId};
     use tempfile::TempDir;
 

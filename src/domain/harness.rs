@@ -1,10 +1,11 @@
 //! Harness - API surface for the system.
 //!
-//! The harness is the single entry point for external requests:
-//! - deploy: Register an agent after validating requirements
-//! - invoke: Submit a job for execution
-//! - poll: Check job status
-//! - tick: Reconcile completed jobs from reply queue
+//! The harness is the entry point for external requests. Different harness
+//! types handle different interfaces (CLI, Web API, WhatsApp, etc.) but share
+//! a common contract via the `Harness` trait.
+//!
+//! - `Harness` trait: Common operations (deploy, invoke, poll)
+//! - `CliHarness`: Command-line implementation with tick loop and local paths
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -12,17 +13,38 @@ use std::sync::Arc;
 
 use crate::domain::registry::{JobId, JobStatus, Registry};
 use crate::domain::{Agent, ResourceId};
-use crate::queue::{Message, MessageId, MessageQueue};
+use crate::queue::{
+    HarnessType, InvokeMessage, Message, MessageId, MessageQueue, SubmissionId,
+};
 
-/// The harness - API surface for agent deployment and job management.
-pub struct Harness {
+/// Common harness operations shared across all harness types.
+pub trait Harness {
+    /// The type of this harness (CLI, Web, API, WhatsApp).
+    fn harness_type(&self) -> HarnessType;
+
+    /// Deploy an agent from TOML manifest content.
+    fn deploy(&self, manifest_toml: &str) -> Result<ResourceId, String>;
+
+    /// Submit a job for an already-deployed agent.
+    fn invoke(&mut self, agent_id: &ResourceId, input: &str) -> Result<JobId, String>;
+
+    /// Poll for job completion.
+    fn poll(&self, job_id: &JobId) -> Option<String>;
+}
+
+/// CLI harness implementation.
+///
+/// Adds CLI-specific functionality:
+/// - `deploy_from_path()`: Load agent from local filesystem
+/// - `tick()`: Polling loop for reconciling completed jobs
+pub struct CliHarness {
     queue: Arc<dyn MessageQueue + Send + Sync>,
     registry: Arc<dyn Registry>,
     reply_queue: String,
     inflight: HashMap<MessageId, JobId>,
 }
 
-impl Harness {
+impl CliHarness {
     pub fn new(
         queue: Arc<dyn MessageQueue + Send + Sync>,
         registry: Arc<dyn Registry>,
@@ -35,24 +57,13 @@ impl Harness {
         }
     }
 
-    /// Deploy an agent from a local directory path.
+    /// Deploy an agent from a local directory path (CLI-specific).
     ///
     /// Loads the manifest, resolves relative paths, validates requirements,
-    /// and registers the agent. This is the preferred method for CLI usage.
+    /// and registers the agent.
     pub fn deploy_from_path(&self, path: &Path) -> Result<ResourceId, String> {
         let agent = Agent::load(path)
             .map_err(|e| format!("failed to load agent: {:?}", e))?;
-
-        self.register_agent(agent)
-    }
-
-    /// Deploy an agent from TOML content with pre-resolved URIs.
-    ///
-    /// Use this when the manifest comes from a non-filesystem source (e.g., HTTP request)
-    /// where URIs are already absolute.
-    pub fn deploy(&self, manifest_toml: &str) -> Result<ResourceId, String> {
-        let agent = Agent::from_toml(manifest_toml)
-            .map_err(|e| format!("failed to parse manifest: {:?}", e))?;
 
         self.register_agent(agent)
     }
@@ -67,45 +78,9 @@ impl Harness {
         Ok(agent_id)
     }
 
-    /// Submit a job for an already-deployed agent.
-    ///
-    /// Creates job in registry, queues message, returns job ID.
-    pub fn invoke(&mut self, agent_id: &ResourceId, input: &str) -> Result<JobId, String> {
-        // Verify agent is deployed and get runtime type
-        let agent = self.registry.get_agent(agent_id)
-            .ok_or_else(|| format!("agent not deployed: {}", agent_id))?;
-        let runtime = self.registry.select_runtime(&agent)
-            .ok_or_else(|| format!("no runtime available for agent: {}", agent_id))?;
-
-        // Create job in registry
-        let job_id = self.registry.create_job(agent_id.clone(), input.to_string());
-
-        // Queue message to agent using backend-qualified queue name (ADR 043)
-        let queue_name = self.queue.agent_queue(runtime.as_str(), &agent);
-        let message = Message::request(input.as_bytes().to_vec(), &self.reply_queue);
-        let message_id = message.id.clone();
-
-        self.queue
-            .send(&queue_name, message)
-            .map_err(|e| format!("failed to queue: {}", e))?;
-
-        // Track for response correlation
-        self.inflight.insert(message_id, job_id.clone());
-        self.registry.update_job_status(&job_id, JobStatus::Running);
-
-        Ok(job_id)
-    }
-
-    /// Poll for job completion.
-    pub fn poll(&self, job_id: &JobId) -> Option<String> {
-        match self.registry.get_job(job_id)?.status {
-            JobStatus::Completed(ref result) => Some(result.clone()),
-            JobStatus::Failed(ref error) => Some(format!("[error] {}", error)),
-            _ => None,
-        }
-    }
-
     /// Tick: monitor reply queue and update completed jobs in registry.
+    ///
+    /// CLI-specific: runs until no more messages or shutdown signal.
     pub fn tick(&mut self) {
         while let Ok(pending) = self.queue.receive(&self.reply_queue) {
             if let Some(correlation_id) = &pending.message.correlation_id {
@@ -115,6 +90,58 @@ impl Harness {
                 }
             }
             let _ = pending.ack();
+        }
+    }
+}
+
+impl Harness for CliHarness {
+    fn harness_type(&self) -> HarnessType {
+        HarnessType::Cli
+    }
+
+    fn deploy(&self, manifest_toml: &str) -> Result<ResourceId, String> {
+        let agent = Agent::from_toml(manifest_toml)
+            .map_err(|e| format!("failed to parse manifest: {:?}", e))?;
+
+        self.register_agent(agent)
+    }
+
+    fn invoke(&mut self, agent_id: &ResourceId, input: &str) -> Result<JobId, String> {
+        // Verify agent is deployed and get runtime type
+        let agent = self.registry.get_agent(agent_id)
+            .ok_or_else(|| format!("agent not deployed: {}", agent_id))?;
+        let runtime = self.registry.select_runtime(&agent)
+            .ok_or_else(|| format!("no runtime available for agent: {}", agent_id))?;
+
+        // Create job in registry
+        let job_id = self.registry.create_job(agent_id.clone(), input.to_string());
+
+        // Build and send typed InvokeMessage (ADR 044)
+        let invoke = InvokeMessage::new(
+            SubmissionId::new(),
+            HarnessType::Cli,
+            runtime,
+            agent_id.clone(),
+            input.as_bytes().to_vec(),
+        );
+        let message_id = invoke.id.clone();
+
+        self.queue
+            .send_invoke(invoke)
+            .map_err(|e| format!("failed to queue: {}", e))?;
+
+        // Track for response correlation
+        self.inflight.insert(message_id, job_id.clone());
+        self.registry.update_job_status(&job_id, JobStatus::Running);
+
+        Ok(job_id)
+    }
+
+    fn poll(&self, job_id: &JobId) -> Option<String> {
+        match self.registry.get_job(job_id)?.status {
+            JobStatus::Completed(ref result) => Some(result.clone()),
+            JobStatus::Failed(ref error) => Some(format!("[error] {}", error)),
+            _ => None,
         }
     }
 }
@@ -142,7 +169,7 @@ mod tests {
     }
 
     /// Deploy a minimal test agent.
-    fn deploy_test_agent(harness: &Harness) -> ResourceId {
+    fn deploy_test_agent(harness: &CliHarness) -> ResourceId {
         let manifest = r#"
             name = "test-agent"
             description = "Test"
@@ -154,10 +181,19 @@ mod tests {
     }
 
     #[test]
+    fn harness_type_is_cli() {
+        let queue = Arc::new(InMemoryQueue::new());
+        let registry = test_registry();
+        let harness = CliHarness::new(queue, registry);
+
+        assert_eq!(harness.harness_type(), HarnessType::Cli);
+    }
+
+    #[test]
     fn invoke_creates_job_and_queues_message() {
         let queue = Arc::new(InMemoryQueue::new());
         let registry = test_registry();
-        let mut harness = Harness::new(queue.clone(), registry.clone());
+        let mut harness = CliHarness::new(queue.clone(), registry.clone());
 
         // Deploy agent first
         let agent_id = deploy_test_agent(&harness);
@@ -170,17 +206,22 @@ mod tests {
         assert_eq!(job.status, JobStatus::Running);
         assert_eq!(job.agent_id, agent_id);
 
-        // Message is in queue using backend-qualified name (ADR 043)
-        let pending = queue.receive("vlinder.agent.wasm.test-agent").unwrap();
-        assert_eq!(pending.message.payload, b"hello");
-        pending.ack().unwrap();
+        // Message is in typed queue with ADR 044 subject pattern
+        // Agent name extracted from "file:///test/agent.wasm" → "agent"
+        let typed = queue.typed_queues.lock().unwrap();
+        assert_eq!(typed.len(), 1);
+        let (subject, _) = typed.iter().next().unwrap();
+        assert!(subject.contains(".invoke."));
+        assert!(subject.contains(".cli."));
+        assert!(subject.contains(".wasm."));
+        assert!(subject.contains(".agent"), "subject should contain agent name: {}", subject);
     }
 
     #[test]
     fn invoke_fails_for_undeployed_agent() {
         let queue = Arc::new(InMemoryQueue::new());
         let registry = test_registry();
-        let mut harness = Harness::new(queue, registry);
+        let mut harness = CliHarness::new(queue, registry);
 
         let agent_id = test_agent_id();
         let result = harness.invoke(&agent_id, "hello");
@@ -193,7 +234,7 @@ mod tests {
     fn poll_returns_none_for_running_job() {
         let queue = Arc::new(InMemoryQueue::new());
         let registry = test_registry();
-        let mut harness = Harness::new(queue, registry);
+        let mut harness = CliHarness::new(queue, registry);
 
         let agent_id = deploy_test_agent(&harness);
         let job_id = harness.invoke(&agent_id, "hello").unwrap();
@@ -206,7 +247,7 @@ mod tests {
     fn poll_returns_result_for_completed_job() {
         let queue = Arc::new(InMemoryQueue::new());
         let registry = test_registry();
-        let harness = Harness::new(queue, registry.clone());
+        let harness = CliHarness::new(queue, registry.clone());
 
         let agent_id = test_agent_id();
         let job_id = registry.create_job(agent_id, "input".to_string());
@@ -219,21 +260,29 @@ mod tests {
     fn tick_reconciles_completed_jobs() {
         let queue = Arc::new(InMemoryQueue::new());
         let registry = test_registry();
-        let mut harness = Harness::new(queue.clone(), registry.clone());
+        let mut harness = CliHarness::new(queue.clone(), registry.clone());
 
         let agent_id = deploy_test_agent(&harness);
         let job_id = harness.invoke(&agent_id, "hello").unwrap();
 
-        // Simulate worker processing: receive request, send response to reply_to
-        // Queue name now uses backend-qualified format (ADR 043)
-        let pending = queue.receive("vlinder.agent.wasm.test-agent").unwrap();
+        // Get the InvokeMessage from typed queue to find its ID for correlation
+        let invoke_id = {
+            let typed = queue.typed_queues.lock().unwrap();
+            let (_, messages) = typed.iter().next().unwrap();
+            match &messages[0] {
+                crate::queue::ObservableMessage::Invoke(msg) => msg.id.clone(),
+                _ => panic!("expected InvokeMessage"),
+            }
+        };
+
+        // Simulate worker sending CompleteMessage response via untyped queue
+        // (tick still uses untyped receive during migration)
         let response = Message::response(
             b"result".to_vec(),
-            &pending.message.reply_to,
-            pending.message.id.clone(),
+            &harness.reply_queue,
+            invoke_id,
         );
-        queue.send(&pending.message.reply_to, response).unwrap();
-        pending.ack().unwrap();
+        queue.send(&harness.reply_queue, response).unwrap();
 
         // Before tick: job is still Running
         assert_eq!(registry.get_job(&job_id).unwrap().status, JobStatus::Running);
@@ -252,7 +301,7 @@ mod tests {
     fn deploy_from_path_loads_and_registers_agent() {
         let queue = Arc::new(InMemoryQueue::new());
         let registry = test_registry();
-        let harness = Harness::new(queue, registry.clone());
+        let harness = CliHarness::new(queue, registry.clone());
 
         let agent_id = harness.deploy_from_path(&fixture_path("echo-agent")).unwrap();
 
@@ -265,7 +314,7 @@ mod tests {
     fn deploy_from_path_fails_for_nonexistent_path() {
         let queue = Arc::new(InMemoryQueue::new());
         let registry = test_registry();
-        let harness = Harness::new(queue, registry);
+        let harness = CliHarness::new(queue, registry);
 
         let result = harness.deploy_from_path(Path::new("/nonexistent/path"));
 
@@ -277,7 +326,7 @@ mod tests {
     fn deploy_from_path_fails_for_path_without_manifest() {
         let queue = Arc::new(InMemoryQueue::new());
         let registry = test_registry();
-        let harness = Harness::new(queue, registry);
+        let harness = CliHarness::new(queue, registry);
 
         // Use tests/ directory which exists but has no agent.toml
         let result = harness.deploy_from_path(Path::new("tests"));

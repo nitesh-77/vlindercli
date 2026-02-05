@@ -17,7 +17,8 @@ use std::sync::{Arc, Mutex};
 /// methods write to both, enabling gradual migration of receivers.
 pub struct InMemoryQueue {
     queues: Arc<Mutex<HashMap<String, VecDeque<Message>>>>,
-    typed_queues: Arc<Mutex<HashMap<String, VecDeque<ObservableMessage>>>>,
+    /// Typed queues - pub(crate) for test access
+    pub(crate) typed_queues: Arc<Mutex<HashMap<String, VecDeque<ObservableMessage>>>>,
 }
 
 impl InMemoryQueue {
