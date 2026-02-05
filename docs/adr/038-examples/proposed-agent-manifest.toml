@@ -1,0 +1,34 @@
+# Proposed agent manifest schema
+# Location: agents/pensieve/agent.toml
+#
+# The agent manifest declares identity and requirements.
+# Physical locations (code, storage, model weights) are resolved by the registry.
+
+name = "pensieve"
+description = "A memory system for web articles."
+source = "https://github.com/vlindercli/pensieve"
+
+# ID is assigned by the registry when the agent is registered.
+# Format: registry://<registry-authority>/agents/<name>
+# Example: registry://localhost:9000/agents/pensieve
+#
+# The registry maintains the mapping from this ID to the physical artifact (WASM, etc).
+
+[requirements]
+
+# Models: reference by name, not by file path.
+# The registry resolves model names to their physical artifacts.
+models = ["phi3", "nomic-embed"]
+
+# Services: capabilities the agent requires from the runtime.
+services = ["infer", "embed", "object-storage", "vector-storage"]
+
+# Storage: declare that storage is needed, not where it lives.
+[requirements.storage]
+object = true
+vector = true
+
+[[mounts]]
+host_path = "mnt"
+guest_path = "/"
+mode = "rw"

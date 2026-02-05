@@ -1,0 +1,15 @@
+# Proposed model manifest schema
+# Location: models/phi3.toml
+#
+# The model manifest describes the model's identity and capabilities.
+# It does NOT contain the path to weight files - that is resolved by the registry.
+
+name = "phi3"
+type = "inference"
+engine = "llama"
+
+# ID is assigned by the registry when the model is registered.
+# Format: registry://<registry-authority>/models/<name>
+# Example: registry://localhost:9000/models/phi3
+#
+# The registry maintains the mapping from this ID to the physical artifact.

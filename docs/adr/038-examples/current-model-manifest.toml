@@ -1,0 +1,7 @@
+# Current model manifest schema
+# Location: models/phi3.toml
+
+name = "phi3"
+type = "inference"
+engine = "llama"
+id = "file:///Users/alice/models/phi-3-mini-4k-instruct-q4.gguf"

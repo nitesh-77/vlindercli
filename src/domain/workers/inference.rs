@@ -70,7 +70,7 @@ impl InferenceServiceWorker {
     /// Process one message if available. Returns true if processed.
     pub fn tick(&self) -> bool {
         // Receive typed RequestMessage (ADR 044)
-        match self.queue.receive_request("infer", &self.backend, "") {
+        match self.queue.receive_request("infer", &self.backend, "run") {
             Ok((request, ack)) => {
                 let response_payload = self.handle_infer(&request);
                 // Use ExpectsReply to build properly-correlated ResponseMessage
@@ -222,7 +222,7 @@ mod tests {
             test_agent_id(),
             "infer",
             "memory",
-            "",
+            "run",
             Sequence::first(),
             serde_json::to_vec(&payload).unwrap(),
         );
@@ -259,7 +259,7 @@ mod tests {
             test_agent_id(),
             "infer",
             "memory",
-            "",
+            "run",
             Sequence::first(),
             serde_json::to_vec(&payload).unwrap(),
         );
@@ -295,7 +295,7 @@ mod tests {
             ResourceId::new("file:///unknown-agent.wasm"),
             "infer",
             "memory",
-            "",
+            "run",
             Sequence::first(),
             serde_json::to_vec(&payload).unwrap(),
         );

@@ -1,6 +1,6 @@
 name = "model-test-agent"
 description = "Test agent for model loading tests"
-id = "file://./agent.wasm"
+id = "model-test-agent.wasm"
 
 [requirements]
 services = []

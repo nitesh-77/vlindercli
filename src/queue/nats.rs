@@ -5,10 +5,12 @@
 //!
 //! Uses typed messages exclusively for full observability.
 
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_nats::jetstream::{self, consumer, stream};
+type PullConsumer = async_nats::jetstream::consumer::Consumer<consumer::pull::Config>;
 use async_nats::jetstream::message::Message as JetStreamMessage;
 use futures::StreamExt;
 use tokio::runtime::Runtime;
@@ -31,6 +33,7 @@ struct NatsQueueInner {
     runtime: Runtime,
     client: async_nats::Client,
     jetstream: jetstream::Context,
+    consumers: Mutex<HashMap<String, PullConsumer>>,
 }
 
 impl NatsQueue {
@@ -59,6 +62,7 @@ impl NatsQueue {
                 runtime,
                 client,
                 jetstream,
+                consumers: Mutex::new(HashMap::new()),
             }),
         })
     }
@@ -96,8 +100,22 @@ impl NatsQueue {
         &self.inner.jetstream
     }
 
-    /// Fetch one message from a subject filter, returning the message and an ack closure.
-    async fn fetch_one(&self, filter: &str) -> Result<(JetStreamMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+    /// Get or create a named consumer for the given filter.
+    ///
+    /// Consumers are cached by filter pattern to avoid creating ephemeral
+    /// consumers on every poll — which floods the NATS server and causes
+    /// messages to get stuck in "pending ack" limbo on abandoned consumers.
+    async fn get_or_create_consumer(&self, filter: &str) -> Result<PullConsumer, QueueError> {
+        // Check cache first
+        {
+            let consumers = self.inner.consumers.lock().unwrap();
+            if let Some(consumer) = consumers.get(filter) {
+                return Ok(consumer.clone());
+            }
+        }
+
+        // Create a named consumer — name derived from filter for uniqueness
+        let name = filter_to_consumer_name(filter);
         let stream = self.inner.jetstream
             .get_stream("VLINDER")
             .await
@@ -105,11 +123,26 @@ impl NatsQueue {
 
         let consumer = stream
             .create_consumer(consumer::pull::Config {
+                name: Some(name),
                 filter_subject: filter.to_string(),
+                ack_wait: Duration::from_secs(300),
                 ..Default::default()
             })
             .await
             .map_err(|e| QueueError::ReceiveFailed(e.to_string()))?;
+
+        // Cache it
+        {
+            let mut consumers = self.inner.consumers.lock().unwrap();
+            consumers.insert(filter.to_string(), consumer.clone());
+        }
+
+        Ok(consumer)
+    }
+
+    /// Fetch one message from a subject filter, returning the message and an ack closure.
+    async fn fetch_one(&self, filter: &str) -> Result<(JetStreamMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+        let consumer = self.get_or_create_consumer(filter).await?;
 
         let mut messages = consumer
             .fetch()
@@ -307,12 +340,8 @@ impl MessageQueue for NatsQueue {
     }
 
     fn receive_request(&self, service: &str, backend: &str, operation: &str) -> Result<(RequestMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
-        // Build filter: vlinder.*.req.*.{service}.{backend}.{operation}.*
-        let filter = if operation.is_empty() {
-            format!("vlinder.*.req.*.{}.{}.*", service, backend)
-        } else {
-            format!("vlinder.*.req.*.{}.{}.{}.*", service, backend, operation)
-        };
+        // Build filter: vlinder.*.req.*.{service}.{backend}.{operation}.{sequence}
+        let filter = format!("vlinder.*.req.*.{}.{}.{}.*", service, backend, operation);
 
         self.inner.runtime.block_on(async {
             let (js_msg, ack_fn) = self.fetch_one(&filter).await?;
@@ -336,8 +365,9 @@ impl MessageQueue for NatsQueue {
     }
 
     fn receive_response(&self, subject_pattern: &str) -> Result<(ResponseMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
-        // Build filter from pattern (e.g., "sub-xxx.res.kv.sqlite" -> "vlinder.sub-xxx.res.kv.sqlite.*.*")
-        let filter = format!("vlinder.{}.*.*", subject_pattern);
+        // Build filter from pattern (e.g., "sub-xxx.res.kv.sqlite" -> "vlinder.sub-xxx.res.kv.sqlite.*.*.*")
+        // Three wildcards match: {agent}.{operation}.{sequence}
+        let filter = format!("vlinder.{}.*.*.*", subject_pattern);
 
         self.inner.runtime.block_on(async {
             let (js_msg, ack_fn) = self.fetch_one(&filter).await?;
@@ -383,6 +413,17 @@ impl MessageQueue for NatsQueue {
             Ok((msg, ack_fn))
         })
     }
+}
+
+/// Derive a stable consumer name from a filter pattern.
+///
+/// NATS consumer names must be alphanumeric + dash/underscore.
+/// We replace dots and wildcards with underscores.
+fn filter_to_consumer_name(filter: &str) -> String {
+    filter
+        .replace('.', "_")
+        .replace('*', "W")
+        .replace('>', "G")
 }
 
 /// Extract a short name from a ResourceId for NATS subjects.

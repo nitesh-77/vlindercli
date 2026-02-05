@@ -1,6 +1,6 @@
 name = "upper-agent"
 description = "Test agent that uppercases input"
-id = "agent.wasm"
+id = "upper-agent.wasm"
 
 [requirements]
 services = []

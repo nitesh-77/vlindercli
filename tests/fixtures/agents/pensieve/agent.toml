@@ -8,7 +8,7 @@ answers from your knowledge base.
 """
 
 source = "https://github.com/vlindercli/pensieve"
-id = "agent.wasm"
+id = "pensieve.wasm"
 
 [requirements]
 services = [

@@ -292,9 +292,9 @@ fn resolve_service_info(
             ("vec".to_string(), backend, operation)
         }
         // Inference (currently only ollama supported)
-        "infer" => ("infer".to_string(), "ollama".to_string(), String::new()),
+        "infer" => ("infer".to_string(), "ollama".to_string(), "run".to_string()),
         // Embedding (currently only ollama supported)
-        "embed" => ("embed".to_string(), "ollama".to_string(), String::new()),
+        "embed" => ("embed".to_string(), "ollama".to_string(), "run".to_string()),
         // Unknown operation - treat as agent-to-agent message
         _ => ("agent".to_string(), op.to_string(), String::new()),
     };

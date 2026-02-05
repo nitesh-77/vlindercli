@@ -1,0 +1,21 @@
+# Current agent manifest schema
+# Location: agents/pensieve/agent.toml
+
+name = "pensieve"
+description = "A memory system for web articles."
+source = "https://github.com/vlindercli/pensieve"
+id = "agent.wasm"
+object_storage = "sqlite:///Users/alice/data/pensieve/objects.db"
+vector_storage = "sqlite:///Users/alice/data/pensieve/vectors.db"
+
+[requirements]
+services = ["infer", "embed", "get_file", "put_file", "store_embedding", "search_by_vector"]
+
+[requirements.models]
+phi3 = "file://./models/phi3.toml"
+nomic-embed = "file://./models/nomic-embed.toml"
+
+[[mounts]]
+host_path = "mnt"
+guest_path = "/"
+mode = "rw"

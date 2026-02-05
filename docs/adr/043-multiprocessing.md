@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted
 
 ## Context
 
@@ -103,18 +103,15 @@ sqlite-vec = 1        # 1 SQLite-vec process
 
 Local backends have deployment constraints. Remote backends are just proxies — scale by adding workers.
 
-NATS subjects include backend type for routing:
+NATS subjects include backend type for routing (see ADR 044 for typed message subjects):
 ```
-vlinder.agent.wasm.{name}
-vlinder.agent.docker.{name}
-vlinder.svc.infer.ollama.{model}
-vlinder.svc.kv.sqlite.{instance}
-vlinder.svc.kv.s3.{instance}
-vlinder.svc.vec.sqlite-vec.{instance}
-vlinder.svc.vec.pinecone.{instance}
+vlinder.{sub}.invoke.{harness}.{runtime}.{agent}
+vlinder.{sub}.req.{agent}.{service}.{backend}.{operation}.{seq}
+vlinder.{sub}.res.{service}.{backend}.{agent}.{operation}.{seq}
+vlinder.{sub}.complete.{agent}.{harness}
 ```
 
-Workers subscribe to backends they can handle. A machine with Docker subscribes to `vlinder.agent.docker.>`. A machine without it simply doesn't.
+Workers subscribe to backends they can handle using wildcard filters (e.g., `vlinder.*.req.*.infer.ollama.*.*`). A machine without a backend simply has no workers subscribing to its subjects.
 
 ### 3. Multi-Machine Deployment
 
@@ -211,41 +208,16 @@ ollama = 4     # Only production backends
 
 If an agent requires a backend that's not configured, routing fails — no workers subscribed to that subject. This is correct behavior: the deployment doesn't support that backend.
 
-### 5. PendingMessage ACK Pattern
+### 5. ACK Pattern
 
-Change `MessageQueue::receive()` to return a `PendingMessage` requiring explicit acknowledgment:
+Typed receive methods (ADR 044) return a tuple of `(TypedMessage, ack_fn)` requiring explicit acknowledgment:
 
-```rust
-pub trait MessageQueue {
-    fn send(&self, queue: &str, msg: Message) -> Result<(), QueueError>;
-    fn receive(&self, queue: &str) -> Result<PendingMessage, QueueError>;
-}
+| Backend | `receive_*()` | `ack()` |
+|---------|---------------|---------|
+| InMemoryQueue | Removes message | No-op |
+| NatsQueue | Fetches from JetStream consumer | ACKs to JetStream |
 
-pub struct PendingMessage {
-    pub message: Message,
-    ack_fn: Box<dyn FnOnce() -> Result<(), QueueError> + Send>,
-    nack_fn: Box<dyn FnOnce() -> Result<(), QueueError> + Send>,
-}
-
-impl PendingMessage {
-    /// Acknowledge successful processing. Consumes self.
-    pub fn ack(self) -> Result<(), QueueError> {
-        (self.ack_fn)()
-    }
-
-    /// Negative acknowledge. Message redelivered. Consumes self.
-    pub fn nack(self) -> Result<(), QueueError> {
-        (self.nack_fn)()
-    }
-}
-```
-
-| Backend | `receive()` | `ack()` | `nack()` |
-|---------|-------------|---------|----------|
-| InMemoryQueue | Removes message | No-op | No-op |
-| NatsQueue | Fetches, holds handle | ACKs to JetStream | NAKs, redelivers |
-
-Type safety: `ack()` consumes self — can't double-ACK, compiler warns on unused `PendingMessage`.
+Workers must call `ack()` after processing to remove the message from the WorkQueue stream.
 
 ### 6. SQLite Concurrent Access
 
@@ -306,89 +278,11 @@ No application-level retry needed.
 **Negative:**
 - Operational complexity in distributed mode
 - Local backends (SQLite, WASM) constrained to single machine
-- Breaking change to `receive()` return type
-- Subject scheme gains complexity (`vlinder.agent.{runtime}.{name}`)
+- Subject scheme gains complexity (see ADR 044 for typed message subjects)
 
 **Migration:**
-- Update all `queue.receive()` callers to handle `PendingMessage`
-- Add `.ack()` after processing
-- InMemoryQueue unaffected (ACK is no-op)
+- Use typed send/receive methods (ADR 044) with explicit `ack()` after processing
 - Update NATS subjects to include backend type
-
-## Implementation Phases
-
-**Phase 1: PendingMessage pattern**
-- Change trait, update both queue implementations
-- Update all callers
-- No functional change (local mode works as before)
-
-**Phase 2: Distributed config + process spawning**
-- Add `[distributed]` config section with `enabled` and `registry_addr`
-- Add nested process count sections (`[distributed.agent]`, etc.)
-- Daemon spawns child processes, each running a single service's tick loop
-- Update NATS subjects to include backend type
-
-### Process Spawning Details
-
-In local mode, `Daemon.tick()` calls all service ticks sequentially in one loop:
-
-```
-daemon loop:
-    runtime.tick()        # agent
-    provider.tick()       # object, vector, inference, embedding (sequential)
-    harness.tick()        # job reconciliation
-```
-
-In distributed mode, the daemon spawns child processes via `std::process::Command`. Each child runs ONE service's tick loop.
-
-**Parent-child communication via environment variable:**
-
-```rust
-// Parent spawns children
-for _ in 0..config.distributed.agent.wasm {
-    Command::new(std::env::current_exe()?)
-        .args(["daemon"])
-        .env("VLINDER_WORKER_ROLE", "agent.wasm")
-        .spawn()?;
-}
-```
-
-```rust
-// Child checks env var to determine behavior
-if let Ok(role) = std::env::var("VLINDER_WORKER_ROLE") {
-    // I'm a worker — run tick loop for this role
-    run_worker_loop(&role);
-} else {
-    // I'm the parent — spawn children, wait for SIGTERM
-    spawn_children(&config);
-    wait_for_shutdown();
-}
-```
-
-**Process tree:**
-
-```
-vlinder daemon (parent)
-    ├── vlinder daemon [VLINDER_WORKER_ROLE=registry]
-    ├── vlinder daemon [VLINDER_WORKER_ROLE=agent.wasm]      (×4)
-    ├── vlinder daemon [VLINDER_WORKER_ROLE=inference.ollama] (×2)
-    ├── vlinder daemon [VLINDER_WORKER_ROLE=embedding.ollama]
-    ├── vlinder daemon [VLINDER_WORKER_ROLE=storage.object.sqlite]
-    └── vlinder daemon [VLINDER_WORKER_ROLE=storage.vector.sqlite-vec]
-```
-
-Each child process:
-1. Connects to registry (gRPC client, or runs server if role is `registry`)
-2. Connects to queue (NATS)
-3. Creates its specific service worker
-4. Runs `worker.tick()` in a loop until SIGTERM
-
-The env var approach is standard for Rust daemons — avoids fork() issues with async runtimes, keeps spawning logic in the binary rather than external orchestration.
-
-**Phase 3: Multi-machine support**
-- Registry runs on one machine, others connect via `registry_addr`
-- Documentation for multi-machine setup
-- Example configs for common topologies
 
 ## Open Questions
 

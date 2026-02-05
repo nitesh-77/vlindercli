@@ -202,7 +202,7 @@ fn agent_id_has_file_scheme() {
 
     // ResourceId parsing works on loaded agents
     assert_eq!(agent.id.scheme(), Some("file"));
-    assert!(agent.id.path().unwrap().ends_with("agent.wasm"));
+    assert!(agent.id.path().unwrap().ends_with("echo-agent.wasm"));
 }
 
 #[test]

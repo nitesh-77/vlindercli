@@ -8,9 +8,9 @@ agents/*/*.wasm
 
 # Only these 3 fixture agents have real WASM copied from builds
 # (other fixtures use placeholder text files that are tracked)
-tests/fixtures/agents/echo-agent/agent.wasm      # tests/wasm_tests.rs (agent_echo)
-tests/fixtures/agents/upper-agent/agent.wasm     # tests/wasm_tests.rs (agent_upper)
-tests/fixtures/agents/reverse-agent/agent.wasm   # tests/daemon_tests.rs, tests/wasm_runtime_tests.rs
+tests/fixtures/agents/echo-agent/echo-agent.wasm
+tests/fixtures/agents/upper-agent/upper-agent.wasm
+tests/fixtures/agents/reverse-agent/reverse-agent.wasm
 
 # Pensieve data directory
 agents/pensieve/data/

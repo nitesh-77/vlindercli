@@ -238,8 +238,9 @@ impl Daemon {
 
     /// Tick all components.
     ///
-    /// In local mode, this drives all services. In distributed mode,
-    /// workers handle their own tick loops - this just ticks the harness.
+    /// In local mode, this drives all services including the harness.
+    /// In distributed mode, workers handle their own tick loops and the
+    /// CLI process owns its own harness - daemon does not tick harness.
     pub fn tick(&mut self) {
         if let Some(ref mut runtime) = self.runtime {
             runtime.tick();
@@ -247,7 +248,11 @@ impl Daemon {
         if let Some(ref provider) = self.provider {
             provider.tick();
         }
-        self.harness.tick();
+        // Only tick harness in local mode - in distributed mode, the CLI
+        // process owns the harness and polls for completions directly.
+        if !self.is_distributed() {
+            self.harness.tick();
+        }
     }
 
     /// Signal shutdown and wait for workers to exit.

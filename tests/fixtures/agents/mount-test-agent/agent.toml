@@ -1,6 +1,6 @@
 name = "mount-test-agent"
 description = "Test agent with explicit mounts"
-id = "agent.wasm"
+id = "mount-test-agent.wasm"
 
 [requirements]
 services = []
