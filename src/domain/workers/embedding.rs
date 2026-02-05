@@ -13,7 +13,7 @@ use serde::Deserialize;
 use crate::domain::EmbeddingEngine;
 use crate::domain::registry::Registry;
 use crate::embedding::open_embedding_engine;
-use crate::queue::{Message, MessageQueue};
+use crate::queue::{ExpectsReply, MessageQueue, RequestMessage};
 use crate::services::embedding;
 
 // ============================================================================
@@ -63,25 +63,22 @@ impl EmbeddingServiceWorker {
 
     /// Process one message if available. Returns true if processed.
     pub fn tick(&self) -> bool {
-        let queue_name = self.queue.service_queue("embed", &self.backend, "");
-        match self.queue.receive(&queue_name) {
-            Ok(pending) => {
-                let response = self.handle_embed(&pending.message);
-                self.send_response(&pending.message, response);
-                let _ = pending.ack();
+        // Receive typed RequestMessage (ADR 044)
+        match self.queue.receive_request("embed", &self.backend, "") {
+            Ok((request, ack)) => {
+                let response_payload = self.handle_embed(&request);
+                // Use ExpectsReply to build properly-correlated ResponseMessage
+                let response = request.create_reply(response_payload);
+                let _ = self.queue.send_response(response);
+                let _ = ack();
                 true
             }
             Err(_) => false,
         }
     }
 
-    fn send_response(&self, request: &Message, payload: Vec<u8>) {
-        let response = Message::response(payload, &request.reply_to, request.id.clone());
-        let _ = self.queue.send(&request.reply_to, response);
-    }
-
-    fn handle_embed(&self, msg: &Message) -> Vec<u8> {
-        let req: EmbedRequest = match serde_json::from_slice(&msg.payload) {
+    fn handle_embed(&self, request: &RequestMessage) -> Vec<u8> {
+        let req: EmbedRequest = match serde_json::from_slice(&request.payload) {
             Ok(r) => r,
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
@@ -156,11 +153,19 @@ impl EmbeddingServiceWorker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{Agent, EngineType, InMemoryRegistry, Model, ModelType};
-    use crate::queue::{InMemoryQueue, Message};
+    use crate::domain::{Agent, EngineType, InMemoryRegistry, Model, ModelType, ResourceId};
+    use crate::queue::{InMemoryQueue, Sequence, SubmissionId};
     use crate::embedding::InMemoryEmbedding;
 
     const TEST_AGENT_ID: &str = "file:///test-agent.wasm";
+
+    fn test_agent_id() -> ResourceId {
+        ResourceId::new(TEST_AGENT_ID)
+    }
+
+    fn test_submission() -> SubmissionId {
+        SubmissionId::from("sub-test-123".to_string())
+    }
 
     fn test_model(name: &str) -> Model {
         // model_path must match the URI in the agent manifest
@@ -207,26 +212,32 @@ mod tests {
         let engine = Arc::new(InMemoryEmbedding::new(canned.clone()));
         handler.register("test-model", engine);
 
-        // Send embed request
+        // Send typed RequestMessage (ADR 044)
         let payload = serde_json::json!({
             "agent_id": TEST_AGENT_ID,
             "model": "test-model",
             "text": "hello world"
         });
-        let msg = Message::request(
+        let request = RequestMessage::new(
+            test_submission(),
+            test_agent_id(),
+            "embed",
+            "memory",
+            "",
+            Sequence::first(),
             serde_json::to_vec(&payload).unwrap(),
-            "reply",
         );
-        // Use backend-qualified queue name (ADR 043)
-        queue.send("vlinder.svc.embed.memory", msg).unwrap();
+
+        queue.send_request(request).unwrap();
 
         // Process
         assert!(handler.tick());
-        let pending = queue.receive("reply").unwrap();
-        let vector: Vec<f32> = serde_json::from_slice(&pending.message.payload).unwrap();
+
+        let (response, ack) = queue.receive_response("res.embed.memory").unwrap();
+        let vector: Vec<f32> = serde_json::from_slice(&response.payload).unwrap();
         assert_eq!(vector.len(), 768);
         assert_eq!(vector, canned);
-        pending.ack().unwrap();
+        ack().unwrap();
     }
 
     #[test]
@@ -246,19 +257,24 @@ mod tests {
             "model": "other-model",
             "text": "hello"
         });
-        let msg = Message::request(
+        let request = RequestMessage::new(
+            test_submission(),
+            test_agent_id(),
+            "embed",
+            "memory",
+            "",
+            Sequence::first(),
             serde_json::to_vec(&payload).unwrap(),
-            "reply",
         );
-        // Use backend-qualified queue name (ADR 043)
-        queue.send("vlinder.svc.embed.memory", msg).unwrap();
+
+        queue.send_request(request).unwrap();
 
         assert!(handler.tick());
-        let pending = queue.receive("reply").unwrap();
-        let text = String::from_utf8(pending.message.payload.clone()).unwrap();
+        let (response, ack) = queue.receive_response("res.embed.memory").unwrap();
+        let text = String::from_utf8(response.payload.clone()).unwrap();
         assert!(text.contains("[error]"));
         assert!(text.contains("did not declare model"));
-        pending.ack().unwrap();
+        ack().unwrap();
     }
 
     #[test]
@@ -278,18 +294,23 @@ mod tests {
             "model": "test-model",
             "text": "hello"
         });
-        let msg = Message::request(
+        let request = RequestMessage::new(
+            test_submission(),
+            ResourceId::new("file:///unknown-agent.wasm"),
+            "embed",
+            "memory",
+            "",
+            Sequence::first(),
             serde_json::to_vec(&payload).unwrap(),
-            "reply",
         );
-        // Use backend-qualified queue name (ADR 043)
-        queue.send("vlinder.svc.embed.memory", msg).unwrap();
+
+        queue.send_request(request).unwrap();
 
         assert!(handler.tick());
-        let pending = queue.receive("reply").unwrap();
-        let text = String::from_utf8(pending.message.payload.clone()).unwrap();
+        let (response, ack) = queue.receive_response("res.embed.memory").unwrap();
+        let text = String::from_utf8(response.payload.clone()).unwrap();
         assert!(text.contains("[error]"));
         assert!(text.contains("agent not found"));
-        pending.ack().unwrap();
+        ack().unwrap();
     }
 }

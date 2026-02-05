@@ -14,7 +14,7 @@ use serde::Deserialize;
 
 use crate::domain::registry::Registry;
 use crate::domain::{ObjectStorage, ResourceId};
-use crate::queue::{Message, MessageQueue};
+use crate::queue::{ExpectsReply, MessageQueue, RequestMessage};
 use crate::services::object_storage;
 use crate::storage::dispatch::open_object_storage_from_uri;
 
@@ -110,12 +110,13 @@ impl ObjectServiceWorker {
     }
 
     fn try_get(&self) -> bool {
-        let queue_name = self.queue.service_queue("kv", &self.backend, "get");
-        match self.queue.receive(&queue_name) {
-            Ok(pending) => {
-                let response = self.handle_get(&pending.message);
-                self.send_response(&pending.message, response);
-                let _ = pending.ack();
+        // Receive typed RequestMessage (ADR 044)
+        match self.queue.receive_request("kv", &self.backend, "get") {
+            Ok((request, ack)) => {
+                let response_payload = self.handle_get(&request);
+                let response = request.create_reply(response_payload);
+                let _ = self.queue.send_response(response);
+                let _ = ack();
                 true
             }
             Err(_) => false,
@@ -123,12 +124,12 @@ impl ObjectServiceWorker {
     }
 
     fn try_put(&self) -> bool {
-        let queue_name = self.queue.service_queue("kv", &self.backend, "put");
-        match self.queue.receive(&queue_name) {
-            Ok(pending) => {
-                let response = self.handle_put(&pending.message);
-                self.send_response(&pending.message, response);
-                let _ = pending.ack();
+        match self.queue.receive_request("kv", &self.backend, "put") {
+            Ok((request, ack)) => {
+                let response_payload = self.handle_put(&request);
+                let response = request.create_reply(response_payload);
+                let _ = self.queue.send_response(response);
+                let _ = ack();
                 true
             }
             Err(_) => false,
@@ -136,12 +137,12 @@ impl ObjectServiceWorker {
     }
 
     fn try_list(&self) -> bool {
-        let queue_name = self.queue.service_queue("kv", &self.backend, "list");
-        match self.queue.receive(&queue_name) {
-            Ok(pending) => {
-                let response = self.handle_list(&pending.message);
-                self.send_response(&pending.message, response);
-                let _ = pending.ack();
+        match self.queue.receive_request("kv", &self.backend, "list") {
+            Ok((request, ack)) => {
+                let response_payload = self.handle_list(&request);
+                let response = request.create_reply(response_payload);
+                let _ = self.queue.send_response(response);
+                let _ = ack();
                 true
             }
             Err(_) => false,
@@ -149,25 +150,20 @@ impl ObjectServiceWorker {
     }
 
     fn try_delete(&self) -> bool {
-        let queue_name = self.queue.service_queue("kv", &self.backend, "delete");
-        match self.queue.receive(&queue_name) {
-            Ok(pending) => {
-                let response = self.handle_delete(&pending.message);
-                self.send_response(&pending.message, response);
-                let _ = pending.ack();
+        match self.queue.receive_request("kv", &self.backend, "delete") {
+            Ok((request, ack)) => {
+                let response_payload = self.handle_delete(&request);
+                let response = request.create_reply(response_payload);
+                let _ = self.queue.send_response(response);
+                let _ = ack();
                 true
             }
             Err(_) => false,
         }
     }
 
-    fn send_response(&self, request: &Message, payload: Vec<u8>) {
-        let response = Message::response(payload, &request.reply_to, request.id.clone());
-        let _ = self.queue.send(&request.reply_to, response);
-    }
-
-    fn handle_get(&self, msg: &Message) -> Vec<u8> {
-        let req: GetRequest = match serde_json::from_slice(&msg.payload) {
+    fn handle_get(&self, request: &RequestMessage) -> Vec<u8> {
+        let req: GetRequest = match serde_json::from_slice(&request.payload) {
             Ok(r) => r,
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
@@ -185,8 +181,8 @@ impl ObjectServiceWorker {
         }
     }
 
-    fn handle_put(&self, msg: &Message) -> Vec<u8> {
-        let req: PutRequest = match serde_json::from_slice(&msg.payload) {
+    fn handle_put(&self, request: &RequestMessage) -> Vec<u8> {
+        let req: PutRequest = match serde_json::from_slice(&request.payload) {
             Ok(r) => r,
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
@@ -209,8 +205,8 @@ impl ObjectServiceWorker {
         }
     }
 
-    fn handle_list(&self, msg: &Message) -> Vec<u8> {
-        let req: ListRequest = match serde_json::from_slice(&msg.payload) {
+    fn handle_list(&self, request: &RequestMessage) -> Vec<u8> {
+        let req: ListRequest = match serde_json::from_slice(&request.payload) {
             Ok(r) => r,
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
@@ -227,8 +223,8 @@ impl ObjectServiceWorker {
         }
     }
 
-    fn handle_delete(&self, msg: &Message) -> Vec<u8> {
-        let req: DeleteRequest = match serde_json::from_slice(&msg.payload) {
+    fn handle_delete(&self, request: &RequestMessage) -> Vec<u8> {
+        let req: DeleteRequest = match serde_json::from_slice(&request.payload) {
             Ok(r) => r,
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
@@ -250,7 +246,17 @@ impl ObjectServiceWorker {
 mod tests {
     use super::*;
     use crate::domain::{Agent, InMemoryRegistry};
-    use crate::queue::{InMemoryQueue, Message};
+    use crate::queue::{InMemoryQueue, Sequence, SubmissionId};
+
+    const TEST_AGENT_ID: &str = "file:///test.wasm";
+
+    fn test_agent_id() -> ResourceId {
+        ResourceId::new(TEST_AGENT_ID)
+    }
+
+    fn test_submission() -> SubmissionId {
+        SubmissionId::from("sub-test-123".to_string())
+    }
 
     fn test_agent_with_object_storage() -> Agent {
         let manifest = r#"
@@ -278,41 +284,51 @@ mod tests {
         let registry: Arc<dyn Registry> = Arc::new(registry);
         let handler = ObjectServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry), "memory");
 
-        // Send put request - worker will lazy-open storage from agent's URI
+        // Send typed put request (ADR 044)
         let put_payload = serde_json::json!({
-            "agent_id": "file:///test.wasm",
+            "agent_id": TEST_AGENT_ID,
             "path": "/hello.txt",
             "content": base64::engine::general_purpose::STANDARD.encode(b"hello world")
         });
-        let put_msg = Message::request(
+        let put_request = RequestMessage::new(
+            test_submission(),
+            test_agent_id(),
+            "kv",
+            "memory",
+            "put",
+            Sequence::first(),
             serde_json::to_vec(&put_payload).unwrap(),
-            "reply",
         );
-        // Use backend-qualified queue name (ADR 043)
-        queue.send("vlinder.svc.kv.memory.put", put_msg).unwrap();
+
+        queue.send_request(put_request).unwrap();
 
         // Process
         assert!(handler.tick());
-        let pending = queue.receive("reply").unwrap();
-        assert_eq!(pending.message.payload, b"ok");
-        pending.ack().unwrap();
+        let (response, ack) = queue.receive_response("res.kv.memory").unwrap();
+        assert_eq!(response.payload, b"ok");
+        ack().unwrap();
 
-        // Send get request
+        // Send typed get request
         let get_payload = serde_json::json!({
-            "agent_id": "file:///test.wasm",
+            "agent_id": TEST_AGENT_ID,
             "path": "/hello.txt"
         });
-        let get_msg = Message::request(
+        let get_request = RequestMessage::new(
+            test_submission(),
+            test_agent_id(),
+            "kv",
+            "memory",
+            "get",
+            Sequence::from(2),
             serde_json::to_vec(&get_payload).unwrap(),
-            "reply",
         );
-        // Use backend-qualified queue name (ADR 043)
-        queue.send("vlinder.svc.kv.memory.get", get_msg).unwrap();
+
+        queue.send_request(get_request).unwrap();
 
         // Process
         assert!(handler.tick());
-        let pending = queue.receive("reply").unwrap();
-        assert_eq!(pending.message.payload, b"hello world");
-        pending.ack().unwrap();
+        let (response, ack) = queue.receive_response("res.kv.memory").unwrap();
+        assert_eq!(response.payload, b"hello world");
+        ack().unwrap();
     }
 }

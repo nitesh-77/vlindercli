@@ -12,7 +12,7 @@ use serde::Deserialize;
 
 use crate::domain::registry::Registry;
 use crate::domain::{VectorStorage, ResourceId};
-use crate::queue::{Message, MessageQueue};
+use crate::queue::{ExpectsReply, MessageQueue, RequestMessage};
 use crate::services::vector_storage;
 use crate::storage::dispatch::open_vector_storage_from_uri;
 
@@ -103,12 +103,13 @@ impl VectorServiceWorker {
     }
 
     fn try_store(&self) -> bool {
-        let queue_name = self.queue.service_queue("vec", &self.backend, "store");
-        match self.queue.receive(&queue_name) {
-            Ok(pending) => {
-                let response = self.handle_store(&pending.message);
-                self.send_response(&pending.message, response);
-                let _ = pending.ack();
+        // Receive typed RequestMessage (ADR 044)
+        match self.queue.receive_request("vec", &self.backend, "store") {
+            Ok((request, ack)) => {
+                let response_payload = self.handle_store(&request);
+                let response = request.create_reply(response_payload);
+                let _ = self.queue.send_response(response);
+                let _ = ack();
                 true
             }
             Err(_) => false,
@@ -116,12 +117,12 @@ impl VectorServiceWorker {
     }
 
     fn try_search(&self) -> bool {
-        let queue_name = self.queue.service_queue("vec", &self.backend, "search");
-        match self.queue.receive(&queue_name) {
-            Ok(pending) => {
-                let response = self.handle_search(&pending.message);
-                self.send_response(&pending.message, response);
-                let _ = pending.ack();
+        match self.queue.receive_request("vec", &self.backend, "search") {
+            Ok((request, ack)) => {
+                let response_payload = self.handle_search(&request);
+                let response = request.create_reply(response_payload);
+                let _ = self.queue.send_response(response);
+                let _ = ack();
                 true
             }
             Err(_) => false,
@@ -129,25 +130,20 @@ impl VectorServiceWorker {
     }
 
     fn try_delete(&self) -> bool {
-        let queue_name = self.queue.service_queue("vec", &self.backend, "delete");
-        match self.queue.receive(&queue_name) {
-            Ok(pending) => {
-                let response = self.handle_delete(&pending.message);
-                self.send_response(&pending.message, response);
-                let _ = pending.ack();
+        match self.queue.receive_request("vec", &self.backend, "delete") {
+            Ok((request, ack)) => {
+                let response_payload = self.handle_delete(&request);
+                let response = request.create_reply(response_payload);
+                let _ = self.queue.send_response(response);
+                let _ = ack();
                 true
             }
             Err(_) => false,
         }
     }
 
-    fn send_response(&self, request: &Message, payload: Vec<u8>) {
-        let response = Message::response(payload, &request.reply_to, request.id.clone());
-        let _ = self.queue.send(&request.reply_to, response);
-    }
-
-    fn handle_store(&self, msg: &Message) -> Vec<u8> {
-        let req: StoreRequest = match serde_json::from_slice(&msg.payload) {
+    fn handle_store(&self, request: &RequestMessage) -> Vec<u8> {
+        let req: StoreRequest = match serde_json::from_slice(&request.payload) {
             Ok(r) => r,
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
@@ -164,8 +160,8 @@ impl VectorServiceWorker {
         }
     }
 
-    fn handle_search(&self, msg: &Message) -> Vec<u8> {
-        let req: SearchRequest = match serde_json::from_slice(&msg.payload) {
+    fn handle_search(&self, request: &RequestMessage) -> Vec<u8> {
+        let req: SearchRequest = match serde_json::from_slice(&request.payload) {
             Ok(r) => r,
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
@@ -182,8 +178,8 @@ impl VectorServiceWorker {
         }
     }
 
-    fn handle_delete(&self, msg: &Message) -> Vec<u8> {
-        let req: DeleteRequest = match serde_json::from_slice(&msg.payload) {
+    fn handle_delete(&self, request: &RequestMessage) -> Vec<u8> {
+        let req: DeleteRequest = match serde_json::from_slice(&request.payload) {
             Ok(r) => r,
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
@@ -206,7 +202,17 @@ impl VectorServiceWorker {
 mod tests {
     use super::*;
     use crate::domain::{Agent, InMemoryRegistry, Registry};
-    use crate::queue::{InMemoryQueue, Message};
+    use crate::queue::{InMemoryQueue, Sequence, SubmissionId};
+
+    const TEST_AGENT_ID: &str = "file:///test.wasm";
+
+    fn test_agent_id() -> ResourceId {
+        ResourceId::new(TEST_AGENT_ID)
+    }
+
+    fn test_submission() -> SubmissionId {
+        SubmissionId::from("sub-test-123".to_string())
+    }
 
     fn test_agent_with_vector_storage() -> Agent {
         let manifest = r#"
@@ -237,41 +243,51 @@ mod tests {
         // Store embedding - worker will lazy-open storage from agent's URI
         let embedding: Vec<f32> = (0..768).map(|i| i as f32 * 0.001).collect();
         let store_payload = serde_json::json!({
-            "agent_id": "file:///test.wasm",
+            "agent_id": TEST_AGENT_ID,
             "key": "doc1",
             "vector": embedding,
             "metadata": "test document"
         });
-        let store_msg = Message::request(
+        let store_request = RequestMessage::new(
+            test_submission(),
+            test_agent_id(),
+            "vec",
+            "memory",
+            "store",
+            Sequence::first(),
             serde_json::to_vec(&store_payload).unwrap(),
-            "reply",
         );
-        // Use backend-qualified queue name (ADR 043)
-        queue.send("vlinder.svc.vec.memory.store", store_msg).unwrap();
+
+        queue.send_request(store_request).unwrap();
 
         assert!(handler.tick());
-        let pending = queue.receive("reply").unwrap();
-        assert_eq!(pending.message.payload, b"ok");
-        pending.ack().unwrap();
+        let (response, ack) = queue.receive_response("res.vec.memory").unwrap();
+        assert_eq!(response.payload, b"ok");
+        ack().unwrap();
 
         // Search
         let search_payload = serde_json::json!({
-            "agent_id": "file:///test.wasm",
+            "agent_id": TEST_AGENT_ID,
             "vector": embedding,
             "limit": 1
         });
-        let search_msg = Message::request(
+        let search_request = RequestMessage::new(
+            test_submission(),
+            test_agent_id(),
+            "vec",
+            "memory",
+            "search",
+            Sequence::from(2),
             serde_json::to_vec(&search_payload).unwrap(),
-            "reply",
         );
-        // Use backend-qualified queue name (ADR 043)
-        queue.send("vlinder.svc.vec.memory.search", search_msg).unwrap();
+
+        queue.send_request(search_request).unwrap();
 
         assert!(handler.tick());
-        let pending = queue.receive("reply").unwrap();
-        let results: Vec<serde_json::Value> = serde_json::from_slice(&pending.message.payload).unwrap();
+        let (response, ack) = queue.receive_response("res.vec.memory").unwrap();
+        let results: Vec<serde_json::Value> = serde_json::from_slice(&response.payload).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0]["key"], "doc1");
-        pending.ack().unwrap();
+        ack().unwrap();
     }
 }
