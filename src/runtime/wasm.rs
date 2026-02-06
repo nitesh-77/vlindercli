@@ -19,7 +19,7 @@ use std::thread::{self, JoinHandle};
 
 use extism::{CurrentPlugin, Function, Manifest, Plugin, UserData, Val, Wasm};
 
-use crate::domain::{Registry, ResourceId, Runtime, RuntimeType};
+use crate::domain::{ObjectStorageType, Registry, ResourceId, Runtime, RuntimeType, VectorStorageType};
 use crate::queue::{
     ExpectsReply, InvokeMessage, MessageQueue, RequestMessage, Sequence,
 };
@@ -102,14 +102,9 @@ impl Runtime for WasmRuntime {
 
                 // Extract storage backends from agent config before spawning
                 let kv_backend = agent.object_storage.as_ref()
-                    .and_then(|uri| uri.as_str().split("://").next())
-                    .unwrap_or("memory")
-                    .to_string();
+                    .and_then(|uri| ObjectStorageType::from_scheme(uri.scheme()));
                 let vec_backend = agent.vector_storage.as_ref()
-                    .and_then(|uri| uri.as_str().split("://").next())
-                    .map(|s| if s == "sqlite" { "sqlite-vec" } else { s })
-                    .unwrap_or("memory")
-                    .to_string();
+                    .and_then(|uri| VectorStorageType::from_scheme(uri.scheme()));
 
                 // Clone invoke for the send function; original stays for RunningTask
                 let invoke_for_send = invoke.clone();
@@ -157,9 +152,9 @@ struct SendFunctionData {
     queue: Arc<dyn MessageQueue + Send + Sync>,
     /// The invoke that triggered this execution - carries submission + agent_id
     invoke: InvokeMessage,
-    /// Resolved backend names from agent config (avoids registry lookup per send)
-    kv_backend: String,
-    vec_backend: String,
+    /// Resolved backends from agent config (None if agent didn't declare storage)
+    kv_backend: Option<ObjectStorageType>,
+    vec_backend: Option<VectorStorageType>,
     /// Sequence counter - incremented per service call
     sequence: Arc<std::sync::Mutex<Sequence>>,
 }
@@ -174,8 +169,8 @@ struct SendFunctionData {
 fn make_send_function(
     queue: Arc<dyn MessageQueue + Send + Sync>,
     invoke: InvokeMessage,
-    kv_backend: String,
-    vec_backend: String,
+    kv_backend: Option<ObjectStorageType>,
+    vec_backend: Option<VectorStorageType>,
 ) -> Function {
     let sequence = Arc::new(std::sync::Mutex::new(Sequence::first()));
     let data: SendFunctionData = SendFunctionData { queue, invoke, kv_backend, vec_backend, sequence };
@@ -200,15 +195,14 @@ fn make_send_function(
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| extism::Error::msg("payload missing 'op' field"))?
                 .to_string();
-
-            tracing::debug!(op = %op, "WASM agent calling service");
-
+            
             // Inject agent_id for storage operations
             if let Some(obj) = json.as_object_mut() {
                 obj.insert("agent_id".to_string(), serde_json::Value::String(data.invoke.agent_id.as_str().to_string()));
             }
 
-            let (service, backend, operation) = resolve_route(&op, &data.kv_backend, &data.vec_backend);
+            let (service, backend, operation) = resolve_route(&op, data.kv_backend, data.vec_backend)
+                .map_err(|e| extism::Error::msg(e))?;
 
             // Get next sequence number
             let seq = {
@@ -225,29 +219,19 @@ fn make_send_function(
             let request = RequestMessage::new(
                 data.invoke.submission.clone(),
                 data.invoke.agent_id.clone(),
-                service.clone(),
-                backend.clone(),
-                operation.clone(),
+                service,
+                backend,
+                operation,
                 seq,
                 enriched_payload,
             );
 
-            tracing::debug!(
-                submission = %data.invoke.submission,
-                service = %service,
-                backend = %backend,
-                operation = %operation,
-                sequence = %seq,
-                "Sending typed RequestMessage"
-            );
-
-            data.queue.send_request(request)
+            data.queue.send_request(request.clone())
                 .map_err(|e| extism::Error::msg(format!("send error: {}", e)))?;
 
             // Wait for typed ResponseMessage (ADR 044)
-            let reply_pattern = format!("{}.res.{}.{}", data.invoke.submission, service, backend);
             loop {
-                if let Ok((response, ack)) = data.queue.receive_response(&reply_pattern) {
+                if let Ok((response, ack)) = data.queue.receive_response(&request) {
                     let payload = response.payload.clone();
                     let _ = ack();
                     return write_output(plugin, outputs, &payload);
@@ -265,19 +249,29 @@ fn make_send_function(
 /// - `vector-*` → vec service with agent's configured vector storage backend
 /// - `infer`/`embed` → hardcoded to ollama (only supported backend)
 /// - anything else → agent-to-agent message
-fn resolve_route(op: &str, kv_backend: &str, vec_backend: &str) -> (String, String, String) {
+///
+/// Returns Err if the agent calls a storage op without declaring the backend.
+fn resolve_route(
+    op: &str,
+    kv_backend: Option<ObjectStorageType>,
+    vec_backend: Option<VectorStorageType>,
+) -> Result<(String, String, String), String> {
     match op {
         "kv-get" | "kv-put" | "kv-list" | "kv-delete" => {
+            let backend = kv_backend
+                .ok_or_else(|| format!("agent called {} but has no object_storage configured", op))?;
             let operation = op.strip_prefix("kv-").unwrap_or(op).to_string();
-            ("kv".to_string(), kv_backend.to_string(), operation)
+            Ok(("kv".to_string(), backend.as_str().to_string(), operation))
         }
         "vector-store" | "vector-search" | "vector-delete" => {
+            let backend = vec_backend
+                .ok_or_else(|| format!("agent called {} but has no vector_storage configured", op))?;
             let operation = op.strip_prefix("vector-").unwrap_or(op).to_string();
-            ("vec".to_string(), vec_backend.to_string(), operation)
+            Ok(("vec".to_string(), backend.as_str().to_string(), operation))
         }
-        "infer" => ("infer".to_string(), "ollama".to_string(), "run".to_string()),
-        "embed" => ("embed".to_string(), "ollama".to_string(), "run".to_string()),
-        _ => ("agent".to_string(), op.to_string(), String::new()),
+        "infer" => Ok(("infer".to_string(), "ollama".to_string(), "run".to_string())),
+        "embed" => Ok(("embed".to_string(), "ollama".to_string(), "run".to_string())),
+        _ => Ok(("agent".to_string(), op.to_string(), String::new())),
     }
 }
 
@@ -314,34 +308,46 @@ mod tests {
 
     #[test]
     fn resolve_route_kv_operations() {
-        let (svc, backend, op) = resolve_route("kv-get", "sqlite", "memory");
+        let (svc, backend, op) = resolve_route("kv-get", Some(ObjectStorageType::Sqlite), None).unwrap();
         assert_eq!((svc.as_str(), backend.as_str(), op.as_str()), ("kv", "sqlite", "get"));
 
-        let (svc, backend, op) = resolve_route("kv-put", "memory", "memory");
+        let (svc, backend, op) = resolve_route("kv-put", Some(ObjectStorageType::InMemory), None).unwrap();
         assert_eq!((svc.as_str(), backend.as_str(), op.as_str()), ("kv", "memory", "put"));
     }
 
     #[test]
     fn resolve_route_vector_operations() {
-        let (svc, backend, op) = resolve_route("vector-store", "memory", "sqlite-vec");
+        let (svc, backend, op) = resolve_route("vector-store", None, Some(VectorStorageType::SqliteVec)).unwrap();
         assert_eq!((svc.as_str(), backend.as_str(), op.as_str()), ("vec", "sqlite-vec", "store"));
 
-        let (svc, backend, op) = resolve_route("vector-search", "memory", "memory");
+        let (svc, backend, op) = resolve_route("vector-search", None, Some(VectorStorageType::InMemory)).unwrap();
         assert_eq!((svc.as_str(), backend.as_str(), op.as_str()), ("vec", "memory", "search"));
     }
 
     #[test]
+    fn resolve_route_kv_without_backend_fails() {
+        let err = resolve_route("kv-get", None, Some(VectorStorageType::InMemory)).unwrap_err();
+        assert!(err.contains("no object_storage configured"));
+    }
+
+    #[test]
+    fn resolve_route_vector_without_backend_fails() {
+        let err = resolve_route("vector-store", Some(ObjectStorageType::Sqlite), None).unwrap_err();
+        assert!(err.contains("no vector_storage configured"));
+    }
+
+    #[test]
     fn resolve_route_inference_ignores_backends() {
-        let (svc, backend, op) = resolve_route("infer", "anything", "anything");
+        let (svc, backend, op) = resolve_route("infer", None, None).unwrap();
         assert_eq!((svc.as_str(), backend.as_str(), op.as_str()), ("infer", "ollama", "run"));
 
-        let (svc, backend, op) = resolve_route("embed", "anything", "anything");
+        let (svc, backend, op) = resolve_route("embed", None, None).unwrap();
         assert_eq!((svc.as_str(), backend.as_str(), op.as_str()), ("embed", "ollama", "run"));
     }
 
     #[test]
     fn resolve_route_unknown_op_is_agent_message() {
-        let (svc, backend, op) = resolve_route("summarize", "sqlite", "sqlite-vec");
+        let (svc, backend, op) = resolve_route("summarize", None, None).unwrap();
         assert_eq!((svc.as_str(), backend.as_str(), op.as_str()), ("agent", "summarize", ""));
     }
 

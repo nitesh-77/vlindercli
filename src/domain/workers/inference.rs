@@ -227,13 +227,13 @@ mod tests {
             serde_json::to_vec(&payload).unwrap(),
         );
 
-        queue.send_request(request).unwrap();
+        queue.send_request(request.clone()).unwrap();
 
         // Process
         assert!(handler.tick());
 
-        // Response is sent via typed queue - receive with pattern
-        let (response, ack) = queue.receive_response("res.infer.memory").unwrap();
+        // Response is sent via typed queue
+        let (response, ack) = queue.receive_response(&request).unwrap();
         assert_eq!(String::from_utf8(response.payload.clone()).unwrap(), "test response");
         ack().unwrap();
     }
@@ -264,10 +264,10 @@ mod tests {
             serde_json::to_vec(&payload).unwrap(),
         );
 
-        queue.send_request(request).unwrap();
+        queue.send_request(request.clone()).unwrap();
 
         assert!(handler.tick());
-        let (response, ack) = queue.receive_response("res.infer.memory").unwrap();
+        let (response, ack) = queue.receive_response(&request).unwrap();
         let text = String::from_utf8(response.payload.clone()).unwrap();
         assert!(text.contains("[error]"));
         assert!(text.contains("did not declare model"));
@@ -300,10 +300,10 @@ mod tests {
             serde_json::to_vec(&payload).unwrap(),
         );
 
-        queue.send_request(request).unwrap();
+        queue.send_request(request.clone()).unwrap();
 
         assert!(handler.tick());
-        let (response, ack) = queue.receive_response("res.infer.memory").unwrap();
+        let (response, ack) = queue.receive_response(&request).unwrap();
         let text = String::from_utf8(response.payload.clone()).unwrap();
         assert!(text.contains("[error]"));
         assert!(text.contains("agent not found"));

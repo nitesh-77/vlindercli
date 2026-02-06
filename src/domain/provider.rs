@@ -130,9 +130,9 @@ mod tests {
             Sequence::first(),
             serde_json::to_vec(&put_a).unwrap(),
         );
-        queue.send_request(request_a).unwrap();
+        queue.send_request(request_a.clone()).unwrap();
         provider.tick();
-        let (response, ack) = queue.receive_response("res.kv.memory").unwrap();
+        let (response, ack) = queue.receive_response(&request_a).unwrap();
         assert_eq!(response.payload, b"ok");
         ack().unwrap();
 
@@ -151,9 +151,9 @@ mod tests {
             Sequence::from(2),
             serde_json::to_vec(&put_b).unwrap(),
         );
-        queue.send_request(request_b).unwrap();
+        queue.send_request(request_b.clone()).unwrap();
         provider.tick();
-        let (response, ack) = queue.receive_response("res.kv.memory").unwrap();
+        let (response, ack) = queue.receive_response(&request_b).unwrap();
         assert_eq!(response.payload, b"ok");
         ack().unwrap();
 
@@ -168,9 +168,9 @@ mod tests {
             Sequence::from(3),
             serde_json::to_vec(&get_a).unwrap(),
         );
-        queue.send_request(request_get_a).unwrap();
+        queue.send_request(request_get_a.clone()).unwrap();
         provider.tick();
-        let (response, ack) = queue.receive_response("res.kv.memory").unwrap();
+        let (response, ack) = queue.receive_response(&request_get_a).unwrap();
         assert_eq!(response.payload, b"data for A");
         ack().unwrap();
 
@@ -185,9 +185,9 @@ mod tests {
             Sequence::from(4),
             serde_json::to_vec(&get_b).unwrap(),
         );
-        queue.send_request(request_get_b).unwrap();
+        queue.send_request(request_get_b.clone()).unwrap();
         provider.tick();
-        let (response, ack) = queue.receive_response("res.kv.memory").unwrap();
+        let (response, ack) = queue.receive_response(&request_get_b).unwrap();
         assert_eq!(response.payload, b"data for B");
         ack().unwrap();
     }

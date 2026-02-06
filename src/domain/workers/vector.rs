@@ -258,10 +258,10 @@ mod tests {
             serde_json::to_vec(&store_payload).unwrap(),
         );
 
-        queue.send_request(store_request).unwrap();
+        queue.send_request(store_request.clone()).unwrap();
 
         assert!(handler.tick());
-        let (response, ack) = queue.receive_response("res.vec.memory").unwrap();
+        let (response, ack) = queue.receive_response(&store_request).unwrap();
         assert_eq!(response.payload, b"ok");
         ack().unwrap();
 
@@ -281,10 +281,10 @@ mod tests {
             serde_json::to_vec(&search_payload).unwrap(),
         );
 
-        queue.send_request(search_request).unwrap();
+        queue.send_request(search_request.clone()).unwrap();
 
         assert!(handler.tick());
-        let (response, ack) = queue.receive_response("res.vec.memory").unwrap();
+        let (response, ack) = queue.receive_response(&search_request).unwrap();
         let results: Vec<serde_json::Value> = serde_json::from_slice(&response.payload).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0]["key"], "doc1");

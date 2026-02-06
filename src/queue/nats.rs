@@ -364,10 +364,10 @@ impl MessageQueue for NatsQueue {
         })
     }
 
-    fn receive_response(&self, subject_pattern: &str) -> Result<(ResponseMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
-        // Build filter from pattern (e.g., "sub-xxx.res.kv.sqlite" -> "vlinder.sub-xxx.res.kv.sqlite.*.*.*")
+    fn receive_response(&self, request: &RequestMessage) -> Result<(ResponseMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+        // Build filter from request dimensions
         // Three wildcards match: {agent}.{operation}.{sequence}
-        let filter = format!("vlinder.{}.*.*.*", subject_pattern);
+        let filter = format!("vlinder.{}.res.{}.{}.*.*.*", request.submission, request.service, request.backend);
 
         self.inner.runtime.block_on(async {
             let (js_msg, ack_fn) = self.fetch_one(&filter).await?;

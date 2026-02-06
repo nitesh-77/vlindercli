@@ -228,12 +228,12 @@ mod tests {
             serde_json::to_vec(&payload).unwrap(),
         );
 
-        queue.send_request(request).unwrap();
+        queue.send_request(request.clone()).unwrap();
 
         // Process
         assert!(handler.tick());
 
-        let (response, ack) = queue.receive_response("res.embed.memory").unwrap();
+        let (response, ack) = queue.receive_response(&request).unwrap();
         let vector: Vec<f32> = serde_json::from_slice(&response.payload).unwrap();
         assert_eq!(vector.len(), 768);
         assert_eq!(vector, canned);
@@ -267,10 +267,10 @@ mod tests {
             serde_json::to_vec(&payload).unwrap(),
         );
 
-        queue.send_request(request).unwrap();
+        queue.send_request(request.clone()).unwrap();
 
         assert!(handler.tick());
-        let (response, ack) = queue.receive_response("res.embed.memory").unwrap();
+        let (response, ack) = queue.receive_response(&request).unwrap();
         let text = String::from_utf8(response.payload.clone()).unwrap();
         assert!(text.contains("[error]"));
         assert!(text.contains("did not declare model"));
@@ -304,10 +304,10 @@ mod tests {
             serde_json::to_vec(&payload).unwrap(),
         );
 
-        queue.send_request(request).unwrap();
+        queue.send_request(request.clone()).unwrap();
 
         assert!(handler.tick());
-        let (response, ack) = queue.receive_response("res.embed.memory").unwrap();
+        let (response, ack) = queue.receive_response(&request).unwrap();
         let text = String::from_utf8(response.payload.clone()).unwrap();
         assert!(text.contains("[error]"));
         assert!(text.contains("agent not found"));

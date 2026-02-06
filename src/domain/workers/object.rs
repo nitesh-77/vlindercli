@@ -300,11 +300,11 @@ mod tests {
             serde_json::to_vec(&put_payload).unwrap(),
         );
 
-        queue.send_request(put_request).unwrap();
+        queue.send_request(put_request.clone()).unwrap();
 
         // Process
         assert!(handler.tick());
-        let (response, ack) = queue.receive_response("res.kv.memory").unwrap();
+        let (response, ack) = queue.receive_response(&put_request).unwrap();
         assert_eq!(response.payload, b"ok");
         ack().unwrap();
 
@@ -323,11 +323,11 @@ mod tests {
             serde_json::to_vec(&get_payload).unwrap(),
         );
 
-        queue.send_request(get_request).unwrap();
+        queue.send_request(get_request.clone()).unwrap();
 
         // Process
         assert!(handler.tick());
-        let (response, ack) = queue.receive_response("res.kv.memory").unwrap();
+        let (response, ack) = queue.receive_response(&get_request).unwrap();
         assert_eq!(response.payload, b"hello world");
         ack().unwrap();
     }

@@ -25,6 +25,14 @@ pub enum ObjectStorageType {
 }
 
 impl ObjectStorageType {
+    /// String representation for queue routing.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ObjectStorageType::Sqlite => "sqlite",
+            ObjectStorageType::InMemory => "memory",
+        }
+    }
+
     /// Determine storage type from URI scheme.
     pub fn from_scheme(scheme: Option<&str>) -> Option<Self> {
         match scheme {
@@ -52,6 +60,14 @@ pub enum VectorStorageType {
 }
 
 impl VectorStorageType {
+    /// String representation for queue routing.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            VectorStorageType::SqliteVec => "sqlite-vec",
+            VectorStorageType::InMemory => "memory",
+        }
+    }
+
     /// Determine storage type from URI scheme.
     pub fn from_scheme(scheme: Option<&str>) -> Option<Self> {
         match scheme {

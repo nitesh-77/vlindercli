@@ -164,11 +164,12 @@ impl MessageQueue for InMemoryQueue {
         Err(QueueError::Timeout)
     }
 
-    fn receive_response(&self, subject_pattern: &str) -> Result<(ResponseMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+    fn receive_response(&self, request: &RequestMessage) -> Result<(ResponseMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+        let pattern = format!("{}.res.{}.{}", request.submission, request.service, request.backend);
         let mut typed = self.typed_queues.lock().unwrap();
 
         for (subject, queue) in typed.iter_mut() {
-            if subject.contains(subject_pattern) || subject_pattern.contains("*") {
+            if subject.contains(&pattern) {
                 if let Some(ObservableMessage::Response(msg)) = queue.front() {
                     let msg = msg.clone();
                     queue.pop_front();

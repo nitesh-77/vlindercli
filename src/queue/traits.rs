@@ -83,10 +83,11 @@ pub trait MessageQueue {
     /// Returns the typed message with all dimensions intact.
     fn receive_request(&self, service: &str, backend: &str, operation: &str) -> Result<(RequestMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError>;
 
-    /// Receive a ResponseMessage from a subject pattern.
+    /// Receive a ResponseMessage for the given request.
     ///
+    /// The queue builds the filter pattern from the request's dimensions.
     /// Returns the typed message with all dimensions intact.
-    fn receive_response(&self, subject_pattern: &str) -> Result<(ResponseMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError>;
+    fn receive_response(&self, request: &RequestMessage) -> Result<(ResponseMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError>;
 
     /// Receive a CompleteMessage for a harness.
     ///
