@@ -156,17 +156,17 @@ mod tests {
     use std::path::PathBuf;
 
     fn test_agent_id() -> ResourceId {
-        ResourceId::new("file:///test/agent.wasm")
+        ResourceId::new("container://localhost/test-agent")
     }
 
     fn fixture_path(name: &str) -> PathBuf {
         PathBuf::from("tests/fixtures/agents").join(name)
     }
 
-    /// Create a registry with Wasm runtime registered (required for agent deployment).
+    /// Create a registry with Container runtime registered (required for agent deployment).
     fn test_registry() -> Arc<dyn Registry> {
         let registry = InMemoryRegistry::new();
-        registry.register_runtime(RuntimeType::Wasm);
+        registry.register_runtime(RuntimeType::Container);
         Arc::new(registry)
     }
 
@@ -175,7 +175,7 @@ mod tests {
         let manifest = r#"
             name = "test-agent"
             description = "Test"
-            id = "file:///test/agent.wasm"
+            id = "container://localhost/test-agent"
             [requirements]
             services = []
         "#;
@@ -209,14 +209,14 @@ mod tests {
         assert_eq!(job.agent_id, agent_id);
 
         // Message is in typed queue with ADR 044 subject pattern
-        // Agent name extracted from "file:///test/agent.wasm" → "agent"
+        // Agent name extracted from "container://localhost/test-agent" → "test-agent"
         let typed = queue.typed_queues.lock().unwrap();
         assert_eq!(typed.len(), 1);
         let (subject, _) = typed.iter().next().unwrap();
         assert!(subject.contains(".invoke."));
         assert!(subject.contains(".cli."));
-        assert!(subject.contains(".wasm."));
-        assert!(subject.contains(".agent"), "subject should contain agent name: {}", subject);
+        assert!(subject.contains(".container."));
+        assert!(subject.contains(".test-agent"), "subject should contain agent name: {}", subject);
     }
 
     #[test]

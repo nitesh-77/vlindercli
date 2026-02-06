@@ -156,7 +156,7 @@ mod tests {
     use crate::queue::{InMemoryQueue, Sequence, SubmissionId};
     use crate::inference::InMemoryInference;
 
-    const TEST_AGENT_ID: &str = "file:///test-agent.wasm";
+    const TEST_AGENT_ID: &str = "container://localhost/test-agent";
 
     fn test_agent_id() -> ResourceId {
         ResourceId::new(TEST_AGENT_ID)
@@ -194,7 +194,7 @@ mod tests {
 
     fn test_registry_with_agent_and_model(agent: Agent, model_name: &str) -> Arc<dyn Registry> {
         let registry = InMemoryRegistry::new();
-        registry.register_runtime(crate::domain::RuntimeType::Wasm);
+        registry.register_runtime(crate::domain::RuntimeType::Container);
         registry.register_model(test_model(model_name));
         registry.register_agent(agent).unwrap();
         Arc::new(registry)
@@ -288,7 +288,7 @@ mod tests {
         });
         let request = RequestMessage::new(
             test_submission(),
-            ResourceId::new("file:///unknown-agent.wasm"),
+            ResourceId::new("container://localhost/unknown-agent"),
             "infer",
             "memory",
             "run",

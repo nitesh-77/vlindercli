@@ -244,7 +244,7 @@ mod tests {
     use crate::domain::{Agent, InMemoryRegistry};
     use crate::queue::{InMemoryQueue, Sequence, SubmissionId};
 
-    const TEST_AGENT_ID: &str = "file:///test.wasm";
+    const TEST_AGENT_ID: &str = "container://localhost/test-agent";
 
     fn test_agent_id() -> ResourceId {
         ResourceId::new(TEST_AGENT_ID)
@@ -258,7 +258,7 @@ mod tests {
         let manifest = r#"
             name = "test-agent"
             description = "Test agent for object storage"
-            id = "file:///test.wasm"
+            id = "container://localhost/test-agent"
             object_storage = "memory://"
             [requirements]
             services = []
@@ -270,7 +270,7 @@ mod tests {
     fn handles_put_and_get() {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
         let registry = InMemoryRegistry::new();
-        registry.register_runtime(crate::domain::RuntimeType::Wasm);
+        registry.register_runtime(crate::domain::RuntimeType::Container);
         registry.register_object_storage(crate::domain::ObjectStorageType::InMemory);
 
         // Register test agent with memory:// object storage

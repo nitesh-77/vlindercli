@@ -1,6 +1,0 @@
-name = "reverse-agent"
-description = "Reverses the input string"
-id = "reverse-agent.wasm"
-
-[requirements]
-services = []

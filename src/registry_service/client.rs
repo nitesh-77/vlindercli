@@ -94,9 +94,7 @@ impl Registry for GrpcRegistryClient {
     }
 
     fn select_runtime(&self, agent: &Agent) -> Option<RuntimeType> {
-        if agent.id.scheme() == Some("file") && agent.id.to_string().ends_with(".wasm") {
-            Some(RuntimeType::Wasm)
-        } else if agent.id.scheme() == Some("container") {
+        if agent.id.scheme() == Some("container") {
             Some(RuntimeType::Container)
         } else {
             None

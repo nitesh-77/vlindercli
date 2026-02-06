@@ -13,8 +13,6 @@ use super::ResourceId;
 /// This is a compile-time enum - adding a new runtime type requires code changes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum RuntimeType {
-    /// WebAssembly runtime (Extism/WASI)
-    Wasm,
     /// OCI container runtime (Podman)
     Container,
 }
@@ -23,7 +21,6 @@ impl RuntimeType {
     /// String representation for URI construction.
     pub fn as_str(&self) -> &'static str {
         match self {
-            RuntimeType::Wasm => "wasm",
             RuntimeType::Container => "container",
         }
     }
@@ -46,7 +43,7 @@ pub trait Runtime {
     /// Format: `<registry_id>/runtimes/<runtime_type>`
     fn id(&self) -> &ResourceId;
 
-    /// The type of runtime (Wasm, Lambda, etc.)
+    /// The type of runtime (Container, etc.)
     fn runtime_type(&self) -> RuntimeType;
 
     /// Process agent work. Returns true if work was done.
@@ -82,7 +79,7 @@ mod tests {
         }
 
         fn runtime_type(&self) -> RuntimeType {
-            RuntimeType::Wasm // Mock as Wasm for testing
+            RuntimeType::Container
         }
 
         fn tick(&mut self) -> bool {

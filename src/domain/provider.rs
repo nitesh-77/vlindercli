@@ -105,12 +105,12 @@ mod tests {
         // Each agent gets its own isolated storage (lazy-opened from memory://)
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
         let registry = InMemoryRegistry::new();
-        registry.register_runtime(crate::domain::RuntimeType::Wasm);
+        registry.register_runtime(crate::domain::RuntimeType::Container);
         registry.register_object_storage(crate::domain::ObjectStorageType::InMemory);
 
         // Register agents - each declares memory:// storage (each gets separate instance)
-        registry.register_agent(test_agent("file:///agent-a.wasm")).unwrap();
-        registry.register_agent(test_agent("file:///agent-b.wasm")).unwrap();
+        registry.register_agent(test_agent("container://localhost/agent-a")).unwrap();
+        registry.register_agent(test_agent("container://localhost/agent-b")).unwrap();
 
         let registry: Arc<dyn Registry> = Arc::new(registry);
         let provider = Provider::new(Arc::clone(&queue), Arc::clone(&registry));
@@ -122,7 +122,7 @@ mod tests {
         });
         let request_a = RequestMessage::new(
             test_submission(),
-            ResourceId::new("file:///agent-a.wasm"),
+            ResourceId::new("container://localhost/agent-a"),
             "kv",
             "memory",
             "put",
@@ -142,7 +142,7 @@ mod tests {
         });
         let request_b = RequestMessage::new(
             test_submission(),
-            ResourceId::new("file:///agent-b.wasm"),
+            ResourceId::new("container://localhost/agent-b"),
             "kv",
             "memory",
             "put",
@@ -159,7 +159,7 @@ mod tests {
         let get_a = serde_json::json!({ "path": "/data.txt" });
         let request_get_a = RequestMessage::new(
             test_submission(),
-            ResourceId::new("file:///agent-a.wasm"),
+            ResourceId::new("container://localhost/agent-a"),
             "kv",
             "memory",
             "get",
@@ -176,7 +176,7 @@ mod tests {
         let get_b = serde_json::json!({ "path": "/data.txt" });
         let request_get_b = RequestMessage::new(
             test_submission(),
-            ResourceId::new("file:///agent-b.wasm"),
+            ResourceId::new("container://localhost/agent-b"),
             "kv",
             "memory",
             "get",

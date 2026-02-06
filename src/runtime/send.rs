@@ -1,6 +1,6 @@
 //! SendFunctionData — shared agent→service call handler.
 //!
-//! Used by both WasmRuntime (via host function) and ContainerRuntime (via HTTP bridge).
+//! Used by ContainerRuntime (via HTTP bridge).
 //! Contains the core logic: parse SdkMessage, resolve hop, build RequestMessage,
 //! send to queue, poll for ResponseMessage, return payload.
 

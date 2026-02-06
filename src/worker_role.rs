@@ -17,8 +17,6 @@ use std::str::FromStr;
 pub enum WorkerRole {
     /// Registry service - coordinates agents, models, and jobs
     Registry,
-    /// WASM agent runtime - executes WASM agents
-    AgentWasm,
     /// Container agent runtime - executes OCI container agents via Podman
     AgentContainer,
     /// Ollama inference service
@@ -49,7 +47,6 @@ impl WorkerRole {
     pub fn as_env_value(&self) -> &'static str {
         match self {
             WorkerRole::Registry => "registry",
-            WorkerRole::AgentWasm => "agent-wasm",
             WorkerRole::AgentContainer => "agent-container",
             WorkerRole::InferenceOllama => "inference-ollama",
             WorkerRole::EmbeddingOllama => "embedding-ollama",
@@ -64,7 +61,6 @@ impl WorkerRole {
     pub fn description(&self) -> &'static str {
         match self {
             WorkerRole::Registry => "Registry service",
-            WorkerRole::AgentWasm => "WASM agent runtime",
             WorkerRole::AgentContainer => "Container agent runtime",
             WorkerRole::InferenceOllama => "Ollama inference service",
             WorkerRole::EmbeddingOllama => "Ollama embedding service",
@@ -88,7 +84,6 @@ impl FromStr for WorkerRole {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "registry" => Ok(WorkerRole::Registry),
-            "agent-wasm" => Ok(WorkerRole::AgentWasm),
             "agent-container" => Ok(WorkerRole::AgentContainer),
             "inference-ollama" => Ok(WorkerRole::InferenceOllama),
             "embedding-ollama" => Ok(WorkerRole::EmbeddingOllama),
@@ -119,7 +114,7 @@ mod tests {
     #[test]
     fn parse_valid_roles() {
         assert_eq!("registry".parse::<WorkerRole>().unwrap(), WorkerRole::Registry);
-        assert_eq!("agent-wasm".parse::<WorkerRole>().unwrap(), WorkerRole::AgentWasm);
+        assert_eq!("agent-container".parse::<WorkerRole>().unwrap(), WorkerRole::AgentContainer);
         assert_eq!("inference-ollama".parse::<WorkerRole>().unwrap(), WorkerRole::InferenceOllama);
         assert_eq!("embedding-ollama".parse::<WorkerRole>().unwrap(), WorkerRole::EmbeddingOllama);
         assert_eq!("storage-object-sqlite".parse::<WorkerRole>().unwrap(), WorkerRole::StorageObjectSqlite);
@@ -136,7 +131,7 @@ mod tests {
     fn roundtrip_env_value() {
         for role in [
             WorkerRole::Registry,
-            WorkerRole::AgentWasm,
+            WorkerRole::AgentContainer,
             WorkerRole::InferenceOllama,
             WorkerRole::EmbeddingOllama,
             WorkerRole::StorageObjectSqlite,
@@ -151,8 +146,8 @@ mod tests {
     #[test]
     fn from_env_parses_valid_role() {
         // Test the parsing logic directly (avoids env var race conditions)
-        let result = "agent-wasm".parse::<WorkerRole>();
-        assert_eq!(result.unwrap(), WorkerRole::AgentWasm);
+        let result = "agent-container".parse::<WorkerRole>();
+        assert_eq!(result.unwrap(), WorkerRole::AgentContainer);
     }
 
     #[test]

@@ -584,7 +584,7 @@ mod tests {
     // --- Typed message tests ---
 
     fn test_agent_id() -> ResourceId {
-        ResourceId::new("file:///test/echo-agent.wasm")
+        ResourceId::new("container://localhost/echo-agent")
     }
 
     #[test]
@@ -594,14 +594,14 @@ mod tests {
         let msg = InvokeMessage::new(
             submission.clone(),
             HarnessType::Cli,
-            RuntimeType::Wasm,
+            RuntimeType::Container,
             agent_id.clone(),
             b"hello".to_vec(),
         );
 
         assert_eq!(msg.submission, submission);
         assert_eq!(msg.harness, HarnessType::Cli);
-        assert_eq!(msg.runtime, RuntimeType::Wasm);
+        assert_eq!(msg.runtime, RuntimeType::Container);
         assert_eq!(msg.agent_id, agent_id);
         assert_eq!(msg.payload, b"hello");
     }
@@ -688,7 +688,7 @@ mod tests {
         let invoke = InvokeMessage::new(
             SubmissionId::new(),
             HarnessType::Cli,
-            RuntimeType::Wasm,
+            RuntimeType::Container,
             test_agent_id(),
             b"input".to_vec(),
         );
@@ -748,7 +748,7 @@ mod tests {
         let invoke = InvokeMessage::new(
             SubmissionId::new(),
             HarnessType::Cli,
-            RuntimeType::Wasm,
+            RuntimeType::Container,
             test_agent_id(),
             b"test".to_vec(),
         );
@@ -788,7 +788,7 @@ mod tests {
         let invoke = InvokeMessage::new(
             submission.clone(),
             HarnessType::Cli,
-            RuntimeType::Wasm,
+            RuntimeType::Container,
             agent_id.clone(),
             b"payload".to_vec(),
         );

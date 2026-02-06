@@ -1,6 +1,0 @@
-name = "echo-agent"
-description = "Test agent that echoes input"
-id = "echo-agent.wasm"
-
-[requirements]
-services = []

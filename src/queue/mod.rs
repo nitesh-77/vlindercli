@@ -33,10 +33,9 @@ pub use nats::NatsQueue;
 /// This is the canonical function for computing the NATS subject token
 /// for an agent. Both send and receive must use the same key.
 ///
-/// - `file:///path/to/echo-agent.wasm` → "echo-agent"
 /// - `container://localhost/echo-container:latest` → "echo-container_latest"
 /// - `memory://test-agent` → "test-agent"
-/// TODO: This smells. We should just have a queue friendly unique short name 
+/// TODO: This smells. We should just have a queue friendly unique short name
 /// in the agent entity
 pub fn agent_routing_key(agent_id: &ResourceId) -> String {
     if let Some(path) = agent_id.path() {

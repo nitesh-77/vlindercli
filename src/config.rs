@@ -125,8 +125,6 @@ pub struct WorkerCounts {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct AgentWorkerCounts {
-    /// WASM runtime workers
-    pub wasm: u32,
     /// Container runtime workers (Podman)
     pub container: u32,
 }
@@ -242,7 +240,7 @@ impl Default for WorkerCounts {
 
 impl Default for AgentWorkerCounts {
     fn default() -> Self {
-        Self { wasm: 1, container: 0 }
+        Self { container: 1 }
     }
 }
 
@@ -342,9 +340,6 @@ impl Config {
         if let Ok(v) = std::env::var("VLINDER_WORKERS_REGISTRY") {
             self.distributed.workers.registry = v.parse().unwrap_or(1);
         }
-        if let Ok(v) = std::env::var("VLINDER_WORKERS_AGENT_WASM") {
-            self.distributed.workers.agent.wasm = v.parse().unwrap_or(1);
-        }
         if let Ok(v) = std::env::var("VLINDER_WORKERS_AGENT_CONTAINER") {
             self.distributed.workers.agent.container = v.parse().unwrap_or(0);
         }
@@ -409,11 +404,6 @@ pub fn agent_dir(name: &str) -> PathBuf {
     agents_dir().join(name)
 }
 
-pub fn agent_wasm_path(name: &str) -> PathBuf {
-    let wasm_name = name.replace('-', "_");
-    agent_dir(name).join(format!("{}.wasm", wasm_name))
-}
-
 pub fn agent_manifest_path(name: &str) -> PathBuf {
     agent_dir(name).join(format!("{}-agent.toml", name))
 }
@@ -467,7 +457,7 @@ mod tests {
         assert!(!config.distributed.enabled);
         assert_eq!(config.distributed.registry_addr, "http://127.0.0.1:9090");
         assert_eq!(config.distributed.workers.registry, 1);
-        assert_eq!(config.distributed.workers.agent.wasm, 1);
+        assert_eq!(config.distributed.workers.agent.container, 1);
         assert_eq!(config.distributed.workers.inference.ollama, 1);
         assert_eq!(config.distributed.workers.embedding.ollama, 1);
         assert_eq!(config.distributed.workers.storage.object.sqlite, 1);
@@ -488,13 +478,13 @@ mod tests {
 
     #[test]
     fn env_override_worker_counts() {
-        std::env::set_var("VLINDER_WORKERS_AGENT_WASM", "4");
+        std::env::set_var("VLINDER_WORKERS_AGENT_CONTAINER", "4");
         std::env::set_var("VLINDER_WORKERS_INFERENCE_OLLAMA", "2");
         let config = Config::load();
-        std::env::remove_var("VLINDER_WORKERS_AGENT_WASM");
+        std::env::remove_var("VLINDER_WORKERS_AGENT_CONTAINER");
         std::env::remove_var("VLINDER_WORKERS_INFERENCE_OLLAMA");
 
-        assert_eq!(config.distributed.workers.agent.wasm, 4);
+        assert_eq!(config.distributed.workers.agent.container, 4);
         assert_eq!(config.distributed.workers.inference.ollama, 2);
     }
 }

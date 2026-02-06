@@ -1,6 +1,6 @@
 name = "echo-agent"
 description = "Test agent that echoes input"
-id = "echo-agent.wasm"
+id = "container://localhost/echo-agent:latest"
 
 [requirements]
 services = []

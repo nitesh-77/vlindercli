@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted (extends ADR 013)
+Superseded by ADR 046
+
+WASI mounts are no longer relevant — agents are OCI containers. Volume mounts use Podman's standard `-v` flag instead.
 
 ## Context
 

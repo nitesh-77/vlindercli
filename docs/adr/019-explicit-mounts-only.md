@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted (supersedes ADR 016 mount defaults)
+Superseded by ADR 046
+
+WASI mount policy is moot — agents are OCI containers. Mount behavior is now standard Podman volume mounts declared in agent.toml.
 
 ## Context
 

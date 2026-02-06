@@ -2,9 +2,9 @@
 
 ## Status
 
-Accepted (wire protocol updated by ADR 018)
+Superseded by ADR 046
 
-The coroutine model remains valid. The wire protocol changed from `yield_to(agent_ptr, ...)` to queue-based `send(queue, payload, reply_to)` and `receive(queue)`. Implementation uses Extism, not Wasmtime async.
+Agents are now OCI containers, not WASM coroutines. The coroutine/yield model assumed in-process WASM execution. With containers, agents are independent processes communicating via the HTTP bridge.
 
 ## Context
 

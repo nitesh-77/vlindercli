@@ -133,7 +133,7 @@ fn manifest_fails_for_missing_required_field() {
 }
 
 // ============================================================================
-// Agent Tests (need fixtures for WASM files and directory structure)
+// Agent Tests (need fixtures for directory structure)
 // ============================================================================
 
 #[test]
@@ -189,20 +189,11 @@ fn agent_load_fails_for_missing_mount() {
 }
 
 #[test]
-fn agent_id_resolved_to_uri() {
+fn agent_id_is_container_uri() {
     let agent = Agent::load(&agent_fixture("echo-agent")).unwrap();
 
-    assert!(agent.id.as_str().starts_with("file://"));
-    assert!(agent.id.as_str().ends_with(".wasm"));
-}
-
-#[test]
-fn agent_id_has_file_scheme() {
-    let agent = Agent::load(&agent_fixture("echo-agent")).unwrap();
-
-    // ResourceId parsing works on loaded agents
-    assert_eq!(agent.id.scheme(), Some("file"));
-    assert!(agent.id.path().unwrap().ends_with("echo-agent.wasm"));
+    assert_eq!(agent.id.scheme(), Some("container"));
+    assert_eq!(agent.id.as_str(), "container://localhost/echo-agent:latest");
 }
 
 #[test]

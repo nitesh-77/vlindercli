@@ -202,13 +202,6 @@ impl InMemoryRegistry {
 
     /// Internal: check if runtime is available for agent (needs read lock held).
     fn select_runtime_internal(&self, agent: &Agent, state: &RegistryState) -> Option<RuntimeType> {
-        if agent.id.scheme() == Some("file") {
-            if let Some(path) = agent.id.path() {
-                if path.ends_with(".wasm") && state.available_runtimes.contains(&RuntimeType::Wasm) {
-                    return Some(RuntimeType::Wasm);
-                }
-            }
-        }
         if agent.id.scheme() == Some("container")
             && state.available_runtimes.contains(&RuntimeType::Container)
         {
@@ -412,7 +405,7 @@ mod tests {
     use crate::queue::SubmissionId;
 
     fn test_agent_id() -> ResourceId {
-        ResourceId::new("file:///test/agent.wasm")
+        ResourceId::new("container://localhost/test-agent")
     }
 
     #[test]

@@ -212,7 +212,7 @@ mod tests {
     use crate::queue::{ExpectsReply, HarnessType, Sequence, SubmissionId};
 
     fn test_agent_id() -> ResourceId {
-        ResourceId::new("file:///test/echo-agent.wasm")
+        ResourceId::new("container://localhost/echo-agent")
     }
 
     fn test_submission() -> SubmissionId {
@@ -230,7 +230,7 @@ mod tests {
         let invoke = InvokeMessage::new(
             test_submission(),
             HarnessType::Cli,
-            RuntimeType::Wasm,
+            RuntimeType::Container,
             test_agent_id(),
             b"input".to_vec(),
         );
@@ -242,7 +242,7 @@ mod tests {
         let (subject, messages) = typed.iter().next().unwrap();
         assert!(subject.contains("invoke"));
         assert!(subject.contains("cli"));
-        assert!(subject.contains("wasm"));
+        assert!(subject.contains("container"));
         assert!(subject.contains("echo-agent"));
         assert_eq!(messages.len(), 1);
     }
@@ -301,7 +301,7 @@ mod tests {
         let invoke = InvokeMessage::new(
             test_submission(),
             HarnessType::Web,
-            RuntimeType::Wasm,
+            RuntimeType::Container,
             test_agent_id(),
             b"input".to_vec(),
         );
@@ -338,7 +338,7 @@ mod tests {
         let invoke = InvokeMessage::new(
             test_submission(),
             HarnessType::Cli,
-            RuntimeType::Wasm,
+            RuntimeType::Container,
             test_agent_id(),
             b"hello".to_vec(),
         );
@@ -351,7 +351,7 @@ mod tests {
 
         assert_eq!(received.id, original_id);
         assert_eq!(received.harness, HarnessType::Cli);
-        assert_eq!(received.runtime, RuntimeType::Wasm);
+        assert_eq!(received.runtime, RuntimeType::Container);
         assert_eq!(received.payload, b"hello");
 
         ack().unwrap();
@@ -367,7 +367,7 @@ mod tests {
         let invoke = InvokeMessage::new(
             submission.clone(),
             HarnessType::Web,
-            RuntimeType::Wasm,
+            RuntimeType::Container,
             agent_id.clone(),
             b"input".to_vec(),
         );

@@ -2,7 +2,9 @@
 
 ## Status
 
-Draft
+Superseded by ADR 046
+
+WASM yield/wait was never implemented. Agents are now OCI containers — async parallelism is a language-level concern, not a platform one.
 
 ## Context
 

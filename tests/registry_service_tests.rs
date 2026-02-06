@@ -50,9 +50,9 @@ fn start_server_background(registry: Arc<dyn Registry>) -> SocketAddr {
 
 #[test]
 fn grpc_register_and_get_agent() {
-    // Create in-memory registry and register WASM runtime
+    // Create in-memory registry and register Container runtime
     let registry = Arc::new(InMemoryRegistry::new());
-    registry.register_runtime(RuntimeType::Wasm);
+    registry.register_runtime(RuntimeType::Container);
     let addr = start_server_background(registry.clone());
 
     // Create gRPC client
@@ -62,7 +62,7 @@ fn grpc_register_and_get_agent() {
     let agent = Agent {
         name: "test-agent".to_string(),
         description: "A test agent".to_string(),
-        id: ResourceId::new("file:///tmp/test.wasm"),
+        id: ResourceId::new("container://localhost/test-agent"),
         requirements: empty_requirements(),
         object_storage: None,
         vector_storage: None,
@@ -82,7 +82,7 @@ fn grpc_register_and_get_agent() {
 #[test]
 fn grpc_list_agents() {
     let registry = Arc::new(InMemoryRegistry::new());
-    registry.register_runtime(RuntimeType::Wasm);
+    registry.register_runtime(RuntimeType::Container);
     let addr = start_server_background(registry.clone());
     let client = GrpcRegistryClient::connect(&format!("http://{}", addr)).unwrap();
 
@@ -91,7 +91,7 @@ fn grpc_list_agents() {
         let agent = Agent {
             name: format!("agent-{}", i),
             description: "Test".to_string(),
-            id: ResourceId::new(&format!("file:///tmp/agent{}.wasm", i)),
+            id: ResourceId::new(&format!("container://localhost/agent{}", i)),
             requirements: empty_requirements(),
             object_storage: None,
             vector_storage: None,
@@ -109,7 +109,7 @@ fn grpc_list_agents() {
 #[test]
 fn grpc_job_lifecycle() {
     let registry = Arc::new(InMemoryRegistry::new());
-    registry.register_runtime(RuntimeType::Wasm);
+    registry.register_runtime(RuntimeType::Container);
     let addr = start_server_background(registry.clone());
     let client = GrpcRegistryClient::connect(&format!("http://{}", addr)).unwrap();
 
@@ -117,7 +117,7 @@ fn grpc_job_lifecycle() {
     let agent = Agent {
         name: "job-test-agent".to_string(),
         description: "Test".to_string(),
-        id: ResourceId::new("file:///tmp/job-test.wasm"),
+        id: ResourceId::new("container://localhost/job-test"),
         requirements: empty_requirements(),
         object_storage: None,
         vector_storage: None,

@@ -36,11 +36,6 @@ impl Supervisor {
         }
 
         // Agent runtimes
-        for _ in 0..counts.agent.wasm {
-            if let Some(child) = spawn_worker(WorkerRole::AgentWasm) {
-                workers.push(child);
-            }
-        }
         for _ in 0..counts.agent.container {
             if let Some(child) = spawn_worker(WorkerRole::AgentContainer) {
                 workers.push(child);
@@ -145,7 +140,7 @@ mod tests {
                 registry_addr: "http://127.0.0.1:9090".to_string(),
                 workers: crate::config::WorkerCounts {
                     registry: 0,
-                    agent: crate::config::AgentWorkerCounts { wasm: 0, container: 0 },
+                    agent: crate::config::AgentWorkerCounts { container: 0 },
                     inference: crate::config::InferenceWorkerCounts { ollama: 0 },
                     embedding: crate::config::EmbeddingWorkerCounts { ollama: 0 },
                     storage: crate::config::StorageWorkerCounts {

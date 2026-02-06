@@ -450,7 +450,6 @@ fn parse_harness_type(s: &str) -> Result<HarnessType, QueueError> {
 /// Parse a runtime type string.
 fn parse_runtime_type(s: &str) -> Result<RuntimeType, QueueError> {
     match s {
-        "wasm" => Ok(RuntimeType::Wasm),
         "container" => Ok(RuntimeType::Container),
         _ => Err(QueueError::ReceiveFailed(format!("unknown runtime type: {}", s))),
     }
