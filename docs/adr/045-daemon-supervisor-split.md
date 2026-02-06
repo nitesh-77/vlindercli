@@ -39,7 +39,7 @@ pub struct Daemon {
 }
 ```
 
-No `Option` fields. No `workers`. No `shutdown`. No `is_distributed()`. Created by `vlinder agent run` for the embedded development experience.
+No `Option` fields. No `workers`. No `shutdown`. No `is_distributed()`. Created by `vlinder daemon` (local mode) and `vlinder agent run` (local mode) for the single-process development experience.
 
 ### 2. `Supervisor` — distributed process manager
 
@@ -60,9 +60,9 @@ No harness, no registry, no queue. The supervisor doesn't participate in the mes
 ### 3. Command routing
 
 ```
-vlinder daemon          → Supervisor (distributed) or Daemon tick loop (local)
-vlinder agent run       → Embedded Daemon (always local)
-vlinder worker          → Standalone worker process (for manual/advanced use)
+vlinder daemon                          → Supervisor (distributed) or Daemon tick loop (local)
+vlinder agent run                       → Embedded Daemon (local) or NATS+gRPC client (distributed)
+VLINDER_WORKER_ROLE=... vlinder daemon  → Worker process (spawned by Supervisor)
 ```
 
 ## Consequences
