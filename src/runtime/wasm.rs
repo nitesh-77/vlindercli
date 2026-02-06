@@ -190,7 +190,7 @@ fn make_send_function(
             let msg: SdkMessage = serde_json::from_slice(&payload)
                 .map_err(|e| extism::Error::msg(format!("invalid SDK message: {}", e)))?;
 
-            let (service, backend, operation) = msg.route(data.kv_backend, data.vec_backend)
+            let route = msg.route(data.kv_backend, data.vec_backend)
                 .map_err(|e| extism::Error::msg(e))?;
 
             // Get next sequence number
@@ -206,9 +206,9 @@ fn make_send_function(
             let request = RequestMessage::new(
                 data.invoke.submission.clone(),
                 data.invoke.agent_id.clone(),
-                service,
-                backend,
-                operation,
+                route.service,
+                route.backend,
+                route.operation,
                 seq,
                 payload,
             );

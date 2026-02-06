@@ -9,6 +9,16 @@ use serde::Deserialize;
 
 use super::storage::{ObjectStorageType, VectorStorageType};
 
+/// Routing dimensions for a service request.
+///
+/// Determines which queue subject a message is sent to.
+#[derive(Debug)]
+pub struct Route {
+    pub service: &'static str,
+    pub backend: String,
+    pub operation: &'static str,
+}
+
 /// All valid operations an agent can request.
 ///
 /// Fields are validated by serde but not read directly — the raw payload
@@ -35,14 +45,14 @@ pub enum SdkMessage {
 fn default_max_tokens() -> u32 { 256 }
 
 impl SdkMessage {
-    /// Determine (service, backend, operation) for queue routing.
+    /// Determine routing dimensions for this message.
     ///
     /// Returns Err if the agent calls a storage op without declaring the backend.
     pub fn route(
         &self,
         kv_backend: Option<ObjectStorageType>,
         vec_backend: Option<VectorStorageType>,
-    ) -> Result<(&'static str, String, &'static str), String> {
+    ) -> Result<Route, String> {
         match self {
             SdkMessage::KvGet { .. } => kv_route("get", kv_backend),
             SdkMessage::KvPut { .. } => kv_route("put", kv_backend),
@@ -51,20 +61,20 @@ impl SdkMessage {
             SdkMessage::VectorStore { .. } => vec_route("store", vec_backend),
             SdkMessage::VectorSearch { .. } => vec_route("search", vec_backend),
             SdkMessage::VectorDelete { .. } => vec_route("delete", vec_backend),
-            SdkMessage::Infer { .. } => Ok(("infer", "ollama".to_string(), "run")),
-            SdkMessage::Embed { .. } => Ok(("embed", "ollama".to_string(), "run")),
+            SdkMessage::Infer { .. } => Ok(Route { service: "infer", backend: "ollama".to_string(), operation: "run" }),
+            SdkMessage::Embed { .. } => Ok(Route { service: "embed", backend: "ollama".to_string(), operation: "run" }),
         }
     }
 }
 
-fn kv_route(operation: &'static str, backend: Option<ObjectStorageType>) -> Result<(&'static str, String, &'static str), String> {
+fn kv_route(operation: &'static str, backend: Option<ObjectStorageType>) -> Result<Route, String> {
     let backend = backend.ok_or_else(|| format!("agent called kv-{} but has no object_storage configured", operation))?;
-    Ok(("kv", backend.as_str().to_string(), operation))
+    Ok(Route { service: "kv", backend: backend.as_str().to_string(), operation })
 }
 
-fn vec_route(operation: &'static str, backend: Option<VectorStorageType>) -> Result<(&'static str, String, &'static str), String> {
+fn vec_route(operation: &'static str, backend: Option<VectorStorageType>) -> Result<Route, String> {
     let backend = backend.ok_or_else(|| format!("agent called vector-{} but has no vector_storage configured", operation))?;
-    Ok(("vec", backend.as_str().to_string(), operation))
+    Ok(Route { service: "vec", backend: backend.as_str().to_string(), operation })
 }
 
 #[cfg(test)]
@@ -76,7 +86,7 @@ mod tests {
         json: &str,
         kv: Option<ObjectStorageType>,
         vec: Option<VectorStorageType>,
-    ) -> Result<(&'static str, String, &'static str), String> {
+    ) -> Result<Route, String> {
         let msg: SdkMessage = serde_json::from_str(json)
             .map_err(|e| e.to_string())?;
         msg.route(kv, vec)
@@ -84,32 +94,32 @@ mod tests {
 
     #[test]
     fn kv_operations() {
-        let (svc, backend, op) = parse_and_route(
+        let r = parse_and_route(
             r#"{"op": "kv-get", "path": "/data.txt"}"#,
             Some(ObjectStorageType::Sqlite), None,
         ).unwrap();
-        assert_eq!((svc, backend.as_str(), op), ("kv", "sqlite", "get"));
+        assert_eq!((r.service, r.backend.as_str(), r.operation), ("kv", "sqlite", "get"));
 
-        let (svc, backend, op) = parse_and_route(
+        let r = parse_and_route(
             r#"{"op": "kv-put", "path": "/data.txt", "content": "aGVsbG8="}"#,
             Some(ObjectStorageType::InMemory), None,
         ).unwrap();
-        assert_eq!((svc, backend.as_str(), op), ("kv", "memory", "put"));
+        assert_eq!((r.service, r.backend.as_str(), r.operation), ("kv", "memory", "put"));
     }
 
     #[test]
     fn vector_operations() {
-        let (svc, backend, op) = parse_and_route(
+        let r = parse_and_route(
             r#"{"op": "vector-store", "key": "doc1", "vector": [0.1], "metadata": "test"}"#,
             None, Some(VectorStorageType::SqliteVec),
         ).unwrap();
-        assert_eq!((svc, backend.as_str(), op), ("vec", "sqlite-vec", "store"));
+        assert_eq!((r.service, r.backend.as_str(), r.operation), ("vec", "sqlite-vec", "store"));
 
-        let (svc, backend, op) = parse_and_route(
+        let r = parse_and_route(
             r#"{"op": "vector-search", "vector": [0.1], "limit": 5}"#,
             None, Some(VectorStorageType::InMemory),
         ).unwrap();
-        assert_eq!((svc, backend.as_str(), op), ("vec", "memory", "search"));
+        assert_eq!((r.service, r.backend.as_str(), r.operation), ("vec", "memory", "search"));
     }
 
     #[test]
@@ -132,17 +142,17 @@ mod tests {
 
     #[test]
     fn inference() {
-        let (svc, backend, op) = parse_and_route(
+        let r = parse_and_route(
             r#"{"op": "infer", "model": "phi3", "prompt": "hello"}"#,
             None, None,
         ).unwrap();
-        assert_eq!((svc, backend.as_str(), op), ("infer", "ollama", "run"));
+        assert_eq!((r.service, r.backend.as_str(), r.operation), ("infer", "ollama", "run"));
 
-        let (svc, backend, op) = parse_and_route(
+        let r = parse_and_route(
             r#"{"op": "embed", "model": "nomic", "text": "hello"}"#,
             None, None,
         ).unwrap();
-        assert_eq!((svc, backend.as_str(), op), ("embed", "ollama", "run"));
+        assert_eq!((r.service, r.backend.as_str(), r.operation), ("embed", "ollama", "run"));
     }
 
     #[test]

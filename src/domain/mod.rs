@@ -101,7 +101,7 @@ pub use runtime::{Runtime, RuntimeType};
 // SDK Message (agent-platform contract)
 // ============================================================================
 
-pub use sdk_message::SdkMessage;
+pub use sdk_message::{Route, SdkMessage};
 
 // ============================================================================
 // Harness (API surface for agent interaction)
