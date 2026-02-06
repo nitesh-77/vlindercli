@@ -5,7 +5,11 @@ pub fn truncate(s: &str, max_len: usize) -> String {
     if s.len() <= max_len {
         s.to_string()
     } else {
-        format!("{}...", &s[..max_len.saturating_sub(3)])
+        let mut end = max_len.saturating_sub(3);
+        while end > 0 && !s.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}...", &s[..end])
     }
 }
 
@@ -31,5 +35,13 @@ mod tests {
     #[test]
     fn truncate_empty_string() {
         assert_eq!(truncate("", 10), "");
+    }
+
+    #[test]
+    fn truncate_multibyte_chars() {
+        // "café" is 5 bytes (é = 2 bytes), truncating at byte 4 would split é
+        let result = truncate("café résumé", 7);
+        assert!(result.ends_with("..."));
+        // Must not panic — the key property
     }
 }

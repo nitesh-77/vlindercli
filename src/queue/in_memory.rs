@@ -55,6 +55,7 @@ impl MessageQueue for InMemoryQueue {
             agent_short_name(&msg.agent_id),
         );
 
+
         let mut typed = self.typed_queues.lock().unwrap();
         typed
             .entry(subject)
@@ -73,6 +74,7 @@ impl MessageQueue for InMemoryQueue {
             msg.operation,
             msg.sequence,
         );
+
 
         let mut typed = self.typed_queues.lock().unwrap();
         typed
@@ -93,6 +95,7 @@ impl MessageQueue for InMemoryQueue {
             msg.sequence,
         );
 
+
         let mut typed = self.typed_queues.lock().unwrap();
         typed
             .entry(subject)
@@ -109,6 +112,7 @@ impl MessageQueue for InMemoryQueue {
             msg.harness,
         );
 
+
         let mut typed = self.typed_queues.lock().unwrap();
         typed
             .entry(subject)
@@ -120,12 +124,12 @@ impl MessageQueue for InMemoryQueue {
     fn receive_invoke(&self, subject_pattern: &str) -> Result<(InvokeMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
         let mut typed = self.typed_queues.lock().unwrap();
 
-        // Find first queue matching pattern with an Invoke message
         for (subject, queue) in typed.iter_mut() {
             if subject.contains(subject_pattern) || subject_pattern.contains("*") {
                 if let Some(ObservableMessage::Invoke(msg)) = queue.front() {
                     let msg = msg.clone();
                     queue.pop_front();
+
                     return Ok((msg, Box::new(|| Ok(()))));
                 }
             }
@@ -137,13 +141,10 @@ impl MessageQueue for InMemoryQueue {
     fn receive_request(&self, service: &str, backend: &str, operation: &str) -> Result<(RequestMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
         let mut typed = self.typed_queues.lock().unwrap();
 
-        // Build pattern to match: vlinder.{submission}.req.{agent}.{service}.{backend}.{operation}.{seq}
-        // We match on service, backend, and operation (skip submission, agent, and seq)
         let pattern = format!(".{}.{}.{}.", service, backend, operation);
-        let bare_pattern = format!(".{}.{}.", service, backend); // For operations without action
+        let bare_pattern = format!(".{}.{}.", service, backend);
 
         for (subject, queue) in typed.iter_mut() {
-            // Match either "service.backend.operation" or "service.backend." for bare services
             let matches = if operation.is_empty() {
                 subject.contains(&bare_pattern) && subject.contains(".req.")
             } else {
@@ -154,6 +155,7 @@ impl MessageQueue for InMemoryQueue {
                 if let Some(ObservableMessage::Request(msg)) = queue.front() {
                     let msg = msg.clone();
                     queue.pop_front();
+
                     return Ok((msg, Box::new(|| Ok(()))));
                 }
             }
@@ -165,12 +167,12 @@ impl MessageQueue for InMemoryQueue {
     fn receive_response(&self, subject_pattern: &str) -> Result<(ResponseMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
         let mut typed = self.typed_queues.lock().unwrap();
 
-        // Find first queue matching pattern with a Response message
         for (subject, queue) in typed.iter_mut() {
             if subject.contains(subject_pattern) || subject_pattern.contains("*") {
                 if let Some(ObservableMessage::Response(msg)) = queue.front() {
                     let msg = msg.clone();
                     queue.pop_front();
+
                     return Ok((msg, Box::new(|| Ok(()))));
                 }
             }
@@ -182,12 +184,12 @@ impl MessageQueue for InMemoryQueue {
     fn receive_complete(&self, harness_pattern: &str) -> Result<(CompleteMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
         let mut typed = self.typed_queues.lock().unwrap();
 
-        // Match subjects containing "complete" and the harness pattern
         for (subject, queue) in typed.iter_mut() {
             if subject.contains("complete") && subject.contains(harness_pattern) {
                 if let Some(ObservableMessage::Complete(msg)) = queue.front() {
                     let msg = msg.clone();
                     queue.pop_front();
+
                     return Ok((msg, Box::new(|| Ok(()))));
                 }
             }

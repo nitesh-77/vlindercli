@@ -14,36 +14,65 @@ use crate::queue::MessageQueue;
 
 /// Aggregates service workers for the runtime.
 ///
-/// Each worker handles one service type (object storage, vector storage,
-/// inference, embedding). Storage workers lazy-open based on agent's
-/// manifest URI. Supports heterogeneous deployments.
+/// In local mode, creates workers for all known backends so any agent
+/// manifest (sqlite, memory, ollama, etc.) is handled in-process.
+/// In distributed mode, individual workers are started separately.
 pub struct Provider {
-    object: ObjectServiceWorker,
-    vector: VectorServiceWorker,
-    inference: InferenceServiceWorker,
-    embedding: EmbeddingServiceWorker,
+    workers: Vec<Box<dyn TickWorker>>,
+}
+
+/// Trait for tick-able workers so Provider can hold them in a Vec.
+trait TickWorker {
+    fn tick(&self) -> bool;
+}
+
+impl TickWorker for ObjectServiceWorker {
+    fn tick(&self) -> bool { self.tick() }
+}
+
+impl TickWorker for VectorServiceWorker {
+    fn tick(&self) -> bool { self.tick() }
+}
+
+impl TickWorker for InferenceServiceWorker {
+    fn tick(&self) -> bool { self.tick() }
+}
+
+impl TickWorker for EmbeddingServiceWorker {
+    fn tick(&self) -> bool { self.tick() }
 }
 
 impl Provider {
-    /// Create a new Provider with all service workers for local mode.
+    /// Create a new Provider with workers for all backends.
     ///
-    /// Uses "memory" backend for storage and model workers.
-    /// For distributed mode with specific backends, use worker.rs instead.
+    /// Local mode needs to handle any agent manifest, so we register
+    /// workers for every backend: sqlite, memory, ollama, etc.
     pub fn new(queue: Arc<dyn MessageQueue + Send + Sync>, registry: Arc<dyn Registry>) -> Self {
-        Self {
-            object: ObjectServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry), "memory"),
-            vector: VectorServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry), "memory"),
-            inference: InferenceServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry), "memory"),
-            embedding: EmbeddingServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry), "memory"),
-        }
+        let workers: Vec<Box<dyn TickWorker>> = vec![
+            // Object storage: sqlite + memory
+            Box::new(ObjectServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry), "sqlite")),
+            Box::new(ObjectServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry), "memory")),
+            // Vector storage: sqlite-vec + memory
+            Box::new(VectorServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry), "sqlite-vec")),
+            Box::new(VectorServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry), "memory")),
+            // Inference: ollama + memory (test)
+            Box::new(InferenceServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry), "ollama")),
+            Box::new(InferenceServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry), "memory")),
+            // Embedding: ollama + memory (test)
+            Box::new(EmbeddingServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry), "ollama")),
+            Box::new(EmbeddingServiceWorker::new(Arc::clone(&queue), registry, "memory")),
+        ];
+
+        Self { workers }
     }
 
     /// Process one service message if available. Returns true if processed.
     pub fn tick(&self) -> bool {
-        if self.object.tick() { return true; }
-        if self.vector.tick() { return true; }
-        if self.inference.tick() { return true; }
-        if self.embedding.tick() { return true; }
+        for worker in &self.workers {
+            if worker.tick() {
+                return true;
+            }
+        }
         false
     }
 }

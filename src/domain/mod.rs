@@ -12,6 +12,7 @@ mod agent_manifest;
 mod catalog;
 mod daemon;
 mod embedding;
+mod supervisor;
 mod fleet;
 mod fleet_manifest;
 mod harness;
@@ -106,5 +107,6 @@ pub use harness::{Harness, CliHarness};
 // ============================================================================
 
 pub use daemon::Daemon;
+pub use supervisor::Supervisor;
 pub use registry::{InMemoryRegistry, Job, JobId, JobStatus, RegistrationError, Registry};
 pub use registry_repository::{RegistryRepository, RepositoryError, StoredModel};
