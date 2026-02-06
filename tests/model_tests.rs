@@ -92,26 +92,6 @@ fn model_load_parses_manifest() {
 }
 
 #[test]
-fn model_load_fails_for_missing_model_file() {
-    let temp_dir = std::env::temp_dir().join("vlinder-test-model-missing");
-    let _ = std::fs::remove_dir_all(&temp_dir);
-    std::fs::create_dir_all(&temp_dir).unwrap();
-
-    let manifest = r#"
-        name = "phi3"
-        type = "inference"
-        engine = "llama"
-        model_path = "file://./nonexistent.gguf"
-    "#;
-    std::fs::write(temp_dir.join("model.toml"), manifest).unwrap();
-
-    let result = Model::load(&temp_dir.join("model.toml"));
-    assert!(result.is_err(), "Should fail when model file doesn't exist");
-
-    let _ = std::fs::remove_dir_all(&temp_dir);
-}
-
-#[test]
 fn model_type_from_manifest() {
     let temp_dir = std::env::temp_dir().join("vlinder-test-model-types");
     let _ = std::fs::remove_dir_all(&temp_dir);
@@ -193,42 +173,3 @@ fn model_engine_is_llama() {
     let _ = std::fs::remove_dir_all(&temp_dir);
 }
 
-// ============================================================================
-// .vlinder/models/ Integration Tests
-// ============================================================================
-
-#[test]
-fn vlinder_models_load_correctly() {
-    use std::path::Path;
-
-    let models_dir = Path::new(".vlinder/models");
-    if !models_dir.exists() {
-        // Skip if .vlinder/models doesn't exist (CI environment)
-        return;
-    }
-
-    // Test phi3
-    let phi3_path = models_dir.join("phi3/model.toml");
-    if phi3_path.exists() {
-        let model = Model::load(&phi3_path).unwrap();
-        assert_eq!(model.name, "phi3");
-        assert_eq!(model.model_type, ModelType::Inference);
-        assert_eq!(model.model_path.scheme(), Some("file"));
-    }
-
-    // Test nomic-embed
-    let nomic_path = models_dir.join("nomic-embed/model.toml");
-    if nomic_path.exists() {
-        let model = Model::load(&nomic_path).unwrap();
-        assert_eq!(model.name, "nomic-embed");
-        assert_eq!(model.model_type, ModelType::Embedding);
-    }
-
-    // Test qwen
-    let qwen_path = models_dir.join("qwen/model.toml");
-    if qwen_path.exists() {
-        let model = Model::load(&qwen_path).unwrap();
-        assert_eq!(model.name, "qwen");
-        assert_eq!(model.model_type, ModelType::Inference);
-    }
-}

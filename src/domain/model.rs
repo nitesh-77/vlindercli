@@ -2,8 +2,6 @@
 
 use std::path::Path;
 
-use sha2::{Sha256, Digest};
-
 use super::model_manifest::{ModelManifest, ModelTypeConfig, ModelEngineConfig, ParseError};
 use super::resource_id::ResourceId;
 
@@ -19,8 +17,7 @@ pub struct Model {
     /// Path to the model file (e.g., GGUF).
     pub model_path: ResourceId,
     /// Content digest for reproducibility (e.g., sha256:a80c4f17...).
-    /// - Ollama models: from API
-    /// - Local GGUF: sha256 of file
+    /// Ollama models get this from the API. Empty for local models.
     pub digest: String,
 }
 
@@ -68,43 +65,10 @@ impl Model {
         }
     }
 
-    /// Load model from a manifest file path, calculating digest from model file.
+    /// Load model from a manifest file path.
     pub fn load(path: &Path) -> Result<Model, LoadError> {
         let manifest = ModelManifest::load(path)?;
-
-        // Extract filesystem path from file:// URI
-        let model_file_path = manifest.model_path
-            .strip_prefix("file://")
-            .ok_or_else(|| LoadError::Parse(format!(
-                "expected file:// URI, got: {}",
-                manifest.model_path
-            )))?;
-        let digest = Self::calculate_file_digest(Path::new(model_file_path))?;
-
-        Ok(Self::from_manifest(manifest, digest))
-    }
-
-    /// Calculate sha256 digest of a file.
-    fn calculate_file_digest(path: &Path) -> Result<String, LoadError> {
-        use std::io::Read;
-
-        let mut file = std::fs::File::open(path)
-            .map_err(|e| LoadError::Io(e))?;
-
-        // Use a simple hash - read in chunks for large files
-        let mut hasher = Sha256::new();
-        let mut buffer = [0u8; 8192];
-        loop {
-            let bytes_read = file.read(&mut buffer)
-                .map_err(|e| LoadError::Io(e))?;
-            if bytes_read == 0 {
-                break;
-            }
-            hasher.update(&buffer[..bytes_read]);
-        }
-
-        let hash = hasher.finalize();
-        Ok(format!("sha256:{}", hex::encode(hash)))
+        Ok(Self::from_manifest(manifest, String::new()))
     }
 }
 
