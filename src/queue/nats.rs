@@ -427,12 +427,15 @@ fn filter_to_consumer_name(filter: &str) -> String {
 }
 
 /// Extract a short name from a ResourceId for NATS subjects.
+///
+/// Colons are replaced with underscores (invalid in NATS subject tokens).
 fn agent_short_name(agent_id: &ResourceId) -> String {
     if let Some(path) = agent_id.path() {
         if let Some(filename) = path.rsplit('/').next() {
             let name = filename.strip_suffix(".wasm").unwrap_or(filename);
+            let name = name.replace(':', "_");
             if !name.is_empty() {
-                return name.to_string();
+                return name;
             }
         }
     }

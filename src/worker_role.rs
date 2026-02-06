@@ -19,6 +19,8 @@ pub enum WorkerRole {
     Registry,
     /// WASM agent runtime - executes WASM agents
     AgentWasm,
+    /// Container agent runtime - executes OCI container agents via Podman
+    AgentContainer,
     /// Ollama inference service
     InferenceOllama,
     /// Ollama embedding service
@@ -48,6 +50,7 @@ impl WorkerRole {
         match self {
             WorkerRole::Registry => "registry",
             WorkerRole::AgentWasm => "agent-wasm",
+            WorkerRole::AgentContainer => "agent-container",
             WorkerRole::InferenceOllama => "inference-ollama",
             WorkerRole::EmbeddingOllama => "embedding-ollama",
             WorkerRole::StorageObjectSqlite => "storage-object-sqlite",
@@ -62,6 +65,7 @@ impl WorkerRole {
         match self {
             WorkerRole::Registry => "Registry service",
             WorkerRole::AgentWasm => "WASM agent runtime",
+            WorkerRole::AgentContainer => "Container agent runtime",
             WorkerRole::InferenceOllama => "Ollama inference service",
             WorkerRole::EmbeddingOllama => "Ollama embedding service",
             WorkerRole::StorageObjectSqlite => "SQLite object storage",
@@ -85,6 +89,7 @@ impl FromStr for WorkerRole {
         match s {
             "registry" => Ok(WorkerRole::Registry),
             "agent-wasm" => Ok(WorkerRole::AgentWasm),
+            "agent-container" => Ok(WorkerRole::AgentContainer),
             "inference-ollama" => Ok(WorkerRole::InferenceOllama),
             "embedding-ollama" => Ok(WorkerRole::EmbeddingOllama),
             "storage-object-sqlite" => Ok(WorkerRole::StorageObjectSqlite),

@@ -94,9 +94,10 @@ impl Registry for GrpcRegistryClient {
     }
 
     fn select_runtime(&self, agent: &Agent) -> Option<RuntimeType> {
-        // For now, always return Wasm if the agent has a file:// URI ending in .wasm
         if agent.id.scheme() == Some("file") && agent.id.to_string().ends_with(".wasm") {
             Some(RuntimeType::Wasm)
+        } else if agent.id.scheme() == Some("container") {
+            Some(RuntimeType::Container)
         } else {
             None
         }

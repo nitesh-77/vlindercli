@@ -17,7 +17,7 @@ use crate::domain::{EngineType, InMemoryRegistry, ObjectStorageType, Provider, R
 use crate::domain::harness::CliHarness;
 use crate::domain::registry::Registry;
 use crate::queue;
-use crate::runtime::WasmRuntime;
+use crate::runtime::{ContainerRuntime, WasmRuntime};
 use crate::storage::SqliteRegistryRepository;
 
 /// The daemon - owns all system components for local (single-process) mode.
@@ -27,6 +27,7 @@ pub struct Daemon {
     /// The API surface - use this for deploy/invoke/poll.
     pub harness: CliHarness,
     runtime: WasmRuntime,
+    container_runtime: ContainerRuntime,
     provider: Provider,
 }
 
@@ -47,6 +48,7 @@ impl Daemon {
 
         // Register available runtimes
         registry.register_runtime(RuntimeType::Wasm);
+        registry.register_runtime(RuntimeType::Container);
 
         // Register available object storage implementations
         registry.register_object_storage(ObjectStorageType::Sqlite);
@@ -74,6 +76,7 @@ impl Daemon {
         Self {
             harness: CliHarness::new(queue.clone(), Arc::clone(&registry)),
             runtime: WasmRuntime::new(&registry_id, queue.clone(), Arc::clone(&registry)),
+            container_runtime: ContainerRuntime::new(&registry_id, queue.clone(), Arc::clone(&registry)),
             registry: Arc::clone(&registry),
             provider: Provider::new(queue, registry),
         }
@@ -82,6 +85,7 @@ impl Daemon {
     /// Tick all components.
     pub fn tick(&mut self) {
         self.runtime.tick();
+        self.container_runtime.tick();
         self.provider.tick();
         self.harness.tick();
     }

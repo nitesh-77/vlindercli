@@ -209,6 +209,11 @@ impl InMemoryRegistry {
                 }
             }
         }
+        if agent.id.scheme() == Some("container")
+            && state.available_runtimes.contains(&RuntimeType::Container)
+        {
+            return Some(RuntimeType::Container);
+        }
         None
     }
 }

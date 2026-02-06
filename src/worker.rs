@@ -41,6 +41,7 @@ pub fn run_worker_loop(role: WorkerRole, shutdown: Arc<AtomicBool>) {
     match role {
         WorkerRole::Registry => run_registry_worker(&config, &shutdown),
         WorkerRole::AgentWasm => run_agent_wasm_worker(&config, &shutdown),
+        WorkerRole::AgentContainer => run_agent_container_worker(&config, &shutdown),
         WorkerRole::InferenceOllama => run_inference_ollama_worker(&config, &shutdown),
         WorkerRole::EmbeddingOllama => run_embedding_ollama_worker(&config, &shutdown),
         WorkerRole::StorageObjectSqlite => run_storage_object_sqlite_worker(&config, &shutdown),
@@ -65,8 +66,9 @@ fn run_registry_worker(config: &Config, shutdown: &AtomicBool) {
 
     let registry = InMemoryRegistry::new();
 
-    // Register available capabilities (same as Daemon::new_local)
+    // Register available capabilities (same as Daemon::new)
     registry.register_runtime(RuntimeType::Wasm);
+    registry.register_runtime(RuntimeType::Container);
     registry.register_object_storage(ObjectStorageType::Sqlite);
     registry.register_object_storage(ObjectStorageType::InMemory);
     registry.register_vector_storage(VectorStorageType::SqliteVec);
@@ -148,6 +150,32 @@ fn run_agent_wasm_worker(config: &Config, shutdown: &AtomicBool) {
     let mut runtime = WasmRuntime::new(&registry_id, queue, Arc::clone(&registry));
 
     tracing::info!(registry = %registry_addr, "WASM agent worker ready");
+
+    while !shutdown.load(Ordering::Relaxed) {
+        runtime.tick();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+fn run_agent_container_worker(config: &Config, shutdown: &AtomicBool) {
+    use crate::domain::ResourceId;
+    use crate::queue;
+    use crate::runtime::ContainerRuntime;
+    use crate::domain::Runtime;
+    use crate::registry_service::GrpcRegistryClient;
+
+    let queue = queue::from_config().expect("Failed to create queue");
+
+    let registry_addr = grpc_registry_addr(config);
+    let registry: Arc<dyn Registry> = Arc::new(
+        GrpcRegistryClient::connect(&registry_addr)
+            .expect("Failed to connect to registry")
+    );
+
+    let registry_id = ResourceId::new(&config.distributed.registry_addr);
+    let mut runtime = ContainerRuntime::new(&registry_id, queue, Arc::clone(&registry));
+
+    tracing::info!(registry = %registry_addr, "Container agent worker ready");
 
     while !shutdown.load(Ordering::Relaxed) {
         runtime.tick();

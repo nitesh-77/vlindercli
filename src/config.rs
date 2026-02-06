@@ -127,6 +127,8 @@ pub struct WorkerCounts {
 pub struct AgentWorkerCounts {
     /// WASM runtime workers
     pub wasm: u32,
+    /// Container runtime workers (Podman)
+    pub container: u32,
 }
 
 /// Inference worker counts by engine.
@@ -240,7 +242,7 @@ impl Default for WorkerCounts {
 
 impl Default for AgentWorkerCounts {
     fn default() -> Self {
-        Self { wasm: 1 }
+        Self { wasm: 1, container: 0 }
     }
 }
 
@@ -342,6 +344,9 @@ impl Config {
         }
         if let Ok(v) = std::env::var("VLINDER_WORKERS_AGENT_WASM") {
             self.distributed.workers.agent.wasm = v.parse().unwrap_or(1);
+        }
+        if let Ok(v) = std::env::var("VLINDER_WORKERS_AGENT_CONTAINER") {
+            self.distributed.workers.agent.container = v.parse().unwrap_or(0);
         }
         if let Ok(v) = std::env::var("VLINDER_WORKERS_INFERENCE_OLLAMA") {
             self.distributed.workers.inference.ollama = v.parse().unwrap_or(1);

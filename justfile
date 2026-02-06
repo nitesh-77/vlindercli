@@ -29,6 +29,10 @@ build-pensieve:
     cd agents/pensieve && cargo build --target wasm32-wasip1 --release
     cp agents/pensieve/target/wasm32-wasip1/release/pensieve.wasm agents/pensieve/pensieve.wasm
 
+# Build echo-container agent (OCI image via Podman)
+build-echo-container:
+    podman build -t localhost/echo-container:latest agents/echo-container/
+
 # =============================================================================
 # Main Commands
 # =============================================================================

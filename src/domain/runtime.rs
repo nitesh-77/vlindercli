@@ -15,7 +15,8 @@ use super::ResourceId;
 pub enum RuntimeType {
     /// WebAssembly runtime (Extism/WASI)
     Wasm,
-    // Future: Lambda, Container, etc.
+    /// OCI container runtime (Podman)
+    Container,
 }
 
 impl RuntimeType {
@@ -23,6 +24,7 @@ impl RuntimeType {
     pub fn as_str(&self) -> &'static str {
         match self {
             RuntimeType::Wasm => "wasm",
+            RuntimeType::Container => "container",
         }
     }
 }

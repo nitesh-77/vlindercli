@@ -207,13 +207,16 @@ impl MessageQueue for InMemoryQueue {
 /// Extract a short name from a ResourceId for queue routing.
 ///
 /// - `file:///path/to/echo-agent.wasm` → "echo-agent"
+/// - `container://localhost/echo-agent:latest` → "echo-agent_latest"
 /// - `memory://test-agent` → "test-agent"
 fn agent_short_name(agent_id: &ResourceId) -> String {
     if let Some(path) = agent_id.path() {
         if let Some(filename) = path.rsplit('/').next() {
             let name = filename.strip_suffix(".wasm").unwrap_or(filename);
+            // Replace colons with underscores (colons invalid in NATS subjects)
+            let name = name.replace(':', "_");
             if !name.is_empty() {
-                return name.to_string();
+                return name;
             }
         }
     }
