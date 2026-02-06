@@ -1,36 +1,45 @@
-//! Integration tests for ContainerRuntime (long-running model).
+//! Integration tests for ContainerRuntime HTTP bridge.
 //!
-//! Requires: podman installed + `just build-echo-container`
+//! Requires: podman installed + `just build-kv-bridge-agent`
 
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
-use vlindercli::domain::{Agent, InMemoryRegistry, Registry, ResourceId, Runtime, RuntimeType};
+use vlindercli::domain::{
+    Agent, InMemoryRegistry, ObjectStorageType, Provider, Registry,
+    ResourceId, Runtime, RuntimeType,
+};
 use vlindercli::queue::{InMemoryQueue, InvokeMessage, MessageQueue, HarnessType, SubmissionId};
 use vlindercli::runtime::ContainerRuntime;
 
 #[test]
-#[ignore] // Requires: podman + just build-echo-container
-fn container_runtime_executes_echo_agent() {
+#[ignore] // Requires: podman + just build-kv-bridge-agent
+fn container_bridge_kv_round_trip() {
     let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
 
     let registry = InMemoryRegistry::new();
     registry.register_runtime(RuntimeType::Container);
+    registry.register_object_storage(ObjectStorageType::InMemory);
 
     let agent = Agent::from_toml(r#"
-        name = "echo-container"
-        description = "Echo container agent"
-        id = "container://localhost/echo-container:latest"
+        name = "kv-bridge-agent"
+        description = "KV bridge test agent"
+        id = "container://localhost/kv-bridge-agent:latest"
+        object_storage = "memory://"
         [requirements]
-        services = []
+        services = ["kv"]
     "#).unwrap();
     let agent_id = agent.id.clone();
     registry.register_agent(agent).unwrap();
     let registry: Arc<dyn Registry> = Arc::new(registry);
 
+    // Provider handles KV service requests from the bridge
+    let provider = Provider::new(Arc::clone(&queue), Arc::clone(&registry));
+
     let mut runtime = ContainerRuntime::new(
         &ResourceId::new("http://test:9000"),
         Arc::clone(&queue),
-        registry,
+        Arc::clone(&registry),
     );
 
     // Send InvokeMessage
@@ -39,35 +48,39 @@ fn container_runtime_executes_echo_agent() {
         HarnessType::Cli,
         RuntimeType::Container,
         agent_id,
-        b"hello from container".to_vec(),
+        b"bridge test data".to_vec(),
     );
     let invoke_id = invoke.id.clone();
     queue.send_invoke(invoke).unwrap();
 
-    // First tick starts container (lazy) and dispatches work
+    // First tick starts container and dispatches work
     assert!(runtime.tick());
 
-    // Keep ticking until complete
-    let start = std::time::Instant::now();
+    // Tick both runtime and provider until complete
+    let start = Instant::now();
     loop {
+        // Provider processes KV requests from the bridge
+        provider.tick();
+
+        // Runtime checks if container finished
         if runtime.tick() {
             break;
         }
-        if start.elapsed() > std::time::Duration::from_secs(60) {
+
+        if start.elapsed() > Duration::from_secs(60) {
             panic!("container did not complete within 60 seconds");
         }
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        std::thread::sleep(Duration::from_millis(10));
     }
 
-    // Verify CompleteMessage
+    // Verify CompleteMessage — the agent stores input in KV, reads it back
     let (complete, ack) = queue.receive_complete("cli").unwrap();
     assert_eq!(complete.correlation_id, invoke_id);
     assert_eq!(
         String::from_utf8(complete.payload).unwrap(),
-        "hello from container"
+        "bridge test data"
     );
     ack().unwrap();
 
-    // Explicit shutdown (stops containers)
     runtime.shutdown();
 }

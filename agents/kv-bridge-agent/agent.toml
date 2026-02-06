@@ -1,0 +1,7 @@
+name = "kv-bridge-agent"
+description = "Test agent that exercises HTTP bridge KV operations"
+id = "container://localhost/kv-bridge-agent:latest"
+object_storage = "memory://"
+
+[requirements]
+services = ["kv"]

@@ -426,24 +426,7 @@ fn filter_to_consumer_name(filter: &str) -> String {
         .replace('>', "G")
 }
 
-/// Extract a short name from a ResourceId for NATS subjects.
-///
-/// Colons are replaced with underscores (invalid in NATS subject tokens).
-fn agent_short_name(agent_id: &ResourceId) -> String {
-    if let Some(path) = agent_id.path() {
-        if let Some(filename) = path.rsplit('/').next() {
-            let name = filename.strip_suffix(".wasm").unwrap_or(filename);
-            let name = name.replace(':', "_");
-            if !name.is_empty() {
-                return name;
-            }
-        }
-    }
-    if let Some(authority) = agent_id.authority() {
-        return authority.to_string();
-    }
-    agent_id.as_str().to_string()
-}
+use super::agent_routing_key as agent_short_name;
 
 /// Extract a header value from NATS headers.
 fn get_header(headers: &async_nats::HeaderMap, key: &str) -> Result<String, QueueError> {
@@ -468,6 +451,7 @@ fn parse_harness_type(s: &str) -> Result<HarnessType, QueueError> {
 fn parse_runtime_type(s: &str) -> Result<RuntimeType, QueueError> {
     match s {
         "wasm" => Ok(RuntimeType::Wasm),
+        "container" => Ok(RuntimeType::Container),
         _ => Err(QueueError::ReceiveFailed(format!("unknown runtime type: {}", s))),
     }
 }

@@ -9,7 +9,7 @@
 
 use extism::{CurrentPlugin, Function, Manifest, Plugin, UserData, Val, Wasm};
 
-use super::wasm::SendFunctionData;
+use super::send::SendFunctionData;
 
 /// Load and execute a WASM plugin.
 ///

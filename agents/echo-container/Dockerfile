@@ -1,4 +1,4 @@
-FROM alpine:3.21
-COPY echo.sh /echo.sh
-RUN chmod +x /echo.sh
-ENTRYPOINT ["/echo.sh"]
+FROM python:3.12-alpine
+COPY echo_server.py /echo_server.py
+EXPOSE 8080
+ENTRYPOINT ["python3", "/echo_server.py"]

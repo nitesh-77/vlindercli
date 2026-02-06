@@ -1,0 +1,3 @@
+Summarize this article in 3-5 bullet points:
+
+{text}

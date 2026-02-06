@@ -5,6 +5,8 @@
 //! - ContainerRuntime: queue-based OCI container agent execution
 
 mod container;
+mod http_bridge;
+pub(crate) mod send;
 mod wasm;
 mod wasm_plugin;
 

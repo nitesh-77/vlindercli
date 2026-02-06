@@ -4,7 +4,6 @@ use super::{
     CompleteMessage, InvokeMessage, MessageQueue, ObservableMessage,
     QueueError, RequestMessage, ResponseMessage,
 };
-use crate::domain::ResourceId;
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
@@ -204,32 +203,12 @@ impl MessageQueue for InMemoryQueue {
 // Internal helpers
 // ============================================================================
 
-/// Extract a short name from a ResourceId for queue routing.
-///
-/// - `file:///path/to/echo-agent.wasm` → "echo-agent"
-/// - `container://localhost/echo-agent:latest` → "echo-agent_latest"
-/// - `memory://test-agent` → "test-agent"
-fn agent_short_name(agent_id: &ResourceId) -> String {
-    if let Some(path) = agent_id.path() {
-        if let Some(filename) = path.rsplit('/').next() {
-            let name = filename.strip_suffix(".wasm").unwrap_or(filename);
-            // Replace colons with underscores (colons invalid in NATS subjects)
-            let name = name.replace(':', "_");
-            if !name.is_empty() {
-                return name;
-            }
-        }
-    }
-    if let Some(authority) = agent_id.authority() {
-        return authority.to_string();
-    }
-    agent_id.as_str().to_string()
-}
+use super::agent_routing_key as agent_short_name;
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::RuntimeType;
+    use crate::domain::{ResourceId, RuntimeType};
     use crate::queue::{ExpectsReply, HarnessType, Sequence, SubmissionId};
 
     fn test_agent_id() -> ResourceId {

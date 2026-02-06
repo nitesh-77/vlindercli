@@ -33,6 +33,14 @@ build-pensieve:
 build-echo-container:
     podman build -t localhost/echo-container:latest agents/echo-container/
 
+# Build kv-bridge-agent (OCI image via Podman, exercises HTTP bridge)
+build-kv-bridge-agent:
+    podman build -t localhost/kv-bridge-agent:latest agents/kv-bridge-agent/
+
+# Build pensieve-container (OCI image via Podman, full pensieve in Rust)
+build-pensieve-container:
+    podman build -t localhost/pensieve-container:latest agents/pensieve-container/
+
 # =============================================================================
 # Main Commands
 # =============================================================================

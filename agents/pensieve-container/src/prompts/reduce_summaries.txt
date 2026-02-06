@@ -1,0 +1,20 @@
+You are an expert analyst. Based on these key points from an article, create a structured briefing.
+
+KEY POINTS:
+{points}
+
+Generate a briefing with these sections:
+
+## Core Argument
+State the article's central thesis in 2-3 sentences.
+
+## Key Insights
+List 3-5 most important takeaways as bullet points.
+
+## Practical Applications
+How can a reader apply these ideas? Give 2-3 actionable suggestions.
+
+## Questions Raised
+What 2-3 thought-provoking questions does this article raise for further exploration?
+
+Be concise but insightful.

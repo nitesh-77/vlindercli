@@ -7,16 +7,17 @@
 //! - Sends responses to reply queues
 //!
 //! Agent wiring (validation, routing, request lifecycle) lives in
-//! `SendFunctionData`. Extism-specific plumbing lives in `wasm_plugin`.
+//! `SendFunctionData` (in `send.rs`). Extism-specific plumbing lives in `wasm_plugin`.
 
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
-use crate::domain::{ObjectStorageType, Registry, ResourceId, Runtime, RuntimeType, SdkMessage, VectorStorageType};
+use crate::domain::{ObjectStorageType, Registry, ResourceId, Runtime, RuntimeType, VectorStorageType};
 use crate::queue::{
-    ExpectsReply, InvokeMessage, MessageQueue, RequestMessage, SequenceCounter,
+    ExpectsReply, InvokeMessage, MessageQueue, SequenceCounter,
 };
 
+use super::send::SendFunctionData;
 use super::wasm_plugin;
 
 /// Tracks a WASM execution running in a background thread.
@@ -86,8 +87,9 @@ impl Runtime for WasmRuntime {
 
         // Check for work using typed receive (ADR 044)
         for agent in wasm_agents {
-            // Try to receive typed InvokeMessage
-            if let Ok((invoke, ack)) = self.queue.receive_invoke(&agent.name) {
+            // Use canonical routing key (must match send_invoke subject)
+            let routing_key = crate::queue::agent_routing_key(&agent.id);
+            if let Ok((invoke, ack)) = self.queue.receive_invoke(&routing_key) {
                 let wasm_path = agent.id.path().unwrap_or(agent.id.as_str()).to_string();
                 let queue = Arc::clone(&self.queue);
                 let payload = invoke.payload.clone();
@@ -126,54 +128,6 @@ impl Runtime for WasmRuntime {
         }
 
         false // No work to do
-    }
-}
-
-/// Data passed to the send host function
-pub(super) struct SendFunctionData {
-    pub(super) queue: Arc<dyn MessageQueue + Send + Sync>,
-    /// The invoke that triggered this execution - carries submission + agent_id
-    pub(super) invoke: InvokeMessage,
-    /// Resolved backends from agent config (None if agent didn't declare storage)
-    pub(super) kv_backend: Option<ObjectStorageType>,
-    pub(super) vec_backend: Option<VectorStorageType>,
-    /// Sequence counter - incremented per service call
-    pub(super) sequence: SequenceCounter,
-}
-
-impl SendFunctionData {
-    /// Handle a send call from the agent.
-    ///
-    /// Validates the payload, resolves the next hop, builds a typed request,
-    /// sends it, and waits for the response. Returns the response payload.
-    pub(super) fn handle_send(&self, payload: Vec<u8>) -> Result<Vec<u8>, String> {
-        let msg: SdkMessage = serde_json::from_slice(&payload)
-            .map_err(|e| format!("invalid SDK message: {}", e))?;
-
-        let hop = msg.hop(self.kv_backend, self.vec_backend)?;
-        let seq = self.sequence.next();
-
-        let request = RequestMessage::new(
-            self.invoke.submission.clone(),
-            self.invoke.agent_id.clone(),
-            hop.service,
-            hop.backend,
-            hop.operation,
-            seq,
-            payload,
-        );
-
-        self.queue.send_request(request.clone())
-            .map_err(|e| format!("send error: {}", e))?;
-
-        loop {
-            if let Ok((response, ack)) = self.queue.receive_response(&request) {
-                let payload = response.payload.clone();
-                let _ = ack();
-                return Ok(payload);
-            }
-            std::thread::sleep(std::time::Duration::from_millis(1));
-        }
     }
 }
 

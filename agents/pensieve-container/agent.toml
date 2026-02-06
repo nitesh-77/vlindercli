@@ -1,0 +1,26 @@
+name = "pensieve-container"
+description = """
+A memory system for web articles (container edition). Save URLs to memory,
+search across your saved content with semantic search, and ask questions to
+get synthesized answers from your knowledge base.
+"""
+id = "container://localhost/pensieve-container:latest"
+
+# Storage backends
+object_storage = "sqlite://data/objects.db"
+vector_storage = "sqlite://data/vectors.db"
+
+[requirements]
+services = [
+    "infer",
+    "embed",
+    "get_file",
+    "put_file",
+    "list_files",
+    "store_embedding",
+    "search_by_vector",
+]
+
+[requirements.models]
+phi3 = "ollama://localhost:11434/phi3:latest"
+nomic-embed = "ollama://localhost:11434/nomic-embed-text:latest"
