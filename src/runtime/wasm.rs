@@ -10,7 +10,7 @@
 //! - send(payload) -> response (synchronous request/response)
 //!
 //! The runtime handles all routing concerns:
-//! - Extracts `op` from payload to determine target queue
+//! - Validates payload against SdkMessage schema (typed trust boundary)
 //! - Carries `agent_id` on the message envelope (not in payload)
 //! - Manages reply queue creation and response waiting
 
@@ -159,10 +159,75 @@ struct SendFunctionData {
     sequence: Arc<std::sync::Mutex<Sequence>>,
 }
 
+// ============================================================================
+// SDK Message Schema
+// ============================================================================
+
+/// All valid operations a WASM agent can request through send().
+///
+/// This is the trust boundary — untrusted WASM payloads are validated here.
+/// The `op` field determines the variant; remaining fields must match exactly.
+/// Unknown ops or missing fields are rejected at deserialization time.
+/// Fields are validated by serde but not read directly — the raw payload
+/// bytes are forwarded to service workers for their own deserialization.
+#[derive(Debug, serde::Deserialize)]
+#[serde(tag = "op", rename_all = "kebab-case")]
+#[allow(dead_code)]
+enum SdkMessage {
+    // -- Object storage --
+    KvGet { path: String },
+    KvPut { path: String, content: String },
+    KvList { path: String },
+    KvDelete { path: String },
+    // -- Vector storage --
+    VectorStore { key: String, vector: Vec<f32>, metadata: String },
+    VectorSearch { vector: Vec<f32>, limit: u32 },
+    VectorDelete { key: String },
+    // -- Inference --
+    Infer { model: String, prompt: String, #[serde(default = "default_max_tokens")] max_tokens: u32 },
+    // -- Embedding --
+    Embed { model: String, text: String },
+}
+
+fn default_max_tokens() -> u32 { 256 }
+
+impl SdkMessage {
+    /// Determine (service, backend, operation) for queue routing.
+    ///
+    /// Returns Err if the agent calls a storage op without declaring the backend.
+    fn route(
+        &self,
+        kv_backend: Option<ObjectStorageType>,
+        vec_backend: Option<VectorStorageType>,
+    ) -> Result<(&'static str, String, &'static str), String> {
+        match self {
+            SdkMessage::KvGet { .. } => kv_route("get", kv_backend),
+            SdkMessage::KvPut { .. } => kv_route("put", kv_backend),
+            SdkMessage::KvList { .. } => kv_route("list", kv_backend),
+            SdkMessage::KvDelete { .. } => kv_route("delete", kv_backend),
+            SdkMessage::VectorStore { .. } => vec_route("store", vec_backend),
+            SdkMessage::VectorSearch { .. } => vec_route("search", vec_backend),
+            SdkMessage::VectorDelete { .. } => vec_route("delete", vec_backend),
+            SdkMessage::Infer { .. } => Ok(("infer", "ollama".to_string(), "run")),
+            SdkMessage::Embed { .. } => Ok(("embed", "ollama".to_string(), "run")),
+        }
+    }
+}
+
+fn kv_route(operation: &'static str, backend: Option<ObjectStorageType>) -> Result<(&'static str, String, &'static str), String> {
+    let backend = backend.ok_or_else(|| format!("agent called kv-{} but has no object_storage configured", operation))?;
+    Ok(("kv", backend.as_str().to_string(), operation))
+}
+
+fn vec_route(operation: &'static str, backend: Option<VectorStorageType>) -> Result<(&'static str, String, &'static str), String> {
+    let backend = backend.ok_or_else(|| format!("agent called vector-{} but has no vector_storage configured", operation))?;
+    Ok(("vec", backend.as_str().to_string(), operation))
+}
+
 /// Host function: send(payload) -> response
 ///
 /// Synchronous request/response. The runtime:
-/// - Extracts `op` from payload to determine target queue
+/// - Validates payload against SdkMessage schema
 /// - Builds typed RequestMessage with submission context (ADR 044)
 /// - `agent_id` is carried on the envelope, not injected into payload
 /// - Returns the response payload directly
@@ -177,7 +242,7 @@ fn make_send_function(
 
     Function::new(
         "send",
-        [extism::PTR], // payload (JSON with op field)
+        [extism::PTR], // payload (SdkMessage JSON)
         [extism::PTR], // response payload
         UserData::new(data),
         |plugin, inputs, outputs, user_data| {
@@ -186,16 +251,11 @@ fn make_send_function(
             let data = user_data.get().unwrap();
             let data = data.lock().unwrap();
 
-            // Parse payload to extract op for routing
-            let json: serde_json::Value = serde_json::from_slice(&payload)
-                .map_err(|e| extism::Error::msg(format!("invalid JSON payload: {}", e)))?;
+            // Validate payload against SDK schema and determine route
+            let msg: SdkMessage = serde_json::from_slice(&payload)
+                .map_err(|e| extism::Error::msg(format!("invalid SDK message: {}", e)))?;
 
-            let op = json.get("op")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| extism::Error::msg("payload missing 'op' field"))?
-                .to_string();
-
-            let (service, backend, operation) = resolve_route(&op, data.kv_backend, data.vec_backend)
+            let (service, backend, operation) = msg.route(data.kv_backend, data.vec_backend)
                 .map_err(|e| extism::Error::msg(e))?;
 
             // Get next sequence number
@@ -234,39 +294,6 @@ fn make_send_function(
     )
 }
 
-/// Map an op string to (service, backend, operation) for routing.
-///
-/// Pure routing table — no I/O, no registry lookups.
-/// - `kv-*` → kv service with agent's configured object storage backend
-/// - `vector-*` → vec service with agent's configured vector storage backend
-/// - `infer`/`embed` → hardcoded to ollama (only supported backend)
-/// - anything else → agent-to-agent message
-///
-/// Returns Err if the agent calls a storage op without declaring the backend.
-fn resolve_route(
-    op: &str,
-    kv_backend: Option<ObjectStorageType>,
-    vec_backend: Option<VectorStorageType>,
-) -> Result<(String, String, String), String> {
-    match op {
-        "kv-get" | "kv-put" | "kv-list" | "kv-delete" => {
-            let backend = kv_backend
-                .ok_or_else(|| format!("agent called {} but has no object_storage configured", op))?;
-            let operation = op.strip_prefix("kv-").unwrap_or(op).to_string();
-            Ok(("kv".to_string(), backend.as_str().to_string(), operation))
-        }
-        "vector-store" | "vector-search" | "vector-delete" => {
-            let backend = vec_backend
-                .ok_or_else(|| format!("agent called {} but has no vector_storage configured", op))?;
-            let operation = op.strip_prefix("vector-").unwrap_or(op).to_string();
-            Ok(("vec".to_string(), backend.as_str().to_string(), operation))
-        }
-        "infer" => Ok(("infer".to_string(), "ollama".to_string(), "run".to_string())),
-        "embed" => Ok(("embed".to_string(), "ollama".to_string(), "run".to_string())),
-        _ => Ok(("agent".to_string(), op.to_string(), String::new())),
-    }
-}
-
 /// Host function: get_prompts() -> JSON string
 ///
 /// Returns prompt overrides from the agent's manifest.
@@ -298,49 +325,109 @@ mod tests {
         Arc::new(InMemoryRegistry::new())
     }
 
-    #[test]
-    fn resolve_route_kv_operations() {
-        let (svc, backend, op) = resolve_route("kv-get", Some(ObjectStorageType::Sqlite), None).unwrap();
-        assert_eq!((svc.as_str(), backend.as_str(), op.as_str()), ("kv", "sqlite", "get"));
-
-        let (svc, backend, op) = resolve_route("kv-put", Some(ObjectStorageType::InMemory), None).unwrap();
-        assert_eq!((svc.as_str(), backend.as_str(), op.as_str()), ("kv", "memory", "put"));
+    /// Helper: parse JSON into SdkMessage and return its route.
+    fn parse_and_route(
+        json: &str,
+        kv: Option<ObjectStorageType>,
+        vec: Option<VectorStorageType>,
+    ) -> Result<(&'static str, String, &'static str), String> {
+        let msg: SdkMessage = serde_json::from_str(json)
+            .map_err(|e| e.to_string())?;
+        msg.route(kv, vec)
     }
 
     #[test]
-    fn resolve_route_vector_operations() {
-        let (svc, backend, op) = resolve_route("vector-store", None, Some(VectorStorageType::SqliteVec)).unwrap();
-        assert_eq!((svc.as_str(), backend.as_str(), op.as_str()), ("vec", "sqlite-vec", "store"));
+    fn sdk_message_kv_operations() {
+        let (svc, backend, op) = parse_and_route(
+            r#"{"op": "kv-get", "path": "/data.txt"}"#,
+            Some(ObjectStorageType::Sqlite), None,
+        ).unwrap();
+        assert_eq!((svc, backend.as_str(), op), ("kv", "sqlite", "get"));
 
-        let (svc, backend, op) = resolve_route("vector-search", None, Some(VectorStorageType::InMemory)).unwrap();
-        assert_eq!((svc.as_str(), backend.as_str(), op.as_str()), ("vec", "memory", "search"));
+        let (svc, backend, op) = parse_and_route(
+            r#"{"op": "kv-put", "path": "/data.txt", "content": "aGVsbG8="}"#,
+            Some(ObjectStorageType::InMemory), None,
+        ).unwrap();
+        assert_eq!((svc, backend.as_str(), op), ("kv", "memory", "put"));
     }
 
     #[test]
-    fn resolve_route_kv_without_backend_fails() {
-        let err = resolve_route("kv-get", None, Some(VectorStorageType::InMemory)).unwrap_err();
+    fn sdk_message_vector_operations() {
+        let (svc, backend, op) = parse_and_route(
+            r#"{"op": "vector-store", "key": "doc1", "vector": [0.1], "metadata": "test"}"#,
+            None, Some(VectorStorageType::SqliteVec),
+        ).unwrap();
+        assert_eq!((svc, backend.as_str(), op), ("vec", "sqlite-vec", "store"));
+
+        let (svc, backend, op) = parse_and_route(
+            r#"{"op": "vector-search", "vector": [0.1], "limit": 5}"#,
+            None, Some(VectorStorageType::InMemory),
+        ).unwrap();
+        assert_eq!((svc, backend.as_str(), op), ("vec", "memory", "search"));
+    }
+
+    #[test]
+    fn sdk_message_kv_without_backend_fails() {
+        let err = parse_and_route(
+            r#"{"op": "kv-get", "path": "/data.txt"}"#,
+            None, None,
+        ).unwrap_err();
         assert!(err.contains("no object_storage configured"));
     }
 
     #[test]
-    fn resolve_route_vector_without_backend_fails() {
-        let err = resolve_route("vector-store", Some(ObjectStorageType::Sqlite), None).unwrap_err();
+    fn sdk_message_vector_without_backend_fails() {
+        let err = parse_and_route(
+            r#"{"op": "vector-store", "key": "k", "vector": [0.1], "metadata": "m"}"#,
+            None, None,
+        ).unwrap_err();
         assert!(err.contains("no vector_storage configured"));
     }
 
     #[test]
-    fn resolve_route_inference_ignores_backends() {
-        let (svc, backend, op) = resolve_route("infer", None, None).unwrap();
-        assert_eq!((svc.as_str(), backend.as_str(), op.as_str()), ("infer", "ollama", "run"));
+    fn sdk_message_inference() {
+        let (svc, backend, op) = parse_and_route(
+            r#"{"op": "infer", "model": "phi3", "prompt": "hello"}"#,
+            None, None,
+        ).unwrap();
+        assert_eq!((svc, backend.as_str(), op), ("infer", "ollama", "run"));
 
-        let (svc, backend, op) = resolve_route("embed", None, None).unwrap();
-        assert_eq!((svc.as_str(), backend.as_str(), op.as_str()), ("embed", "ollama", "run"));
+        let (svc, backend, op) = parse_and_route(
+            r#"{"op": "embed", "model": "nomic", "text": "hello"}"#,
+            None, None,
+        ).unwrap();
+        assert_eq!((svc, backend.as_str(), op), ("embed", "ollama", "run"));
     }
 
     #[test]
-    fn resolve_route_unknown_op_is_agent_message() {
-        let (svc, backend, op) = resolve_route("summarize", None, None).unwrap();
-        assert_eq!((svc.as_str(), backend.as_str(), op.as_str()), ("agent", "summarize", ""));
+    fn sdk_message_unknown_op_fails() {
+        let err = parse_and_route(
+            r#"{"op": "summarize"}"#,
+            None, None,
+        ).unwrap_err();
+        // serde rejects unknown variants
+        assert!(err.contains("unknown variant"));
+    }
+
+    #[test]
+    fn sdk_message_missing_fields_fails() {
+        // kv-put without content
+        let err = parse_and_route(
+            r#"{"op": "kv-put", "path": "/data.txt"}"#,
+            Some(ObjectStorageType::Sqlite), None,
+        ).unwrap_err();
+        assert!(err.contains("content"));
+    }
+
+    #[test]
+    fn sdk_message_infer_defaults_max_tokens() {
+        let msg: SdkMessage = serde_json::from_str(
+            r#"{"op": "infer", "model": "phi3", "prompt": "hello"}"#,
+        ).unwrap();
+        match msg {
+            SdkMessage::Infer { max_tokens, .. } => assert_eq!(max_tokens, 256),
+            _ => panic!("expected Infer variant"),
+        }
     }
 
     #[test]
