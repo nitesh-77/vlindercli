@@ -25,6 +25,7 @@ mod runtime;
 mod model_manifest;
 mod path;
 mod resource_id;
+mod sdk_message;
 mod storage;
 pub mod workers;
 
@@ -95,6 +96,12 @@ pub use provider::Provider;
 // ============================================================================
 
 pub use runtime::{Runtime, RuntimeType};
+
+// ============================================================================
+// SDK Message (agent-platform contract)
+// ============================================================================
+
+pub use sdk_message::SdkMessage;
 
 // ============================================================================
 // Harness (API surface for agent interaction)
