@@ -27,7 +27,7 @@ impl GrpcRegistryClient {
         Ok(Self {
             client: Mutex::new(client),
             runtime,
-            id: ResourceId::new(&format!("grpc://{}", addr)),
+            id: ResourceId::new(addr),
         })
     }
 }
@@ -93,12 +93,29 @@ impl Registry for GrpcRegistryClient {
         }
     }
 
+    fn agent_id(&self, name: &str) -> ResourceId {
+        // Query the server — only it knows its registry_id.
+        let request = proto::GetAgentByNameRequest {
+            name: name.to_string(),
+        };
+
+        let response = self.runtime.block_on(async {
+            self.client.lock().unwrap()
+                .get_agent_by_name(request)
+                .await
+        }).expect("agent_id: registry server unreachable");
+
+        let agent = response.into_inner().agent
+            .unwrap_or_else(|| panic!("agent_id: agent '{}' not found on server", name));
+
+        agent.id
+            .unwrap_or_else(|| panic!("agent_id: server returned agent '{}' without id", name))
+            .into()
+    }
+
     fn select_runtime(&self, agent: &Agent) -> Option<RuntimeType> {
-        if agent.id.scheme() == Some("container") {
-            Some(RuntimeType::Container)
-        } else {
-            None
-        }
+        // Runtime type is declared on the agent — no scheme parsing needed
+        Some(agent.runtime)
     }
 
     // --- Model operations ---

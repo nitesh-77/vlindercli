@@ -68,12 +68,13 @@ impl CliHarness {
 
     /// Internal: register an agent after loading/parsing.
     fn register_agent(&self, agent: Agent) -> Result<ResourceId, String> {
-        let agent_id = agent.id.clone();
+        let name = agent.name.clone();
 
         self.registry.register_agent(agent)
             .map_err(|e| format!("registration failed: {}", e))?;
 
-        Ok(agent_id)
+        // Query after registration — in distributed mode, the server assigns the ID.
+        Ok(self.registry.agent_id(&name))
     }
 
     /// Tick: monitor reply queue and update completed jobs in registry.
@@ -156,7 +157,7 @@ mod tests {
     use std::path::PathBuf;
 
     fn test_agent_id() -> ResourceId {
-        ResourceId::new("container://localhost/test-agent")
+        ResourceId::new("http://127.0.0.1:9000/agents/test-agent")
     }
 
     fn fixture_path(name: &str) -> PathBuf {
@@ -175,7 +176,8 @@ mod tests {
         let manifest = r#"
             name = "test-agent"
             description = "Test"
-            id = "container://localhost/test-agent"
+            runtime = "container"
+            executable = "localhost/test-agent:latest"
             [requirements]
             services = []
         "#;
@@ -209,7 +211,7 @@ mod tests {
         assert_eq!(job.agent_id, agent_id);
 
         // Message is in typed queue with ADR 044 subject pattern
-        // Agent name extracted from "container://localhost/test-agent" → "test-agent"
+        // Agent name extracted from registry ID "...agents/test-agent" → "test-agent"
         let typed = queue.typed_queues.lock().unwrap();
         assert_eq!(typed.len(), 1);
         let (subject, _) = typed.iter().next().unwrap();

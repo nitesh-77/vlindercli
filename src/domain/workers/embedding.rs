@@ -156,7 +156,7 @@ mod tests {
     use crate::queue::{InMemoryQueue, Sequence, SubmissionId};
     use crate::embedding::InMemoryEmbedding;
 
-    const TEST_AGENT_ID: &str = "container://localhost/test-agent";
+    const TEST_AGENT_ID: &str = "http://127.0.0.1:9000/agents/test-agent";
 
     fn test_agent_id() -> ResourceId {
         ResourceId::new(TEST_AGENT_ID)
@@ -183,12 +183,13 @@ mod tests {
         let manifest = format!(r#"
             name = "test-agent"
             description = "Test agent"
-            id = "{}"
+            runtime = "container"
+            executable = "localhost/test-agent:latest"
             [requirements]
             services = []
             [requirements.models]
             {} = "memory://test/{}"
-        "#, TEST_AGENT_ID, model_alias, model_alias);
+        "#, model_alias, model_alias);
         Agent::from_toml(&manifest).unwrap()
     }
 
@@ -292,7 +293,7 @@ mod tests {
         });
         let request = RequestMessage::new(
             test_submission(),
-            ResourceId::new("container://localhost/unknown-agent"),
+            ResourceId::new("http://127.0.0.1:9000/agents/unknown-agent"),
             "embed",
             "memory",
             "run",

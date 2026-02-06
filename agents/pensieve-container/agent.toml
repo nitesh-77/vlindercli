@@ -4,7 +4,8 @@ A memory system for web articles (container edition). Save URLs to memory,
 search across your saved content with semantic search, and ask questions to
 get synthesized answers from your knowledge base.
 """
-id = "container://localhost/pensieve-container:latest"
+runtime = "container"
+executable = "localhost/pensieve-container:latest"
 
 # Storage backends
 object_storage = "sqlite://data/objects.db"

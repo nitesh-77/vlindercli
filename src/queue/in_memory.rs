@@ -212,7 +212,7 @@ mod tests {
     use crate::queue::{ExpectsReply, HarnessType, Sequence, SubmissionId};
 
     fn test_agent_id() -> ResourceId {
-        ResourceId::new("container://localhost/echo-agent")
+        ResourceId::new("http://127.0.0.1:9000/agents/echo-agent")
     }
 
     fn test_submission() -> SubmissionId {
@@ -316,14 +316,14 @@ mod tests {
     }
 
     #[test]
-    fn agent_short_name_extracts_from_file_uri() {
-        let id = ResourceId::new("file:///path/to/pensieve.wasm");
+    fn agent_short_name_extracts_from_registry_id() {
+        let id = ResourceId::new("http://127.0.0.1:9000/agents/pensieve");
         assert_eq!(agent_short_name(&id), "pensieve");
     }
 
     #[test]
-    fn agent_short_name_extracts_from_memory_uri() {
-        let id = ResourceId::new("memory://test-agent");
+    fn agent_short_name_extracts_last_path_component() {
+        let id = ResourceId::new("http://example.com/agents/test-agent");
         assert_eq!(agent_short_name(&id), "test-agent");
     }
 

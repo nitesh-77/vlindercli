@@ -60,7 +60,9 @@ pub enum JobStatus {
 /// Error returned when agent registration fails validation.
 #[derive(Debug)]
 pub enum RegistrationError {
-    /// No runtime available for this agent's scheme/extension.
+    /// Agent with this name is already registered.
+    DuplicateName(String),
+    /// No runtime available for this agent's executable scheme/extension.
     NoRuntime(ResourceId),
     /// Agent declares object storage with unknown scheme.
     UnknownObjectStorageScheme(String),
@@ -77,7 +79,8 @@ pub enum RegistrationError {
 impl std::fmt::Display for RegistrationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            RegistrationError::NoRuntime(id) => write!(f, "no runtime available for agent: {}", id),
+            RegistrationError::DuplicateName(name) => write!(f, "agent already registered: {}", name),
+            RegistrationError::NoRuntime(id) => write!(f, "no runtime available for agent executable: {}", id),
             RegistrationError::UnknownObjectStorageScheme(s) => write!(f, "unknown object storage scheme: {}", s),
             RegistrationError::ObjectStorageUnavailable(t) => write!(f, "object storage not available: {:?}", t),
             RegistrationError::UnknownVectorStorageScheme(s) => write!(f, "unknown vector storage scheme: {}", s),
@@ -102,7 +105,11 @@ pub trait Registry: Send + Sync {
     // --- Agent operations ---
 
     /// Register an agent after validating requirements.
+    /// Assigns registry identity `<registry_id>/agents/<name>`.
     fn register_agent(&self, agent: Agent) -> Result<(), RegistrationError>;
+
+    /// Get the registry-issued ID for an agent name.
+    fn agent_id(&self, name: &str) -> ResourceId;
 
     /// Get an agent by ID.
     fn get_agent(&self, id: &ResourceId) -> Option<Agent>;
@@ -202,12 +209,16 @@ impl InMemoryRegistry {
 
     /// Internal: check if runtime is available for agent (needs read lock held).
     fn select_runtime_internal(&self, agent: &Agent, state: &RegistryState) -> Option<RuntimeType> {
-        if agent.id.scheme() == Some("container")
-            && state.available_runtimes.contains(&RuntimeType::Container)
-        {
-            return Some(RuntimeType::Container);
+        if state.available_runtimes.contains(&agent.runtime) {
+            Some(agent.runtime)
+        } else {
+            None
         }
-        None
+    }
+
+    /// Internal: compute agent ID without needing &self for borrow checker.
+    fn agent_id_internal(&self, name: &str) -> ResourceId {
+        ResourceId::new(format!("{}/agents/{}", self.registry_id.as_str(), name))
     }
 }
 
@@ -224,12 +235,20 @@ impl Registry for InMemoryRegistry {
 
     // --- Agent operations ---
 
-    fn register_agent(&self, agent: Agent) -> Result<(), RegistrationError> {
+    fn register_agent(&self, mut agent: Agent) -> Result<(), RegistrationError> {
         let mut state = self.state.write().unwrap();
 
-        // Validate runtime
+        // Check name uniqueness
+        let agent_id = self.agent_id_internal(&agent.name);
+        if state.agents.contains_key(&agent_id) {
+            return Err(RegistrationError::DuplicateName(agent.name.clone()));
+        }
+
+        // Validate runtime is available
         if self.select_runtime_internal(&agent, &state).is_none() {
-            return Err(RegistrationError::NoRuntime(agent.id.clone()));
+            return Err(RegistrationError::NoRuntime(
+                ResourceId::new(format!("runtime:{}", agent.runtime.as_str()))
+            ));
         }
 
         // Validate object storage if declared
@@ -261,8 +280,9 @@ impl Registry for InMemoryRegistry {
             }
         }
 
-        // All validated - store agent
-        state.agents.insert(agent.id.clone(), agent);
+        // Assign registry identity and store
+        agent.id = agent_id.clone();
+        state.agents.insert(agent_id, agent);
         Ok(())
     }
 
@@ -306,6 +326,10 @@ impl Registry for InMemoryRegistry {
         state.models.values()
             .find(|m| &m.model_path == path)
             .cloned()
+    }
+
+    fn agent_id(&self, name: &str) -> ResourceId {
+        self.agent_id_internal(name)
     }
 
     fn model_id(&self, name: &str) -> ResourceId {
@@ -405,7 +429,7 @@ mod tests {
     use crate::queue::SubmissionId;
 
     fn test_agent_id() -> ResourceId {
-        ResourceId::new("container://localhost/test-agent")
+        ResourceId::new("http://127.0.0.1:9000/agents/test-agent")
     }
 
     #[test]

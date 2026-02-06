@@ -1,6 +1,7 @@
 name = "reverse-agent"
 description = "Reverses the input string"
-id = "container://localhost/reverse-agent:latest"
+runtime = "container"
+executable = "localhost/reverse-agent:latest"
 
 [requirements]
 services = []

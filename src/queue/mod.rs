@@ -28,28 +28,17 @@ pub use traits::{MessageQueue, QueueError};
 pub use in_memory::InMemoryQueue;
 pub use nats::NatsQueue;
 
-/// Extract a short routing key from an agent's ResourceId.
+/// Extract the agent name from a registry-assigned ResourceId.
 ///
-/// This is the canonical function for computing the NATS subject token
-/// for an agent. Both send and receive must use the same key.
-///
-/// - `container://localhost/echo-container:latest` → "echo-container_latest"
-/// - `memory://test-agent` → "test-agent"
-/// TODO: This smells. We should just have a queue friendly unique short name
-/// in the agent entity
+/// Registry IDs have the format `<registry>/agents/<name>`.
+/// The last path component is the agent name, used as the NATS subject token.
 pub fn agent_routing_key(agent_id: &ResourceId) -> String {
     if let Some(path) = agent_id.path() {
-        if let Some(filename) = path.rsplit('/').next() {
-            let name = filename.strip_suffix(".wasm").unwrap_or(filename);
-            // Replace colons with underscores (colons invalid in NATS subjects)
-            let name = name.replace(':', "_");
+        if let Some(name) = path.rsplit('/').next() {
             if !name.is_empty() {
-                return name;
+                return name.to_string();
             }
         }
-    }
-    if let Some(authority) = agent_id.authority() {
-        return authority.to_string();
     }
     agent_id.as_str().to_string()
 }

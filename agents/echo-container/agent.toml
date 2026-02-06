@@ -1,6 +1,7 @@
 name = "echo-container"
 description = "Test agent that echoes input (OCI container)"
-id = "container://localhost/echo-container:latest"
+runtime = "container"
+executable = "localhost/echo-container:latest"
 
 [requirements]
 services = []

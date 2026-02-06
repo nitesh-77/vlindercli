@@ -1,6 +1,7 @@
 name = "missing-mount-agent"
 description = "Test agent with mount that doesn't exist"
-id = "missing-mount-agent.wasm"
+runtime = "container"
+executable = "localhost/missing-mount-agent:latest"
 
 [requirements]
 services = []

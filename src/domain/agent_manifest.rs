@@ -7,15 +7,20 @@ use super::resource_id::ResourceId;
 
 /// Agent manifest as read from agent.toml.
 ///
-/// The `id` field is resolved to a URI during loading. Relative paths
-/// are resolved against the manifest's directory.
+/// Relative paths (models, mounts, storage) are resolved against
+/// the manifest's directory during loading.
 #[derive(Clone, Debug, Deserialize)]
 pub struct AgentManifest {
     pub name: String,
     pub description: String,
     #[serde(default)]
     pub source: Option<String>,
-    pub id: String,
+    /// Runtime type (e.g., "container"). Determines which executor runs the agent.
+    pub runtime: String,
+    /// Executable reference — native to the runtime ecosystem.
+    /// Container: OCI image ref (e.g., "localhost/echo-container:latest")
+    /// File paths are resolved to absolute during loading.
+    pub executable: String,
     pub requirements: RequirementsConfig,
     #[serde(default)]
     pub prompts: Option<PromptsConfig>,
@@ -32,8 +37,8 @@ pub struct AgentManifest {
 impl AgentManifest {
     /// Load an agent manifest from a file path.
     ///
-    /// Resolves all paths to absolute URIs:
-    /// - `id` → file:// URI (for local files)
+    /// Resolves relative paths to absolute:
+    /// - `executable` → resolved only for file-based runtimes
     /// - `requirements.models` values → file:// URIs
     /// - `mounts[].host_path` → absolute paths
     pub fn load(path: &Path) -> Result<AgentManifest, ParseError> {
@@ -47,8 +52,11 @@ impl AgentManifest {
             .canonicalize()
             .unwrap_or_else(|_| path.parent().unwrap_or(Path::new(".")).to_path_buf());
 
-        // Resolve id to URI
-        manifest.id = resolve_id_uri(&manifest.id, &agent_dir)?;
+        // Resolve executable for file-based runtimes only.
+        // Container image refs (e.g., "localhost/my-agent:latest") are passed through as-is.
+        if manifest.runtime != "container" {
+            manifest.executable = resolve_executable_path(&manifest.executable, &agent_dir)?;
+        }
 
         // Resolve model URIs
         manifest.requirements.models = manifest.requirements.models
@@ -73,45 +81,47 @@ impl AgentManifest {
     }
 }
 
-/// Resolve an id reference to a URI.
+/// Resolve a file-based executable path to an absolute file:// URI.
 ///
-/// - If already a URI (contains "://"), return as-is (but resolve relative file:// paths)
-/// - If absolute path, convert to file:// URI
-/// - If relative path, resolve against agent_dir and convert to file:// URI
-fn resolve_id_uri(id: &str, agent_dir: &Path) -> Result<String, ParseError> {
-    // Already a URI
-    if id.contains("://") {
-        // For file:// URIs with relative paths, resolve them
-        if let Some(path) = id.strip_prefix("file://") {
-            if !Path::new(path).is_absolute() {
-                let resolved = agent_dir.join(path);
-                if !resolved.exists() {
-                    return Err(ParseError::IdNotFound(format!(
-                        "id not found: {}",
-                        resolved.display()
-                    )));
-                }
-                return Ok(format!("file://{}", resolved.display()));
+/// Only used for non-container runtimes where the executable is a local file.
+/// - If already a file:// URI, resolve relative paths
+/// - If a bare path, resolve against agent_dir and convert to file:// URI
+fn resolve_executable_path(executable: &str, agent_dir: &Path) -> Result<String, ParseError> {
+    // Already a file:// URI with relative path
+    if let Some(path) = executable.strip_prefix("file://") {
+        if !Path::new(path).is_absolute() {
+            let resolved = agent_dir.join(path);
+            if !resolved.exists() {
+                return Err(ParseError::ExecutableNotFound(format!(
+                    "executable not found: {}",
+                    resolved.display()
+                )));
             }
+            return Ok(format!("file://{}", resolved.display()));
         }
-        return Ok(id.to_string());
+        return Ok(executable.to_string());
     }
 
-    // Resolve path (relative or absolute)
-    let id_path = if Path::new(id).is_absolute() {
-        Path::new(id).to_path_buf()
+    // Already a URI of another scheme — pass through
+    if executable.contains("://") {
+        return Ok(executable.to_string());
+    }
+
+    // Resolve bare path (relative or absolute)
+    let exe_path = if Path::new(executable).is_absolute() {
+        Path::new(executable).to_path_buf()
     } else {
-        agent_dir.join(id)
+        agent_dir.join(executable)
     };
 
-    if !id_path.exists() {
-        return Err(ParseError::IdNotFound(format!(
-            "id not found: {}",
-            id_path.display()
+    if !exe_path.exists() {
+        return Err(ParseError::ExecutableNotFound(format!(
+            "executable not found: {}",
+            exe_path.display()
         )));
     }
 
-    Ok(format!("file://{}", id_path.display()))
+    Ok(format!("file://{}", exe_path.display()))
 }
 
 /// Resolve a URI, making relative file:// URIs absolute.
@@ -164,7 +174,7 @@ fn resolve_storage_uri(storage: &ResourceId, agent_dir: &Path) -> ResourceId {
 pub enum ParseError {
     Io(std::io::Error),
     Toml(String),
-    IdNotFound(String),
+    ExecutableNotFound(String),
 }
 
 impl From<std::io::Error> for ParseError {
@@ -221,7 +231,8 @@ mod tests {
         let toml = r#"
             name = "test-agent"
             description = "Test agent with storage"
-            id = "agent.wasm"
+            runtime = "container"
+            executable = "localhost/test-agent:latest"
             object_storage = "sqlite:///data/objects.db"
             vector_storage = "sqlite:///data/vectors.db"
 
@@ -232,6 +243,8 @@ mod tests {
         let manifest: AgentManifest = toml::from_str(toml).unwrap();
 
         assert_eq!(manifest.name, "test-agent");
+        assert_eq!(manifest.runtime, "container");
+        assert_eq!(manifest.executable, "localhost/test-agent:latest");
         assert_eq!(
             manifest.object_storage.as_ref().map(|r| r.as_str()),
             Some("sqlite:///data/objects.db")
@@ -247,7 +260,8 @@ mod tests {
         let toml = r#"
             name = "test-agent"
             description = "Test agent without storage"
-            id = "agent.wasm"
+            runtime = "container"
+            executable = "localhost/test-agent:latest"
 
             [requirements]
             services = ["inference"]
@@ -265,7 +279,8 @@ mod tests {
         let toml = r#"
             name = "test-agent"
             description = "Test agent with only object storage"
-            id = "agent.wasm"
+            runtime = "container"
+            executable = "localhost/test-agent:latest"
             object_storage = "s3://my-bucket/agents/test"
 
             [requirements]
@@ -286,7 +301,8 @@ mod tests {
         let toml = r#"
             name = "test-agent"
             description = "Test"
-            id = "agent.wasm"
+            runtime = "container"
+            executable = "localhost/test-agent:latest"
             object_storage = "memory://test"
             vector_storage = "pinecone://my-index"
 

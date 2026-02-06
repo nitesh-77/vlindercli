@@ -83,15 +83,16 @@ mod tests {
     use crate::domain::{Agent, InMemoryRegistry, ResourceId};
     use crate::queue::{InMemoryQueue, RequestMessage, Sequence, SubmissionId};
 
-    fn test_agent(id: &str) -> Agent {
+    fn test_agent(name: &str) -> Agent {
         let manifest = format!(r#"
-            name = "test-agent"
+            name = "{}"
             description = "Test agent"
-            id = "{}"
+            runtime = "container"
+            executable = "localhost/{}:latest"
             object_storage = "memory://"
             [requirements]
             services = []
-        "#, id);
+        "#, name, name);
         Agent::from_toml(&manifest).unwrap()
     }
 
@@ -109,8 +110,8 @@ mod tests {
         registry.register_object_storage(crate::domain::ObjectStorageType::InMemory);
 
         // Register agents - each declares memory:// storage (each gets separate instance)
-        registry.register_agent(test_agent("container://localhost/agent-a")).unwrap();
-        registry.register_agent(test_agent("container://localhost/agent-b")).unwrap();
+        registry.register_agent(test_agent("agent-a")).unwrap();
+        registry.register_agent(test_agent("agent-b")).unwrap();
 
         let registry: Arc<dyn Registry> = Arc::new(registry);
         let provider = Provider::new(Arc::clone(&queue), Arc::clone(&registry));
@@ -122,7 +123,7 @@ mod tests {
         });
         let request_a = RequestMessage::new(
             test_submission(),
-            ResourceId::new("container://localhost/agent-a"),
+            ResourceId::new("http://127.0.0.1:9000/agents/agent-a"),
             "kv",
             "memory",
             "put",
@@ -142,7 +143,7 @@ mod tests {
         });
         let request_b = RequestMessage::new(
             test_submission(),
-            ResourceId::new("container://localhost/agent-b"),
+            ResourceId::new("http://127.0.0.1:9000/agents/agent-b"),
             "kv",
             "memory",
             "put",
@@ -159,7 +160,7 @@ mod tests {
         let get_a = serde_json::json!({ "path": "/data.txt" });
         let request_get_a = RequestMessage::new(
             test_submission(),
-            ResourceId::new("container://localhost/agent-a"),
+            ResourceId::new("http://127.0.0.1:9000/agents/agent-a"),
             "kv",
             "memory",
             "get",
@@ -176,7 +177,7 @@ mod tests {
         let get_b = serde_json::json!({ "path": "/data.txt" });
         let request_get_b = RequestMessage::new(
             test_submission(),
-            ResourceId::new("container://localhost/agent-b"),
+            ResourceId::new("http://127.0.0.1:9000/agents/agent-b"),
             "kv",
             "memory",
             "get",

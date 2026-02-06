@@ -201,7 +201,7 @@ mod tests {
     use crate::domain::{Agent, InMemoryRegistry, Registry};
     use crate::queue::{InMemoryQueue, Sequence, SubmissionId};
 
-    const TEST_AGENT_ID: &str = "container://localhost/test-agent";
+    const TEST_AGENT_ID: &str = "http://127.0.0.1:9000/agents/test-agent";
 
     fn test_agent_id() -> ResourceId {
         ResourceId::new(TEST_AGENT_ID)
@@ -215,7 +215,8 @@ mod tests {
         let manifest = r#"
             name = "test-agent"
             description = "Test agent for vector storage"
-            id = "container://localhost/test-agent"
+            runtime = "container"
+            executable = "localhost/test-agent:latest"
             vector_storage = "memory://"
             [requirements]
             services = []

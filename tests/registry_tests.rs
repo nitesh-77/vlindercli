@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use vlindercli::domain::{Agent, InMemoryRegistry, Registry, ResourceId, RuntimeType};
+use vlindercli::domain::{Agent, InMemoryRegistry, Registry, RuntimeType};
 
 const FIXTURES: &str = "tests/fixtures/agents";
 
@@ -22,18 +22,16 @@ fn load_agent(name: &str) -> Agent {
 fn agent_registration() {
     let registry = InMemoryRegistry::new();
     registry.register_runtime(RuntimeType::Container);
-    let fake_id = ResourceId::new("container://localhost/nonexistent-agent");
 
     // Agent not found initially
-    assert!(registry.get_agent(&fake_id).is_none());
+    let agent_id = registry.agent_id("echo-agent");
+    assert!(registry.get_agent(&agent_id).is_none());
 
-    // Register agent (override id to container scheme so runtime matches)
-    let mut agent = load_agent("echo-agent");
-    agent.id = ResourceId::new("container://localhost/echo-agent");
-    let agent_id = agent.id.clone();
+    // Register agent — registry assigns identity
+    let agent = load_agent("echo-agent");
     registry.register_agent(agent).unwrap();
 
-    // Now found by id
+    // Now found by registry-assigned id
     let agent = registry.get_agent(&agent_id).unwrap();
     assert_eq!(agent.name, "echo-agent");
 }
@@ -47,10 +45,9 @@ fn select_runtime_identifies_container_agent() {
     let registry = InMemoryRegistry::new();
     registry.register_runtime(RuntimeType::Container);
 
-    let mut agent = load_agent("echo-agent");
-    agent.id = ResourceId::new("container://localhost/echo-agent");
+    let agent = load_agent("echo-agent");
 
-    // container:// scheme → Container runtime
+    // Agent declares runtime = "container" → Container runtime selected
     assert_eq!(registry.select_runtime(&agent), Some(RuntimeType::Container));
 }
 
@@ -58,35 +55,8 @@ fn select_runtime_identifies_container_agent() {
 fn select_runtime_returns_none_without_registered_runtime() {
     let registry = InMemoryRegistry::new(); // No runtimes registered
 
-    let mut agent = load_agent("echo-agent");
-    agent.id = ResourceId::new("container://localhost/echo-agent");
+    let agent = load_agent("echo-agent");
 
     // No Container runtime available
-    assert_eq!(registry.select_runtime(&agent), None);
-}
-
-#[test]
-fn select_runtime_returns_none_for_http_scheme() {
-    let registry = InMemoryRegistry::new();
-    registry.register_runtime(RuntimeType::Container);
-
-    // Load agent and modify its id to use http:// scheme
-    let mut agent = load_agent("echo-agent");
-    agent.id = ResourceId::new("http://example.com/agent");
-
-    // http:// scheme → no runtime (only container:// supported)
-    assert_eq!(registry.select_runtime(&agent), None);
-}
-
-#[test]
-fn select_runtime_returns_none_for_file_scheme() {
-    let registry = InMemoryRegistry::new();
-    registry.register_runtime(RuntimeType::Container);
-
-    // Load agent and modify its id to use file:// scheme
-    let mut agent = load_agent("echo-agent");
-    agent.id = ResourceId::new("file:///path/to/agent.wasm");
-
-    // file:// scheme → no runtime (only container:// supported)
     assert_eq!(registry.select_runtime(&agent), None);
 }

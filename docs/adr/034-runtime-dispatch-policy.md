@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Superseded by ADR 048 (Agent Registry Identity)
 
 ## Context
 

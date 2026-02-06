@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use crate::domain::{
     Agent, EngineType, Job, JobId, JobStatus, Model, ModelType, Requirements, ResourceId,
+    RuntimeType,
 };
 use crate::queue::SubmissionId;
 use super::proto;
@@ -95,6 +96,8 @@ impl From<Agent> for proto::Agent {
                 resource_id: Some(r.into()),
                 dimensions: 0, // Not stored in domain model
             }),
+            runtime: agent.runtime.as_str().to_string(),
+            executable: agent.executable,
         }
     }
 }
@@ -107,10 +110,15 @@ impl TryFrom<proto::Agent> for Agent {
             .map(|(k, v)| (k, ResourceId::new(&v)))
             .collect();
 
+        let runtime = RuntimeType::from_str(&agent.runtime)
+            .ok_or_else(|| format!("unknown runtime: {}", agent.runtime))?;
+
         Ok(Self {
             name: agent.name,
             description: agent.description,
             id: agent.id.ok_or("missing agent id")?.into(),
+            runtime,
+            executable: agent.executable,
             requirements: Requirements {
                 models,
                 services: agent.required_services,

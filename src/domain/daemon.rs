@@ -123,11 +123,12 @@ mod tests {
     fn deploy_rejects_agent_with_no_matching_runtime() {
         let daemon = Daemon::new();
 
-        // Agent with http:// scheme - no runtime supports this
+        // Agent with unknown runtime - no runtime supports this
         let manifest = r#"
             name = "remote-agent"
             description = "An agent hosted remotely"
-            id = "http://example.com/agent.wasm"
+            runtime = "lambda"
+            executable = "arn:aws:lambda:us-east-1:123456789:function:my-agent"
             [requirements]
             services = []
         "#;
@@ -135,7 +136,7 @@ mod tests {
         let result = daemon.harness.deploy(manifest);
 
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("no runtime"));
+        assert!(result.unwrap_err().contains("unknown runtime"));
     }
 
     #[test]

@@ -1,6 +1,7 @@
 name = "model-test-agent"
 description = "Test agent for model loading tests"
-id = "model-test-agent.wasm"
+runtime = "container"
+executable = "localhost/model-test-agent:latest"
 
 [requirements]
 services = []

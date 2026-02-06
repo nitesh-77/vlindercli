@@ -24,6 +24,14 @@ impl RuntimeType {
             RuntimeType::Container => "container",
         }
     }
+
+    /// Parse from manifest string.
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "container" => Some(RuntimeType::Container),
+            _ => None,
+        }
+    }
 }
 
 // ============================================================================

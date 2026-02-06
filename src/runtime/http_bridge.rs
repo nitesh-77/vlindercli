@@ -262,7 +262,7 @@ mod tests {
             SubmissionId::new(),
             HarnessType::Cli,
             RuntimeType::Container,
-            ResourceId::new("container://localhost/test:latest"),
+            ResourceId::new("http://127.0.0.1:9000/agents/test"),
             b"test".to_vec(),
         );
         Arc::new(SendFunctionData {

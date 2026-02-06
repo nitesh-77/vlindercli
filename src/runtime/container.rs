@@ -87,10 +87,8 @@ impl ContainerRuntime {
             .map_err(|e| format!("failed to start bridge: {}", e))?;
         let bridge_url = bridge.container_url();
 
-        // Extract image reference: container://localhost/echo-container:latest → localhost/echo-container:latest
-        let image = agent.id.as_str()
-            .strip_prefix("container://")
-            .unwrap_or(agent.id.as_str());
+        // Use the agent's executable directly — it's a native OCI image ref
+        let image = &agent.executable;
 
         // Start container in detached mode with port mapping and bridge URL
         let output = Command::new("podman")
@@ -180,8 +178,8 @@ impl Runtime for ContainerRuntime {
 
         // Check for work using typed receive (ADR 044)
         for agent in &container_agents {
-            // Use canonical routing key (must match send_invoke subject)
-            let routing_key = crate::queue::agent_routing_key(&agent.id);
+            // Route by agent name (must match send_invoke subject)
+            let routing_key = agent.name.clone();
             if let Ok((invoke, ack)) = self.queue.receive_invoke(&routing_key) {
                 let payload = invoke.payload.clone();
 

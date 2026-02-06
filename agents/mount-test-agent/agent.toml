@@ -1,6 +1,7 @@
 name = "mount-test-agent"
 description = "Test agent with explicit mounts"
-id = "mount-test-agent.wasm"
+runtime = "container"
+executable = "localhost/mount-test-agent:latest"
 
 [requirements]
 services = []

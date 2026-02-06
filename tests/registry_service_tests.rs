@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use vlindercli::domain::{Agent, InMemoryRegistry, Registry, Requirements, ResourceId, RuntimeType};
+use vlindercli::domain::{Agent, InMemoryRegistry, Registry, Requirements, RuntimeType};
 use vlindercli::queue::SubmissionId;
 use vlindercli::registry_service::{GrpcRegistryClient, RegistryServiceServer};
 
@@ -62,7 +62,9 @@ fn grpc_register_and_get_agent() {
     let agent = Agent {
         name: "test-agent".to_string(),
         description: "A test agent".to_string(),
-        id: ResourceId::new("container://localhost/test-agent"),
+        id: Agent::placeholder_id("test-agent"),
+        runtime: RuntimeType::Container,
+        executable: "localhost/test-agent:latest".to_string(),
         requirements: empty_requirements(),
         object_storage: None,
         vector_storage: None,
@@ -71,10 +73,11 @@ fn grpc_register_and_get_agent() {
         prompts: None,
     };
 
-    client.register_agent(agent.clone()).unwrap();
+    client.register_agent(agent).unwrap();
 
-    // Retrieve via gRPC
-    let retrieved = client.get_agent(&agent.id);
+    // Retrieve via gRPC using registry-assigned ID
+    let agent_id = registry.agent_id("test-agent");
+    let retrieved = client.get_agent(&agent_id);
     assert!(retrieved.is_some());
     assert_eq!(retrieved.unwrap().name, "test-agent");
 }
@@ -88,10 +91,13 @@ fn grpc_list_agents() {
 
     // Register two agents
     for i in 0..2 {
+        let name = format!("agent-{}", i);
         let agent = Agent {
-            name: format!("agent-{}", i),
+            name: name.clone(),
             description: "Test".to_string(),
-            id: ResourceId::new(&format!("container://localhost/agent{}", i)),
+            id: Agent::placeholder_id(&name),
+            runtime: RuntimeType::Container,
+            executable: format!("localhost/agent-{}:latest", i),
             requirements: empty_requirements(),
             object_storage: None,
             vector_storage: None,
@@ -117,7 +123,9 @@ fn grpc_job_lifecycle() {
     let agent = Agent {
         name: "job-test-agent".to_string(),
         description: "Test".to_string(),
-        id: ResourceId::new("container://localhost/job-test"),
+        id: Agent::placeholder_id("job-test-agent"),
+        runtime: RuntimeType::Container,
+        executable: "localhost/job-test-agent:latest".to_string(),
         requirements: empty_requirements(),
         object_storage: None,
         vector_storage: None,
@@ -125,10 +133,11 @@ fn grpc_job_lifecycle() {
         source: None,
         prompts: None,
     };
-    client.register_agent(agent.clone()).unwrap();
+    client.register_agent(agent).unwrap();
 
-    // Create a job via gRPC
-    let job_id = client.create_job(SubmissionId::new(), agent.id.clone(), "hello".to_string());
+    // Create a job via gRPC using registry-assigned ID
+    let agent_id = registry.agent_id("job-test-agent");
+    let job_id = client.create_job(SubmissionId::new(), agent_id, "hello".to_string());
 
     // Job should be pending
     let pending = client.pending_jobs();

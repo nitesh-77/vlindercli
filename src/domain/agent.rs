@@ -6,11 +6,12 @@ use serde::Serialize;
 use super::agent_manifest::{AgentManifest, MountConfig, ParseError, PromptsConfig, RequirementsConfig};
 use super::path::AbsolutePath;
 use super::resource_id::ResourceId;
+use super::runtime::RuntimeType;
 
 /// An agent with resolved paths, ready for execution.
 ///
-/// All paths (id, mounts, model URIs) are resolved to absolute paths at load time.
-/// See ADR 020 for the manifest format.
+/// All paths (executable, mounts, model URIs) are resolved to absolute paths at load time.
+/// See ADR 020 for the manifest format, ADR 048 for identity model.
 #[derive(Clone, Debug)]
 pub struct Agent {
     pub name: String,
@@ -19,8 +20,15 @@ pub struct Agent {
     pub requirements: Requirements,
     pub prompts: Option<Prompts>,
     pub mounts: Vec<Mount>,
-    /// Resource URI identifying the executable (WASM file, Lambda ARN, Docker image, etc.)
+    /// Registry-assigned identity: `<registry_id>/agents/<name>`.
+    /// Set by the registry during registration.
     pub id: ResourceId,
+    /// Which runtime executes this agent.
+    pub runtime: RuntimeType,
+    /// Executable reference — native to the runtime ecosystem.
+    /// Container: OCI image ref (e.g., "localhost/echo-container:latest")
+    /// File: absolute path or file:// URI
+    pub executable: String,
     /// Object storage configuration (optional).
     pub object_storage: Option<ResourceId>,
     /// Vector storage configuration (optional).
@@ -28,9 +36,16 @@ pub struct Agent {
 }
 
 impl Agent {
+    /// Create a placeholder ID for agents not yet registered.
+    ///
+    /// Registry replaces this with `<registry_id>/agents/<name>` during registration.
+    pub fn placeholder_id(name: &str) -> ResourceId {
+        ResourceId::new(format!("pending-registration://agents/{}", name))
+    }
+
     /// Create an agent directly from TOML content.
     ///
-    /// The TOML should contain resolved absolute URIs for `id` and model paths.
+    /// The TOML should contain resolved absolute URIs for `executable` and model paths.
     /// No path resolution is performed - caller is responsible for pre-resolving.
     pub fn from_toml(toml_content: &str) -> Result<Agent, LoadError> {
         let manifest: AgentManifest = toml::from_str(toml_content)
@@ -41,6 +56,8 @@ impl Agent {
     /// Create an agent from a manifest.
     ///
     /// All paths in the manifest are already resolved to absolute paths.
+    /// The `id` field is set to a placeholder. The registry assigns the real
+    /// id (`<registry_id>/agents/<name>`) during registration.
     pub fn from_manifest(manifest: AgentManifest) -> Result<Agent, LoadError> {
         // Validate mounts exist
         let mut mounts = Vec::new();
@@ -48,17 +65,19 @@ impl Agent {
             mounts.push(Mount::from_config(mount_config)?);
         }
 
-        // id is already resolved to absolute URI by AgentManifest::load()
-        let id = ResourceId::new(&manifest.id);
+        let runtime = RuntimeType::from_str(&manifest.runtime)
+            .ok_or_else(|| LoadError::Parse(format!("unknown runtime: {}", manifest.runtime)))?;
 
         Ok(Agent {
-            name: manifest.name,
+            name: manifest.name.clone(),
             description: manifest.description,
             source: manifest.source,
             requirements: Requirements::from_config(manifest.requirements),
             prompts: manifest.prompts.map(|p| p.into()),
             mounts,
-            id,
+            id: Self::placeholder_id(&manifest.name),
+            runtime,
+            executable: manifest.executable,
             object_storage: manifest.object_storage,
             vector_storage: manifest.vector_storage,
         })
@@ -110,7 +129,7 @@ impl From<ParseError> for LoadError {
         match e {
             ParseError::Io(e) => LoadError::Io(e),
             ParseError::Toml(s) => LoadError::Parse(s),
-            ParseError::IdNotFound(s) => LoadError::Parse(s),
+            ParseError::ExecutableNotFound(s) => LoadError::Parse(s),
         }
     }
 }

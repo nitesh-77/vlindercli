@@ -22,7 +22,8 @@ fn manifest_parses_required_fields() {
     let manifest: AgentManifest = parse_manifest(r#"
         name = "test-agent"
         description = "A test agent"
-        id = "agent.wasm"
+        runtime = "container"
+        executable = "localhost/test-agent:latest"
 
         [requirements]
         services = []
@@ -30,7 +31,8 @@ fn manifest_parses_required_fields() {
 
     assert_eq!(manifest.name, "test-agent");
     assert_eq!(manifest.description, "A test agent");
-    assert_eq!(manifest.id, "agent.wasm");
+    assert_eq!(manifest.runtime, "container");
+    assert_eq!(manifest.executable, "localhost/test-agent:latest");
 }
 
 #[test]
@@ -38,7 +40,8 @@ fn manifest_parses_optional_source() {
     let manifest: AgentManifest = parse_manifest(r#"
         name = "test-agent"
         description = "A test agent"
-        id = "agent.wasm"
+        runtime = "container"
+        executable = "localhost/test-agent:latest"
         source = "https://github.com/example/agent"
 
         [requirements]
@@ -53,7 +56,8 @@ fn manifest_parses_requirements() {
     let manifest: AgentManifest = parse_manifest(r#"
         name = "test-agent"
         description = "A test agent"
-        id = "agent.wasm"
+        runtime = "container"
+        executable = "localhost/test-agent:latest"
 
         [requirements]
         services = ["infer", "embed"]
@@ -73,7 +77,8 @@ fn manifest_parses_mounts() {
     let manifest: AgentManifest = parse_manifest(r#"
         name = "test-agent"
         description = "A test agent"
-        id = "agent.wasm"
+        runtime = "container"
+        executable = "localhost/test-agent:latest"
 
         [requirements]
         services = []
@@ -101,7 +106,8 @@ fn manifest_defaults_empty_optional_fields() {
     let manifest: AgentManifest = parse_manifest(r#"
         name = "minimal"
         description = "Minimal valid manifest"
-        id = "agent.wasm"
+        runtime = "container"
+        executable = "localhost/minimal:latest"
 
         [requirements]
         services = []
@@ -123,10 +129,9 @@ fn manifest_fails_for_invalid_toml() {
 fn manifest_fails_for_missing_required_field() {
     let result = parse_manifest(r#"
         name = "incomplete"
-        description = "Missing id field"
+        description = "Missing runtime and executable"
 
         [requirements]
-        models = []
         services = []
     "#);
     assert!(result.is_err());
@@ -189,48 +194,53 @@ fn agent_load_fails_for_missing_mount() {
 }
 
 #[test]
-fn agent_id_is_container_uri() {
+fn agent_id_is_placeholder_before_registration() {
     let agent = Agent::load(&agent_fixture("echo-agent")).unwrap();
 
-    assert_eq!(agent.id.scheme(), Some("container"));
-    assert_eq!(agent.id.as_str(), "container://localhost/echo-agent:latest");
+    // Before registration, id is a placeholder (ADR 048)
+    assert!(agent.id.as_str().contains("pending-registration://"));
+    assert!(agent.id.as_str().contains("echo-agent"));
+
+    // Executable carries the native artifact ref
+    assert_eq!(agent.executable, "localhost/echo-agent:latest");
 }
 
 #[test]
-fn manifest_with_remote_uri_passes_through() {
-    // Non-file URIs should pass through without resolution
+fn manifest_executable_passes_through_for_containers() {
+    // Container executables should pass through without file resolution
     let manifest: AgentManifest = parse_manifest(r#"
-        name = "lambda-agent"
-        description = "Agent running on AWS Lambda"
-        id = "aws://lambda/us-east-1/my-function"
+        name = "remote-agent"
+        description = "Agent with remote registry image"
+        runtime = "container"
+        executable = "ghcr.io/user/my-agent:v1.2.3"
 
         [requirements]
         services = []
     "#).unwrap();
 
-    assert_eq!(manifest.id, "aws://lambda/us-east-1/my-function");
+    assert_eq!(manifest.executable, "ghcr.io/user/my-agent:v1.2.3");
 }
 
 #[test]
-fn agent_load_fails_for_missing_id() {
-    // Create temp directory with manifest pointing to non-existent code
-    let temp_dir = std::env::temp_dir().join("vlinder-test-missing-id");
+fn agent_load_fails_for_missing_executable() {
+    // Create temp directory with manifest pointing to non-existent file executable
+    let temp_dir = std::env::temp_dir().join("vlinder-test-missing-executable");
     let _ = std::fs::remove_dir_all(&temp_dir);
     std::fs::create_dir_all(&temp_dir).unwrap();
 
     let manifest = r#"
-        name = "missing-id-agent"
+        name = "missing-executable-agent"
         description = "Agent with missing code"
-        id = "nonexistent.wasm"
+        runtime = "file"
+        executable = "nonexistent.wasm"
 
         [requirements]
-        models = []
         services = []
     "#;
     std::fs::write(temp_dir.join("agent.toml"), manifest).unwrap();
 
     let result = Agent::load(&temp_dir);
-    assert!(result.is_err(), "Should fail when code file doesn't exist");
+    assert!(result.is_err(), "Should fail when executable file doesn't exist");
 
     // Cleanup
     let _ = std::fs::remove_dir_all(&temp_dir);

@@ -19,12 +19,13 @@ fn container_runtime_executes_echo_agent() {
     let agent = Agent::from_toml(r#"
         name = "echo-container"
         description = "Echo container agent"
-        id = "container://localhost/echo-container:latest"
+        runtime = "container"
+        executable = "localhost/echo-container:latest"
         [requirements]
         services = []
     "#).unwrap();
-    let agent_id = agent.id.clone();
     registry.register_agent(agent).unwrap();
+    let agent_id = registry.agent_id("echo-container");
     let registry: Arc<dyn Registry> = Arc::new(registry);
 
     let mut runtime = ContainerRuntime::new(

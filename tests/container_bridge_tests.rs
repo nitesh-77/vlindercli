@@ -24,13 +24,14 @@ fn container_bridge_kv_round_trip() {
     let agent = Agent::from_toml(r#"
         name = "kv-bridge-agent"
         description = "KV bridge test agent"
-        id = "container://localhost/kv-bridge-agent:latest"
+        runtime = "container"
+        executable = "localhost/kv-bridge-agent:latest"
         object_storage = "memory://"
         [requirements]
         services = ["kv"]
     "#).unwrap();
-    let agent_id = agent.id.clone();
     registry.register_agent(agent).unwrap();
+    let agent_id = registry.agent_id("kv-bridge-agent");
     let registry: Arc<dyn Registry> = Arc::new(registry);
 
     // Provider handles KV service requests from the bridge

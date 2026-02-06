@@ -49,6 +49,8 @@ message Agent {
   map<string, string> models = 5;  // name -> uri
   ObjectStorageConfig object_storage = 6;
   VectorStorageConfig vector_storage = 7;
+  string runtime = 8;     // Runtime type (e.g., "container")
+  string executable = 9;  // Native artifact ref (e.g., OCI image)
 }
 
 message ObjectStorageConfig {

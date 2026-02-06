@@ -584,7 +584,7 @@ mod tests {
     // --- Typed message tests ---
 
     fn test_agent_id() -> ResourceId {
-        ResourceId::new("container://localhost/echo-agent")
+        ResourceId::new("http://127.0.0.1:9000/agents/echo-agent")
     }
 
     #[test]

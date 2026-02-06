@@ -1,6 +1,7 @@
 name = "upper-agent"
 description = "Test agent that uppercases input"
-id = "container://localhost/upper-agent:latest"
+runtime = "container"
+executable = "localhost/upper-agent:latest"
 
 [requirements]
 services = []
