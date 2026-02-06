@@ -6,23 +6,18 @@
 //! - Executes WASM on message arrival
 //! - Sends responses to reply queues
 //!
-//! Host functions provided to WASM guests:
-//! - send(payload) -> response (synchronous request/response)
-//!
-//! The runtime handles all routing concerns:
-//! - Validates payload against SdkMessage schema (typed trust boundary)
-//! - Carries `agent_id` on the message envelope (not in payload)
-//! - Manages reply queue creation and response waiting
+//! Agent wiring (validation, routing, request lifecycle) lives in
+//! `SendFunctionData`. Extism-specific plumbing lives in `wasm_plugin`.
 
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
-
-use extism::{CurrentPlugin, Function, Manifest, Plugin, UserData, Val, Wasm};
 
 use crate::domain::{ObjectStorageType, Registry, ResourceId, Runtime, RuntimeType, SdkMessage, VectorStorageType};
 use crate::queue::{
     ExpectsReply, InvokeMessage, MessageQueue, RequestMessage, SequenceCounter,
 };
+
+use super::wasm_plugin;
 
 /// Tracks a WASM execution running in a background thread.
 struct RunningTask {
@@ -111,17 +106,14 @@ impl Runtime for WasmRuntime {
 
                 // Spawn WASM execution in background thread
                 let handle = thread::spawn(move || {
-                    let functions = [
-                        make_send_function(Arc::clone(&queue), invoke_for_send, kv_backend, vec_backend),
-                        make_get_prompts_function(),
-                    ];
-
-                    let wasm = Wasm::file(&wasm_path);
-                    let manifest =
-                        Manifest::new([wasm]).with_allowed_hosts(["*".to_string()].into_iter());
-                    let mut plugin = Plugin::new(&manifest, functions, true).unwrap();
-
-                    plugin.call::<_, Vec<u8>>("process", &payload).unwrap()
+                    let send_data = SendFunctionData {
+                        queue,
+                        invoke: invoke_for_send,
+                        kv_backend,
+                        vec_backend,
+                        sequence: SequenceCounter::new(),
+                    };
+                    wasm_plugin::run_plugin(&wasm_path, send_data, &payload)
                 });
 
                 self.running = Some(RunningTask {
@@ -137,107 +129,52 @@ impl Runtime for WasmRuntime {
     }
 }
 
-// ============================================================================
-// Host Function Builders
-// ============================================================================
-
-fn write_output(plugin: &mut CurrentPlugin, outputs: &mut [Val], response: &[u8]) -> Result<(), extism::Error> {
-    let handle = plugin.memory_new(response)?;
-    outputs[0] = Val::I64(handle.offset() as i64);
-    Ok(())
-}
-
 /// Data passed to the send host function
-struct SendFunctionData {
-    queue: Arc<dyn MessageQueue + Send + Sync>,
+pub(super) struct SendFunctionData {
+    pub(super) queue: Arc<dyn MessageQueue + Send + Sync>,
     /// The invoke that triggered this execution - carries submission + agent_id
-    invoke: InvokeMessage,
+    pub(super) invoke: InvokeMessage,
     /// Resolved backends from agent config (None if agent didn't declare storage)
-    kv_backend: Option<ObjectStorageType>,
-    vec_backend: Option<VectorStorageType>,
+    pub(super) kv_backend: Option<ObjectStorageType>,
+    pub(super) vec_backend: Option<VectorStorageType>,
     /// Sequence counter - incremented per service call
-    sequence: SequenceCounter,
+    pub(super) sequence: SequenceCounter,
 }
 
-/// Host function: send(payload) -> response
-///
-/// Synchronous request/response. The runtime:
-/// - Validates payload against SdkMessage schema
-/// - Builds typed RequestMessage with submission context (ADR 044)
-/// - `agent_id` is carried on the envelope, not injected into payload
-/// - Returns the response payload directly
-fn make_send_function(
-    queue: Arc<dyn MessageQueue + Send + Sync>,
-    invoke: InvokeMessage,
-    kv_backend: Option<ObjectStorageType>,
-    vec_backend: Option<VectorStorageType>,
-) -> Function {
-    let sequence = SequenceCounter::new();
-    let data: SendFunctionData = SendFunctionData { queue, invoke, kv_backend, vec_backend, sequence };
+impl SendFunctionData {
+    /// Handle a send call from the agent.
+    ///
+    /// Validates the payload, resolves the next hop, builds a typed request,
+    /// sends it, and waits for the response. Returns the response payload.
+    pub(super) fn handle_send(&self, payload: Vec<u8>) -> Result<Vec<u8>, String> {
+        let msg: SdkMessage = serde_json::from_slice(&payload)
+            .map_err(|e| format!("invalid SDK message: {}", e))?;
 
-    Function::new(
-        "send",
-        [extism::PTR], // payload (SdkMessage JSON)
-        [extism::PTR], // response payload
-        UserData::new(data),
-        |plugin, inputs, outputs, user_data| {
-            let payload: Vec<u8> = plugin.memory_get_val(&inputs[0])?;
+        let hop = msg.hop(self.kv_backend, self.vec_backend)?;
+        let seq = self.sequence.next();
 
-            let data = user_data.get().unwrap();
-            let data = data.lock().unwrap();
+        let request = RequestMessage::new(
+            self.invoke.submission.clone(),
+            self.invoke.agent_id.clone(),
+            hop.service,
+            hop.backend,
+            hop.operation,
+            seq,
+            payload,
+        );
 
-            // Validate payload against SDK schema and determine next hop
-            let msg: SdkMessage = serde_json::from_slice(&payload)
-                .map_err(|e| extism::Error::msg(format!("invalid SDK message: {}", e)))?;
+        self.queue.send_request(request.clone())
+            .map_err(|e| format!("send error: {}", e))?;
 
-            let hop = msg.hop(data.kv_backend, data.vec_backend)
-                .map_err(|e| extism::Error::msg(e))?;
-
-            let seq = data.sequence.next();
-
-            // Build typed RequestMessage (ADR 044)
-            // agent_id lives on the envelope, not in the payload
-            let request = RequestMessage::new(
-                data.invoke.submission.clone(),
-                data.invoke.agent_id.clone(),
-                hop.service,
-                hop.backend,
-                hop.operation,
-                seq,
-                payload,
-            );
-
-            data.queue.send_request(request.clone())
-                .map_err(|e| extism::Error::msg(format!("send error: {}", e)))?;
-
-            // Wait for typed ResponseMessage (ADR 044)
-            loop {
-                if let Ok((response, ack)) = data.queue.receive_response(&request) {
-                    let payload = response.payload.clone();
-                    let _ = ack();
-                    return write_output(plugin, outputs, &payload);
-                }
-                std::thread::sleep(std::time::Duration::from_millis(1));
+        loop {
+            if let Ok((response, ack)) = self.queue.receive_response(&request) {
+                let payload = response.payload.clone();
+                let _ = ack();
+                return Ok(payload);
             }
-        },
-    )
-}
-
-/// Host function: get_prompts() -> JSON string
-///
-/// Returns prompt overrides from the agent's manifest.
-/// Returns empty JSON object if no overrides defined.
-fn make_get_prompts_function() -> Function {
-    Function::new(
-        "get_prompts",
-        [],           // no inputs
-        [extism::PTR], // JSON string
-        UserData::new(()),
-        |plugin, _inputs, outputs, _user_data| {
-            // Return empty object - prompts default to compiled-in values
-            write_output(plugin, outputs, b"{}")
-        },
-    )
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    }
 }
 
 #[cfg(test)]

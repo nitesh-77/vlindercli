@@ -4,5 +4,6 @@
 //! - WasmRuntime: queue-based WASM agent execution
 
 mod wasm;
+mod wasm_plugin;
 
 pub use wasm::WasmRuntime;
