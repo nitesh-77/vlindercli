@@ -117,7 +117,6 @@ mod tests {
 
         // Write to agent-a's storage using typed message (ADR 044)
         let put_a = serde_json::json!({
-            "agent_id": "file:///agent-a.wasm",
             "path": "/data.txt",
             "content": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, b"data for A")
         });
@@ -138,7 +137,6 @@ mod tests {
 
         // Write to agent-b's storage
         let put_b = serde_json::json!({
-            "agent_id": "file:///agent-b.wasm",
             "path": "/data.txt",
             "content": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, b"data for B")
         });
@@ -158,7 +156,7 @@ mod tests {
         ack().unwrap();
 
         // Read from agent-a - gets A's data
-        let get_a = serde_json::json!({ "agent_id": "file:///agent-a.wasm", "path": "/data.txt" });
+        let get_a = serde_json::json!({ "path": "/data.txt" });
         let request_get_a = RequestMessage::new(
             test_submission(),
             ResourceId::new("file:///agent-a.wasm"),
@@ -175,7 +173,7 @@ mod tests {
         ack().unwrap();
 
         // Read from agent-b - gets B's data (isolated)
-        let get_b = serde_json::json!({ "agent_id": "file:///agent-b.wasm", "path": "/data.txt" });
+        let get_b = serde_json::json!({ "path": "/data.txt" });
         let request_get_b = RequestMessage::new(
             test_submission(),
             ResourceId::new("file:///agent-b.wasm"),

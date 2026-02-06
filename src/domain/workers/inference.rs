@@ -22,7 +22,6 @@ use crate::services::inference;
 
 #[derive(Debug, Deserialize)]
 struct InferRequest {
-    agent_id: String,
     model: String,
     prompt: String,
     #[serde(default = "default_max_tokens")]
@@ -90,7 +89,7 @@ impl InferenceServiceWorker {
         };
 
         // Resolve model alias to model_path via agent's manifest
-        let model_path = match self.resolve_model_uri(&req.agent_id, &req.model) {
+        let model_path = match self.resolve_model_uri(request.agent_id.as_str(), &req.model) {
             Ok(uri) => uri,
             Err(e) => return format!("[error] {}", e).into_bytes(),
         };
@@ -213,7 +212,6 @@ mod tests {
 
         // Send typed RequestMessage (ADR 044)
         let payload = serde_json::json!({
-            "agent_id": TEST_AGENT_ID,
             "model": "test-model",
             "prompt": "Hello"
         });
@@ -250,7 +248,6 @@ mod tests {
         handler.register("other-model", engine);
 
         let payload = serde_json::json!({
-            "agent_id": TEST_AGENT_ID,
             "model": "other-model",
             "prompt": "Hello"
         });
@@ -286,7 +283,6 @@ mod tests {
         handler.register("test-model", engine);
 
         let payload = serde_json::json!({
-            "agent_id": "file:///unknown-agent.wasm",
             "model": "test-model",
             "prompt": "Hello"
         });

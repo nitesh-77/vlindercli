@@ -22,7 +22,6 @@ use crate::storage::dispatch::open_vector_storage_from_uri;
 
 #[derive(Debug, Deserialize)]
 struct StoreRequest {
-    agent_id: String,
     key: String,
     vector: Vec<f32>,
     metadata: String,
@@ -30,14 +29,12 @@ struct StoreRequest {
 
 #[derive(Debug, Deserialize)]
 struct SearchRequest {
-    agent_id: String,
     vector: Vec<f32>,
     limit: u32,
 }
 
 #[derive(Debug, Deserialize)]
 struct DeleteRequest {
-    agent_id: String,
     key: String,
 }
 
@@ -148,7 +145,7 @@ impl VectorServiceWorker {
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
 
-        let store = match self.get_or_open(&req.agent_id) {
+        let store = match self.get_or_open(request.agent_id.as_str()) {
             Ok(s) => s,
             Err(e) => return format!("[error] {}", e).into_bytes(),
         };
@@ -166,7 +163,7 @@ impl VectorServiceWorker {
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
 
-        let store = match self.get_or_open(&req.agent_id) {
+        let store = match self.get_or_open(request.agent_id.as_str()) {
             Ok(s) => s,
             Err(e) => return format!("[error] {}", e).into_bytes(),
         };
@@ -184,7 +181,7 @@ impl VectorServiceWorker {
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
 
-        let store = match self.get_or_open(&req.agent_id) {
+        let store = match self.get_or_open(request.agent_id.as_str()) {
             Ok(s) => s,
             Err(e) => return format!("[error] {}", e).into_bytes(),
         };
@@ -243,7 +240,6 @@ mod tests {
         // Store embedding - worker will lazy-open storage from agent's URI
         let embedding: Vec<f32> = (0..768).map(|i| i as f32 * 0.001).collect();
         let store_payload = serde_json::json!({
-            "agent_id": TEST_AGENT_ID,
             "key": "doc1",
             "vector": embedding,
             "metadata": "test document"
@@ -267,7 +263,6 @@ mod tests {
 
         // Search
         let search_payload = serde_json::json!({
-            "agent_id": TEST_AGENT_ID,
             "vector": embedding,
             "limit": 1
         });

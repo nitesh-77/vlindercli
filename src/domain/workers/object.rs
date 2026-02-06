@@ -24,26 +24,22 @@ use crate::storage::dispatch::open_object_storage_from_uri;
 
 #[derive(Debug, Deserialize)]
 struct GetRequest {
-    agent_id: String,
     path: String,
 }
 
 #[derive(Debug, Deserialize)]
 struct PutRequest {
-    agent_id: String,
     path: String,
     content: String, // base64 encoded
 }
 
 #[derive(Debug, Deserialize)]
 struct ListRequest {
-    agent_id: String,
     path: String,
 }
 
 #[derive(Debug, Deserialize)]
 struct DeleteRequest {
-    agent_id: String,
     path: String,
 }
 
@@ -168,7 +164,7 @@ impl ObjectServiceWorker {
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
 
-        let store = match self.get_or_open(&req.agent_id) {
+        let store = match self.get_or_open(request.agent_id.as_str()) {
             Ok(s) => s,
             Err(e) => return format!("[error] {}", e).into_bytes(),
         };
@@ -187,7 +183,7 @@ impl ObjectServiceWorker {
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
 
-        let store = match self.get_or_open(&req.agent_id) {
+        let store = match self.get_or_open(request.agent_id.as_str()) {
             Ok(s) => s,
             Err(e) => return format!("[error] {}", e).into_bytes(),
         };
@@ -211,7 +207,7 @@ impl ObjectServiceWorker {
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
 
-        let store = match self.get_or_open(&req.agent_id) {
+        let store = match self.get_or_open(request.agent_id.as_str()) {
             Ok(s) => s,
             Err(e) => return format!("[error] {}", e).into_bytes(),
         };
@@ -229,7 +225,7 @@ impl ObjectServiceWorker {
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
 
-        let store = match self.get_or_open(&req.agent_id) {
+        let store = match self.get_or_open(request.agent_id.as_str()) {
             Ok(s) => s,
             Err(e) => return format!("[error] {}", e).into_bytes(),
         };
@@ -286,7 +282,6 @@ mod tests {
 
         // Send typed put request (ADR 044)
         let put_payload = serde_json::json!({
-            "agent_id": TEST_AGENT_ID,
             "path": "/hello.txt",
             "content": base64::engine::general_purpose::STANDARD.encode(b"hello world")
         });
@@ -310,7 +305,6 @@ mod tests {
 
         // Send typed get request
         let get_payload = serde_json::json!({
-            "agent_id": TEST_AGENT_ID,
             "path": "/hello.txt"
         });
         let get_request = RequestMessage::new(

@@ -11,7 +11,7 @@
 //!
 //! The runtime handles all routing concerns:
 //! - Extracts `op` from payload to determine target queue
-//! - Injects `agent_id` for storage isolation
+//! - Carries `agent_id` on the message envelope (not in payload)
 //! - Manages reply queue creation and response waiting
 
 use std::sync::Arc;
@@ -163,8 +163,8 @@ struct SendFunctionData {
 ///
 /// Synchronous request/response. The runtime:
 /// - Extracts `op` from payload to determine target queue
-/// - Injects `agent_id` for storage isolation
 /// - Builds typed RequestMessage with submission context (ADR 044)
+/// - `agent_id` is carried on the envelope, not injected into payload
 /// - Returns the response payload directly
 fn make_send_function(
     queue: Arc<dyn MessageQueue + Send + Sync>,
@@ -186,20 +186,14 @@ fn make_send_function(
             let data = user_data.get().unwrap();
             let data = data.lock().unwrap();
 
-            // Parse payload to extract op and inject agent_id
-            let mut json: serde_json::Value = serde_json::from_slice(&payload)
+            // Parse payload to extract op for routing
+            let json: serde_json::Value = serde_json::from_slice(&payload)
                 .map_err(|e| extism::Error::msg(format!("invalid JSON payload: {}", e)))?;
 
-            // Extract op to determine queue
             let op = json.get("op")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| extism::Error::msg("payload missing 'op' field"))?
                 .to_string();
-            
-            // Inject agent_id for storage operations
-            if let Some(obj) = json.as_object_mut() {
-                obj.insert("agent_id".to_string(), serde_json::Value::String(data.invoke.agent_id.as_str().to_string()));
-            }
 
             let (service, backend, operation) = resolve_route(&op, data.kv_backend, data.vec_backend)
                 .map_err(|e| extism::Error::msg(e))?;
@@ -213,9 +207,7 @@ fn make_send_function(
             };
 
             // Build typed RequestMessage (ADR 044)
-            let enriched_payload = serde_json::to_vec(&json)
-                .map_err(|e| extism::Error::msg(format!("serialize error: {}", e)))?;
-
+            // agent_id lives on the envelope, not in the payload
             let request = RequestMessage::new(
                 data.invoke.submission.clone(),
                 data.invoke.agent_id.clone(),
@@ -223,7 +215,7 @@ fn make_send_function(
                 backend,
                 operation,
                 seq,
-                enriched_payload,
+                payload,
             );
 
             data.queue.send_request(request.clone())
