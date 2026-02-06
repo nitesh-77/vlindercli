@@ -21,7 +21,7 @@ use extism::{CurrentPlugin, Function, Manifest, Plugin, UserData, Val, Wasm};
 
 use crate::domain::{Registry, ResourceId, Runtime, RuntimeType};
 use crate::queue::{
-    ExpectsReply, InvokeMessage, MessageQueue, RequestMessage, Sequence, SubmissionId,
+    ExpectsReply, InvokeMessage, MessageQueue, RequestMessage, Sequence,
 };
 
 /// Tracks a WASM execution running in a background thread.
@@ -94,25 +94,30 @@ impl Runtime for WasmRuntime {
             // Try to receive typed InvokeMessage
             if let Ok((invoke, ack)) = self.queue.receive_invoke(&agent.name) {
                 let wasm_path = agent.id.path().unwrap_or(agent.id.as_str()).to_string();
-                let agent_id = agent.id.clone();
                 let queue = Arc::clone(&self.queue);
                 let payload = invoke.payload.clone();
-                let submission = invoke.submission.clone();
 
                 // ACK the message now - we've taken ownership of processing
                 let _ = ack();
 
-                // TECH DEBT: We pass registry to the thread to look up agent config for routing.
-                // This is wasteful - we already have the Agent here. Cleaner approach:
-                // extract (kv_backend, vec_backend) from agent before spawn, pass a closure
-                // to make_send_function. Deferring until we build another runtime (e.g., Docker)
-                // to clarify the contracts between runtime and host functions.
-                let registry_for_thread = Arc::clone(&self.registry);
+                // Extract storage backends from agent config before spawning
+                let kv_backend = agent.object_storage.as_ref()
+                    .and_then(|uri| uri.as_str().split("://").next())
+                    .unwrap_or("memory")
+                    .to_string();
+                let vec_backend = agent.vector_storage.as_ref()
+                    .and_then(|uri| uri.as_str().split("://").next())
+                    .map(|s| if s == "sqlite" { "sqlite-vec" } else { s })
+                    .unwrap_or("memory")
+                    .to_string();
+
+                // Clone invoke for the send function; original stays for RunningTask
+                let invoke_for_send = invoke.clone();
 
                 // Spawn WASM execution in background thread
                 let handle = thread::spawn(move || {
                     let functions = [
-                        make_send_function(Arc::clone(&queue), agent_id, registry_for_thread, submission),
+                        make_send_function(Arc::clone(&queue), invoke_for_send, kv_backend, vec_backend),
                         make_get_prompts_function(),
                     ];
 
@@ -150,10 +155,11 @@ fn write_output(plugin: &mut CurrentPlugin, outputs: &mut [Val], response: &[u8]
 /// Data passed to the send host function
 struct SendFunctionData {
     queue: Arc<dyn MessageQueue + Send + Sync>,
-    agent_id: ResourceId,
-    registry: Arc<dyn Registry>,
-    /// Submission context for typed messages (ADR 044)
-    submission: SubmissionId,
+    /// The invoke that triggered this execution - carries submission + agent_id
+    invoke: InvokeMessage,
+    /// Resolved backend names from agent config (avoids registry lookup per send)
+    kv_backend: String,
+    vec_backend: String,
     /// Sequence counter - incremented per service call
     sequence: Arc<std::sync::Mutex<Sequence>>,
 }
@@ -167,12 +173,12 @@ struct SendFunctionData {
 /// - Returns the response payload directly
 fn make_send_function(
     queue: Arc<dyn MessageQueue + Send + Sync>,
-    agent_id: ResourceId,
-    registry: Arc<dyn Registry>,
-    submission: SubmissionId,
+    invoke: InvokeMessage,
+    kv_backend: String,
+    vec_backend: String,
 ) -> Function {
     let sequence = Arc::new(std::sync::Mutex::new(Sequence::first()));
-    let data = SendFunctionData { queue, agent_id, registry, submission, sequence };
+    let data: SendFunctionData = SendFunctionData { queue, invoke, kv_backend, vec_backend, sequence };
 
     Function::new(
         "send",
@@ -199,11 +205,10 @@ fn make_send_function(
 
             // Inject agent_id for storage operations
             if let Some(obj) = json.as_object_mut() {
-                obj.insert("agent_id".to_string(), serde_json::Value::String(data.agent_id.as_str().to_string()));
+                obj.insert("agent_id".to_string(), serde_json::Value::String(data.invoke.agent_id.as_str().to_string()));
             }
 
-            // Resolve service and backend from operation
-            let (service, backend, operation) = resolve_service_info(&data.registry, data.agent_id.as_str(), &op)?;
+            let (service, backend, operation) = resolve_route(&op, &data.kv_backend, &data.vec_backend);
 
             // Get next sequence number
             let seq = {
@@ -218,8 +223,8 @@ fn make_send_function(
                 .map_err(|e| extism::Error::msg(format!("serialize error: {}", e)))?;
 
             let request = RequestMessage::new(
-                data.submission.clone(),
-                data.agent_id.clone(),
+                data.invoke.submission.clone(),
+                data.invoke.agent_id.clone(),
                 service.clone(),
                 backend.clone(),
                 operation.clone(),
@@ -228,7 +233,7 @@ fn make_send_function(
             );
 
             tracing::debug!(
-                submission = %data.submission,
+                submission = %data.invoke.submission,
                 service = %service,
                 backend = %backend,
                 operation = %operation,
@@ -240,7 +245,7 @@ fn make_send_function(
                 .map_err(|e| extism::Error::msg(format!("send error: {}", e)))?;
 
             // Wait for typed ResponseMessage (ADR 044)
-            let reply_pattern = format!("{}.res.{}.{}", data.submission, service, backend);
+            let reply_pattern = format!("{}.res.{}.{}", data.invoke.submission, service, backend);
             loop {
                 if let Ok((response, ack)) = data.queue.receive_response(&reply_pattern) {
                     let payload = response.payload.clone();
@@ -253,101 +258,27 @@ fn make_send_function(
     )
 }
 
-/// Resolve service, backend, and operation from an op string.
+/// Map an op string to (service, backend, operation) for routing.
 ///
-/// Returns (service, backend, operation) tuple for building typed RequestMessage.
-/// Maps operation names to backend-specific info based on agent configuration:
-/// - `kv-*` operations → look up agent's object_storage URI scheme
-/// - `vector-*` operations → look up agent's vector_storage URI scheme
-/// - `infer`/`embed` → hardcoded to "ollama" (only supported backend for now)
-fn resolve_service_info(
-    registry: &Arc<dyn Registry>,
-    agent_id: &str,
-    op: &str,
-) -> Result<(String, String, String), extism::Error> {
-    // Look up agent from registry
-    let resource_id = ResourceId::new(agent_id);
-    let agent = registry.get_agent(&resource_id)
-        .ok_or_else(|| extism::Error::msg(format!("agent not found: {}", agent_id)))?;
-
-    // Determine service, backend, and operation based on op string
-    let (service, backend, operation) = match op {
-        // KV storage operations
+/// Pure routing table — no I/O, no registry lookups.
+/// - `kv-*` → kv service with agent's configured object storage backend
+/// - `vector-*` → vec service with agent's configured vector storage backend
+/// - `infer`/`embed` → hardcoded to ollama (only supported backend)
+/// - anything else → agent-to-agent message
+fn resolve_route(op: &str, kv_backend: &str, vec_backend: &str) -> (String, String, String) {
+    match op {
         "kv-get" | "kv-put" | "kv-list" | "kv-delete" => {
-            let backend = agent.object_storage.as_ref()
-                .and_then(|uri| uri.as_str().split("://").next())
-                .unwrap_or("memory")
-                .to_string();
             let operation = op.strip_prefix("kv-").unwrap_or(op).to_string();
-            ("kv".to_string(), backend, operation)
+            ("kv".to_string(), kv_backend.to_string(), operation)
         }
-        // Vector storage operations
         "vector-store" | "vector-search" | "vector-delete" => {
-            let backend = agent.vector_storage.as_ref()
-                .and_then(|uri| uri.as_str().split("://").next())
-                .map(|s| if s == "sqlite" { "sqlite-vec" } else { s })
-                .unwrap_or("memory")
-                .to_string();
             let operation = op.strip_prefix("vector-").unwrap_or(op).to_string();
-            ("vec".to_string(), backend, operation)
+            ("vec".to_string(), vec_backend.to_string(), operation)
         }
-        // Inference (currently only ollama supported)
         "infer" => ("infer".to_string(), "ollama".to_string(), "run".to_string()),
-        // Embedding (currently only ollama supported)
         "embed" => ("embed".to_string(), "ollama".to_string(), "run".to_string()),
-        // Unknown operation - treat as agent-to-agent message
         _ => ("agent".to_string(), op.to_string(), String::new()),
-    };
-
-    Ok((service, backend, operation))
-}
-
-/// Resolve the backend-qualified queue name for a service operation.
-///
-/// Maps operation names to backend-specific queues based on agent configuration:
-/// - `kv-*` operations → look up agent's object_storage URI scheme
-/// - `vector-*` operations → look up agent's vector_storage URI scheme
-/// - `infer`/`embed` → hardcoded to "ollama" (only supported backend for now)
-#[allow(dead_code)] // Will be removed after full migration to typed messages
-fn resolve_service_queue(
-    queue: &Arc<dyn MessageQueue + Send + Sync>,
-    registry: &Arc<dyn Registry>,
-    agent_id: &str,
-    op: &str,
-) -> Result<String, extism::Error> {
-    // Look up agent from registry
-    let resource_id = ResourceId::new(agent_id);
-    let agent = registry.get_agent(&resource_id)
-        .ok_or_else(|| extism::Error::msg(format!("agent not found: {}", agent_id)))?;
-
-    // Determine service and backend based on operation
-    let queue_name = match op {
-        // KV storage operations
-        "kv-get" | "kv-put" | "kv-list" | "kv-delete" => {
-            let backend = agent.object_storage.as_ref()
-                .and_then(|uri| uri.as_str().split("://").next())
-                .unwrap_or("memory");
-            let action = op.strip_prefix("kv-").unwrap_or(op);
-            queue.service_queue("kv", backend, action)
-        }
-        // Vector storage operations
-        "vector-store" | "vector-search" | "vector-delete" => {
-            let backend = agent.vector_storage.as_ref()
-                .and_then(|uri| uri.as_str().split("://").next())
-                .map(|s| if s == "sqlite" { "sqlite-vec" } else { s })
-                .unwrap_or("memory");
-            let action = op.strip_prefix("vector-").unwrap_or(op);
-            queue.service_queue("vec", backend, action)
-        }
-        // Inference (currently only ollama supported)
-        "infer" => queue.service_queue("infer", "ollama", ""),
-        // Embedding (currently only ollama supported)
-        "embed" => queue.service_queue("embed", "ollama", ""),
-        // Unknown operation - treat as agent-to-agent message
-        _ => format!("vlinder.agent.{}", op),
-    };
-
-    Ok(queue_name)
+    }
 }
 
 /// Host function: get_prompts() -> JSON string
@@ -379,6 +310,39 @@ mod tests {
 
     fn test_registry() -> Arc<dyn Registry> {
         Arc::new(InMemoryRegistry::new())
+    }
+
+    #[test]
+    fn resolve_route_kv_operations() {
+        let (svc, backend, op) = resolve_route("kv-get", "sqlite", "memory");
+        assert_eq!((svc.as_str(), backend.as_str(), op.as_str()), ("kv", "sqlite", "get"));
+
+        let (svc, backend, op) = resolve_route("kv-put", "memory", "memory");
+        assert_eq!((svc.as_str(), backend.as_str(), op.as_str()), ("kv", "memory", "put"));
+    }
+
+    #[test]
+    fn resolve_route_vector_operations() {
+        let (svc, backend, op) = resolve_route("vector-store", "memory", "sqlite-vec");
+        assert_eq!((svc.as_str(), backend.as_str(), op.as_str()), ("vec", "sqlite-vec", "store"));
+
+        let (svc, backend, op) = resolve_route("vector-search", "memory", "memory");
+        assert_eq!((svc.as_str(), backend.as_str(), op.as_str()), ("vec", "memory", "search"));
+    }
+
+    #[test]
+    fn resolve_route_inference_ignores_backends() {
+        let (svc, backend, op) = resolve_route("infer", "anything", "anything");
+        assert_eq!((svc.as_str(), backend.as_str(), op.as_str()), ("infer", "ollama", "run"));
+
+        let (svc, backend, op) = resolve_route("embed", "anything", "anything");
+        assert_eq!((svc.as_str(), backend.as_str(), op.as_str()), ("embed", "ollama", "run"));
+    }
+
+    #[test]
+    fn resolve_route_unknown_op_is_agent_message() {
+        let (svc, backend, op) = resolve_route("summarize", "sqlite", "sqlite-vec");
+        assert_eq!((svc.as_str(), backend.as_str(), op.as_str()), ("agent", "summarize", ""));
     }
 
     #[test]
