@@ -19,7 +19,7 @@ use std::sync::Arc;
 use crate::config::Config;
 
 pub use message::{
-    MessageId, SubmissionId, Sequence, HarnessType,
+    MessageId, SubmissionId, Sequence, SequenceCounter, HarnessType,
     InvokeMessage, RequestMessage, ResponseMessage, CompleteMessage,
     ExpectsReply, ObservableMessage,
 };

@@ -9,11 +9,11 @@ use serde::Deserialize;
 
 use super::storage::{ObjectStorageType, VectorStorageType};
 
-/// Routing dimensions for a service request.
+/// A single hop in message routing.
 ///
-/// Determines which queue subject a message is sent to.
+/// Determines the next queue subject a message is sent to.
 #[derive(Debug)]
-pub struct Route {
+pub struct Hop {
     pub service: &'static str,
     pub backend: String,
     pub operation: &'static str,
@@ -45,62 +45,62 @@ pub enum SdkMessage {
 fn default_max_tokens() -> u32 { 256 }
 
 impl SdkMessage {
-    /// Determine routing dimensions for this message.
+    /// Determine the next hop for this message.
     ///
     /// Returns Err if the agent calls a storage op without declaring the backend.
-    pub fn route(
+    pub fn hop(
         &self,
         kv_backend: Option<ObjectStorageType>,
         vec_backend: Option<VectorStorageType>,
-    ) -> Result<Route, String> {
+    ) -> Result<Hop, String> {
         match self {
-            SdkMessage::KvGet { .. } => kv_route("get", kv_backend),
-            SdkMessage::KvPut { .. } => kv_route("put", kv_backend),
-            SdkMessage::KvList { .. } => kv_route("list", kv_backend),
-            SdkMessage::KvDelete { .. } => kv_route("delete", kv_backend),
-            SdkMessage::VectorStore { .. } => vec_route("store", vec_backend),
-            SdkMessage::VectorSearch { .. } => vec_route("search", vec_backend),
-            SdkMessage::VectorDelete { .. } => vec_route("delete", vec_backend),
-            SdkMessage::Infer { .. } => Ok(Route { service: "infer", backend: "ollama".to_string(), operation: "run" }),
-            SdkMessage::Embed { .. } => Ok(Route { service: "embed", backend: "ollama".to_string(), operation: "run" }),
+            SdkMessage::KvGet { .. } => kv_hop("get", kv_backend),
+            SdkMessage::KvPut { .. } => kv_hop("put", kv_backend),
+            SdkMessage::KvList { .. } => kv_hop("list", kv_backend),
+            SdkMessage::KvDelete { .. } => kv_hop("delete", kv_backend),
+            SdkMessage::VectorStore { .. } => vec_hop("store", vec_backend),
+            SdkMessage::VectorSearch { .. } => vec_hop("search", vec_backend),
+            SdkMessage::VectorDelete { .. } => vec_hop("delete", vec_backend),
+            SdkMessage::Infer { .. } => Ok(Hop { service: "infer", backend: "ollama".to_string(), operation: "run" }),
+            SdkMessage::Embed { .. } => Ok(Hop { service: "embed", backend: "ollama".to_string(), operation: "run" }),
         }
     }
 }
 
-fn kv_route(operation: &'static str, backend: Option<ObjectStorageType>) -> Result<Route, String> {
+fn kv_hop(operation: &'static str, backend: Option<ObjectStorageType>) -> Result<Hop, String> {
     let backend = backend.ok_or_else(|| format!("agent called kv-{} but has no object_storage configured", operation))?;
-    Ok(Route { service: "kv", backend: backend.as_str().to_string(), operation })
+    Ok(Hop { service: "kv", backend: backend.as_str().to_string(), operation })
 }
 
-fn vec_route(operation: &'static str, backend: Option<VectorStorageType>) -> Result<Route, String> {
+fn vec_hop(operation: &'static str, backend: Option<VectorStorageType>) -> Result<Hop, String> {
     let backend = backend.ok_or_else(|| format!("agent called vector-{} but has no vector_storage configured", operation))?;
-    Ok(Route { service: "vec", backend: backend.as_str().to_string(), operation })
+    Ok(Hop { service: "vec", backend: backend.as_str().to_string(), operation })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Helper: parse JSON into SdkMessage and return its route.
-    fn parse_and_route(
+    /// Helper: parse JSON into SdkMessage and return its hop.
+    fn parse_and_hop(
         json: &str,
         kv: Option<ObjectStorageType>,
         vec: Option<VectorStorageType>,
-    ) -> Result<Route, String> {
+    ) -> Result<Hop, String> {
         let msg: SdkMessage = serde_json::from_str(json)
             .map_err(|e| e.to_string())?;
-        msg.route(kv, vec)
+        msg.hop(kv, vec)
     }
 
     #[test]
     fn kv_operations() {
-        let r = parse_and_route(
+        let r = parse_and_hop(
             r#"{"op": "kv-get", "path": "/data.txt"}"#,
             Some(ObjectStorageType::Sqlite), None,
         ).unwrap();
         assert_eq!((r.service, r.backend.as_str(), r.operation), ("kv", "sqlite", "get"));
 
-        let r = parse_and_route(
+        let r = parse_and_hop(
             r#"{"op": "kv-put", "path": "/data.txt", "content": "aGVsbG8="}"#,
             Some(ObjectStorageType::InMemory), None,
         ).unwrap();
@@ -109,13 +109,13 @@ mod tests {
 
     #[test]
     fn vector_operations() {
-        let r = parse_and_route(
+        let r = parse_and_hop(
             r#"{"op": "vector-store", "key": "doc1", "vector": [0.1], "metadata": "test"}"#,
             None, Some(VectorStorageType::SqliteVec),
         ).unwrap();
         assert_eq!((r.service, r.backend.as_str(), r.operation), ("vec", "sqlite-vec", "store"));
 
-        let r = parse_and_route(
+        let r = parse_and_hop(
             r#"{"op": "vector-search", "vector": [0.1], "limit": 5}"#,
             None, Some(VectorStorageType::InMemory),
         ).unwrap();
@@ -124,7 +124,7 @@ mod tests {
 
     #[test]
     fn kv_without_backend_fails() {
-        let err = parse_and_route(
+        let err = parse_and_hop(
             r#"{"op": "kv-get", "path": "/data.txt"}"#,
             None, None,
         ).unwrap_err();
@@ -133,7 +133,7 @@ mod tests {
 
     #[test]
     fn vector_without_backend_fails() {
-        let err = parse_and_route(
+        let err = parse_and_hop(
             r#"{"op": "vector-store", "key": "k", "vector": [0.1], "metadata": "m"}"#,
             None, None,
         ).unwrap_err();
@@ -142,13 +142,13 @@ mod tests {
 
     #[test]
     fn inference() {
-        let r = parse_and_route(
+        let r = parse_and_hop(
             r#"{"op": "infer", "model": "phi3", "prompt": "hello"}"#,
             None, None,
         ).unwrap();
         assert_eq!((r.service, r.backend.as_str(), r.operation), ("infer", "ollama", "run"));
 
-        let r = parse_and_route(
+        let r = parse_and_hop(
             r#"{"op": "embed", "model": "nomic", "text": "hello"}"#,
             None, None,
         ).unwrap();
@@ -157,7 +157,7 @@ mod tests {
 
     #[test]
     fn unknown_op_fails() {
-        let err = parse_and_route(
+        let err = parse_and_hop(
             r#"{"op": "summarize"}"#,
             None, None,
         ).unwrap_err();
@@ -166,7 +166,7 @@ mod tests {
 
     #[test]
     fn missing_fields_fails() {
-        let err = parse_and_route(
+        let err = parse_and_hop(
             r#"{"op": "kv-put", "path": "/data.txt"}"#,
             Some(ObjectStorageType::Sqlite), None,
         ).unwrap_err();

@@ -109,6 +109,27 @@ impl Sequence {
     }
 }
 
+/// Thread-safe counter that allocates sequential Sequence values.
+///
+/// Each call to `next()` returns the current value and advances.
+/// Starts at 1 (the first valid sequence number).
+pub struct SequenceCounter(std::sync::Mutex<Sequence>);
+
+impl SequenceCounter {
+    /// Create a counter starting at sequence 1.
+    pub fn new() -> Self {
+        Self(std::sync::Mutex::new(Sequence::first()))
+    }
+
+    /// Allocate the next sequence number.
+    pub fn next(&self) -> Sequence {
+        let mut current = self.0.lock().unwrap();
+        let seq = *current;
+        *current = current.next();
+        seq
+    }
+}
+
 impl fmt::Display for Sequence {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)

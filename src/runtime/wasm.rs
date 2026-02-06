@@ -21,7 +21,7 @@ use extism::{CurrentPlugin, Function, Manifest, Plugin, UserData, Val, Wasm};
 
 use crate::domain::{ObjectStorageType, Registry, ResourceId, Runtime, RuntimeType, SdkMessage, VectorStorageType};
 use crate::queue::{
-    ExpectsReply, InvokeMessage, MessageQueue, RequestMessage, Sequence,
+    ExpectsReply, InvokeMessage, MessageQueue, RequestMessage, SequenceCounter,
 };
 
 /// Tracks a WASM execution running in a background thread.
@@ -156,7 +156,7 @@ struct SendFunctionData {
     kv_backend: Option<ObjectStorageType>,
     vec_backend: Option<VectorStorageType>,
     /// Sequence counter - incremented per service call
-    sequence: Arc<std::sync::Mutex<Sequence>>,
+    sequence: SequenceCounter,
 }
 
 /// Host function: send(payload) -> response
@@ -172,7 +172,7 @@ fn make_send_function(
     kv_backend: Option<ObjectStorageType>,
     vec_backend: Option<VectorStorageType>,
 ) -> Function {
-    let sequence = Arc::new(std::sync::Mutex::new(Sequence::first()));
+    let sequence = SequenceCounter::new();
     let data: SendFunctionData = SendFunctionData { queue, invoke, kv_backend, vec_backend, sequence };
 
     Function::new(
@@ -186,29 +186,23 @@ fn make_send_function(
             let data = user_data.get().unwrap();
             let data = data.lock().unwrap();
 
-            // Validate payload against SDK schema and determine route
+            // Validate payload against SDK schema and determine next hop
             let msg: SdkMessage = serde_json::from_slice(&payload)
                 .map_err(|e| extism::Error::msg(format!("invalid SDK message: {}", e)))?;
 
-            let route = msg.route(data.kv_backend, data.vec_backend)
+            let hop = msg.hop(data.kv_backend, data.vec_backend)
                 .map_err(|e| extism::Error::msg(e))?;
 
-            // Get next sequence number
-            let seq = {
-                let mut seq_lock = data.sequence.lock().unwrap();
-                let current = *seq_lock;
-                *seq_lock = seq_lock.next();
-                current
-            };
+            let seq = data.sequence.next();
 
             // Build typed RequestMessage (ADR 044)
             // agent_id lives on the envelope, not in the payload
             let request = RequestMessage::new(
                 data.invoke.submission.clone(),
                 data.invoke.agent_id.clone(),
-                route.service,
-                route.backend,
-                route.operation,
+                hop.service,
+                hop.backend,
+                hop.operation,
                 seq,
                 payload,
             );
