@@ -1,9 +1,10 @@
+use std::path::Path;
+
 use clap::Subcommand;
 
 use vlindercli::catalog::OllamaCatalog;
 use vlindercli::config::{registry_db_path, Config};
-use vlindercli::domain::{ModelCatalog, RegistryRepository};
-use vlindercli::storage::SqliteRegistryRepository;
+use vlindercli::domain::{Model, ModelCatalog, PersistentRegistry, Registry};
 
 #[derive(Subcommand, Debug, PartialEq)]
 pub enum ModelCommand {
@@ -60,25 +61,36 @@ pub fn execute(cmd: ModelCommand) {
 }
 
 fn add(name: &str, catalog: &str, endpoint: &str) {
-    let catalog = match catalog {
-        "ollama" => OllamaCatalog::new(endpoint),
-        other => {
-            eprintln!("Unknown catalog: {}. Supported: ollama", other);
-            return;
+    // If the name looks like a file path, load from manifest directly
+    let model = if Path::new(name).extension().is_some_and(|ext| ext == "toml") {
+        match Model::load(Path::new(name)) {
+            Ok(m) => m,
+            Err(e) => {
+                eprintln!("Failed to load model manifest '{}': {}", name, e);
+                return;
+            }
+        }
+    } else {
+        let catalog = match catalog {
+            "ollama" => OllamaCatalog::new(endpoint),
+            other => {
+                eprintln!("Unknown catalog: {}. Supported: ollama", other);
+                return;
+            }
+        };
+
+        match catalog.resolve(name) {
+            Ok(m) => m,
+            Err(e) => {
+                eprintln!("Failed to resolve model '{}': {}", name, e);
+                return;
+            }
         }
     };
 
-    let model = match catalog.resolve(name) {
-        Ok(m) => m,
-        Err(e) => {
-            eprintln!("Failed to resolve model '{}': {}", name, e);
-            return;
-        }
-    };
-
-    // Persist to registry
+    // Register through PersistentRegistry (writes to both disk and cache)
     let db_path = registry_db_path();
-    let repo = match SqliteRegistryRepository::open(&db_path) {
+    let registry = match PersistentRegistry::open(&db_path) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("Failed to open registry: {}", e);
@@ -86,8 +98,8 @@ fn add(name: &str, catalog: &str, endpoint: &str) {
         }
     };
 
-    if let Err(e) = repo.save_model(&model) {
-        eprintln!("Failed to save model: {}", e);
+    if let Err(e) = registry.register_model(model.clone()) {
+        eprintln!("Failed to register model: {}", e);
         return;
     }
 
@@ -132,7 +144,7 @@ fn registered() {
         return;
     }
 
-    let repo = match SqliteRegistryRepository::open(&db_path) {
+    let registry = match PersistentRegistry::open(&db_path) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("Failed to open registry: {}", e);
@@ -140,27 +152,21 @@ fn registered() {
         }
     };
 
-    match repo.load_models() {
-        Ok(models) => {
-            if models.is_empty() {
-                println!("No models registered yet. Use 'vlinder model add <name>' to add models.");
-                return;
-            }
-            println!("Registered models:");
-            for model in models {
-                println!("  {} ({:?}, {:?})", model.name, model.model_type, model.engine);
-            }
-        }
-        Err(e) => {
-            eprintln!("Failed to load models: {}", e);
-        }
+    let models = registry.get_models();
+    if models.is_empty() {
+        println!("No models registered yet. Use 'vlinder model add <name>' to add models.");
+        return;
+    }
+    println!("Registered models:");
+    for model in models {
+        println!("  {} ({:?}, {:?})", model.name, model.model_type, model.engine);
     }
 }
 
 fn remove(name: &str) {
     let db_path = registry_db_path();
 
-    let repo = match SqliteRegistryRepository::open(&db_path) {
+    let registry = match PersistentRegistry::open(&db_path) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("Failed to open registry: {}", e);
@@ -168,7 +174,7 @@ fn remove(name: &str) {
         }
     };
 
-    match repo.delete_model(name) {
+    match registry.delete_model(name) {
         Ok(true) => println!("Removed model '{}'", name),
         Ok(false) => println!("Model '{}' not found", name),
         Err(e) => eprintln!("Failed to remove model: {}", e),
