@@ -7,6 +7,7 @@ use crate::domain::{Registry, JobStatus as DomainJobStatus, ResourceId};
 use super::proto::{
     self,
     registry_server::Registry as RegistryService,
+    PingRequest, PingResponse,
     GetAgentRequest, GetAgentResponse, GetAgentByNameRequest,
     RegisterAgentRequest, RegisterAgentResponse,
     ListAgentsRequest, ListAgentsResponse,
@@ -37,6 +38,13 @@ impl RegistryServiceServer {
 
 #[tonic::async_trait]
 impl RegistryService for RegistryServiceServer {
+    async fn ping(
+        &self,
+        _request: Request<PingRequest>,
+    ) -> Result<Response<PingResponse>, Status> {
+        Ok(Response::new(PingResponse {}))
+    }
+
     async fn get_agent(
         &self,
         request: Request<GetAgentRequest>,

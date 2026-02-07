@@ -7,6 +7,9 @@ package vlinder.registry;
 // =============================================================================
 
 service Registry {
+  // Health check
+  rpc Ping(PingRequest) returns (PingResponse);
+
   // Agent operations
   rpc GetAgent(GetAgentRequest) returns (GetAgentResponse);
   rpc GetAgentByName(GetAgentByNameRequest) returns (GetAgentResponse);
@@ -24,6 +27,13 @@ service Registry {
   rpc UpdateJobStatus(UpdateJobStatusRequest) returns (UpdateJobStatusResponse);
   rpc ListPendingJobs(ListPendingJobsRequest) returns (ListPendingJobsResponse);
 }
+
+// =============================================================================
+// Health Check
+// =============================================================================
+
+message PingRequest {}
+message PingResponse {}
 
 // =============================================================================
 // Common Types

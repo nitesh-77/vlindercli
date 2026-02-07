@@ -9,7 +9,7 @@ mod client;
 mod convert;
 
 pub use server::RegistryServiceServer;
-pub use client::GrpcRegistryClient;
+pub use client::{GrpcRegistryClient, ping_registry};
 
 /// Generated protobuf types.
 pub mod proto {

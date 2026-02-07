@@ -30,6 +30,32 @@ impl GrpcRegistryClient {
             id: ResourceId::new(addr),
         })
     }
+
+    /// Check if the registry server is reachable.
+    pub fn ping(&self) -> bool {
+        self.runtime.block_on(async {
+            self.client.lock().unwrap()
+                .ping(proto::PingRequest {})
+                .await
+        }).is_ok()
+    }
+}
+
+/// Check if a registry server is ready at the given address.
+///
+/// Creates a temporary connection and sends a Ping. Returns true if the
+/// server responds, false on any connection or transport error.
+pub fn ping_registry(addr: &str) -> bool {
+    let Ok(runtime) = tokio::runtime::Runtime::new() else {
+        return false;
+    };
+
+    runtime.block_on(async {
+        let Ok(mut client) = RegistryClient::connect(addr.to_string()).await else {
+            return false;
+        };
+        client.ping(proto::PingRequest {}).await.is_ok()
+    })
 }
 
 impl Registry for GrpcRegistryClient {

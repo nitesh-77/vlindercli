@@ -8,8 +8,10 @@
 //! to NATS and gRPC independently.
 
 use std::process::{Child, Command, Stdio};
+use std::time::{Duration, Instant};
 
 use crate::config::Config;
+use crate::registry_service::ping_registry;
 use crate::worker_role::WorkerRole;
 
 /// Process manager for distributed worker processes.
@@ -30,9 +32,35 @@ impl Supervisor {
             }
         }
 
-        // Give registry time to bind its gRPC port before clients connect.
+        // Wait for registry to become ready before spawning client workers.
         if counts.registry > 0 {
-            std::thread::sleep(std::time::Duration::from_millis(500));
+            let addr = if config.distributed.registry_addr.starts_with("http://") {
+                config.distributed.registry_addr.clone()
+            } else {
+                format!("http://{}", config.distributed.registry_addr)
+            };
+
+            let deadline = Instant::now() + Duration::from_secs(10);
+            let mut ready = false;
+
+            while Instant::now() < deadline {
+                if ping_registry(&addr) {
+                    ready = true;
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+
+            if !ready {
+                tracing::error!(addr = %addr, "Registry did not become ready within 10s");
+                // Kill already-spawned registry workers and bail
+                for child in &mut workers {
+                    let _ = child.kill();
+                }
+                panic!("Registry failed to start — aborting distributed mode");
+            }
+
+            tracing::info!(addr = %addr, "Registry is ready");
         }
 
         // Agent runtimes
