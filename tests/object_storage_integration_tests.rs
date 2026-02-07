@@ -1,36 +1,35 @@
 //! Integration tests for SqliteObjectStorage.
 //! Tests SQLite-specific behavior: persistence, isolation, security.
 
-use vlindercli::config::agent_dir;
+use tempfile::TempDir;
 use vlindercli::storage::{ObjectStorage, SqliteObjectStorage};
 
 #[test]
 fn sqlite_open_creates_db() {
-    let storage = SqliteObjectStorage::open("test-agent-open").unwrap();
-    drop(storage);
-
-    let _ = std::fs::remove_dir_all(agent_dir("test-agent-open"));
+    let dir = TempDir::new().unwrap();
+    let db_path = dir.path().join("agent.db");
+    let _storage = SqliteObjectStorage::open_at(&db_path).unwrap();
+    assert!(db_path.exists());
 }
 
 /// Verify data persists across close/reopen
 #[test]
 fn sqlite_persistence() {
-    let agent_name = "test-agent-persistence";
+    let dir = TempDir::new().unwrap();
+    let db_path = dir.path().join("agent.db");
 
     // Write data
     {
-        let storage = SqliteObjectStorage::open(agent_name).unwrap();
+        let storage = SqliteObjectStorage::open_at(&db_path).unwrap();
         storage.put_file("/persistent.txt", b"survives restart").unwrap();
     } // storage dropped, connection closed
 
     // Reopen and verify data persists
     {
-        let storage = SqliteObjectStorage::open(agent_name).unwrap();
+        let storage = SqliteObjectStorage::open_at(&db_path).unwrap();
         let content = storage.get_file("/persistent.txt").unwrap();
         assert_eq!(content, Some(b"survives restart".to_vec()));
     }
-
-    let _ = std::fs::remove_dir_all(agent_dir(agent_name));
 }
 
 /// Security test: Agents cannot access host filesystem via path traversal.
@@ -38,7 +37,9 @@ fn sqlite_persistence() {
 /// not real filesystem paths.
 #[test]
 fn sqlite_cannot_read_host_filesystem() {
-    let storage = SqliteObjectStorage::open("test-agent-security").unwrap();
+    let dir = TempDir::new().unwrap();
+    let db_path = dir.path().join("agent.db");
+    let storage = SqliteObjectStorage::open_at(&db_path).unwrap();
 
     // Attempt to read host files - should return None
     // because these are just database keys, not real paths
@@ -50,16 +51,15 @@ fn sqlite_cannot_read_host_filesystem() {
     // Verify list_files doesn't expose host directories
     let system_files = storage.list_files("/System").unwrap();
     assert!(system_files.is_empty());
-
-    drop(storage);
-    let _ = std::fs::remove_dir_all(agent_dir("test-agent-security"));
 }
 
 /// Security test: Each agent's storage is isolated
 #[test]
 fn sqlite_agent_isolation() {
-    let storage_a = SqliteObjectStorage::open("test-agent-isolated-a").unwrap();
-    let storage_b = SqliteObjectStorage::open("test-agent-isolated-b").unwrap();
+    let dir_a = TempDir::new().unwrap();
+    let dir_b = TempDir::new().unwrap();
+    let storage_a = SqliteObjectStorage::open_at(&dir_a.path().join("agent.db")).unwrap();
+    let storage_b = SqliteObjectStorage::open_at(&dir_b.path().join("agent.db")).unwrap();
 
     // Agent A writes a secret
     storage_a.put_file("/secret.txt", b"agent-a-secret").unwrap();
@@ -79,9 +79,4 @@ fn sqlite_agent_isolation() {
         storage_b.get_file("/secret.txt").unwrap(),
         Some(b"agent-b-secret".to_vec())
     );
-
-    drop(storage_a);
-    drop(storage_b);
-    let _ = std::fs::remove_dir_all(agent_dir("test-agent-isolated-a"));
-    let _ = std::fs::remove_dir_all(agent_dir("test-agent-isolated-b"));
 }

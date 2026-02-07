@@ -1,7 +1,7 @@
 //! Integration tests for SqliteVectorStorage.
 //! Tests SQLite-specific behavior: persistence, sqlite-vec functionality.
 
-use vlindercli::config::agent_dir;
+use tempfile::TempDir;
 use vlindercli::storage::{VectorStorage, SqliteVectorStorage};
 
 /// Create a 768-dim test vector
@@ -11,7 +11,9 @@ fn make_test_vector(seed: f32) -> Vec<f32> {
 
 #[test]
 fn sqlite_store_and_search() {
-    let storage = SqliteVectorStorage::open("test-agent-vec").unwrap();
+    let dir = TempDir::new().unwrap();
+    let db_path = dir.path().join("agent.db");
+    let storage = SqliteVectorStorage::open_at(&db_path).unwrap();
 
     let vec1 = make_test_vector(1.0);
     let vec2 = make_test_vector(2.0);
@@ -26,38 +28,36 @@ fn sqlite_store_and_search() {
     assert_eq!(results.len(), 3);
     assert_eq!(results[0].0, "doc1"); // Exact match first
     assert_eq!(results[0].1, "first document");
-
-    drop(storage);
-    let _ = std::fs::remove_dir_all(agent_dir("test-agent-vec"));
 }
 
 /// Verify data persists across close/reopen
 #[test]
 fn sqlite_persistence() {
-    let agent_name = "test-agent-vec-persist";
+    let dir = TempDir::new().unwrap();
+    let db_path = dir.path().join("agent.db");
     let vec1 = make_test_vector(1.0);
 
     // Store embedding
     {
-        let storage = SqliteVectorStorage::open(agent_name).unwrap();
+        let storage = SqliteVectorStorage::open_at(&db_path).unwrap();
         storage.store_embedding("persistent", &vec1, "survives restart").unwrap();
     } // storage dropped, connection closed
 
     // Reopen and verify data persists
     {
-        let storage = SqliteVectorStorage::open(agent_name).unwrap();
+        let storage = SqliteVectorStorage::open_at(&db_path).unwrap();
         let results = storage.search_by_vector(&vec1, 1).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].0, "persistent");
         assert_eq!(results[0].1, "survives restart");
     }
-
-    let _ = std::fs::remove_dir_all(agent_dir(agent_name));
 }
 
 #[test]
 fn sqlite_overwrite() {
-    let storage = SqliteVectorStorage::open("test-agent-vec-overwrite").unwrap();
+    let dir = TempDir::new().unwrap();
+    let db_path = dir.path().join("agent.db");
+    let storage = SqliteVectorStorage::open_at(&db_path).unwrap();
 
     let vec1 = make_test_vector(1.0);
     let vec2 = make_test_vector(2.0);
@@ -70,14 +70,13 @@ fn sqlite_overwrite() {
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].0, "doc");
     assert_eq!(results[0].1, "updated");
-
-    drop(storage);
-    let _ = std::fs::remove_dir_all(agent_dir("test-agent-vec-overwrite"));
 }
 
 #[test]
 fn sqlite_delete() {
-    let storage = SqliteVectorStorage::open("test-agent-vec-del").unwrap();
+    let dir = TempDir::new().unwrap();
+    let db_path = dir.path().join("agent.db");
+    let storage = SqliteVectorStorage::open_at(&db_path).unwrap();
 
     let vec1 = make_test_vector(1.0);
     storage.store_embedding("to-delete", &vec1, "temp").unwrap();
@@ -90,16 +89,15 @@ fn sqlite_delete() {
 
     let results = storage.search_by_vector(&vec1, 1).unwrap();
     assert_eq!(results.len(), 0);
-
-    drop(storage);
-    let _ = std::fs::remove_dir_all(agent_dir("test-agent-vec-del"));
 }
 
 /// Security test: Each agent's vector storage is isolated
 #[test]
 fn sqlite_agent_isolation() {
-    let storage_a = SqliteVectorStorage::open("test-agent-vec-isolated-a").unwrap();
-    let storage_b = SqliteVectorStorage::open("test-agent-vec-isolated-b").unwrap();
+    let dir_a = TempDir::new().unwrap();
+    let dir_b = TempDir::new().unwrap();
+    let storage_a = SqliteVectorStorage::open_at(&dir_a.path().join("agent.db")).unwrap();
+    let storage_b = SqliteVectorStorage::open_at(&dir_b.path().join("agent.db")).unwrap();
 
     let vec1 = make_test_vector(1.0);
 
@@ -119,9 +117,4 @@ fn sqlite_agent_isolation() {
 
     let results_b = storage_b.search_by_vector(&vec1, 1).unwrap();
     assert_eq!(results_b[0].1, "agent-b-data");
-
-    drop(storage_a);
-    drop(storage_b);
-    let _ = std::fs::remove_dir_all(agent_dir("test-agent-vec-isolated-a"));
-    let _ = std::fs::remove_dir_all(agent_dir("test-agent-vec-isolated-b"));
 }

@@ -463,7 +463,8 @@ mod tests {
     #[test]
     fn env_override_ollama_endpoint() {
         std::env::set_var("VLINDER_OLLAMA_ENDPOINT", "http://remote:11434");
-        let config = Config::load();
+        let mut config = Config::default();
+        config.apply_env_overrides();
         std::env::remove_var("VLINDER_OLLAMA_ENDPOINT");
 
         assert_eq!(config.ollama.endpoint, "http://remote:11434");
@@ -501,7 +502,8 @@ mod tests {
     fn env_override_distributed_enabled() {
         std::env::set_var("VLINDER_DISTRIBUTED_ENABLED", "true");
         std::env::set_var("VLINDER_DISTRIBUTED_REGISTRY_ADDR", "http://remote:9090");
-        let config = Config::load();
+        let mut config = Config::default();
+        config.apply_env_overrides();
         std::env::remove_var("VLINDER_DISTRIBUTED_ENABLED");
         std::env::remove_var("VLINDER_DISTRIBUTED_REGISTRY_ADDR");
 
@@ -513,7 +515,8 @@ mod tests {
     fn env_override_worker_counts() {
         std::env::set_var("VLINDER_WORKERS_AGENT_CONTAINER", "4");
         std::env::set_var("VLINDER_WORKERS_INFERENCE_OLLAMA", "2");
-        let config = Config::load();
+        let mut config = Config::default();
+        config.apply_env_overrides();
         std::env::remove_var("VLINDER_WORKERS_AGENT_CONTAINER");
         std::env::remove_var("VLINDER_WORKERS_INFERENCE_OLLAMA");
 
