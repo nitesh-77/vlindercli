@@ -24,8 +24,8 @@ pub enum ModelCommand {
         endpoint: Option<String>,
     },
 
-    /// List models from a catalog
-    List {
+    /// List models available in a catalog
+    Available {
         /// Catalog to query
         #[arg(short, long, default_value = "ollama")]
         catalog: String,
@@ -36,7 +36,7 @@ pub enum ModelCommand {
     },
 
     /// List registered models (added via `model add`)
-    Registered,
+    List,
 
     /// Remove a registered model
     Remove {
@@ -67,11 +67,11 @@ pub fn execute(cmd: ModelCommand) {
             println!("  Engine: {:?}", model.engine);
             println!("  Path:   {}", model.model_path);
         }
-        ModelCommand::List { catalog, endpoint } => {
+        ModelCommand::Available { catalog, endpoint } => {
             let endpoint = endpoint.unwrap_or_else(|| config.ollama.endpoint.clone());
-            list(&catalog, &endpoint)
+            list_available(&catalog, &endpoint)
         }
-        ModelCommand::Registered => {
+        ModelCommand::List => {
             let registry = open_registry(&config);
             let Some(registry) = registry else { return };
 
@@ -161,7 +161,7 @@ fn resolve_model(name: &str, catalog: &str, endpoint: &str) -> Option<Model> {
     }
 }
 
-fn list(catalog: &str, endpoint: &str) {
+fn list_available(catalog: &str, endpoint: &str) {
     let catalog = match catalog {
         "ollama" => OllamaCatalog::new(endpoint),
         other => {
@@ -223,6 +223,20 @@ mod tests {
         }
 
         let cli = TestCli::try_parse_from(["test", "list"]).unwrap();
-        assert!(matches!(cli.cmd, ModelCommand::List { .. }));
+        assert!(matches!(cli.cmd, ModelCommand::List));
+    }
+
+    #[test]
+    fn parses_available_command() {
+        use clap::Parser;
+
+        #[derive(Parser)]
+        struct TestCli {
+            #[command(subcommand)]
+            cmd: ModelCommand,
+        }
+
+        let cli = TestCli::try_parse_from(["test", "available"]).unwrap();
+        assert!(matches!(cli.cmd, ModelCommand::Available { .. }));
     }
 }
