@@ -128,6 +128,11 @@ impl SequenceCounter {
         *current = current.next();
         seq
     }
+
+    /// Reset the counter back to sequence 1.
+    pub fn reset(&self) {
+        *self.0.lock().unwrap() = Sequence::first();
+    }
 }
 
 impl fmt::Display for Sequence {

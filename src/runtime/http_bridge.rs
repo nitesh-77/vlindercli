@@ -42,6 +42,7 @@ pub(crate) struct HttpBridge {
     port: u16,
     stop_flag: Arc<AtomicBool>,
     handle: Option<JoinHandle<()>>,
+    send_data: Arc<SendFunctionData>,
 }
 
 impl HttpBridge {
@@ -57,15 +58,22 @@ impl HttpBridge {
         let stop_flag = Arc::new(AtomicBool::new(false));
         let stop = Arc::clone(&stop_flag);
 
+        let bridge_data = Arc::clone(&send_data);
         let handle = std::thread::spawn(move || {
-            run_bridge(listener, send_data, stop);
+            run_bridge(listener, bridge_data, stop);
         });
 
         Ok(Self {
             port,
             stop_flag,
             handle: Some(handle),
+            send_data,
         })
+    }
+
+    /// Update the invoke context for a new invocation.
+    pub(crate) fn update_invoke(&self, invoke: crate::queue::InvokeMessage) {
+        self.send_data.update_invoke(invoke);
     }
 
     /// The port the bridge is listening on.
@@ -267,7 +275,7 @@ mod tests {
         );
         Arc::new(SendFunctionData {
             queue,
-            invoke,
+            invoke: std::sync::RwLock::new(invoke),
             kv_backend: None,
             vec_backend: None,
             model_backends: std::collections::HashMap::new(),

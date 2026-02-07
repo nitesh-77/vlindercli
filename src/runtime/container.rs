@@ -64,6 +64,7 @@ impl ContainerRuntime {
     /// Ensure a container is running for this agent. Starts one lazily if needed.
     fn ensure_container(&mut self, agent: &Agent, invoke: &InvokeMessage) -> Result<u16, String> {
         if let Some(mc) = self.containers.get(&agent.name) {
+            mc.bridge.update_invoke(invoke.clone());
             return Ok(mc.host_port);
         }
 
@@ -84,7 +85,7 @@ impl ContainerRuntime {
         // Create SendFunctionData for the bridge
         let send_data = Arc::new(SendFunctionData {
             queue: Arc::clone(&self.queue),
-            invoke: invoke.clone(),
+            invoke: std::sync::RwLock::new(invoke.clone()),
             kv_backend,
             vec_backend,
             model_backends,
