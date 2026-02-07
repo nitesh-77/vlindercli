@@ -6,7 +6,7 @@ use clap::Subcommand;
 use vlindercli::config::Config;
 use vlindercli::domain::{CliHarness, Daemon, Harness, Registry};
 use vlindercli::queue::{MessageQueue, NatsQueue};
-use vlindercli::registry_service::GrpcRegistryClient;
+use vlindercli::registry_service::{GrpcRegistryClient, ping_registry};
 
 use super::repl;
 
@@ -82,9 +82,6 @@ fn run_distributed(path: Option<PathBuf>, config: &Config) {
         .canonicalize()
         .expect("Failed to resolve agent path");
 
-    tracing::info!("Connecting to distributed daemon...");
-
-    // Connect to remote registry via gRPC
     // Ensure URL has scheme (tonic requires it)
     let registry_addr = if config.distributed.registry_addr.starts_with("http://")
         || config.distributed.registry_addr.starts_with("https://") {
@@ -92,6 +89,12 @@ fn run_distributed(path: Option<PathBuf>, config: &Config) {
     } else {
         format!("http://{}", config.distributed.registry_addr)
     };
+
+    // Check registry is reachable before proceeding
+    if ping_registry(&registry_addr).is_none() {
+        eprintln!("Cannot reach registry at {}. Is the daemon running?", registry_addr);
+        std::process::exit(1);
+    }
 
     let registry: Arc<dyn Registry> = Arc::new(
         GrpcRegistryClient::connect(&registry_addr)
