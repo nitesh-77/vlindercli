@@ -19,6 +19,7 @@ mod harness;
 mod inference;
 mod model;
 mod provider;
+mod persistent_registry;
 mod registry;
 mod registry_repository;
 mod runtime;
@@ -115,5 +116,6 @@ pub use harness::{Harness, CliHarness};
 
 pub use daemon::Daemon;
 pub use supervisor::Supervisor;
+pub use persistent_registry::PersistentRegistry;
 pub use registry::{InMemoryRegistry, Job, JobId, JobStatus, RegistrationError, Registry};
 pub use registry_repository::{RegistryRepository, RepositoryError, StoredModel};
