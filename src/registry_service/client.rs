@@ -231,6 +231,9 @@ impl Registry for GrpcRegistryClient {
         }).map_err(|e| RegistrationError::Persistence(e.to_string()))?;
 
         let resp = response.into_inner();
+        if let Some(error) = resp.error {
+            return Err(RegistrationError::Persistence(error));
+        }
         Ok(resp.deleted)
     }
 

@@ -74,6 +74,8 @@ pub enum RegistrationError {
     VectorStorageUnavailable(VectorStorageType),
     /// Agent requires a model that is not registered.
     ModelNotRegistered(String),
+    /// Model cannot be removed because deployed agents depend on it.
+    ModelInUse(String, Vec<String>),
     /// Persistence operation failed (disk I/O, database error, etc.).
     Persistence(String),
 }
@@ -88,6 +90,7 @@ impl std::fmt::Display for RegistrationError {
             RegistrationError::UnknownVectorStorageScheme(s) => write!(f, "unknown vector storage scheme: {}", s),
             RegistrationError::VectorStorageUnavailable(t) => write!(f, "vector storage not available: {:?}", t),
             RegistrationError::ModelNotRegistered(name) => write!(f, "model not registered: {}", name),
+            RegistrationError::ModelInUse(name, agents) => write!(f, "model '{}' is in use by agents: {}", name, agents.join(", ")),
             RegistrationError::Persistence(msg) => write!(f, "persistence error: {}", msg),
         }
     }
@@ -351,7 +354,24 @@ impl Registry for InMemoryRegistry {
     }
 
     fn delete_model(&self, name: &str) -> Result<bool, RegistrationError> {
-        Ok(self.remove_model(name))
+        let model_id = self.model_id(name);
+        let mut state = self.state.write().unwrap();
+
+        let Some(model) = state.models.get(&model_id) else {
+            return Ok(false);
+        };
+
+        let dependent: Vec<String> = state.agents.values()
+            .filter(|a| a.requirements.models.values().any(|uri| uri == &model.model_path))
+            .map(|a| a.name.clone())
+            .collect();
+
+        if !dependent.is_empty() {
+            return Err(RegistrationError::ModelInUse(name.to_string(), dependent));
+        }
+
+        state.models.remove(&model_id);
+        Ok(true)
     }
 
     // --- Job operations ---

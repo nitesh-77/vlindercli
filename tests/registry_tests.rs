@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use vlindercli::domain::{Agent, InMemoryRegistry, Registry, RuntimeType};
+use vlindercli::domain::{Agent, EngineType, InMemoryRegistry, Model, ModelType, Registry, RegistrationError, ResourceId, RuntimeType};
 
 const FIXTURES: &str = "tests/fixtures/agents";
 
@@ -59,4 +59,73 @@ fn select_runtime_returns_none_without_registered_runtime() {
 
     // No Container runtime available
     assert_eq!(registry.select_runtime(&agent), None);
+}
+
+// ============================================================================
+// Model Deletion Tests
+// ============================================================================
+
+fn register_model_test_agent(registry: &InMemoryRegistry) {
+    // model-test-agent requires phi3 and nomic-embed with these exact URIs
+    let phi3 = Model {
+        id: Model::placeholder_id("phi3"),
+        name: "phi3".to_string(),
+        model_type: ModelType::Inference,
+        engine: EngineType::Ollama,
+        model_path: ResourceId::new("http://127.0.0.1:9000/models/phi3"),
+        digest: String::new(),
+    };
+    let nomic = Model {
+        id: Model::placeholder_id("nomic-embed"),
+        name: "nomic-embed".to_string(),
+        model_type: ModelType::Embedding,
+        engine: EngineType::Ollama,
+        model_path: ResourceId::new("http://127.0.0.1:9000/models/nomic-embed"),
+        digest: String::new(),
+    };
+
+    registry.register_runtime(RuntimeType::Container);
+    registry.register_model(phi3).unwrap();
+    registry.register_model(nomic).unwrap();
+    registry.register_agent(load_agent("model-test-agent")).unwrap();
+}
+
+#[test]
+fn delete_model_blocked_by_deployed_agent() {
+    let registry = InMemoryRegistry::new();
+    register_model_test_agent(&registry);
+
+    let result = registry.delete_model("phi3");
+    assert!(result.is_err());
+
+    let err = result.unwrap_err();
+    match err {
+        RegistrationError::ModelInUse(name, agents) => {
+            assert_eq!(name, "phi3");
+            assert!(agents.contains(&"model-test-agent".to_string()));
+        }
+        other => panic!("expected ModelInUse, got: {}", other),
+    }
+
+    // Model still exists
+    assert!(registry.get_model("phi3").is_some());
+}
+
+#[test]
+fn delete_model_succeeds_without_dependent_agents() {
+    let registry = InMemoryRegistry::new();
+
+    let model = Model {
+        id: Model::placeholder_id("unused"),
+        name: "unused".to_string(),
+        model_type: ModelType::Inference,
+        engine: EngineType::Ollama,
+        model_path: ResourceId::new("ollama://localhost:11434/unused"),
+        digest: String::new(),
+    };
+    registry.register_model(model).unwrap();
+
+    let deleted = registry.delete_model("unused").unwrap();
+    assert!(deleted);
+    assert!(registry.get_model("unused").is_none());
 }

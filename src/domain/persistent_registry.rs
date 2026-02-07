@@ -111,6 +111,23 @@ impl Registry for PersistentRegistry {
     }
 
     fn delete_model(&self, name: &str) -> Result<bool, RegistrationError> {
+        // Check if model exists
+        let Some(model) = self.inner.get_model(name) else {
+            return Ok(false);
+        };
+
+        // Check for dependent agents before deleting
+        let agents = self.inner.get_agents();
+        let dependent: Vec<String> = agents.iter()
+            .filter(|a| a.requirements.models.values().any(|uri| uri == &model.model_path))
+            .map(|a| a.name.clone())
+            .collect();
+
+        if !dependent.is_empty() {
+            return Err(RegistrationError::ModelInUse(name.to_string(), dependent));
+        }
+
+        // Disk first, then cache
         let deleted = self.repo.delete_model(name)
             .map_err(|e| RegistrationError::Persistence(e.to_string()))?;
 
