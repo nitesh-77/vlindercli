@@ -13,12 +13,11 @@
 use std::sync::Arc;
 
 use crate::config::registry_db_path;
-use crate::domain::{EngineType, InMemoryRegistry, ObjectStorageType, Provider, RegistryRepository, Runtime, RuntimeType, VectorStorageType};
+use crate::domain::{EngineType, ObjectStorageType, PersistentRegistry, Provider, Runtime, RuntimeType, VectorStorageType};
 use crate::domain::harness::CliHarness;
 use crate::domain::registry::Registry;
 use crate::queue;
 use crate::runtime::ContainerRuntime;
-use crate::storage::SqliteRegistryRepository;
 
 /// The daemon - owns all system components for local (single-process) mode.
 pub struct Daemon {
@@ -42,32 +41,23 @@ impl Daemon {
     pub fn new() -> Self {
         let queue = queue::from_config()
             .expect("Failed to create queue from config");
-        let registry = InMemoryRegistry::new();
+        let db_path = registry_db_path();
+        let registry = PersistentRegistry::open(&db_path)
+            .unwrap_or_else(|e| panic!("Failed to initialize registry: {}", e));
         let registry_id = registry.id();
 
-        // Register available runtimes
+        // Register available capabilities
         registry.register_runtime(RuntimeType::Container);
-
-        // Register available object storage implementations
         registry.register_object_storage(ObjectStorageType::Sqlite);
         registry.register_object_storage(ObjectStorageType::InMemory);
-
-        // Register available vector storage implementations
         registry.register_vector_storage(VectorStorageType::SqliteVec);
         registry.register_vector_storage(VectorStorageType::InMemory);
-
-        // Register available inference engine implementations
         registry.register_inference_engine(EngineType::Llama);
         registry.register_inference_engine(EngineType::Ollama);
         registry.register_inference_engine(EngineType::InMemory);
-
-        // Register available embedding engine implementations
         registry.register_embedding_engine(EngineType::Llama);
         registry.register_embedding_engine(EngineType::Ollama);
         registry.register_embedding_engine(EngineType::InMemory);
-
-        // Load registered models from persistent storage
-        Self::load_registered_models(&registry);
 
         let registry: Arc<dyn Registry> = Arc::new(registry);
 
@@ -85,24 +75,6 @@ impl Daemon {
         self.provider.tick();
         self.harness.tick();
     }
-
-    /// Load models from the persistent registry.
-    fn load_registered_models(registry: &dyn Registry) {
-        let db_path = registry_db_path();
-        if !db_path.exists() {
-            return;
-        }
-
-        let repo = SqliteRegistryRepository::open(&db_path)
-            .unwrap_or_else(|e| panic!("Failed to open registry.db at '{}': {}", db_path.display(), e));
-
-        let models = repo.load_models()
-            .unwrap_or_else(|e| panic!("Failed to load models from registry.db: {}", e));
-        for model in models {
-            registry.register_model(model)
-                .unwrap_or_else(|e| panic!("Failed to register model: {}", e));
-        }
-    }
 }
 
 impl Default for Daemon {
@@ -115,7 +87,8 @@ impl Default for Daemon {
 mod tests {
     use super::*;
     use crate::domain::harness::Harness;
-    use crate::domain::{Model, ModelType, ResourceId};
+    use crate::domain::{Model, ModelType, RegistryRepository, ResourceId};
+    use crate::storage::SqliteRegistryRepository;
     use tempfile::TempDir;
 
     #[test]
