@@ -12,8 +12,8 @@
 
 use std::sync::Arc;
 
-use crate::config::registry_db_path;
-use crate::domain::{EngineType, ObjectStorageType, PersistentRegistry, Provider, Runtime, RuntimeType, VectorStorageType};
+use crate::config::{registry_db_path, Config};
+use crate::domain::{ObjectStorageType, PersistentRegistry, Provider, Runtime, RuntimeType, VectorStorageType};
 use crate::domain::harness::CliHarness;
 use crate::domain::registry::Registry;
 use crate::queue;
@@ -39,26 +39,20 @@ impl Daemon {
 
 impl Daemon {
     pub fn new() -> Self {
+        let config = Config::load();
         let queue = queue::from_config()
             .expect("Failed to create queue from config");
         let db_path = registry_db_path();
-        let registry = PersistentRegistry::open(&db_path)
+        let registry = PersistentRegistry::open(&db_path, &config)
             .unwrap_or_else(|e| panic!("Failed to initialize registry: {}", e));
         let registry_id = registry.id();
 
-        // Register available capabilities
+        // Register non-engine capabilities (engines are registered by open())
         registry.register_runtime(RuntimeType::Container);
         registry.register_object_storage(ObjectStorageType::Sqlite);
         registry.register_object_storage(ObjectStorageType::InMemory);
         registry.register_vector_storage(VectorStorageType::SqliteVec);
         registry.register_vector_storage(VectorStorageType::InMemory);
-        registry.register_inference_engine(EngineType::Llama);
-        registry.register_inference_engine(EngineType::Ollama);
-        registry.register_inference_engine(EngineType::OpenRouter);
-        registry.register_inference_engine(EngineType::InMemory);
-        registry.register_embedding_engine(EngineType::Llama);
-        registry.register_embedding_engine(EngineType::Ollama);
-        registry.register_embedding_engine(EngineType::InMemory);
 
         let registry: Arc<dyn Registry> = Arc::new(registry);
 
@@ -88,7 +82,7 @@ impl Default for Daemon {
 mod tests {
     use super::*;
     use crate::domain::harness::Harness;
-    use crate::domain::{Model, ModelType, RegistryRepository, ResourceId};
+    use crate::domain::{EngineType, Model, ModelType, RegistryRepository, ResourceId};
     use crate::storage::SqliteRegistryRepository;
     use tempfile::TempDir;
 

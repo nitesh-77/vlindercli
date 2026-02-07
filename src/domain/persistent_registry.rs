@@ -8,6 +8,7 @@
 
 use std::path::Path;
 
+use crate::config::Config;
 use crate::domain::{
     Agent, EngineType, Model, ObjectStorageType, RegistrationError,
     RegistryRepository, ResourceId, RuntimeType, VectorStorageType,
@@ -28,9 +29,10 @@ pub struct PersistentRegistry {
 impl PersistentRegistry {
     /// Open a persistent registry backed by SQLite at the given path.
     ///
-    /// Creates the database if it doesn't exist. Loads all existing models
-    /// into memory. Fails fast with a clear error on any failure.
-    pub fn open(db_path: &Path) -> Result<Self, RegistrationError> {
+    /// Registers engine capabilities from config first, then loads all
+    /// existing models from disk (validating each against available engines).
+    /// Fails fast with a clear error on any failure.
+    pub fn open(db_path: &Path, config: &Config) -> Result<Self, RegistrationError> {
         let repo = SqliteRegistryRepository::open(db_path)
             .map_err(|e| RegistrationError::Persistence(
                 format!("failed to open registry database '{}': {}", db_path.display(), e)
@@ -38,6 +40,18 @@ impl PersistentRegistry {
 
         let inner = InMemoryRegistry::new();
 
+        // Register engine capabilities BEFORE loading models so validation works
+        if config.distributed.workers.inference.ollama > 0 {
+            inner.register_inference_engine(EngineType::Ollama);
+        }
+        if config.distributed.workers.inference.openrouter > 0 {
+            inner.register_inference_engine(EngineType::OpenRouter);
+        }
+        if config.distributed.workers.embedding.ollama > 0 {
+            inner.register_embedding_engine(EngineType::Ollama);
+        }
+
+        // Load persisted models (each validated against registered engines)
         let models = repo.load_models()
             .map_err(|e| RegistrationError::Persistence(
                 format!("failed to load models from '{}': {}", db_path.display(), e)
@@ -86,12 +100,14 @@ impl Registry for PersistentRegistry {
     // --- Model operations (write-through for mutations) ---
 
     fn register_model(&self, model: Model) -> Result<(), RegistrationError> {
-        // Write to disk FIRST (fail-fast)
+        // Validate in-memory first (engine availability check), then persist
+        self.inner.register_model(model.clone())?;
+
+        // Write to disk (model already validated and cached)
         self.repo.save_model(&model)
             .map_err(|e| RegistrationError::Persistence(e.to_string()))?;
 
-        // Then update in-memory cache
-        self.inner.register_model(model)
+        Ok(())
     }
 
     fn get_model(&self, name: &str) -> Option<Model> {
@@ -218,7 +234,7 @@ mod tests {
         let temp = tempfile::TempDir::new().unwrap();
         let db_path = temp.path().join("registry.db");
 
-        let registry = PersistentRegistry::open(&db_path).unwrap();
+        let registry = PersistentRegistry::open(&db_path, &Config::default()).unwrap();
         assert!(registry.get_models().is_empty());
     }
 
@@ -233,7 +249,7 @@ mod tests {
             repo.save_model(&test_model("llama3")).unwrap();
         }
 
-        let registry = PersistentRegistry::open(&db_path).unwrap();
+        let registry = PersistentRegistry::open(&db_path, &Config::default()).unwrap();
         assert!(registry.get_model("llama3").is_some());
     }
 
@@ -242,7 +258,7 @@ mod tests {
         let temp = tempfile::TempDir::new().unwrap();
         let db_path = temp.path().join("registry.db");
 
-        let registry = PersistentRegistry::open(&db_path).unwrap();
+        let registry = PersistentRegistry::open(&db_path, &Config::default()).unwrap();
         registry.register_model(test_model("phi3")).unwrap();
 
         // Verify in-memory
@@ -260,7 +276,7 @@ mod tests {
         let temp = tempfile::TempDir::new().unwrap();
         let db_path = temp.path().join("registry.db");
 
-        let registry = PersistentRegistry::open(&db_path).unwrap();
+        let registry = PersistentRegistry::open(&db_path, &Config::default()).unwrap();
         registry.register_model(test_model("phi3")).unwrap();
         assert!(registry.get_model("phi3").is_some());
 
@@ -280,7 +296,7 @@ mod tests {
         let temp = tempfile::TempDir::new().unwrap();
         let db_path = temp.path().join("registry.db");
 
-        let registry = PersistentRegistry::open(&db_path).unwrap();
+        let registry = PersistentRegistry::open(&db_path, &Config::default()).unwrap();
         let deleted = registry.delete_model("nope").unwrap();
         assert!(!deleted);
     }
@@ -291,7 +307,7 @@ mod tests {
         let db_path = temp.path().join("registry.db");
         std::fs::write(&db_path, b"not a database").unwrap();
 
-        let result = PersistentRegistry::open(&db_path);
+        let result = PersistentRegistry::open(&db_path, &Config::default());
         let err = match result {
             Err(e) => e.to_string(),
             Ok(_) => panic!("expected error for corrupt db"),
@@ -306,13 +322,13 @@ mod tests {
 
         // First "session": add a model
         {
-            let registry = PersistentRegistry::open(&db_path).unwrap();
+            let registry = PersistentRegistry::open(&db_path, &Config::default()).unwrap();
             registry.register_model(test_model("llama3")).unwrap();
         }
 
         // Second "session": model should be there
         {
-            let registry = PersistentRegistry::open(&db_path).unwrap();
+            let registry = PersistentRegistry::open(&db_path, &Config::default()).unwrap();
             let model = registry.get_model("llama3");
             assert!(model.is_some(), "model should survive restart");
             assert_eq!(model.unwrap().name, "llama3");

@@ -13,7 +13,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::RwLock;
 
-use crate::domain::{Agent, EngineType, Model, ObjectStorageType, ResourceId, RuntimeType, VectorStorageType};
+use crate::domain::{Agent, EngineType, Model, ModelType, ObjectStorageType, ResourceId, RuntimeType, VectorStorageType};
 
 /// Unique identifier for a submitted job.
 ///
@@ -74,6 +74,10 @@ pub enum RegistrationError {
     VectorStorageUnavailable(VectorStorageType),
     /// Agent requires a model that is not registered.
     ModelNotRegistered(String),
+    /// Agent requires an inference engine that is not available.
+    InferenceEngineUnavailable(EngineType, String),
+    /// Agent requires an embedding engine that is not available.
+    EmbeddingEngineUnavailable(EngineType, String),
     /// Model cannot be removed because deployed agents depend on it.
     ModelInUse(String, Vec<String>),
     /// Persistence operation failed (disk I/O, database error, etc.).
@@ -90,6 +94,8 @@ impl std::fmt::Display for RegistrationError {
             RegistrationError::UnknownVectorStorageScheme(s) => write!(f, "unknown vector storage scheme: {}", s),
             RegistrationError::VectorStorageUnavailable(t) => write!(f, "vector storage not available: {:?}", t),
             RegistrationError::ModelNotRegistered(name) => write!(f, "model not registered: {}", name),
+            RegistrationError::InferenceEngineUnavailable(engine, model) => write!(f, "inference engine {:?} not available (required by model '{}')", engine, model),
+            RegistrationError::EmbeddingEngineUnavailable(engine, model) => write!(f, "embedding engine {:?} not available (required by model '{}')", engine, model),
             RegistrationError::ModelInUse(name, agents) => write!(f, "model '{}' is in use by agents: {}", name, agents.join(", ")),
             RegistrationError::Persistence(msg) => write!(f, "persistence error: {}", msg),
         }
@@ -287,12 +293,29 @@ impl Registry for InMemoryRegistry {
             }
         }
 
-        // Validate all declared models are registered (by model_path URI)
+        // Validate all declared models are registered and their engines are available
         for (model_alias, manifest_uri) in &agent.requirements.models {
-            let model_exists = state.models.values()
-                .any(|m| &m.model_path == manifest_uri);
-            if !model_exists {
+            let model = state.models.values()
+                .find(|m| &m.model_path == manifest_uri);
+            let Some(model) = model else {
                 return Err(RegistrationError::ModelNotRegistered(model_alias.clone()));
+            };
+
+            match model.model_type {
+                ModelType::Inference => {
+                    if !state.available_inference_engines.contains(&model.engine) {
+                        return Err(RegistrationError::InferenceEngineUnavailable(
+                            model.engine, model.name.clone(),
+                        ));
+                    }
+                }
+                ModelType::Embedding => {
+                    if !state.available_embedding_engines.contains(&model.engine) {
+                        return Err(RegistrationError::EmbeddingEngineUnavailable(
+                            model.engine, model.name.clone(),
+                        ));
+                    }
+                }
             }
         }
 
@@ -323,6 +346,25 @@ impl Registry for InMemoryRegistry {
         let model_id = self.model_id(&model.name);
         model.id = model_id.clone();
         let mut state = self.state.write().unwrap();
+
+        // Validate that the required engine is available
+        match model.model_type {
+            ModelType::Inference => {
+                if !state.available_inference_engines.contains(&model.engine) {
+                    return Err(RegistrationError::InferenceEngineUnavailable(
+                        model.engine, model.name,
+                    ));
+                }
+            }
+            ModelType::Embedding => {
+                if !state.available_embedding_engines.contains(&model.engine) {
+                    return Err(RegistrationError::EmbeddingEngineUnavailable(
+                        model.engine, model.name,
+                    ));
+                }
+            }
+        }
+
         state.models.insert(model_id, model);
         Ok(())
     }

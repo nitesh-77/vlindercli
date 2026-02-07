@@ -85,6 +85,8 @@ fn register_model_test_agent(registry: &InMemoryRegistry) {
     };
 
     registry.register_runtime(RuntimeType::Container);
+    registry.register_inference_engine(EngineType::Ollama);
+    registry.register_embedding_engine(EngineType::Ollama);
     registry.register_model(phi3).unwrap();
     registry.register_model(nomic).unwrap();
     registry.register_agent(load_agent("model-test-agent")).unwrap();
@@ -114,6 +116,7 @@ fn delete_model_blocked_by_deployed_agent() {
 #[test]
 fn delete_model_succeeds_without_dependent_agents() {
     let registry = InMemoryRegistry::new();
+    registry.register_inference_engine(EngineType::Ollama);
 
     let model = Model {
         id: Model::placeholder_id("unused"),
@@ -128,4 +131,58 @@ fn delete_model_succeeds_without_dependent_agents() {
     let deleted = registry.delete_model("unused").unwrap();
     assert!(deleted);
     assert!(registry.get_model("unused").is_none());
+}
+
+// ============================================================================
+// Engine Availability Tests
+// ============================================================================
+
+#[test]
+fn register_model_rejected_without_inference_engine() {
+    let registry = InMemoryRegistry::new();
+    // No inference engine registered
+
+    let model = Model {
+        id: Model::placeholder_id("phi3"),
+        name: "phi3".to_string(),
+        model_type: ModelType::Inference,
+        engine: EngineType::Ollama,
+        model_path: ResourceId::new("http://127.0.0.1:9000/models/phi3"),
+        digest: String::new(),
+    };
+
+    let result = registry.register_model(model);
+    assert!(result.is_err());
+    match result.unwrap_err() {
+        RegistrationError::InferenceEngineUnavailable(engine, model) => {
+            assert_eq!(engine, EngineType::Ollama);
+            assert_eq!(model, "phi3");
+        }
+        other => panic!("expected InferenceEngineUnavailable, got: {}", other),
+    }
+}
+
+#[test]
+fn register_model_rejected_without_embedding_engine() {
+    let registry = InMemoryRegistry::new();
+    // No embedding engine registered
+
+    let model = Model {
+        id: Model::placeholder_id("nomic-embed"),
+        name: "nomic-embed".to_string(),
+        model_type: ModelType::Embedding,
+        engine: EngineType::Ollama,
+        model_path: ResourceId::new("http://127.0.0.1:9000/models/nomic-embed"),
+        digest: String::new(),
+    };
+
+    let result = registry.register_model(model);
+    assert!(result.is_err());
+    match result.unwrap_err() {
+        RegistrationError::EmbeddingEngineUnavailable(engine, model) => {
+            assert_eq!(engine, EngineType::Ollama);
+            assert_eq!(model, "nomic-embed");
+        }
+        other => panic!("expected EmbeddingEngineUnavailable, got: {}", other),
+    }
 }

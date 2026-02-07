@@ -196,6 +196,7 @@ mod tests {
     fn test_registry_with_agent_and_model(agent: Agent, model_name: &str) -> Arc<dyn Registry> {
         let registry = InMemoryRegistry::new();
         registry.register_runtime(crate::domain::RuntimeType::Container);
+        registry.register_inference_engine(EngineType::InMemory);
         registry.register_model(test_model(model_name)).unwrap();
         registry.register_agent(agent).unwrap();
         Arc::new(registry)

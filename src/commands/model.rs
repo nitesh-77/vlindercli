@@ -122,7 +122,7 @@ fn open_registry(config: &Config) -> Option<Arc<dyn Registry>> {
         }
     } else {
         let db_path = registry_db_path();
-        match PersistentRegistry::open(&db_path) {
+        match PersistentRegistry::open(&db_path, config) {
             Ok(r) => Some(Arc::new(r)),
             Err(e) => {
                 eprintln!("Failed to open registry: {}", e);

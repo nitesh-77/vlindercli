@@ -60,26 +60,19 @@ pub fn run_worker_loop(role: WorkerRole, shutdown: Arc<AtomicBool>) {
 fn run_registry_worker(config: &Config, shutdown: &AtomicBool) {
     use tonic::transport::Server;
     use crate::config::registry_db_path;
-    use crate::domain::{PersistentRegistry, RuntimeType, ObjectStorageType, VectorStorageType, EngineType};
+    use crate::domain::{PersistentRegistry, RuntimeType, ObjectStorageType, VectorStorageType};
     use crate::registry_service::RegistryServiceServer;
 
     let db_path = registry_db_path();
-    let registry = PersistentRegistry::open(&db_path)
+    let registry = PersistentRegistry::open(&db_path, config)
         .unwrap_or_else(|e| panic!("Failed to initialize registry: {}", e));
 
-    // Register available capabilities (same as Daemon::new)
+    // Register non-engine capabilities (engines are registered by open())
     registry.register_runtime(RuntimeType::Container);
     registry.register_object_storage(ObjectStorageType::Sqlite);
     registry.register_object_storage(ObjectStorageType::InMemory);
     registry.register_vector_storage(VectorStorageType::SqliteVec);
     registry.register_vector_storage(VectorStorageType::InMemory);
-    registry.register_inference_engine(EngineType::Llama);
-    registry.register_inference_engine(EngineType::Ollama);
-    registry.register_inference_engine(EngineType::OpenRouter);
-    registry.register_inference_engine(EngineType::InMemory);
-    registry.register_embedding_engine(EngineType::Llama);
-    registry.register_embedding_engine(EngineType::Ollama);
-    registry.register_embedding_engine(EngineType::InMemory);
 
     let registry: Arc<dyn Registry> = Arc::new(registry);
 
