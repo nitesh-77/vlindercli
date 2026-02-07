@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use clap::Subcommand;
 
-use vlindercli::config::Config;
-use vlindercli::domain::{CliHarness, Daemon, Harness, Registry};
+use vlindercli::config::{registry_db_path, Config};
+use vlindercli::domain::{CliHarness, Daemon, Harness, PersistentRegistry, Registry};
 use vlindercli::queue::{MessageQueue, NatsQueue};
 use vlindercli::registry_service::{GrpcRegistryClient, ping_registry};
 
@@ -18,11 +18,20 @@ pub enum AgentCommand {
         #[arg(short, long)]
         path: Option<PathBuf>,
     },
+    /// List deployed agents
+    List,
+    /// Show details for a deployed agent
+    Get {
+        /// Agent name
+        name: String,
+    },
 }
 
 pub fn execute(cmd: AgentCommand) {
     match cmd {
         AgentCommand::Run { path } => run(path),
+        AgentCommand::List => list(),
+        AgentCommand::Get { name } => get(&name),
     }
 }
 
@@ -131,4 +140,82 @@ fn run_distributed(path: Option<PathBuf>, config: &Config) {
             Err(e) => format!("[error] {}", e),
         }
     });
+}
+
+fn list() {
+    let config = Config::load();
+    let registry = open_registry(&config);
+    let Some(registry) = registry else { return };
+
+    let agents = registry.get_agents();
+    if agents.is_empty() {
+        println!("No agents deployed.");
+        return;
+    }
+    println!("Deployed agents:");
+    for agent in agents {
+        println!("  {} ({}, {})", agent.name, agent.runtime.as_str(), agent.executable);
+    }
+}
+
+fn get(name: &str) {
+    let config = Config::load();
+    let registry = open_registry(&config);
+    let Some(registry) = registry else { return };
+
+    let Some(agent) = registry.get_agent_by_name(name) else {
+        eprintln!("Agent '{}' not found", name);
+        return;
+    };
+
+    println!("Name:        {}", agent.name);
+    println!("Runtime:     {}", agent.runtime.as_str());
+    println!("Executable:  {}", agent.executable);
+    println!("Description: {}", agent.description);
+    if let Some(ref storage) = agent.object_storage {
+        println!("Object storage: {}", storage);
+    }
+    if let Some(ref storage) = agent.vector_storage {
+        println!("Vector storage: {}", storage);
+    }
+    if !agent.requirements.models.is_empty() {
+        println!("Models:");
+        for (alias, uri) in &agent.requirements.models {
+            println!("  {} -> {}", alias, uri);
+        }
+    }
+}
+
+/// Connect to the registry — gRPC in distributed mode, local SQLite otherwise.
+fn open_registry(config: &Config) -> Option<Arc<dyn Registry>> {
+    if config.distributed.enabled {
+        let registry_addr = if config.distributed.registry_addr.starts_with("http://")
+            || config.distributed.registry_addr.starts_with("https://") {
+            config.distributed.registry_addr.clone()
+        } else {
+            format!("http://{}", config.distributed.registry_addr)
+        };
+
+        if ping_registry(&registry_addr).is_none() {
+            eprintln!("Cannot reach registry at {}. Is the daemon running?", registry_addr);
+            return None;
+        }
+
+        match GrpcRegistryClient::connect(&registry_addr) {
+            Ok(client) => Some(Arc::new(client)),
+            Err(e) => {
+                eprintln!("Failed to connect to registry: {}", e);
+                None
+            }
+        }
+    } else {
+        let db_path = registry_db_path();
+        match PersistentRegistry::open(&db_path, config) {
+            Ok(r) => Some(Arc::new(r)),
+            Err(e) => {
+                eprintln!("Failed to open registry: {}", e);
+                None
+            }
+        }
+    }
 }

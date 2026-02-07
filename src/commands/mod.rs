@@ -94,4 +94,28 @@ mod tests {
         let result = Cli::try_parse_from(["vlinder", "agent"]);
         assert!(result.is_err());
     }
+
+    #[test]
+    fn cli_agent_list() {
+        let cli = Cli::try_parse_from(["vlinder", "agent", "list"]).unwrap();
+        assert_eq!(
+            cli.command,
+            Command::Agent {
+                cmd: agent::AgentCommand::List
+            }
+        );
+    }
+
+    #[test]
+    fn cli_agent_get() {
+        let cli = Cli::try_parse_from(["vlinder", "agent", "get", "pensieve"]).unwrap();
+        assert_eq!(
+            cli.command,
+            Command::Agent {
+                cmd: agent::AgentCommand::Get {
+                    name: "pensieve".to_string()
+                }
+            }
+        );
+    }
 }
