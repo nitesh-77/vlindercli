@@ -270,6 +270,7 @@ mod tests {
             invoke,
             kv_backend: None,
             vec_backend: None,
+            model_backends: std::collections::HashMap::new(),
             sequence: SequenceCounter::new(),
         })
     }

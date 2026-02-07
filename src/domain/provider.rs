@@ -55,8 +55,9 @@ impl Provider {
             // Vector storage: sqlite-vec + memory
             Box::new(VectorServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry), "sqlite-vec")),
             Box::new(VectorServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry), "memory")),
-            // Inference: ollama + memory (test)
+            // Inference: ollama + openrouter + memory (test)
             Box::new(InferenceServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry), "ollama")),
+            Box::new(InferenceServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry), "openrouter")),
             Box::new(InferenceServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry), "memory")),
             // Embedding: ollama + memory (test)
             Box::new(EmbeddingServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry), "ollama")),

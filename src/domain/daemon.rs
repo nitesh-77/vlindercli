@@ -59,6 +59,7 @@ impl Daemon {
         // Register available inference engine implementations
         registry.register_inference_engine(EngineType::Llama);
         registry.register_inference_engine(EngineType::Ollama);
+        registry.register_inference_engine(EngineType::OpenRouter);
         registry.register_inference_engine(EngineType::InMemory);
 
         // Register available embedding engine implementations

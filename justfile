@@ -10,6 +10,10 @@ build-echo-container:
 build-kv-bridge-agent:
     podman build -t localhost/kv-bridge-agent:latest agents/kv-bridge-agent/
 
+# Build todoapp agent (OCI image via Podman, OpenRouter integration test)
+build-todoapp:
+    podman build -t localhost/todoapp:latest agents/todoapp/
+
 # Build pensieve-container (OCI image via Podman, full pensieve in Rust)
 build-pensieve-container:
     podman build -t localhost/pensieve-container:latest agents/pensieve-container/

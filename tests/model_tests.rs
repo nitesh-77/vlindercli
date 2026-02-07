@@ -40,6 +40,44 @@ fn model_manifest_parses_embedding_type() {
 }
 
 #[test]
+fn model_manifest_parses_openrouter_engine() {
+    let manifest: ModelManifest = parse_model_manifest(r#"
+        name = "claude-sonnet"
+        type = "inference"
+        engine = "openrouter"
+        model_path = "openrouter://anthropic/claude-sonnet-4-20250514"
+    "#).unwrap();
+
+    assert_eq!(manifest.name, "claude-sonnet");
+    assert_eq!(manifest.model_type, ModelTypeConfig::Inference);
+    assert_eq!(manifest.engine, ModelEngineConfig::OpenRouter);
+    assert_eq!(manifest.model_path, "openrouter://anthropic/claude-sonnet-4-20250514");
+}
+
+#[test]
+fn openrouter_model_loads_with_correct_engine_type() {
+    let temp_dir = std::env::temp_dir().join("vlinder-test-openrouter-model");
+    let _ = std::fs::remove_dir_all(&temp_dir);
+    std::fs::create_dir_all(&temp_dir).unwrap();
+
+    let manifest = r#"
+        name = "claude-sonnet"
+        type = "inference"
+        engine = "openrouter"
+        model_path = "openrouter://anthropic/claude-sonnet-4-20250514"
+    "#;
+    std::fs::write(temp_dir.join("model.toml"), manifest).unwrap();
+
+    let model = Model::load(&temp_dir.join("model.toml")).unwrap();
+    assert_eq!(model.name, "claude-sonnet");
+    assert_eq!(model.engine, EngineType::OpenRouter);
+    assert_eq!(model.model_type, ModelType::Inference);
+    assert_eq!(model.model_path.as_str(), "openrouter://anthropic/claude-sonnet-4-20250514");
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
 fn model_manifest_fails_for_invalmodel_type() {
     let result = parse_model_manifest(r#"
         name = "bad"

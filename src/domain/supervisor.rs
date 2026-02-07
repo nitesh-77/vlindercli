@@ -48,6 +48,11 @@ impl Supervisor {
                 workers.push(child);
             }
         }
+        for _ in 0..counts.inference.openrouter {
+            if let Some(child) = spawn_worker(WorkerRole::InferenceOpenRouter) {
+                workers.push(child);
+            }
+        }
 
         // Embedding workers
         for _ in 0..counts.embedding.ollama {
@@ -141,7 +146,7 @@ mod tests {
                 workers: crate::config::WorkerCounts {
                     registry: 0,
                     agent: crate::config::AgentWorkerCounts { container: 0 },
-                    inference: crate::config::InferenceWorkerCounts { ollama: 0 },
+                    inference: crate::config::InferenceWorkerCounts { ollama: 0, openrouter: 0 },
                     embedding: crate::config::EmbeddingWorkerCounts { ollama: 0 },
                     storage: crate::config::StorageWorkerCounts {
                         object: crate::config::ObjectStorageWorkerCounts { sqlite: 0, memory: 0 },

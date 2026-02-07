@@ -57,6 +57,7 @@ impl ConfigLoader for TestLoader {
 pub struct Config {
     pub logging: LoggingConfig,
     pub ollama: OllamaConfig,
+    pub openrouter: OpenRouterConfig,
     pub queue: QueueConfig,
     pub distributed: DistributedConfig,
 }
@@ -75,6 +76,15 @@ pub struct LoggingConfig {
 pub struct OllamaConfig {
     /// Ollama server endpoint
     pub endpoint: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct OpenRouterConfig {
+    /// OpenRouter API endpoint
+    pub endpoint: String,
+    /// API key for authentication
+    pub api_key: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -135,6 +145,8 @@ pub struct AgentWorkerCounts {
 pub struct InferenceWorkerCounts {
     /// Ollama inference workers
     pub ollama: u32,
+    /// OpenRouter inference workers
+    pub openrouter: u32,
 }
 
 /// Embedding worker counts by engine.
@@ -184,6 +196,7 @@ impl Default for Config {
         Self {
             logging: LoggingConfig::default(),
             ollama: OllamaConfig::default(),
+            openrouter: OpenRouterConfig::default(),
             queue: QueueConfig::default(),
             distributed: DistributedConfig::default(),
         }
@@ -203,6 +216,15 @@ impl Default for OllamaConfig {
     fn default() -> Self {
         Self {
             endpoint: "http://localhost:11434".to_string(),
+        }
+    }
+}
+
+impl Default for OpenRouterConfig {
+    fn default() -> Self {
+        Self {
+            endpoint: "https://openrouter.ai/api/v1".to_string(),
+            api_key: String::new(),
         }
     }
 }
@@ -246,7 +268,7 @@ impl Default for AgentWorkerCounts {
 
 impl Default for InferenceWorkerCounts {
     fn default() -> Self {
-        Self { ollama: 1 }
+        Self { ollama: 1, openrouter: 0 }
     }
 }
 
@@ -320,6 +342,14 @@ impl Config {
             self.ollama.endpoint = v;
         }
 
+        // OpenRouter
+        if let Ok(v) = std::env::var("VLINDER_OPENROUTER_ENDPOINT") {
+            self.openrouter.endpoint = v;
+        }
+        if let Ok(v) = std::env::var("VLINDER_OPENROUTER_API_KEY") {
+            self.openrouter.api_key = v;
+        }
+
         // Queue
         if let Ok(v) = std::env::var("VLINDER_QUEUE_BACKEND") {
             self.queue.backend = v;
@@ -345,6 +375,9 @@ impl Config {
         }
         if let Ok(v) = std::env::var("VLINDER_WORKERS_INFERENCE_OLLAMA") {
             self.distributed.workers.inference.ollama = v.parse().unwrap_or(1);
+        }
+        if let Ok(v) = std::env::var("VLINDER_WORKERS_INFERENCE_OPENROUTER") {
+            self.distributed.workers.inference.openrouter = v.parse().unwrap_or(0);
         }
         if let Ok(v) = std::env::var("VLINDER_WORKERS_EMBEDDING_OLLAMA") {
             self.distributed.workers.embedding.ollama = v.parse().unwrap_or(1);

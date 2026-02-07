@@ -4,6 +4,7 @@
 //! Contains the core logic: parse SdkMessage, resolve hop, build RequestMessage,
 //! send to queue, poll for ResponseMessage, return payload.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::domain::{ObjectStorageType, SdkMessage, VectorStorageType};
@@ -20,6 +21,8 @@ pub(crate) struct SendFunctionData {
     /// Resolved backends from agent config (None if agent didn't declare storage)
     pub(crate) kv_backend: Option<ObjectStorageType>,
     pub(crate) vec_backend: Option<VectorStorageType>,
+    /// Model name → backend string mapping (built from agent's declared models)
+    pub(crate) model_backends: HashMap<String, String>,
     /// Sequence counter — incremented per service call
     pub(crate) sequence: SequenceCounter,
 }
@@ -33,7 +36,7 @@ impl SendFunctionData {
         let msg: SdkMessage = serde_json::from_slice(&payload)
             .map_err(|e| format!("invalid SDK message: {}", e))?;
 
-        let hop = msg.hop(self.kv_backend, self.vec_backend)?;
+        let hop = msg.hop(self.kv_backend, self.vec_backend, &self.model_backends)?;
         let seq = self.sequence.next();
 
         let request = RequestMessage::new(
