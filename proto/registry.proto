@@ -7,8 +7,8 @@ package vlinder.registry;
 // =============================================================================
 
 service Registry {
-  // Health check
-  rpc Ping(PingRequest) returns (PingResponse);
+  // Health check — returns server's protocol version
+  rpc Ping(PingRequest) returns (SemVer);
 
   // Agent operations
   rpc GetAgent(GetAgentRequest) returns (GetAgentResponse);
@@ -33,7 +33,12 @@ service Registry {
 // =============================================================================
 
 message PingRequest {}
-message PingResponse {}
+
+message SemVer {
+  uint32 major = 1;
+  uint32 minor = 2;
+  uint32 patch = 3;
+}
 
 // =============================================================================
 // Common Types

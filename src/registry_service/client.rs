@@ -31,30 +31,38 @@ impl GrpcRegistryClient {
         })
     }
 
-    /// Check if the registry server is reachable.
-    pub fn ping(&self) -> bool {
+    /// Ping the registry server, returning its protocol version.
+    pub fn ping(&self) -> Option<(u32, u32, u32)> {
         self.runtime.block_on(async {
             self.client.lock().unwrap()
                 .ping(proto::PingRequest {})
                 .await
-        }).is_ok()
+                .ok()
+                .map(|r| {
+                    let v = r.into_inner();
+                    (v.major, v.minor, v.patch)
+                })
+        })
     }
 }
 
-/// Check if a registry server is ready at the given address.
+/// Ping a registry server at the given address, returning its protocol version.
 ///
-/// Creates a temporary connection and sends a Ping. Returns true if the
-/// server responds, false on any connection or transport error.
-pub fn ping_registry(addr: &str) -> bool {
+/// Creates a temporary connection and sends a Ping. Returns the server's
+/// version on success, None on any connection or transport error.
+pub fn ping_registry(addr: &str) -> Option<(u32, u32, u32)> {
     let Ok(runtime) = tokio::runtime::Runtime::new() else {
-        return false;
+        return None;
     };
 
     runtime.block_on(async {
         let Ok(mut client) = RegistryClient::connect(addr.to_string()).await else {
-            return false;
+            return None;
         };
-        client.ping(proto::PingRequest {}).await.is_ok()
+        client.ping(proto::PingRequest {}).await.ok().map(|r| {
+            let v = r.into_inner();
+            (v.major, v.minor, v.patch)
+        })
     })
 }
 

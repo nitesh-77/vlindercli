@@ -7,7 +7,7 @@ use crate::domain::{Registry, JobStatus as DomainJobStatus, ResourceId};
 use super::proto::{
     self,
     registry_server::Registry as RegistryService,
-    PingRequest, PingResponse,
+    PingRequest, SemVer,
     GetAgentRequest, GetAgentResponse, GetAgentByNameRequest,
     RegisterAgentRequest, RegisterAgentResponse,
     ListAgentsRequest, ListAgentsResponse,
@@ -41,8 +41,12 @@ impl RegistryService for RegistryServiceServer {
     async fn ping(
         &self,
         _request: Request<PingRequest>,
-    ) -> Result<Response<PingResponse>, Status> {
-        Ok(Response::new(PingResponse {}))
+    ) -> Result<Response<SemVer>, Status> {
+        Ok(Response::new(SemVer {
+            major: 0,
+            minor: 0,
+            patch: 1,
+        }))
     }
 
     async fn get_agent(

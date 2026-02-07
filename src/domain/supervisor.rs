@@ -41,26 +41,32 @@ impl Supervisor {
             };
 
             let deadline = Instant::now() + Duration::from_secs(10);
-            let mut ready = false;
+            let mut version = None;
 
             while Instant::now() < deadline {
-                if ping_registry(&addr) {
-                    ready = true;
+                if let Some(v) = ping_registry(&addr) {
+                    version = Some(v);
                     break;
                 }
                 std::thread::sleep(Duration::from_millis(50));
             }
 
-            if !ready {
-                tracing::error!(addr = %addr, "Registry did not become ready within 10s");
-                // Kill already-spawned registry workers and bail
-                for child in &mut workers {
-                    let _ = child.kill();
+            match version {
+                Some((major, minor, patch)) => {
+                    tracing::info!(
+                        addr = %addr,
+                        version = %format!("{}.{}.{}", major, minor, patch),
+                        "Registry is ready"
+                    );
                 }
-                panic!("Registry failed to start — aborting distributed mode");
+                None => {
+                    tracing::error!(addr = %addr, "Registry did not become ready within 10s");
+                    for child in &mut workers {
+                        let _ = child.kill();
+                    }
+                    panic!("Registry failed to start — aborting distributed mode");
+                }
             }
-
-            tracing::info!(addr = %addr, "Registry is ready");
         }
 
         // Agent runtimes
