@@ -59,11 +59,12 @@ pub fn run_worker_loop(role: WorkerRole, shutdown: Arc<AtomicBool>) {
 fn run_registry_worker(config: &Config, shutdown: &AtomicBool) {
     use tonic::transport::Server;
     use crate::config::registry_db_path;
-    use crate::domain::{InMemoryRegistry, RegistryRepository, RuntimeType, ObjectStorageType, VectorStorageType, EngineType};
+    use crate::domain::{PersistentRegistry, RuntimeType, ObjectStorageType, VectorStorageType, EngineType};
     use crate::registry_service::RegistryServiceServer;
-    use crate::storage::SqliteRegistryRepository;
 
-    let registry = InMemoryRegistry::new();
+    let db_path = registry_db_path();
+    let registry = PersistentRegistry::open(&db_path)
+        .unwrap_or_else(|e| panic!("Failed to initialize registry: {}", e));
 
     // Register available capabilities (same as Daemon::new)
     registry.register_runtime(RuntimeType::Container);
@@ -77,20 +78,6 @@ fn run_registry_worker(config: &Config, shutdown: &AtomicBool) {
     registry.register_embedding_engine(EngineType::Llama);
     registry.register_embedding_engine(EngineType::Ollama);
     registry.register_embedding_engine(EngineType::InMemory);
-
-    // Load registered models from persistent storage (fail-fast on errors)
-    let db_path = registry_db_path();
-    if db_path.exists() {
-        let repo = SqliteRegistryRepository::open(&db_path)
-            .unwrap_or_else(|e| panic!("Failed to open registry.db at '{}': {}", db_path.display(), e));
-        let models = repo.load_models()
-            .unwrap_or_else(|e| panic!("Failed to load models from registry.db: {}", e));
-        for model in models {
-            tracing::info!(model = %model.name, "Loaded model from registry");
-            registry.register_model(model)
-                .unwrap_or_else(|e| panic!("Failed to register model: {}", e));
-        }
-    }
 
     let registry: Arc<dyn Registry> = Arc::new(registry);
 
