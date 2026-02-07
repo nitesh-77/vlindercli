@@ -120,17 +120,26 @@ impl Registry for GrpcRegistryClient {
 
     // --- Model operations ---
 
-    fn register_model(&self, model: Model) {
+    fn register_model(&self, model: Model) -> Result<(), RegistrationError> {
         let proto_model: proto::Model = model.into();
         let request = proto::RegisterModelRequest {
             model: Some(proto_model),
         };
 
-        let _ = self.runtime.block_on(async {
+        let response = self.runtime.block_on(async {
             self.client.lock().unwrap()
                 .register_model(request)
                 .await
-        });
+        }).map_err(|e| RegistrationError::Persistence(e.to_string()))?;
+
+        let resp = response.into_inner();
+        if resp.success {
+            Ok(())
+        } else {
+            Err(RegistrationError::Persistence(
+                resp.error.unwrap_or_else(|| "unknown server error".to_string())
+            ))
+        }
     }
 
     fn get_model(&self, name: &str) -> Option<Model> {

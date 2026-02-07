@@ -78,16 +78,17 @@ fn run_registry_worker(config: &Config, shutdown: &AtomicBool) {
     registry.register_embedding_engine(EngineType::Ollama);
     registry.register_embedding_engine(EngineType::InMemory);
 
-    // Load registered models from persistent storage
+    // Load registered models from persistent storage (fail-fast on errors)
     let db_path = registry_db_path();
     if db_path.exists() {
-        if let Ok(repo) = SqliteRegistryRepository::open(&db_path) {
-            if let Ok(models) = repo.load_models() {
-                for model in models {
-                    tracing::info!(model = %model.name, "Loaded model from registry");
-                    registry.register_model(model);
-                }
-            }
+        let repo = SqliteRegistryRepository::open(&db_path)
+            .unwrap_or_else(|e| panic!("Failed to open registry.db at '{}': {}", db_path.display(), e));
+        let models = repo.load_models()
+            .unwrap_or_else(|e| panic!("Failed to load models from registry.db: {}", e));
+        for model in models {
+            tracing::info!(model = %model.name, "Loaded model from registry");
+            registry.register_model(model)
+                .unwrap_or_else(|e| panic!("Failed to register model: {}", e));
         }
     }
 

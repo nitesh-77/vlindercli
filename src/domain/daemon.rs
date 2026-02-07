@@ -93,15 +93,14 @@ impl Daemon {
             return;
         }
 
-        let repo = match SqliteRegistryRepository::open(&db_path) {
-            Ok(r) => r,
-            Err(_) => return,
-        };
+        let repo = SqliteRegistryRepository::open(&db_path)
+            .unwrap_or_else(|e| panic!("Failed to open registry.db at '{}': {}", db_path.display(), e));
 
-        if let Ok(models) = repo.load_models() {
-            for model in models {
-                registry.register_model(model);
-            }
+        let models = repo.load_models()
+            .unwrap_or_else(|e| panic!("Failed to load models from registry.db: {}", e));
+        for model in models {
+            registry.register_model(model)
+                .unwrap_or_else(|e| panic!("Failed to register model: {}", e));
         }
     }
 }
@@ -121,7 +120,11 @@ mod tests {
 
     #[test]
     fn deploy_rejects_agent_with_no_matching_runtime() {
+        // Isolate from real registry.db
+        let temp_dir = TempDir::new().unwrap();
+        std::env::set_var("VLINDER_DIR", temp_dir.path());
         let daemon = Daemon::new();
+        std::env::remove_var("VLINDER_DIR");
 
         // Agent with unknown runtime - no runtime supports this
         let manifest = r#"

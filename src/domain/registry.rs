@@ -74,6 +74,8 @@ pub enum RegistrationError {
     VectorStorageUnavailable(VectorStorageType),
     /// Agent requires a model that is not registered.
     ModelNotRegistered(String),
+    /// Persistence operation failed (disk I/O, database error, etc.).
+    Persistence(String),
 }
 
 impl std::fmt::Display for RegistrationError {
@@ -86,6 +88,7 @@ impl std::fmt::Display for RegistrationError {
             RegistrationError::UnknownVectorStorageScheme(s) => write!(f, "unknown vector storage scheme: {}", s),
             RegistrationError::VectorStorageUnavailable(t) => write!(f, "vector storage not available: {:?}", t),
             RegistrationError::ModelNotRegistered(name) => write!(f, "model not registered: {}", name),
+            RegistrationError::Persistence(msg) => write!(f, "persistence error: {}", msg),
         }
     }
 }
@@ -123,7 +126,7 @@ pub trait Registry: Send + Sync {
     // --- Model operations ---
 
     /// Register a model (assigns registry-issued identity).
-    fn register_model(&self, model: Model);
+    fn register_model(&self, model: Model) -> Result<(), RegistrationError>;
 
     /// Get a model by name.
     fn get_model(&self, name: &str) -> Option<Model>;
@@ -220,6 +223,13 @@ impl InMemoryRegistry {
     fn agent_id_internal(&self, name: &str) -> ResourceId {
         ResourceId::new(format!("{}/agents/{}", self.registry_id.as_str(), name))
     }
+
+    /// Remove a model by name. Returns true if the model existed.
+    pub fn remove_model(&self, name: &str) -> bool {
+        let model_id = ResourceId::new(format!("{}/models/{}", self.registry_id.as_str(), name));
+        let mut state = self.state.write().unwrap();
+        state.models.remove(&model_id).is_some()
+    }
 }
 
 impl Default for InMemoryRegistry {
@@ -303,11 +313,12 @@ impl Registry for InMemoryRegistry {
 
     // --- Model operations ---
 
-    fn register_model(&self, mut model: Model) {
+    fn register_model(&self, mut model: Model) -> Result<(), RegistrationError> {
         let model_id = self.model_id(&model.name);
         model.id = model_id.clone();
         let mut state = self.state.write().unwrap();
         state.models.insert(model_id, model);
+        Ok(())
     }
 
     fn get_model(&self, name: &str) -> Option<Model> {

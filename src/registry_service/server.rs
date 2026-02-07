@@ -134,9 +134,16 @@ impl RegistryService for RegistryServiceServer {
         let domain_model = model.try_into()
             .map_err(|e: String| Status::invalid_argument(e))?;
 
-        self.registry.register_model(domain_model);
-
-        Ok(Response::new(RegisterModelResponse { success: true }))
+        match self.registry.register_model(domain_model) {
+            Ok(()) => Ok(Response::new(RegisterModelResponse {
+                success: true,
+                error: None,
+            })),
+            Err(e) => Ok(Response::new(RegisterModelResponse {
+                success: false,
+                error: Some(e.to_string()),
+            })),
+        }
     }
 
     async fn create_job(

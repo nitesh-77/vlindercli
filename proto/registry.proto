@@ -135,6 +135,7 @@ message RegisterModelRequest {
 
 message RegisterModelResponse {
   bool success = 1;
+  optional string error = 2;
 }
 
 // =============================================================================
