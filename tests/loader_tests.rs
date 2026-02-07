@@ -45,7 +45,7 @@ fn load_fleet_with_file_uri() {
 #[test]
 fn load_model_with_file_uri() {
     let model = load_model(&vlinder_model_uri("phi3")).unwrap();
-    assert_eq!(model.name, "phi3");
+    assert_eq!(model.name, "llama/phi3");
 }
 
 #[test]

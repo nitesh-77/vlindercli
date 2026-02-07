@@ -53,6 +53,14 @@ impl EngineType {
             EngineType::InMemory => "memory",
         }
     }
+
+    /// Qualify a bare model name with its engine prefix.
+    ///
+    /// Prevents name collisions across engines (e.g., Ollama and OpenRouter
+    /// both offering "llama3"). The qualified name is the registry key.
+    pub fn qualify_name(&self, bare_name: &str) -> String {
+        format!("{}/{}", self.as_backend_str(), bare_name)
+    }
 }
 
 impl Model {
@@ -68,12 +76,13 @@ impl Model {
     /// The `id` field is set to a placeholder. The registry assigns the real
     /// id (`<registry_id>/models/<name>`) during registration.
     pub fn from_manifest(manifest: ModelManifest, digest: String) -> Model {
-        let name = manifest.name.clone();
+        let engine: EngineType = manifest.engine.into();
+        let name = engine.qualify_name(&manifest.name);
         Model {
             id: Self::placeholder_id(&name),
-            name: manifest.name,
+            name,
             model_type: manifest.model_type.into(),
-            engine: manifest.engine.into(),
+            engine,
             model_path: ResourceId::new(manifest.model_path),
             digest,
         }

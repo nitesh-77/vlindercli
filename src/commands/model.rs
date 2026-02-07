@@ -67,9 +67,9 @@ pub fn execute(cmd: ModelCommand) {
             println!("  Engine: {:?}", model.engine);
             println!("  Path:   {}", model.model_path);
         }
-        ModelCommand::Available { catalog, endpoint } => {
+        ModelCommand::Available { ref catalog, endpoint } => {
             let endpoint = endpoint.unwrap_or_else(|| config.ollama.endpoint.clone());
-            list_available(&catalog, &endpoint)
+            list_available(catalog, &endpoint)
         }
         ModelCommand::List => {
             let registry = open_registry(&config);
@@ -161,8 +161,8 @@ fn resolve_model(name: &str, catalog: &str, endpoint: &str) -> Option<Model> {
     }
 }
 
-fn list_available(catalog: &str, endpoint: &str) {
-    let catalog = match catalog {
+fn list_available(catalog_name: &str, endpoint: &str) {
+    let catalog = match catalog_name {
         "ollama" => OllamaCatalog::new(endpoint),
         other => {
             eprintln!("Unknown catalog: {}. Supported: ollama", other);
@@ -179,7 +179,7 @@ fn list_available(catalog: &str, endpoint: &str) {
             println!("Available models:");
             for model in models {
                 let size = model.size.unwrap_or_default();
-                println!("  {} ({})", model.name, size);
+                println!("  {}/{} ({})", catalog_name, model.name, size);
             }
         }
         Err(e) => {

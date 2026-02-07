@@ -69,7 +69,7 @@ fn openrouter_model_loads_with_correct_engine_type() {
     std::fs::write(temp_dir.join("model.toml"), manifest).unwrap();
 
     let model = Model::load(&temp_dir.join("model.toml")).unwrap();
-    assert_eq!(model.name, "claude-sonnet");
+    assert_eq!(model.name, "openrouter/claude-sonnet");
     assert_eq!(model.engine, EngineType::OpenRouter);
     assert_eq!(model.model_type, ModelType::Inference);
     assert_eq!(model.model_path.as_str(), "openrouter://anthropic/claude-sonnet-4-20250514");
@@ -120,7 +120,7 @@ fn model_load_parses_manifest() {
     std::fs::write(temp_dir.join("model.toml"), manifest).unwrap();
 
     let model = Model::load(&temp_dir.join("model.toml")).unwrap();
-    assert_eq!(model.name, "phi3");
+    assert_eq!(model.name, "llama/phi3");
     assert_eq!(model.model_type, ModelType::Inference);
     assert_eq!(model.engine, EngineType::Llama);
     assert_eq!(model.model_path.scheme(), Some("file"));
