@@ -196,6 +196,7 @@ impl From<EngineType> for proto::EngineType {
         match t {
             EngineType::Llama => proto::EngineType::Llama,
             EngineType::Ollama => proto::EngineType::Ollama,
+            EngineType::OpenRouter => proto::EngineType::Openrouter,
             EngineType::InMemory => proto::EngineType::InMemory,
         }
     }
@@ -206,6 +207,7 @@ impl From<proto::EngineType> for EngineType {
         match t {
             proto::EngineType::Llama => EngineType::Llama,
             proto::EngineType::Ollama => EngineType::Ollama,
+            proto::EngineType::Openrouter => EngineType::OpenRouter,
             proto::EngineType::InMemory => EngineType::InMemory,
             proto::EngineType::Unspecified => EngineType::InMemory, // Default
         }

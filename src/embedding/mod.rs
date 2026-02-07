@@ -35,6 +35,9 @@ pub fn open_embedding_engine(model: &Model) -> Result<Arc<dyn EmbeddingEngine>, 
             let model_name = model.name.clone();
             Ok(Arc::new(OllamaEmbeddingEngine::new(endpoint, model_name)))
         }
+        EngineType::OpenRouter => {
+            Err("OpenRouter does not support embeddings".to_string())
+        }
         EngineType::InMemory => {
             Err("InMemory engine should be injected directly in tests".to_string())
         }

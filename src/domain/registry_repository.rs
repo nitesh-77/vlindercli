@@ -60,6 +60,7 @@ impl StoredModel {
             engine: match model.engine {
                 EngineType::Llama => "llama".to_string(),
                 EngineType::Ollama => "ollama".to_string(),
+                EngineType::OpenRouter => "openrouter".to_string(),
                 EngineType::InMemory => "inmemory".to_string(),
             },
             model_path: model.model_path.as_str().to_string(),
@@ -79,6 +80,7 @@ impl StoredModel {
         let engine = match self.engine.as_str() {
             "llama" => EngineType::Llama,
             "ollama" => EngineType::Ollama,
+            "openrouter" => EngineType::OpenRouter,
             "inmemory" => EngineType::InMemory,
             other => return Err(RepositoryError::Serialization(
                 format!("unknown engine type: {}", other)

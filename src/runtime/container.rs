@@ -73,12 +73,21 @@ impl ContainerRuntime {
         let vec_backend = agent.vector_storage.as_ref()
             .and_then(|uri| VectorStorageType::from_scheme(uri.scheme()));
 
+        // Build model→backend map from agent's declared models
+        let mut model_backends = HashMap::new();
+        for (model_alias, model_uri) in &agent.requirements.models {
+            if let Some(model) = self.registry.get_model_by_path(model_uri) {
+                model_backends.insert(model_alias.clone(), model.engine.as_backend_str().to_string());
+            }
+        }
+
         // Create SendFunctionData for the bridge
         let send_data = Arc::new(SendFunctionData {
             queue: Arc::clone(&self.queue),
             invoke: invoke.clone(),
             kv_backend,
             vec_backend,
+            model_backends,
             sequence: SequenceCounter::new(),
         });
 

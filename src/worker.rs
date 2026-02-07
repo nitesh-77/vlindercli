@@ -42,6 +42,7 @@ pub fn run_worker_loop(role: WorkerRole, shutdown: Arc<AtomicBool>) {
         WorkerRole::Registry => run_registry_worker(&config, &shutdown),
         WorkerRole::AgentContainer => run_agent_container_worker(&config, &shutdown),
         WorkerRole::InferenceOllama => run_inference_ollama_worker(&config, &shutdown),
+        WorkerRole::InferenceOpenRouter => run_inference_openrouter_worker(&config, &shutdown),
         WorkerRole::EmbeddingOllama => run_embedding_ollama_worker(&config, &shutdown),
         WorkerRole::StorageObjectSqlite => run_storage_object_sqlite_worker(&config, &shutdown),
         WorkerRole::StorageObjectMemory => run_storage_object_memory_worker(&config, &shutdown),
@@ -74,6 +75,7 @@ fn run_registry_worker(config: &Config, shutdown: &AtomicBool) {
     registry.register_vector_storage(VectorStorageType::InMemory);
     registry.register_inference_engine(EngineType::Llama);
     registry.register_inference_engine(EngineType::Ollama);
+    registry.register_inference_engine(EngineType::OpenRouter);
     registry.register_inference_engine(EngineType::InMemory);
     registry.register_embedding_engine(EngineType::Llama);
     registry.register_embedding_engine(EngineType::Ollama);
@@ -154,6 +156,29 @@ fn run_inference_ollama_worker(config: &Config, shutdown: &AtomicBool) {
     let worker = InferenceServiceWorker::new(queue, registry, "ollama");
 
     tracing::info!(endpoint = %config.ollama.endpoint, registry = %registry_addr, "Ollama inference worker ready");
+
+    while !shutdown.load(Ordering::Relaxed) {
+        worker.tick();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+fn run_inference_openrouter_worker(config: &Config, shutdown: &AtomicBool) {
+    use crate::domain::workers::InferenceServiceWorker;
+    use crate::queue;
+    use crate::registry_service::GrpcRegistryClient;
+
+    let queue = queue::from_config().expect("Failed to create queue");
+
+    let registry_addr = grpc_registry_addr(config);
+    let registry: Arc<dyn Registry> = Arc::new(
+        GrpcRegistryClient::connect(&registry_addr)
+            .expect("Failed to connect to registry")
+    );
+
+    let worker = InferenceServiceWorker::new(queue, registry, "openrouter");
+
+    tracing::info!(registry = %registry_addr, "OpenRouter inference worker ready");
 
     while !shutdown.load(Ordering::Relaxed) {
         worker.tick();

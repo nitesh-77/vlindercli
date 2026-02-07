@@ -37,8 +37,22 @@ pub enum EngineType {
     Llama,
     /// Ollama HTTP API.
     Ollama,
+    /// OpenRouter API (cloud LLMs via OpenAI-compatible endpoint).
+    OpenRouter,
     /// In-memory engine (for testing).
     InMemory,
+}
+
+impl EngineType {
+    /// Backend string used for queue routing subjects.
+    pub fn as_backend_str(&self) -> &str {
+        match self {
+            EngineType::Llama => "llama",
+            EngineType::Ollama => "ollama",
+            EngineType::OpenRouter => "openrouter",
+            EngineType::InMemory => "memory",
+        }
+    }
 }
 
 impl Model {
@@ -86,6 +100,7 @@ impl From<ModelEngineConfig> for EngineType {
         match config {
             ModelEngineConfig::Llama => EngineType::Llama,
             ModelEngineConfig::Ollama => EngineType::Ollama,
+            ModelEngineConfig::OpenRouter => EngineType::OpenRouter,
         }
     }
 }

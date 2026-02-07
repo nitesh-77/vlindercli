@@ -21,6 +21,8 @@ pub enum WorkerRole {
     AgentContainer,
     /// Ollama inference service
     InferenceOllama,
+    /// OpenRouter inference service (cloud LLMs)
+    InferenceOpenRouter,
     /// Ollama embedding service
     EmbeddingOllama,
     /// SQLite object storage service
@@ -49,6 +51,7 @@ impl WorkerRole {
             WorkerRole::Registry => "registry",
             WorkerRole::AgentContainer => "agent-container",
             WorkerRole::InferenceOllama => "inference-ollama",
+            WorkerRole::InferenceOpenRouter => "inference-openrouter",
             WorkerRole::EmbeddingOllama => "embedding-ollama",
             WorkerRole::StorageObjectSqlite => "storage-object-sqlite",
             WorkerRole::StorageObjectMemory => "storage-object-memory",
@@ -63,6 +66,7 @@ impl WorkerRole {
             WorkerRole::Registry => "Registry service",
             WorkerRole::AgentContainer => "Container agent runtime",
             WorkerRole::InferenceOllama => "Ollama inference service",
+            WorkerRole::InferenceOpenRouter => "OpenRouter inference service",
             WorkerRole::EmbeddingOllama => "Ollama embedding service",
             WorkerRole::StorageObjectSqlite => "SQLite object storage",
             WorkerRole::StorageObjectMemory => "In-memory object storage",
@@ -86,6 +90,7 @@ impl FromStr for WorkerRole {
             "registry" => Ok(WorkerRole::Registry),
             "agent-container" => Ok(WorkerRole::AgentContainer),
             "inference-ollama" => Ok(WorkerRole::InferenceOllama),
+            "inference-openrouter" => Ok(WorkerRole::InferenceOpenRouter),
             "embedding-ollama" => Ok(WorkerRole::EmbeddingOllama),
             "storage-object-sqlite" => Ok(WorkerRole::StorageObjectSqlite),
             "storage-object-memory" => Ok(WorkerRole::StorageObjectMemory),

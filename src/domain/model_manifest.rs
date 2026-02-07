@@ -26,6 +26,7 @@ pub enum ModelTypeConfig {
 pub enum ModelEngineConfig {
     Llama,
     Ollama,
+    OpenRouter,
 }
 
 impl ModelManifest {

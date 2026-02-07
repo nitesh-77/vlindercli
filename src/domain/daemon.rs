@@ -54,6 +54,7 @@ impl Daemon {
         registry.register_vector_storage(VectorStorageType::InMemory);
         registry.register_inference_engine(EngineType::Llama);
         registry.register_inference_engine(EngineType::Ollama);
+        registry.register_inference_engine(EngineType::OpenRouter);
         registry.register_inference_engine(EngineType::InMemory);
         registry.register_embedding_engine(EngineType::Llama);
         registry.register_embedding_engine(EngineType::Ollama);

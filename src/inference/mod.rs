@@ -3,8 +3,10 @@
 //! The trait is defined in the domain module.
 
 mod ollama;
+mod openrouter;
 
 pub use ollama::OllamaInferenceEngine;
+pub use openrouter::OpenRouterInferenceEngine;
 
 use std::num::NonZeroU32;
 use std::path::Path;
@@ -46,6 +48,13 @@ pub fn open_inference_engine(model: &Model) -> Result<Arc<dyn InferenceEngine>, 
                 .unwrap_or_else(|| Config::load().ollama.endpoint);
             let model_name = model.name.clone();
             Ok(Arc::new(OllamaInferenceEngine::new(endpoint, model_name)))
+        }
+        EngineType::OpenRouter => {
+            let config = Config::load();
+            let endpoint = config.openrouter.endpoint;
+            let api_key = config.openrouter.api_key;
+            let model_name = model.name.clone();
+            Ok(Arc::new(OpenRouterInferenceEngine::new(endpoint, api_key, model_name)))
         }
         EngineType::InMemory => {
             Err("InMemory engine should be injected directly in tests".to_string())

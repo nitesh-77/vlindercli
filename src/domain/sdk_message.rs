@@ -5,6 +5,8 @@
 //! The `op` field determines the variant; remaining fields must match exactly.
 //! Unknown ops or missing fields are rejected at deserialization time.
 
+use std::collections::HashMap;
+
 use serde::Deserialize;
 
 use super::storage::{ObjectStorageType, VectorStorageType};
@@ -47,11 +49,13 @@ fn default_max_tokens() -> u32 { 256 }
 impl SdkMessage {
     /// Determine the next hop for this message.
     ///
-    /// Returns Err if the agent calls a storage op without declaring the backend.
+    /// Returns Err if the agent calls a storage op without declaring the backend,
+    /// or if the agent calls infer/embed with a model not declared in its requirements.
     pub fn hop(
         &self,
         kv_backend: Option<ObjectStorageType>,
         vec_backend: Option<VectorStorageType>,
+        model_backends: &HashMap<String, String>,
     ) -> Result<Hop, String> {
         match self {
             SdkMessage::KvGet { .. } => kv_hop("get", kv_backend),
@@ -61,8 +65,8 @@ impl SdkMessage {
             SdkMessage::VectorStore { .. } => vec_hop("store", vec_backend),
             SdkMessage::VectorSearch { .. } => vec_hop("search", vec_backend),
             SdkMessage::VectorDelete { .. } => vec_hop("delete", vec_backend),
-            SdkMessage::Infer { .. } => Ok(Hop { service: "infer", backend: "ollama".to_string(), operation: "run" }),
-            SdkMessage::Embed { .. } => Ok(Hop { service: "embed", backend: "ollama".to_string(), operation: "run" }),
+            SdkMessage::Infer { model, .. } => infer_hop(model, model_backends),
+            SdkMessage::Embed { model, .. } => embed_hop(model, model_backends),
         }
     }
 }
@@ -77,32 +81,53 @@ fn vec_hop(operation: &'static str, backend: Option<VectorStorageType>) -> Resul
     Ok(Hop { service: "vec", backend: backend.as_str().to_string(), operation })
 }
 
+fn infer_hop(model: &str, model_backends: &HashMap<String, String>) -> Result<Hop, String> {
+    let backend = model_backends.get(model)
+        .ok_or_else(|| format!("agent called infer with undeclared model '{}'", model))?;
+    Ok(Hop { service: "infer", backend: backend.clone(), operation: "run" })
+}
+
+fn embed_hop(model: &str, model_backends: &HashMap<String, String>) -> Result<Hop, String> {
+    let backend = model_backends.get(model)
+        .ok_or_else(|| format!("agent called embed with undeclared model '{}'", model))?;
+    Ok(Hop { service: "embed", backend: backend.clone(), operation: "run" })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn empty_models() -> HashMap<String, String> {
+        HashMap::new()
+    }
+
+    fn models_with(entries: &[(&str, &str)]) -> HashMap<String, String> {
+        entries.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+    }
 
     /// Helper: parse JSON into SdkMessage and return its hop.
     fn parse_and_hop(
         json: &str,
         kv: Option<ObjectStorageType>,
         vec: Option<VectorStorageType>,
+        model_backends: &HashMap<String, String>,
     ) -> Result<Hop, String> {
         let msg: SdkMessage = serde_json::from_str(json)
             .map_err(|e| e.to_string())?;
-        msg.hop(kv, vec)
+        msg.hop(kv, vec, model_backends)
     }
 
     #[test]
     fn kv_operations() {
         let r = parse_and_hop(
             r#"{"op": "kv-get", "path": "/data.txt"}"#,
-            Some(ObjectStorageType::Sqlite), None,
+            Some(ObjectStorageType::Sqlite), None, &empty_models(),
         ).unwrap();
         assert_eq!((r.service, r.backend.as_str(), r.operation), ("kv", "sqlite", "get"));
 
         let r = parse_and_hop(
             r#"{"op": "kv-put", "path": "/data.txt", "content": "aGVsbG8="}"#,
-            Some(ObjectStorageType::InMemory), None,
+            Some(ObjectStorageType::InMemory), None, &empty_models(),
         ).unwrap();
         assert_eq!((r.service, r.backend.as_str(), r.operation), ("kv", "memory", "put"));
     }
@@ -111,13 +136,13 @@ mod tests {
     fn vector_operations() {
         let r = parse_and_hop(
             r#"{"op": "vector-store", "key": "doc1", "vector": [0.1], "metadata": "test"}"#,
-            None, Some(VectorStorageType::SqliteVec),
+            None, Some(VectorStorageType::SqliteVec), &empty_models(),
         ).unwrap();
         assert_eq!((r.service, r.backend.as_str(), r.operation), ("vec", "sqlite-vec", "store"));
 
         let r = parse_and_hop(
             r#"{"op": "vector-search", "vector": [0.1], "limit": 5}"#,
-            None, Some(VectorStorageType::InMemory),
+            None, Some(VectorStorageType::InMemory), &empty_models(),
         ).unwrap();
         assert_eq!((r.service, r.backend.as_str(), r.operation), ("vec", "memory", "search"));
     }
@@ -126,7 +151,7 @@ mod tests {
     fn kv_without_backend_fails() {
         let err = parse_and_hop(
             r#"{"op": "kv-get", "path": "/data.txt"}"#,
-            None, None,
+            None, None, &empty_models(),
         ).unwrap_err();
         assert!(err.contains("no object_storage configured"));
     }
@@ -135,31 +160,71 @@ mod tests {
     fn vector_without_backend_fails() {
         let err = parse_and_hop(
             r#"{"op": "vector-store", "key": "k", "vector": [0.1], "metadata": "m"}"#,
-            None, None,
+            None, None, &empty_models(),
         ).unwrap_err();
         assert!(err.contains("no vector_storage configured"));
     }
 
     #[test]
-    fn inference() {
+    fn inference_routes_to_declared_backend() {
+        let models = models_with(&[("phi3", "ollama"), ("nomic", "ollama")]);
         let r = parse_and_hop(
             r#"{"op": "infer", "model": "phi3", "prompt": "hello"}"#,
-            None, None,
+            None, None, &models,
         ).unwrap();
         assert_eq!((r.service, r.backend.as_str(), r.operation), ("infer", "ollama", "run"));
 
         let r = parse_and_hop(
             r#"{"op": "embed", "model": "nomic", "text": "hello"}"#,
-            None, None,
+            None, None, &models,
         ).unwrap();
         assert_eq!((r.service, r.backend.as_str(), r.operation), ("embed", "ollama", "run"));
+    }
+
+    #[test]
+    fn inference_routes_openrouter_model() {
+        let models = models_with(&[
+            ("phi3", "ollama"),
+            ("claude-sonnet", "openrouter"),
+        ]);
+
+        let r = parse_and_hop(
+            r#"{"op": "infer", "model": "phi3", "prompt": "hello"}"#,
+            None, None, &models,
+        ).unwrap();
+        assert_eq!((r.service, r.backend.as_str(), r.operation), ("infer", "ollama", "run"));
+
+        let r = parse_and_hop(
+            r#"{"op": "infer", "model": "claude-sonnet", "prompt": "hello"}"#,
+            None, None, &models,
+        ).unwrap();
+        assert_eq!((r.service, r.backend.as_str(), r.operation), ("infer", "openrouter", "run"));
+    }
+
+    #[test]
+    fn infer_with_undeclared_model_fails() {
+        let models = models_with(&[("phi3", "ollama")]);
+        let err = parse_and_hop(
+            r#"{"op": "infer", "model": "unknown-model", "prompt": "hello"}"#,
+            None, None, &models,
+        ).unwrap_err();
+        assert!(err.contains("undeclared model"));
+    }
+
+    #[test]
+    fn embed_with_undeclared_model_fails() {
+        let err = parse_and_hop(
+            r#"{"op": "embed", "model": "nomic", "text": "hello"}"#,
+            None, None, &empty_models(),
+        ).unwrap_err();
+        assert!(err.contains("undeclared model"));
     }
 
     #[test]
     fn unknown_op_fails() {
         let err = parse_and_hop(
             r#"{"op": "summarize"}"#,
-            None, None,
+            None, None, &empty_models(),
         ).unwrap_err();
         assert!(err.contains("unknown variant"));
     }
@@ -168,7 +233,7 @@ mod tests {
     fn missing_fields_fails() {
         let err = parse_and_hop(
             r#"{"op": "kv-put", "path": "/data.txt"}"#,
-            Some(ObjectStorageType::Sqlite), None,
+            Some(ObjectStorageType::Sqlite), None, &empty_models(),
         ).unwrap_err();
         assert!(err.contains("content"));
     }
