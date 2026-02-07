@@ -2,7 +2,7 @@
 
 use super::{
     CompleteMessage, InvokeMessage, MessageQueue, ObservableMessage,
-    QueueError, RequestMessage, ResponseMessage,
+    QueueError, RequestMessage, ResponseMessage, SubmissionId,
 };
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
@@ -181,11 +181,11 @@ impl MessageQueue for InMemoryQueue {
         Err(QueueError::Timeout)
     }
 
-    fn receive_complete(&self, harness_pattern: &str) -> Result<(CompleteMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+    fn receive_complete(&self, submission: &SubmissionId, harness: &str) -> Result<(CompleteMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
         let mut typed = self.typed_queues.lock().unwrap();
 
         for (subject, queue) in typed.iter_mut() {
-            if subject.contains("complete") && subject.contains(harness_pattern) {
+            if subject.contains("complete") && subject.contains(submission.as_str()) && subject.contains(harness) {
                 if let Some(ObservableMessage::Complete(msg)) = queue.front() {
                     let msg = msg.clone();
                     queue.pop_front();

@@ -14,7 +14,7 @@ use std::sync::Arc;
 use crate::domain::registry::{JobId, JobStatus, Registry};
 use crate::domain::{Agent, ResourceId};
 use crate::queue::{
-    HarnessType, InvokeMessage, MessageId, MessageQueue, SubmissionId,
+    HarnessType, InvokeMessage, MessageQueue, SubmissionId,
 };
 
 /// Common harness operations shared across all harness types.
@@ -40,7 +40,7 @@ pub trait Harness {
 pub struct CliHarness {
     queue: Arc<dyn MessageQueue + Send + Sync>,
     registry: Arc<dyn Registry>,
-    inflight: HashMap<MessageId, JobId>,
+    inflight: HashMap<SubmissionId, JobId>,
 }
 
 impl CliHarness {
@@ -82,14 +82,17 @@ impl CliHarness {
     /// CLI-specific: runs until no more messages or shutdown signal.
     /// Uses typed CompleteMessage (ADR 044) for job completion tracking.
     pub fn tick(&mut self) {
-        // Receive typed CompleteMessage from harness pattern
-        while let Ok((complete, ack)) = self.queue.receive_complete("cli") {
-            // CompleteMessage.correlation_id links back to InvokeMessage.id
-            if let Some(job_id) = self.inflight.remove(&complete.correlation_id) {
-                let result = String::from_utf8_lossy(&complete.payload).to_string();
-                self.registry.update_job_status(&job_id, JobStatus::Completed(result));
+        // Poll each inflight submission's scoped consumer (ADR 052)
+        let submissions: Vec<SubmissionId> = self.inflight.keys().cloned().collect();
+
+        for submission in &submissions {
+            while let Ok((complete, ack)) = self.queue.receive_complete(submission, "cli") {
+                if let Some(job_id) = self.inflight.remove(&complete.submission) {
+                    let result = String::from_utf8_lossy(&complete.payload).to_string();
+                    self.registry.update_job_status(&job_id, JobStatus::Completed(result));
+                }
+                let _ = ack();
             }
-            let _ = ack();
         }
     }
 }
@@ -121,20 +124,19 @@ impl Harness for CliHarness {
 
         // Build and send typed InvokeMessage (ADR 044)
         let invoke = InvokeMessage::new(
-            submission,
+            submission.clone(),
             HarnessType::Cli,
             runtime,
             agent_id.clone(),
             input.as_bytes().to_vec(),
         );
-        let message_id = invoke.id.clone();
 
         self.queue
             .send_invoke(invoke)
             .map_err(|e| format!("failed to queue: {}", e))?;
 
-        // Track for response correlation
-        self.inflight.insert(message_id, job_id.clone());
+        // Track submission → job for completion reconciliation (ADR 052)
+        self.inflight.insert(submission, job_id.clone());
         self.registry.update_job_status(&job_id, JobStatus::Running);
 
         Ok(job_id)

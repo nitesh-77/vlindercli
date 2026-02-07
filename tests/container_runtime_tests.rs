@@ -35,14 +35,14 @@ fn container_runtime_executes_echo_agent() {
     );
 
     // Send InvokeMessage
+    let submission = SubmissionId::new();
     let invoke = InvokeMessage::new(
-        SubmissionId::new(),
+        submission.clone(),
         HarnessType::Cli,
         RuntimeType::Container,
         agent_id,
         b"hello from container".to_vec(),
     );
-    let invoke_id = invoke.id.clone();
     queue.send_invoke(invoke).unwrap();
 
     // First tick starts container (lazy) and dispatches work
@@ -60,9 +60,8 @@ fn container_runtime_executes_echo_agent() {
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
 
-    // Verify CompleteMessage
-    let (complete, ack) = queue.receive_complete("cli").unwrap();
-    assert_eq!(complete.correlation_id, invoke_id);
+    // Verify CompleteMessage (submission-scoped consumer, ADR 052)
+    let (complete, ack) = queue.receive_complete(&submission, "cli").unwrap();
     assert_eq!(
         String::from_utf8(complete.payload).unwrap(),
         "hello from container"

@@ -301,7 +301,6 @@ impl MessageQueue for NatsQueue {
             headers.insert("submission-id", msg.submission.as_str());
             headers.insert("agent-id", msg.agent_id.as_str());
             headers.insert("harness", msg.harness.as_str());
-            headers.insert("correlation-id", msg.correlation_id.as_str());
 
             self.inner
                 .jetstream
@@ -391,9 +390,9 @@ impl MessageQueue for NatsQueue {
         })
     }
 
-    fn receive_complete(&self, harness_pattern: &str) -> Result<(CompleteMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
-        // Build filter: vlinder.*.complete.*.{harness}
-        let filter = format!("vlinder.*.complete.*.{}", harness_pattern);
+    fn receive_complete(&self, submission: &SubmissionId, harness: &str) -> Result<(CompleteMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+        // Build filter: submission-scoped consumer (ADR 052)
+        let filter = format!("vlinder.{}.complete.*.{}", submission, harness);
 
         self.inner.runtime.block_on(async {
             let (js_msg, ack_fn) = self.fetch_one(&filter).await?;
@@ -407,7 +406,6 @@ impl MessageQueue for NatsQueue {
                 agent_id: ResourceId::new(&get_header(headers, "agent-id")?),
                 harness: parse_harness_type(&get_header(headers, "harness")?)?,
                 payload: js_msg.payload.to_vec(),
-                correlation_id: MessageId::from(get_header(headers, "correlation-id")?),
             };
 
             Ok((msg, ack_fn))

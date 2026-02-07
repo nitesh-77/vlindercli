@@ -319,7 +319,6 @@ pub struct CompleteMessage {
     pub agent_id: ResourceId,
     pub harness: HarnessType,
     pub payload: Vec<u8>,
-    pub correlation_id: MessageId,
 }
 
 impl CompleteMessage {
@@ -328,7 +327,6 @@ impl CompleteMessage {
         agent_id: ResourceId,
         harness: HarnessType,
         payload: Vec<u8>,
-        correlation_id: MessageId,
     ) -> Self {
         Self {
             id: MessageId::new(),
@@ -336,7 +334,6 @@ impl CompleteMessage {
             agent_id,
             harness,
             payload,
-            correlation_id,
         }
     }
 }
@@ -355,7 +352,6 @@ impl ExpectsReply for InvokeMessage {
             self.agent_id.clone(),
             self.harness,
             payload,
-            self.id.clone(),
         )
     }
 }
@@ -670,20 +666,17 @@ mod tests {
     fn complete_message_creation() {
         let submission = SubmissionId::new();
         let agent_id = test_agent_id();
-        let invoke_id = MessageId::new();
         let msg = CompleteMessage::new(
             submission.clone(),
             agent_id.clone(),
             HarnessType::Cli,
             b"result".to_vec(),
-            invoke_id.clone(),
         );
 
         assert_eq!(msg.submission, submission);
         assert_eq!(msg.agent_id, agent_id);
         assert_eq!(msg.harness, HarnessType::Cli);
         assert_eq!(msg.payload, b"result");
-        assert_eq!(msg.correlation_id, invoke_id);
     }
 
     // --- ExpectsReply trait tests ---
@@ -705,8 +698,6 @@ mod tests {
         assert_eq!(complete.submission, invoke.submission);
         assert_eq!(complete.agent_id, invoke.agent_id);
         assert_eq!(complete.harness, invoke.harness);
-        // Correlation links reply to original
-        assert_eq!(complete.correlation_id, invoke.id);
         // Payload is the reply payload
         assert_eq!(complete.payload, b"output");
     }

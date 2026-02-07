@@ -44,14 +44,14 @@ fn container_bridge_kv_round_trip() {
     );
 
     // Send InvokeMessage
+    let submission = SubmissionId::new();
     let invoke = InvokeMessage::new(
-        SubmissionId::new(),
+        submission.clone(),
         HarnessType::Cli,
         RuntimeType::Container,
         agent_id,
         b"bridge test data".to_vec(),
     );
-    let invoke_id = invoke.id.clone();
     queue.send_invoke(invoke).unwrap();
 
     // First tick starts container and dispatches work
@@ -74,9 +74,8 @@ fn container_bridge_kv_round_trip() {
         std::thread::sleep(Duration::from_millis(10));
     }
 
-    // Verify CompleteMessage — the agent stores input in KV, reads it back
-    let (complete, ack) = queue.receive_complete("cli").unwrap();
-    assert_eq!(complete.correlation_id, invoke_id);
+    // Verify CompleteMessage (submission-scoped consumer, ADR 052)
+    let (complete, ack) = queue.receive_complete(&submission, "cli").unwrap();
     assert_eq!(
         String::from_utf8(complete.payload).unwrap(),
         "bridge test data"

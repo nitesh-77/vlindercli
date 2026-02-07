@@ -9,7 +9,7 @@
 //! Each receive method returns a tuple of (TypedMessage, AckFn) where
 //! AckFn acknowledges successful processing.
 
-use super::{CompleteMessage, InvokeMessage, RequestMessage, ResponseMessage};
+use super::{CompleteMessage, InvokeMessage, RequestMessage, ResponseMessage, SubmissionId};
 use crate::domain::Agent;
 use std::fmt;
 
@@ -89,10 +89,10 @@ pub trait MessageQueue {
     /// Returns the typed message with all dimensions intact.
     fn receive_response(&self, request: &RequestMessage) -> Result<(ResponseMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError>;
 
-    /// Receive a CompleteMessage for a harness.
+    /// Receive a CompleteMessage for a specific submission.
     ///
-    /// Used by harness to receive job completion notifications.
-    fn receive_complete(&self, harness_pattern: &str) -> Result<(CompleteMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError>;
+    /// Each invocation polls its own submission-scoped consumer (ADR 052).
+    fn receive_complete(&self, submission: &SubmissionId, harness: &str) -> Result<(CompleteMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError>;
 }
 
 // --- Errors ---
