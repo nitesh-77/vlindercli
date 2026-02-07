@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted
 
 ## Context
 
@@ -46,20 +46,22 @@ errors via `let _ = ...`.
   InMemoryRegistry cache.
 - **Reads**: delegate to InMemoryRegistry (fast, no I/O).
 - **delete_model**: removes from SQLite first, then removes from cache.
-  This method lives on PersistentRegistry directly, not on the Registry trait.
+  Lives on the Registry trait so it can be dispatched through gRPC.
 - **All other methods**: delegate to InMemoryRegistry unchanged.
 
 ### Unified path
 
-All model operations flow through PersistentRegistry:
+All model operations flow through the Registry trait:
 
-- `vlinder model add` → `PersistentRegistry::register_model()`
-- `vlinder model remove` → `PersistentRegistry::delete_model()`
-- `vlinder model registered` → `PersistentRegistry::get_models()`
+- **Local mode**: CLI commands use `PersistentRegistry` directly
+- **Distributed mode**: CLI commands use `GrpcRegistryClient`, which
+  routes to the daemon's `PersistentRegistry` over gRPC
 - Daemon startup → `PersistentRegistry::open()` loads models
 - Registry worker → `PersistentRegistry::open()` loads models
-- gRPC server → wraps PersistentRegistry (distributed clients persist
-  through the server)
+
+In both modes, the same `Registry` trait methods are called
+(`register_model`, `get_models`, `delete_model`). The transport
+differs but the behavior is identical.
 
 `load_registered_models()` is eliminated — the constructor handles loading.
 
@@ -68,7 +70,8 @@ All model operations flow through PersistentRegistry:
 - `InMemoryRegistry` — still useful for tests, still the inner implementation
 - `RegistryRepository` trait — unchanged
 - `SqliteRegistryRepository` — unchanged, used internally by PersistentRegistry
-- gRPC proto — only additive change (optional error field on RegisterModelResponse)
+- gRPC proto — additive changes (optional error field on RegisterModelResponse,
+  new DeleteModel RPC)
 
 ## Consequences
 

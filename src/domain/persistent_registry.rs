@@ -50,17 +50,6 @@ impl PersistentRegistry {
         Ok(Self { inner, repo })
     }
 
-    /// Delete a model by name from both disk and cache.
-    pub fn delete_model(&self, name: &str) -> Result<bool, RegistrationError> {
-        let deleted = self.repo.delete_model(name)
-            .map_err(|e| RegistrationError::Persistence(e.to_string()))?;
-
-        if deleted {
-            self.inner.remove_model(name);
-        }
-
-        Ok(deleted)
-    }
 }
 
 // ============================================================================
@@ -119,6 +108,17 @@ impl Registry for PersistentRegistry {
 
     fn model_id(&self, name: &str) -> ResourceId {
         self.inner.model_id(name)
+    }
+
+    fn delete_model(&self, name: &str) -> Result<bool, RegistrationError> {
+        let deleted = self.repo.delete_model(name)
+            .map_err(|e| RegistrationError::Persistence(e.to_string()))?;
+
+        if deleted {
+            self.inner.remove_model(name);
+        }
+
+        Ok(deleted)
     }
 
     // --- Job operations (delegate directly) ---

@@ -1,10 +1,12 @@
 use std::path::Path;
+use std::sync::Arc;
 
 use clap::Subcommand;
 
 use vlindercli::catalog::OllamaCatalog;
 use vlindercli::config::{registry_db_path, Config};
 use vlindercli::domain::{Model, ModelCatalog, PersistentRegistry, Registry};
+use vlindercli::registry_service::{GrpcRegistryClient, ping_registry};
 
 #[derive(Subcommand, Debug, PartialEq)]
 pub enum ModelCommand {
@@ -48,26 +50,96 @@ pub fn execute(cmd: ModelCommand) {
 
     match cmd {
         ModelCommand::Add { name, catalog, endpoint } => {
-            let endpoint = endpoint.unwrap_or(config.ollama.endpoint);
-            add(&name, &catalog, &endpoint)
+            let endpoint = endpoint.unwrap_or_else(|| config.ollama.endpoint.clone());
+            let model = resolve_model(&name, &catalog, &endpoint);
+            let Some(model) = model else { return };
+
+            let registry = open_registry(&config);
+            let Some(registry) = registry else { return };
+
+            if let Err(e) = registry.register_model(model.clone()) {
+                eprintln!("Failed to register model: {}", e);
+                return;
+            }
+
+            println!("Added model '{}':", model.name);
+            println!("  Type:   {:?}", model.model_type);
+            println!("  Engine: {:?}", model.engine);
+            println!("  Path:   {}", model.model_path);
         }
         ModelCommand::List { catalog, endpoint } => {
-            let endpoint = endpoint.unwrap_or(config.ollama.endpoint);
+            let endpoint = endpoint.unwrap_or_else(|| config.ollama.endpoint.clone());
             list(&catalog, &endpoint)
         }
-        ModelCommand::Registered => registered(),
-        ModelCommand::Remove { name } => remove(&name),
+        ModelCommand::Registered => {
+            let registry = open_registry(&config);
+            let Some(registry) = registry else { return };
+
+            let models = registry.get_models();
+            if models.is_empty() {
+                println!("No models registered yet. Use 'vlinder model add <name>' to add models.");
+                return;
+            }
+            println!("Registered models:");
+            for model in models {
+                println!("  {} ({:?}, {:?})", model.name, model.model_type, model.engine);
+            }
+        }
+        ModelCommand::Remove { name } => {
+            let registry = open_registry(&config);
+            let Some(registry) = registry else { return };
+
+            match registry.delete_model(&name) {
+                Ok(true) => println!("Removed model '{}'", name),
+                Ok(false) => println!("Model '{}' not found", name),
+                Err(e) => eprintln!("Failed to remove model: {}", e),
+            }
+        }
     }
 }
 
-fn add(name: &str, catalog: &str, endpoint: &str) {
-    // If the name looks like a file path, load from manifest directly
-    let model = if Path::new(name).extension().is_some_and(|ext| ext == "toml") {
+/// Connect to the registry — gRPC in distributed mode, local SQLite otherwise.
+fn open_registry(config: &Config) -> Option<Arc<dyn Registry>> {
+    if config.distributed.enabled {
+        let registry_addr = if config.distributed.registry_addr.starts_with("http://")
+            || config.distributed.registry_addr.starts_with("https://") {
+            config.distributed.registry_addr.clone()
+        } else {
+            format!("http://{}", config.distributed.registry_addr)
+        };
+
+        if ping_registry(&registry_addr).is_none() {
+            eprintln!("Cannot reach registry at {}. Is the daemon running?", registry_addr);
+            return None;
+        }
+
+        match GrpcRegistryClient::connect(&registry_addr) {
+            Ok(client) => Some(Arc::new(client)),
+            Err(e) => {
+                eprintln!("Failed to connect to registry: {}", e);
+                None
+            }
+        }
+    } else {
+        let db_path = registry_db_path();
+        match PersistentRegistry::open(&db_path) {
+            Ok(r) => Some(Arc::new(r)),
+            Err(e) => {
+                eprintln!("Failed to open registry: {}", e);
+                None
+            }
+        }
+    }
+}
+
+/// Resolve a model from name — either a TOML manifest path or a catalog lookup.
+fn resolve_model(name: &str, catalog: &str, endpoint: &str) -> Option<Model> {
+    if Path::new(name).extension().is_some_and(|ext| ext == "toml") {
         match Model::load(Path::new(name)) {
-            Ok(m) => m,
+            Ok(m) => Some(m),
             Err(e) => {
                 eprintln!("Failed to load model manifest '{}': {}", name, e);
-                return;
+                None
             }
         }
     } else {
@@ -75,38 +147,18 @@ fn add(name: &str, catalog: &str, endpoint: &str) {
             "ollama" => OllamaCatalog::new(endpoint),
             other => {
                 eprintln!("Unknown catalog: {}. Supported: ollama", other);
-                return;
+                return None;
             }
         };
 
         match catalog.resolve(name) {
-            Ok(m) => m,
+            Ok(m) => Some(m),
             Err(e) => {
                 eprintln!("Failed to resolve model '{}': {}", name, e);
-                return;
+                None
             }
         }
-    };
-
-    // Register through PersistentRegistry (writes to both disk and cache)
-    let db_path = registry_db_path();
-    let registry = match PersistentRegistry::open(&db_path) {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("Failed to open registry: {}", e);
-            return;
-        }
-    };
-
-    if let Err(e) = registry.register_model(model.clone()) {
-        eprintln!("Failed to register model: {}", e);
-        return;
     }
-
-    println!("Added model '{}':", model.name);
-    println!("  Type:   {:?}", model.model_type);
-    println!("  Engine: {:?}", model.engine);
-    println!("  Path:   {}", model.model_path);
 }
 
 fn list(catalog: &str, endpoint: &str) {
@@ -133,51 +185,6 @@ fn list(catalog: &str, endpoint: &str) {
         Err(e) => {
             eprintln!("Failed to list models: {}", e);
         }
-    }
-}
-
-fn registered() {
-    let db_path = registry_db_path();
-
-    if !db_path.exists() {
-        println!("No models registered yet. Use 'vlinder model add <name>' to add models.");
-        return;
-    }
-
-    let registry = match PersistentRegistry::open(&db_path) {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("Failed to open registry: {}", e);
-            return;
-        }
-    };
-
-    let models = registry.get_models();
-    if models.is_empty() {
-        println!("No models registered yet. Use 'vlinder model add <name>' to add models.");
-        return;
-    }
-    println!("Registered models:");
-    for model in models {
-        println!("  {} ({:?}, {:?})", model.name, model.model_type, model.engine);
-    }
-}
-
-fn remove(name: &str) {
-    let db_path = registry_db_path();
-
-    let registry = match PersistentRegistry::open(&db_path) {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("Failed to open registry: {}", e);
-            return;
-        }
-    };
-
-    match registry.delete_model(name) {
-        Ok(true) => println!("Removed model '{}'", name),
-        Ok(false) => println!("Model '{}' not found", name),
-        Err(e) => eprintln!("Failed to remove model: {}", e),
     }
 }
 

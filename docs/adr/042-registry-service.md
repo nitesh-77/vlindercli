@@ -30,16 +30,26 @@ The `Registry` trait is the source of truth for agents, models, jobs, and capabi
 
 ```protobuf
 service Registry {
-  rpc GetAgent(GetAgentRequest) returns (Agent);
-  rpc GetModel(GetModelRequest) returns (Model);
-  rpc RegisterAgent(Agent) returns (RegisterResponse);
-  rpc RegisterModel(Model) returns (RegisterResponse);
-  rpc CreateJob(CreateJobRequest) returns (Job);
-  rpc GetJob(GetJobRequest) returns (Job);
-  rpc UpdateJobStatus(UpdateJobRequest) returns (UpdateJobResponse);
-  rpc ListPendingJobs(Empty) returns (JobList);
+  rpc Ping(PingRequest) returns (SemVer);  // Readiness + version
+  rpc GetAgent(GetAgentRequest) returns (GetAgentResponse);
+  rpc GetAgentByName(GetAgentByNameRequest) returns (GetAgentResponse);
+  rpc RegisterAgent(RegisterAgentRequest) returns (RegisterAgentResponse);
+  rpc ListAgents(ListAgentsRequest) returns (ListAgentsResponse);
+  rpc GetModel(GetModelRequest) returns (GetModelResponse);
+  rpc ListModels(ListModelsRequest) returns (ListModelsResponse);
+  rpc RegisterModel(RegisterModelRequest) returns (RegisterModelResponse);
+  rpc DeleteModel(DeleteModelRequest) returns (DeleteModelResponse);
+  rpc CreateJob(CreateJobRequest) returns (CreateJobResponse);
+  rpc GetJob(GetJobRequest) returns (GetJobResponse);
+  rpc UpdateJobStatus(UpdateJobStatusRequest) returns (UpdateJobStatusResponse);
+  rpc ListPendingJobs(ListPendingJobsRequest) returns (ListPendingJobsResponse);
 }
 ```
+
+The `Ping` RPC returns a `SemVer` message (major/minor/patch) for
+readiness checks and version skew detection. The Supervisor polls
+Ping on startup instead of sleeping. CLI commands also ping before
+connecting in distributed mode.
 
 ### Architecture
 

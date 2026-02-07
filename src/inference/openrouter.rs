@@ -104,8 +104,8 @@ mod tests {
     #[test]
     #[ignore] // Requires valid API key and network access
     fn infers_with_openrouter_api() {
-        let api_key = std::env::var("OPENROUTER_API_KEY")
-            .expect("OPENROUTER_API_KEY must be set");
+        let api_key = std::env::var("VLINDER_OPENROUTER_API_KEY")
+            .expect("VLINDER_OPENROUTER_API_KEY must be set");
         let engine = OpenRouterInferenceEngine::new(
             "https://openrouter.ai/api/v1",
             api_key,

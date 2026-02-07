@@ -1,4 +1,4 @@
 name = "claude-sonnet"
 type = "inference"
 engine = "openrouter"
-model_path = "openrouter://anthropic/claude-sonnet-4-20250514"
+model_path = "openrouter://anthropic/claude-sonnet-4"

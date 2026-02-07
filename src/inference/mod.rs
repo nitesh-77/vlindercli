@@ -53,8 +53,13 @@ pub fn open_inference_engine(model: &Model) -> Result<Arc<dyn InferenceEngine>, 
             let config = Config::load();
             let endpoint = config.openrouter.endpoint;
             let api_key = config.openrouter.api_key;
-            let model_name = model.name.clone();
-            Ok(Arc::new(OpenRouterInferenceEngine::new(endpoint, api_key, model_name)))
+            // model_path is "openrouter://anthropic/claude-sonnet-4-20250514"
+            // Strip the scheme to get the OpenRouter model identifier
+            let model_id = model.model_path.as_str()
+                .strip_prefix("openrouter://")
+                .unwrap_or(model.model_path.as_str())
+                .to_string();
+            Ok(Arc::new(OpenRouterInferenceEngine::new(endpoint, api_key, model_id)))
         }
         EngineType::InMemory => {
             Err("InMemory engine should be injected directly in tests".to_string())

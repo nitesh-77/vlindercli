@@ -219,6 +219,21 @@ impl Registry for GrpcRegistryClient {
         ResourceId::new(&format!("model://{}", name))
     }
 
+    fn delete_model(&self, name: &str) -> Result<bool, RegistrationError> {
+        let request = proto::DeleteModelRequest {
+            name: name.to_string(),
+        };
+
+        let response = self.runtime.block_on(async {
+            self.client.lock().unwrap()
+                .delete_model(request)
+                .await
+        }).map_err(|e| RegistrationError::Persistence(e.to_string()))?;
+
+        let resp = response.into_inner();
+        Ok(resp.deleted)
+    }
+
     // --- Job operations ---
 
     fn create_job(&self, submission_id: crate::queue::SubmissionId, agent_id: ResourceId, input: String) -> JobId {

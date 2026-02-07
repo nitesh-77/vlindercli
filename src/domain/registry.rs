@@ -140,6 +140,9 @@ pub trait Registry: Send + Sync {
     /// Get the registry-issued ID for a model name.
     fn model_id(&self, name: &str) -> ResourceId;
 
+    /// Delete a model by name. Returns true if the model existed.
+    fn delete_model(&self, name: &str) -> Result<bool, RegistrationError>;
+
     // --- Job operations ---
 
     /// Create a new job with submission tracking (ADR 044).
@@ -345,6 +348,10 @@ impl Registry for InMemoryRegistry {
 
     fn model_id(&self, name: &str) -> ResourceId {
         ResourceId::new(format!("{}/models/{}", self.registry_id.as_str(), name))
+    }
+
+    fn delete_model(&self, name: &str) -> Result<bool, RegistrationError> {
+        Ok(self.remove_model(name))
     }
 
     // --- Job operations ---

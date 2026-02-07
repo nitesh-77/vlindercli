@@ -14,6 +14,7 @@ use super::proto::{
     GetModelRequest, GetModelResponse,
     ListModelsRequest, ListModelsResponse,
     RegisterModelRequest, RegisterModelResponse,
+    DeleteModelRequest, DeleteModelResponse,
     CreateJobRequest, CreateJobResponse,
     GetJobRequest, GetJobResponse,
     UpdateJobStatusRequest, UpdateJobStatusResponse,
@@ -153,6 +154,24 @@ impl RegistryService for RegistryServiceServer {
             })),
             Err(e) => Ok(Response::new(RegisterModelResponse {
                 success: false,
+                error: Some(e.to_string()),
+            })),
+        }
+    }
+
+    async fn delete_model(
+        &self,
+        request: Request<DeleteModelRequest>,
+    ) -> Result<Response<DeleteModelResponse>, Status> {
+        let req = request.into_inner();
+
+        match self.registry.delete_model(&req.name) {
+            Ok(deleted) => Ok(Response::new(DeleteModelResponse {
+                deleted,
+                error: None,
+            })),
+            Err(e) => Ok(Response::new(DeleteModelResponse {
+                deleted: false,
                 error: Some(e.to_string()),
             })),
         }

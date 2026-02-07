@@ -20,6 +20,7 @@ service Registry {
   rpc GetModel(GetModelRequest) returns (GetModelResponse);
   rpc ListModels(ListModelsRequest) returns (ListModelsResponse);
   rpc RegisterModel(RegisterModelRequest) returns (RegisterModelResponse);
+  rpc DeleteModel(DeleteModelRequest) returns (DeleteModelResponse);
 
   // Job operations
   rpc CreateJob(CreateJobRequest) returns (CreateJobResponse);
@@ -151,6 +152,15 @@ message RegisterModelRequest {
 
 message RegisterModelResponse {
   bool success = 1;
+  optional string error = 2;
+}
+
+message DeleteModelRequest {
+  string name = 1;
+}
+
+message DeleteModelResponse {
+  bool deleted = 1;
   optional string error = 2;
 }
 

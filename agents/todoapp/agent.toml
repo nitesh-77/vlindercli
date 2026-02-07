@@ -16,5 +16,5 @@ vector_storage = "sqlite://data/vectors.db"
 services = ["infer", "embed", "kv", "store_embedding", "search_by_vector"]
 
 [requirements.models]
-claude-sonnet = "openrouter://anthropic/claude-sonnet-4-20250514"
+claude-sonnet = "openrouter://anthropic/claude-sonnet-4"
 nomic-embed = "ollama://localhost:11434/nomic-embed-text:latest"
