@@ -36,7 +36,7 @@ pub struct ContainerRuntime {
     id: ResourceId,
     queue: Arc<dyn MessageQueue + Send + Sync>,
     registry: Arc<dyn Registry>,
-    running: Option<RunningTask>,
+    running: HashMap<String, RunningTask>,
     /// Long-running containers keyed by agent name.
     containers: HashMap<String, ManagedContainer>,
 }
@@ -56,7 +56,7 @@ impl ContainerRuntime {
             id,
             queue,
             registry,
-            running: None,
+            running: HashMap::new(),
             containers: HashMap::new(),
         }
     }
@@ -167,37 +167,39 @@ impl Runtime for ContainerRuntime {
     }
 
     fn tick(&mut self) -> bool {
-        // First, check if a running task completed
-        if let Some(task) = self.running.take() {
-            if task.handle.is_finished() {
-                let output = task.handle.join().unwrap();
-                let complete = task.invoke.create_reply(output);
-                self.queue.send_complete(complete).unwrap();
-                return true;
-            } else {
-                self.running = Some(task);
-                return false;
-            }
-        }
+        let mut did_work = false;
 
-        // Collect container agents from registry
-        let all_agents = self.registry.get_agents();
-        let container_agents: Vec<_> = all_agents.iter()
-            .filter(|agent| self.registry.select_runtime(agent) == Some(RuntimeType::Container))
+        // 1. Sweep completed tasks
+        let finished: Vec<String> = self.running.iter()
+            .filter(|(_, task)| task.handle.is_finished())
+            .map(|(name, _)| name.clone())
             .collect();
 
-        // Check for work using typed receive (ADR 044)
+        for name in finished {
+            let task = self.running.remove(&name).unwrap();
+            let output = task.handle.join().unwrap();
+            let complete = task.invoke.create_reply(output);
+            self.queue.send_complete(complete).unwrap();
+            did_work = true;
+        }
+
+        // 2. Dispatch new work to idle agents
+        let all_agents = self.registry.get_agents();
+        let container_agents: Vec<_> = all_agents.iter()
+            .filter(|a| self.registry.select_runtime(a) == Some(RuntimeType::Container))
+            .collect();
+
         for agent in &container_agents {
-            // Route by agent name (must match send_invoke subject)
+            if self.running.contains_key(&agent.name) {
+                continue; // agent already busy
+            }
+
             let routing_key = agent.name.clone();
             if let Ok((invoke, ack)) = self.queue.receive_invoke(&routing_key) {
                 let payload = invoke.payload.clone();
-
-                // ACK the message — we've taken ownership of processing
                 let _ = ack();
 
-                // Ensure container is running (lazy start)
-                let host_port = match self.ensure_container(&agent, &invoke) {
+                let host_port = match self.ensure_container(agent, &invoke) {
                     Ok(port) => port,
                     Err(e) => {
                         tracing::error!(agent = %agent.name, error = %e, "Failed to start container");
@@ -205,21 +207,21 @@ impl Runtime for ContainerRuntime {
                             format!("[error] container start failed: {}", e).into_bytes()
                         );
                         self.queue.send_complete(complete).unwrap();
-                        return true;
+                        did_work = true;
+                        continue;
                     }
                 };
 
-                // Dispatch work to container via HTTP in a background thread
                 let handle = thread::spawn(move || {
                     dispatch_to_container(host_port, &payload)
                 });
 
-                self.running = Some(RunningTask { handle, invoke });
-                return true;
+                self.running.insert(agent.name.clone(), RunningTask { handle, invoke });
+                did_work = true;
             }
         }
 
-        false
+        did_work
     }
 }
 
