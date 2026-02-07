@@ -67,8 +67,24 @@ impl CliHarness {
     }
 
     /// Internal: register an agent after loading/parsing.
+    ///
+    /// Idempotent: if an agent with the same name is already registered and
+    /// the configuration matches, returns the existing ID. If the configuration
+    /// differs, returns an error listing the differences.
     fn register_agent(&self, agent: Agent) -> Result<ResourceId, String> {
         let name = agent.name.clone();
+
+        if let Some(existing) = self.registry.get_agent_by_name(&name) {
+            let diffs = compare_agents(&agent, &existing);
+            if diffs.is_empty() {
+                return Ok(existing.id);
+            }
+            return Err(format!(
+                "agent '{}' is already deployed with a different configuration:\n{}",
+                name,
+                diffs.join("\n")
+            ));
+        }
 
         self.registry.register_agent(agent)
             .map_err(|e| format!("registration failed: {}", e))?;
@@ -95,6 +111,38 @@ impl CliHarness {
             }
         }
     }
+}
+
+/// Compare two agents and return a list of field differences.
+///
+/// Skips `id` (placeholder vs registry-assigned) and `mounts` (path-dependent).
+/// Returns an empty vec if the agents are functionally identical.
+fn compare_agents(new: &Agent, existing: &Agent) -> Vec<String> {
+    let mut diffs = Vec::new();
+
+    if new.executable != existing.executable {
+        diffs.push(format!("  - executable: {:?} -> {:?}", existing.executable, new.executable));
+    }
+    if new.runtime != existing.runtime {
+        diffs.push(format!("  - runtime: {:?} -> {:?}", existing.runtime, new.runtime));
+    }
+    if new.description != existing.description {
+        diffs.push(format!("  - description: {:?} -> {:?}", existing.description, new.description));
+    }
+    if new.object_storage != existing.object_storage {
+        diffs.push(format!("  - object_storage: {:?} -> {:?}", existing.object_storage, new.object_storage));
+    }
+    if new.vector_storage != existing.vector_storage {
+        diffs.push(format!("  - vector_storage: {:?} -> {:?}", existing.vector_storage, new.vector_storage));
+    }
+    if new.requirements.models != existing.requirements.models {
+        diffs.push(format!("  - requirements.models: {:?} -> {:?}", existing.requirements.models, new.requirements.models));
+    }
+    if new.requirements.services != existing.requirements.services {
+        diffs.push(format!("  - requirements.services: {:?} -> {:?}", existing.requirements.services, new.requirements.services));
+    }
+
+    diffs
 }
 
 impl Harness for CliHarness {

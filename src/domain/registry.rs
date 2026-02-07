@@ -129,6 +129,11 @@ pub trait Registry: Send + Sync {
     /// Get all registered agents.
     fn get_agents(&self) -> Vec<Agent>;
 
+    /// Get an agent by name.
+    fn get_agent_by_name(&self, name: &str) -> Option<Agent> {
+        self.get_agents().into_iter().find(|a| a.name == name)
+    }
+
     /// Select the appropriate runtime for an agent.
     fn select_runtime(&self, agent: &Agent) -> Option<RuntimeType>;
 
