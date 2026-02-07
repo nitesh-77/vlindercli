@@ -1,0 +1,138 @@
+//! OpenRouter model catalog - queries OpenRouter API for available models.
+
+use serde::Deserialize;
+
+use crate::config::Config;
+use crate::domain::{
+    CatalogError, EngineType, Model, ModelCatalog, ModelInfo, ModelType, ResourceId,
+};
+
+/// Catalog that queries OpenRouter's API for available models.
+pub struct OpenRouterCatalog {
+    endpoint: String,
+    api_key: String,
+}
+
+impl OpenRouterCatalog {
+    /// Create a new OpenRouter catalog.
+    ///
+    /// - `endpoint`: OpenRouter API URL (e.g., "https://openrouter.ai/api/v1")
+    /// - `api_key`: OpenRouter API key for authentication
+    pub fn new(endpoint: impl Into<String>, api_key: impl Into<String>) -> Self {
+        Self {
+            endpoint: endpoint.into(),
+            api_key: api_key.into(),
+        }
+    }
+
+    /// Create catalog using config values.
+    pub fn from_config() -> Self {
+        let config = Config::load();
+        Self::new(&config.openrouter.endpoint, &config.openrouter.api_key)
+    }
+}
+
+impl ModelCatalog for OpenRouterCatalog {
+    fn resolve(&self, name: &str) -> Result<Model, CatalogError> {
+        let models = self.list()?;
+        let info = models
+            .iter()
+            .find(|m| m.name == name)
+            .ok_or_else(|| CatalogError::NotFound(name.to_string()))?;
+
+        let model_type = if name.contains("embed") {
+            ModelType::Embedding
+        } else {
+            ModelType::Inference
+        };
+
+        let qualified = EngineType::OpenRouter.qualify_name(&info.name);
+        Ok(Model {
+            id: Model::placeholder_id(&qualified),
+            name: qualified,
+            model_type,
+            engine: EngineType::OpenRouter,
+            model_path: ResourceId::new(format!("openrouter://{}", info.name)),
+            digest: String::new(),
+        })
+    }
+
+    fn list(&self) -> Result<Vec<ModelInfo>, CatalogError> {
+        let url = format!("{}/models", self.endpoint);
+
+        let mut request = ureq::get(&url);
+        if !self.api_key.is_empty() {
+            request = request.set("Authorization", &format!("Bearer {}", self.api_key));
+        }
+
+        let response = request
+            .call()
+            .map_err(|e| CatalogError::Network(e.to_string()))?;
+
+        let body: ModelsResponse = response
+            .into_json()
+            .map_err(|e| CatalogError::Parse(e.to_string()))?;
+
+        Ok(body
+            .data
+            .into_iter()
+            .map(|m| ModelInfo {
+                name: m.id,
+                size: None,
+                modified: None,
+                digest: None,
+            })
+            .collect())
+    }
+
+    fn available(&self, name: &str) -> bool {
+        self.list()
+            .map(|models| models.iter().any(|m| m.name == name))
+            .unwrap_or(false)
+    }
+}
+
+#[derive(Deserialize)]
+struct ModelsResponse {
+    data: Vec<OpenRouterModel>,
+}
+
+#[derive(Deserialize)]
+struct OpenRouterModel {
+    id: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn creates_catalog_with_endpoint() {
+        let catalog = OpenRouterCatalog::new(
+            "https://openrouter.ai/api/v1",
+            "test-key",
+        );
+        assert_eq!(catalog.endpoint, "https://openrouter.ai/api/v1");
+        assert_eq!(catalog.api_key, "test-key");
+    }
+
+    #[test]
+    #[ignore] // Requires OpenRouter API key
+    fn lists_models_from_openrouter() {
+        let catalog = OpenRouterCatalog::from_config();
+        let models = catalog.list();
+        assert!(models.is_ok());
+        assert!(!models.unwrap().is_empty());
+    }
+
+    #[test]
+    #[ignore] // Requires OpenRouter API key
+    fn resolves_model_from_openrouter() {
+        let catalog = OpenRouterCatalog::from_config();
+        let model = catalog.resolve("anthropic/claude-sonnet-4");
+        assert!(model.is_ok());
+        let model = model.unwrap();
+        assert_eq!(model.engine, EngineType::OpenRouter);
+        assert!(model.id.as_str().starts_with("pending-registration://"));
+    }
+}

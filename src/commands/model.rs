@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use clap::Subcommand;
 
-use vlindercli::catalog::OllamaCatalog;
+use vlindercli::catalog::{OllamaCatalog, OpenRouterCatalog};
 use vlindercli::config::{registry_db_path, Config};
 use vlindercli::domain::{Model, ModelCatalog, PersistentRegistry, Registry};
 use vlindercli::registry_service::{GrpcRegistryClient, ping_registry};
@@ -26,8 +26,11 @@ pub enum ModelCommand {
 
     /// List models available in a catalog
     Available {
-        /// Catalog to query
-        #[arg(short, long, default_value = "ollama")]
+        /// Filter models by name (substring match)
+        filter: Option<String>,
+
+        /// Catalog to query (default: all)
+        #[arg(short, long, default_value = "all")]
         catalog: String,
 
         /// Ollama endpoint (overrides config)
@@ -46,12 +49,14 @@ pub enum ModelCommand {
 }
 
 pub fn execute(cmd: ModelCommand) {
-    let config = Config::load();
+    let mut config = Config::load();
 
     match cmd {
         ModelCommand::Add { name, catalog, endpoint } => {
-            let endpoint = endpoint.unwrap_or_else(|| config.ollama.endpoint.clone());
-            let model = resolve_model(&name, &catalog, &endpoint);
+            if let Some(ep) = endpoint {
+                config.ollama.endpoint = ep;
+            }
+            let model = resolve_model(&name, &catalog, &config);
             let Some(model) = model else { return };
 
             let registry = open_registry(&config);
@@ -67,9 +72,11 @@ pub fn execute(cmd: ModelCommand) {
             println!("  Engine: {:?}", model.engine);
             println!("  Path:   {}", model.model_path);
         }
-        ModelCommand::Available { ref catalog, endpoint } => {
-            let endpoint = endpoint.unwrap_or_else(|| config.ollama.endpoint.clone());
-            list_available(catalog, &endpoint)
+        ModelCommand::Available { filter, ref catalog, endpoint } => {
+            if let Some(ep) = endpoint {
+                config.ollama.endpoint = ep;
+            }
+            list_available(catalog, filter.as_deref(), &config)
         }
         ModelCommand::List => {
             let registry = open_registry(&config);
@@ -133,7 +140,7 @@ fn open_registry(config: &Config) -> Option<Arc<dyn Registry>> {
 }
 
 /// Resolve a model from name — either a TOML manifest path or a catalog lookup.
-fn resolve_model(name: &str, catalog: &str, endpoint: &str) -> Option<Model> {
+fn resolve_model(name: &str, catalog: &str, config: &Config) -> Option<Model> {
     if Path::new(name).extension().is_some_and(|ext| ext == "toml") {
         match Model::load(Path::new(name)) {
             Ok(m) => Some(m),
@@ -143,10 +150,14 @@ fn resolve_model(name: &str, catalog: &str, endpoint: &str) -> Option<Model> {
             }
         }
     } else {
-        let catalog = match catalog {
-            "ollama" => OllamaCatalog::new(endpoint),
+        let catalog: Box<dyn ModelCatalog> = match catalog {
+            "ollama" => Box::new(OllamaCatalog::new(&config.ollama.endpoint)),
+            "openrouter" => Box::new(OpenRouterCatalog::new(
+                &config.openrouter.endpoint,
+                &config.openrouter.api_key,
+            )),
             other => {
-                eprintln!("Unknown catalog: {}. Supported: ollama", other);
+                eprintln!("Unknown catalog: {}. Supported: ollama, openrouter", other);
                 return None;
             }
         };
@@ -161,29 +172,68 @@ fn resolve_model(name: &str, catalog: &str, endpoint: &str) -> Option<Model> {
     }
 }
 
-fn list_available(catalog_name: &str, endpoint: &str) {
-    let catalog = match catalog_name {
-        "ollama" => OllamaCatalog::new(endpoint),
-        other => {
-            eprintln!("Unknown catalog: {}. Supported: ollama", other);
-            return;
-        }
+/// Known catalogs in display order.
+const CATALOGS: &[&str] = &["ollama", "openrouter"];
+
+fn list_available(catalog_name: &str, filter: Option<&str>, config: &Config) {
+    let catalogs: Vec<&str> = if catalog_name == "all" {
+        CATALOGS.to_vec()
+    } else if CATALOGS.contains(&catalog_name) {
+        vec![catalog_name]
+    } else {
+        eprintln!("Unknown catalog: {}. Supported: all, ollama, openrouter", catalog_name);
+        return;
     };
 
-    match catalog.list() {
-        Ok(models) => {
-            if models.is_empty() {
-                println!("No models found. Pull models with: ollama pull <model>");
-                return;
-            }
-            println!("Available models:");
-            for model in models {
-                let size = model.size.unwrap_or_default();
-                println!("  {}/{} ({})", catalog_name, model.name, size);
-            }
+    let show_all = catalogs.len() > 1;
+    println!("Tip: use --catalog <name> to pick a catalog, or pass a filter to narrow results.");
+    println!();
+
+    for name in &catalogs {
+        // When showing all catalogs, skip OpenRouter if no API key is configured
+        if show_all && *name == "openrouter" && config.openrouter.api_key.is_empty() {
+            println!("openrouter: set VLINDER_OPENROUTER_API_KEY to browse OpenRouter models.");
+            println!();
+            continue;
         }
-        Err(e) => {
-            eprintln!("Failed to list models: {}", e);
+
+        let catalog: Box<dyn ModelCatalog> = match *name {
+            "ollama" => Box::new(OllamaCatalog::new(&config.ollama.endpoint)),
+            "openrouter" => Box::new(OpenRouterCatalog::new(
+                &config.openrouter.endpoint,
+                &config.openrouter.api_key,
+            )),
+            _ => continue,
+        };
+
+        match catalog.list() {
+            Ok(models) => {
+                let filtered: Vec<_> = if let Some(q) = filter {
+                    let q = q.to_lowercase();
+                    models.into_iter().filter(|m| m.name.to_lowercase().contains(&q)).collect()
+                } else {
+                    models
+                };
+
+                if filtered.is_empty() {
+                    continue;
+                }
+
+                println!("{} ({} models):", name, filtered.len());
+                for model in &filtered {
+                    let size = model.size.as_deref().unwrap_or_default();
+                    let detail = if size.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" ({})", size)
+                    };
+                    println!("  {}/{}{}", name, model.name, detail);
+                }
+                println!();
+            }
+            Err(e) => {
+                eprintln!("  {} — failed to list: {}", name, e);
+            }
         }
     }
 }
@@ -237,6 +287,52 @@ mod tests {
         }
 
         let cli = TestCli::try_parse_from(["test", "available"]).unwrap();
-        assert!(matches!(cli.cmd, ModelCommand::Available { .. }));
+        match cli.cmd {
+            ModelCommand::Available { catalog, filter, .. } => {
+                assert_eq!(catalog, "all");
+                assert_eq!(filter, None);
+            }
+            _ => panic!("Expected Available command"),
+        }
+    }
+
+    #[test]
+    fn parses_available_with_filter() {
+        use clap::Parser;
+
+        #[derive(Parser)]
+        struct TestCli {
+            #[command(subcommand)]
+            cmd: ModelCommand,
+        }
+
+        let cli = TestCli::try_parse_from(["test", "available", "claude"]).unwrap();
+        match cli.cmd {
+            ModelCommand::Available { filter, catalog, .. } => {
+                assert_eq!(filter, Some("claude".to_string()));
+                assert_eq!(catalog, "all");
+            }
+            _ => panic!("Expected Available command"),
+        }
+    }
+
+    #[test]
+    fn parses_available_with_catalog_and_filter() {
+        use clap::Parser;
+
+        #[derive(Parser)]
+        struct TestCli {
+            #[command(subcommand)]
+            cmd: ModelCommand,
+        }
+
+        let cli = TestCli::try_parse_from(["test", "available", "--catalog", "openrouter", "claude"]).unwrap();
+        match cli.cmd {
+            ModelCommand::Available { filter, catalog, .. } => {
+                assert_eq!(filter, Some("claude".to_string()));
+                assert_eq!(catalog, "openrouter");
+            }
+            _ => panic!("Expected Available command"),
+        }
     }
 }
