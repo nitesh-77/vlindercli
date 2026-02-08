@@ -1,26 +1,20 @@
 # VlinderCLI
 
-Building blocks for local AI agents.
+AI agents that can time travel.
 
 ### The Bet
 
-Domain-specific agents with well-defined scope need accuracy and predictability,
-not generalized capability. For that, you don't need frontier models or hyperscale
-infrastructure. Small, efficient models — Phi-3, Mistral 7B, Qwen, Whisper,
-Nomic Embed — on infrastructure you control, can deliver outsized value.
+Agent systems are opaque. Something went wrong three turns ago and you'll never
+know what. VlinderCLI makes every side effect (inference calls, storage writes,
+delegation results) a content-addressed snapshot in a Merkle DAG. Fork a
+timeline, replay from any point, diff what changed.
 
-Local models are immutable artifacts. Same weights + same input = same output.
-Execution traces become reproducible proofs. API providers can silently change
-models; you cannot verify. Local models you can hash, replay, and debug.
+### Why It Matters
 
-### The Value Proposal
-
-Agent systems today are messy. VlinderCLI aims to provide a domain specific vocabulary that makes them tractable: building blocks that map to how you think about agents.
-
-- **Agent manifest** (`<name>-agent.toml` — or yaml, json): The agent, serialized, readable. Composed of building blocks.
-- **Fleet manifest** (`<name>-fleet.toml` — or yaml, json): The orchestration layer for agents.
-- **Runtime**: The execution engine that abstracts away the infrastructure.
-- **Text boundaries**: Human-readable and extensible at every surface.
+- **Reason**: A domain model that maps to how you think about agent infrastructure.
+- **Debug**: Something broke. Go back, see exactly what the agent saw, what it did, and why.
+- **Experiment**: Fork a timeline, try a different prompt or model, compare the outcomes.
+- **Prove**: Every side effect has a hash. Auditable by construction, not by convention.
 
 ### Domain Model
 
@@ -37,11 +31,10 @@ For the complete domain vocabulary, see [`DOMAIN_MODEL.md`](DOMAIN_MODEL.md).
  
 ### Who It's For
 
-Agent builders who care about understanding:
-- Homelab operators
-- Startups watching their inference bill
-- Enterprises with on-prem requirements
-- Edge and IoT deployments
+Developers who want to understand what their agents are doing, and prove it.
+- Teams building AI features that need reproducibility and auditability
+- Startups who need to control inference costs and infrastructure
+- Anyone who's debugged an agent by staring at logs and wants something better
 
 
 ---

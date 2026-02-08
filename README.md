@@ -1,14 +1,13 @@
 # VlinderCLI
 
-Building blocks for local AI agents.
+AI agents that can time travel.
 
 ## Motivation
 
-Agent systems today are messy: tangled dependencies, opaque behavior, unpredictable costs. VlinderCLI provides a domain-specific vocabulary that makes agents tractable: building blocks that map to how you think about agents.
-
-**The bet**: Domain-specific agents with well-defined scope need accuracy and predictability, not generalized capability. Small, efficient models (Phi-3, Mistral 7B, Nomic Embed) on infrastructure you control can deliver outsized value.
-
-**Local models are reproducible**. Same weights + same input = same output. API providers can silently change models; you cannot verify. Local models you can hash, replay, and debug.
+Agent systems are opaque. Something went wrong three turns ago and you'll never
+know what. Vlinder makes every side effect (inference calls, storage writes,
+delegation results) a content-addressed snapshot in a Merkle DAG. Fork a
+timeline, replay from any point, diff what changed.
 
 ## Quick Start
 
@@ -41,24 +40,6 @@ cargo run -- agent run -p agents/pensieve/
 | [031](docs/adr/031-vlinderd-as-runtime-registry.md) | Registry as Runtime Authority |
 | [055](docs/adr/055-time-travel-storage.md) | Version-Controlled Agent State |
 
-## Project Structure
-
-```
-vlindercli/
-├── src/
-│   ├── domain/       # Abstract types and traits
-│   ├── inference/    # LLM inference implementations
-│   ├── embedding/    # Embedding implementations
-│   ├── storage/      # Storage implementations
-│   ├── queue/        # Message queue
-│   └── runtime/      # WASM runtime and service handlers
-├── agents/           # Example agents (pensieve, echo, etc.)
-├── docs/
-│   ├── VISION.md
-│   ├── DOMAIN_MODEL.md
-│   └── adr/          # Architecture Decision Records
-└── tests/
-```
 
 ## License
 

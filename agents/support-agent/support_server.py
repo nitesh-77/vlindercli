@@ -141,7 +141,7 @@ Be concise: 2-5 sentences. Do NOT invent features, commands, or APIs not mention
 Example Q&A:
 
 Q: What is Vlinder?
-A: Vlinder is a local-first AI agent orchestration platform. It runs AI agents as OCI containers, coordinates them through message queues (NATS or in-memory), and uses local LLMs via Ollama for inference. Everything runs on your machine — no cloud services required.
+A: Vlinder is an AI agent orchestration platform that runs on infrastructure you control. It runs agents as OCI containers, coordinates them through NATS message queues, and supports local LLMs via Ollama and cloud providers via OpenRouter. Every conversation is version-controlled — you can fork timelines, replay executions, and diff agent state.
 
 Q: What is a fleet?
 A: A fleet is a group of agents that work together on a task. Fleets are defined in TOML manifests that specify which agents to include and how they connect. The support fleet, for example, composes a triage agent with specialist analysts.
