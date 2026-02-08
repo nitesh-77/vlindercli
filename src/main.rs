@@ -1,5 +1,4 @@
 use tracing_subscriber::{fmt, EnvFilter, Layer, layer::SubscriberExt, util::SubscriberInitExt};
-use tracing_subscriber::filter::LevelFilter;
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use vlindercli::config::Config;
 
@@ -36,7 +35,7 @@ fn init_tracing(config: &Config) {
         .with_target(true)
         .with_current_span(true)
         .with_span_list(true)
-        .with_filter(LevelFilter::TRACE);
+        .with_filter(EnvFilter::new("vlindercli=trace,warn"));
 
     tracing_subscriber::registry()
         .with(stderr_layer)

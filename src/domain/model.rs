@@ -71,6 +71,16 @@ impl Model {
         ResourceId::new(format!("pending-registration://models/{}", name))
     }
 
+    /// Strip the registry engine prefix to get the name the engine API expects.
+    ///
+    /// Registry qualifies names to avoid collisions: "ollama/phi3:latest".
+    /// Ollama's HTTP API needs the bare name: "phi3:latest". Without this,
+    /// /api/generate and /api/embeddings return 404.
+    pub fn bare_name(&self) -> &str {
+        let prefix = format!("{}/", self.engine.as_backend_str());
+        self.name.strip_prefix(&prefix).unwrap_or(&self.name)
+    }
+
     /// Create a model from a manifest with a pre-computed digest.
     ///
     /// The `id` field is set to a placeholder. The registry assigns the real

@@ -32,8 +32,7 @@ pub fn open_embedding_engine(model: &Model) -> Result<Arc<dyn EmbeddingEngine>, 
             let endpoint = model.model_path.authority()
                 .map(|a| format!("http://{}", a))
                 .unwrap_or_else(|| Config::load().ollama.endpoint);
-            let model_name = model.name.clone();
-            Ok(Arc::new(OllamaEmbeddingEngine::new(endpoint, model_name)))
+            Ok(Arc::new(OllamaEmbeddingEngine::new(endpoint, model.bare_name())))
         }
         EngineType::OpenRouter => {
             Err("OpenRouter does not support embeddings".to_string())

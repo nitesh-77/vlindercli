@@ -206,7 +206,7 @@ impl Default for Config {
 impl Default for LoggingConfig {
     fn default() -> Self {
         Self {
-            level: "info".to_string(),
+            level: "warn".to_string(),
             llama_level: "error".to_string(),
         }
     }
@@ -391,9 +391,13 @@ impl Config {
     }
 
     /// Build tracing EnvFilter from config.
+    ///
+    /// The configured level applies to vlindercli only. External crates
+    /// (async_nats, tonic, hyper, etc.) are suppressed to warn so they
+    /// don't pollute the user's terminal.
     pub fn tracing_filter(&self) -> String {
         format!(
-            "{},ggml={},llama={}",
+            "warn,vlindercli={},ggml={},llama={}",
             self.logging.level,
             self.logging.llama_level,
             self.logging.llama_level
@@ -464,7 +468,7 @@ mod tests {
     #[test]
     fn default_config_values() {
         let config = Config::default();
-        assert_eq!(config.logging.level, "info");
+        assert_eq!(config.logging.level, "warn");
         assert_eq!(config.ollama.endpoint, "http://localhost:11434");
     }
 

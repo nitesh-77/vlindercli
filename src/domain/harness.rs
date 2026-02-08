@@ -259,14 +259,14 @@ impl Harness for CliHarness {
             (SubmissionId::new(), SessionId::new(), input.to_string())
         };
 
-        let span = tracing::info_span!(
+        let span = tracing::debug_span!(
             "invoke",
             sha = %submission,
             session = %session_id,
             agent = %agent.name,
         );
         let _guard = span.enter();
-        tracing::info!(event = "invoke.started", "Invoking agent");
+        tracing::debug!(event = "invoke.started", "Invoking agent");
 
         // Create job in registry with submission tracking
         let job_id = self.registry.create_job(submission.clone(), agent_id.clone(), input.to_string());

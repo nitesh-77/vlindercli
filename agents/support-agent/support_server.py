@@ -1,10 +1,10 @@
 """Support orchestrator — triage agent that delegates to specialists.
 
-Receives user questions, delegates to log-analyst and code-analyst in parallel,
-waits for both reports, then classifies the situation into one of five categories
-and formats a structured response.
+Receives user questions, triages them first, then either:
+- Answers general questions directly (what is Vlinder, how does it work, etc.)
+- Delegates to log-analyst and code-analyst for troubleshooting
 
-Categories:
+Troubleshooting categories:
 1. Misconfiguration — user's setup is wrong
 2. Bug — observed behavior contradicts design intent
 3. Feature request — user wants something not yet supported
@@ -67,19 +67,66 @@ def wait_for(handle):
 
 
 # =============================================================================
+# Triage
+# =============================================================================
+
+TRIAGE_PROMPT = """You are a triage router for Vlinder, a local-first AI agent orchestration platform.
+
+Vlinder lets developers run AI agents locally using containers (Podman), message queues (NATS),
+and local LLMs (Ollama). Agents are composed into fleets for multi-agent workflows.
+
+Classify the user's message into exactly one of these categories. Reply with ONLY the category name.
+
+GENERAL — The user is asking a general question, greeting, or wants to know about Vlinder.
+          Examples: "hello", "what does this do?", "how do agents work?", "what is a fleet?"
+TROUBLESHOOT — The user has a problem, error, or unexpected behavior they need help with.
+              Examples: "my agent crashes", "I get a 404 error", "deployment fails", "logs show errors"
+
+User message: {query}
+
+Category:"""
+
+GENERAL_PROMPT = """You are the Vlinder support agent. Answer the user's question in 2-4 sentences.
+
+Vlinder is a local-first AI agent orchestration platform written in Rust.
+Agents are OCI containers. Fleets compose multiple agents. NATS handles messaging.
+Ollama runs local LLMs. SQLite provides storage. CLI: vlinder daemon, vlinder support,
+vlinder agent run, vlinder fleet run, vlinder model add.
+
+Rules:
+- Be concise. 2-4 sentences maximum.
+- Do NOT generate fake follow-up questions or conversations.
+- Do NOT invent CLI commands that were not listed above.
+- Stop after your single response.
+
+Question: {query}
+
+Answer:"""
+
+
+def triage(query):
+    """Decide whether a query is general or needs troubleshooting."""
+    prompt = TRIAGE_PROMPT.format(query=query)
+    result = infer(prompt, max_tokens=16).strip().upper()
+    if "TROUBLESHOOT" in result:
+        return "troubleshoot"
+    return "general"
+
+
+# =============================================================================
 # Orchestration
 # =============================================================================
 
-SYSTEM_PROMPT = """You are the Vlinder support orchestrator. You have received two specialist reports
-about a user's question: one from the log analyst (runtime behavior) and one from the
+SYNTHESIS_PROMPT = """You are the Vlinder support orchestrator. You have received two specialist reports
+about a user's problem: one from the log analyst (runtime behavior) and one from the
 code analyst (design intent).
 
-Your job is to synthesize these reports and classify the situation into exactly ONE category:
+Synthesize these reports and classify the situation into exactly ONE category:
 
 1. MISCONFIGURATION — The user's setup is wrong. Include the correct configuration.
-2. BUG — Observed behavior contradicts design intent. Include a bug report: title, description, reproduction steps.
+2. BUG — Observed behavior contradicts design intent. Include: title, description, reproduction steps.
 3. FEATURE_REQUEST — The user wants something not yet supported. Include: title, description, rationale.
-4. AUTHOR_GUIDE — The user wants to build something on the platform. Include: manifest format, container contract, bridge endpoints, and a scaffold.
+4. AUTHOR_GUIDE — The user wants to build something on the platform. Include: manifest format, container contract, bridge endpoints.
 5. OUT_OF_SCOPE — The issue is unrelated to Vlinder. Acknowledge and redirect.
 
 Format your response as:
@@ -91,17 +138,23 @@ Format your response as:
 Be concise and actionable. Cite evidence from both reports."""
 
 
-def handle_query(user_query):
-    """Process a user support query by delegating to both specialists."""
+def handle_general(query):
+    """Answer a general question directly."""
+    prompt = GENERAL_PROMPT.format(query=query)
+    return infer(prompt, max_tokens=256)
+
+
+def handle_troubleshoot(query):
+    """Delegate to specialists and synthesize their reports."""
     # Delegate to both specialists in parallel
     try:
-        log_handle = delegate("log-analyst", user_query)
+        log_handle = delegate("log-analyst", query)
     except Exception as e:
         log_handle = None
         log_report = f"(log analysis unavailable: {e})"
 
     try:
-        code_handle = delegate("code-analyst", user_query)
+        code_handle = delegate("code-analyst", query)
     except Exception as e:
         code_handle = None
         code_report = f"(code analysis unavailable: {e})"
@@ -120,10 +173,10 @@ def handle_query(user_query):
             code_report = f"(code analysis failed: {e})"
 
     # Synthesize with inference
-    prompt = f"""{SYSTEM_PROMPT}
+    prompt = f"""{SYNTHESIS_PROMPT}
 
-=== User's Question ===
-{user_query}
+=== User's Problem ===
+{query}
 
 === Log Analyst Report (runtime behavior) ===
 {log_report}
@@ -136,12 +189,19 @@ Based on both reports, classify and respond:"""
     try:
         return infer(prompt)
     except Exception as e:
-        # Fallback: return raw reports if inference fails
         return (
             f"[SUPPORT ERROR] Classification failed: {e}\n\n"
             f"--- Log Analysis ---\n{log_report}\n\n"
             f"--- Code Analysis ---\n{code_report}"
         )
+
+
+def handle_query(query):
+    """Triage the query, then route to the appropriate handler."""
+    category = triage(query)
+    if category == "troubleshoot":
+        return handle_troubleshoot(query)
+    return handle_general(query)
 
 
 # =============================================================================
@@ -160,10 +220,8 @@ class Handler(BaseHTTPRequestHandler):
         body = self.rfile.read(length).decode()
 
         # Strip fleet context prefix if present (injected by REPL)
-        # The fleet context is prepended to every input — extract the actual query
         if "\n\n" in body:
             parts = body.split("\n\n", 1)
-            # If the first part looks like fleet context, use only the query
             if parts[0].startswith("Fleet:"):
                 body = parts[1]
 

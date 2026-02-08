@@ -46,8 +46,7 @@ pub fn open_inference_engine(model: &Model) -> Result<Arc<dyn InferenceEngine>, 
             let endpoint = model.model_path.authority()
                 .map(|a| format!("http://{}", a))
                 .unwrap_or_else(|| Config::load().ollama.endpoint);
-            let model_name = model.name.clone();
-            Ok(Arc::new(OllamaInferenceEngine::new(endpoint, model_name)))
+            Ok(Arc::new(OllamaInferenceEngine::new(endpoint, model.bare_name())))
         }
         EngineType::OpenRouter => {
             let config = Config::load();
