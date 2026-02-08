@@ -1,50 +1,25 @@
-"""Log analyst agent — searches runtime state for error patterns and root causes.
+"""Log analyst agent — pure retrieval from runtime state.
 
 Receives a user's error description. Has read-only access to the full
 ~/.vlinder directory: logs, conversation store (timeline SHAs), and
 config. Joins these three perspectives to correlate what happened (logs),
 what was tracked (timeline), and how the system is configured (config.toml).
+
+No LLM calls — returns formatted data directly for the support orchestrator.
 """
 
 import glob
 import json
 import os
 import subprocess
-import urllib.request
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
-BRIDGE = os.environ.get("VLINDER_BRIDGE_URL", "")
-INFER_MODEL = "default"
 VLINDER_DIR = "/vlinder"
 LOGS_DIR = os.path.join(VLINDER_DIR, "logs")
 CONFIG_PATH = os.path.join(VLINDER_DIR, "config.toml")
 CONVERSATIONS_DIR = os.path.join(VLINDER_DIR, "conversations")
 MAX_LOG_RECORDS = 200
 MAX_FILES = 10
-
-
-# =============================================================================
-# Bridge helpers
-# =============================================================================
-
-def bridge_call(path, body):
-    """POST to a bridge endpoint and return the response body."""
-    url = f"{BRIDGE}{path}"
-    data = json.dumps(body).encode()
-    req = urllib.request.Request(url, data=data, method="POST")
-    req.add_header("Content-Type", "application/json")
-    with urllib.request.urlopen(req) as resp:
-        return resp.read()
-
-
-def infer(prompt, max_tokens=512):
-    """Call the inference bridge endpoint."""
-    result = bridge_call("/infer", {
-        "model": INFER_MODEL,
-        "prompt": prompt,
-        "max_tokens": max_tokens,
-    })
-    return result.decode()
 
 
 # =============================================================================
@@ -138,7 +113,7 @@ def read_recent_errors():
 
 
 def format_log_records(records):
-    """Format structured log records for inclusion in the inference prompt."""
+    """Format structured log records for human-readable output."""
     if not records:
         return "(no matching log records found)"
     lines = []
@@ -207,22 +182,22 @@ def read_recent_timeline():
 
 
 # =============================================================================
-# Analysis
+# Analysis (pure retrieval — no LLM)
 # =============================================================================
 
 def analyze(user_query):
-    """Analyze logs, config, and timeline in response to a user query."""
+    """Retrieve and format runtime state data for a user query.
+
+    Returns formatted log records, errors, config, and timeline directly —
+    no LLM synthesis. The support orchestrator handles all inference.
+    """
     query_matches = search_logs(user_query)
     recent_errors = read_recent_errors()
     config = read_config()
     timeline = read_recent_timeline()
 
-    prompt_parts = [
-        "You are a runtime state analyst for Vlinder, a local-first AI agent orchestration platform.",
-        "You have access to structured JSONL logs, system configuration, and conversation timeline.",
-        "Your job is to correlate these data sources and identify what actually happened.",
-        "",
-        f"User's question: {user_query}",
+    parts = [
+        f"=== Query: {user_query} ===",
         "",
         "=== Structured log entries matching the query ===",
         format_log_records(query_matches),
@@ -235,20 +210,9 @@ def analyze(user_query):
         "",
         "=== Recent conversation timeline ===",
         timeline[:1000],
-        "",
-        "Based on all available data, provide a concise analysis:",
-        "1. What happened at runtime (sequence of events, correlated by SHA)",
-        "2. Any error patterns or correlations across logs, config, and timeline",
-        "3. The likely root cause based on the evidence",
-        "",
-        "Be specific — cite event names, SHAs, agent names, and timestamps.",
-        "If the data doesn't contain relevant information, say so clearly.",
     ]
 
-    try:
-        return infer("\n".join(prompt_parts))
-    except Exception as e:
-        return f"[log analysis error] {e}"
+    return "\n".join(parts)
 
 
 # =============================================================================
@@ -262,7 +226,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_POST(self):
-        """Analyze logs for the given query."""
+        """Retrieve runtime state for the given query."""
         length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(length).decode()
 

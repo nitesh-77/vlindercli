@@ -1,15 +1,11 @@
-"""Support orchestrator — triage agent that delegates to specialists.
+"""Support orchestrator — grounded triage agent that delegates to specialists.
 
-Receives user questions, triages them first, then either:
-- Answers general questions directly (what is Vlinder, how does it work, etc.)
-- Delegates to log-analyst and code-analyst for troubleshooting
+Receives user questions, detects greetings, triages the rest, then either:
+- Answers questions grounded in retrieved documentation (code-analyst)
+- Troubleshoots problems using both specialists' retrieved data
 
-Troubleshooting categories:
-1. Misconfiguration — user's setup is wrong
-2. Bug — observed behavior contradicts design intent
-3. Feature request — user wants something not yet supported
-4. Author guide — user wants to build something on the platform
-5. Out of scope — issue is unrelated to Vlinder
+This is the ONLY agent in the support fleet that calls the LLM.
+Specialists (code-analyst, log-analyst) are pure retrieval — no LLM.
 """
 
 import json
@@ -19,6 +15,17 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 
 BRIDGE = os.environ.get("VLINDER_BRIDGE_URL", "")
 INFER_MODEL = "default"
+MAX_REPORT_CHARS = 3000
+
+GREETING_WORDS = {"hello", "hi", "hey", "greetings", "howdy", "sup", "yo"}
+
+GREETING_RESPONSE = """Welcome to Vlinder support! I can help you with:
+
+- **Understanding Vlinder** — what it does, how agents/fleets/queues work
+- **Troubleshooting** — errors, crashes, configuration issues
+- **Building agents** — manifest format, container contract, bridge API
+
+What would you like to know?"""
 
 
 # =============================================================================
@@ -35,7 +42,7 @@ def bridge_call(path, body):
         return resp.read()
 
 
-def infer(prompt, max_tokens=1024):
+def infer(prompt, max_tokens=256):
     """Call the inference bridge endpoint."""
     result = bridge_call("/infer", {
         "model": INFER_MODEL,
@@ -67,96 +74,172 @@ def wait_for(handle):
 
 
 # =============================================================================
-# Triage
+# Greeting detection
 # =============================================================================
 
-TRIAGE_PROMPT = """You are a triage router for Vlinder, a local-first AI agent orchestration platform.
+def is_greeting(query):
+    """Detect greetings by keyword match on short messages.
 
-Vlinder lets developers run AI agents locally using containers (Podman), message queues (NATS),
-and local LLMs (Ollama). Agents are composed into fleets for multi-agent workflows.
+    Only triggers on messages with 3 or fewer words to avoid false positives
+    on queries like "hi, my agent crashes on startup".
+    """
+    words = query.strip().lower().split()
+    if len(words) > 3:
+        return False
+    return any(w.strip(".,!?") in GREETING_WORDS for w in words)
 
-Classify the user's message into exactly one of these categories. Reply with ONLY the category name.
 
-GENERAL — The user is asking a general question, greeting, or wants to know about Vlinder.
-          Examples: "hello", "what does this do?", "how do agents work?", "what is a fleet?"
-TROUBLESHOOT — The user has a problem, error, or unexpected behavior they need help with.
-              Examples: "my agent crashes", "I get a 404 error", "deployment fails", "logs show errors"
+# =============================================================================
+# Triage (few-shot, minimal tokens)
+# =============================================================================
 
-User message: {query}
+TRIAGE_PROMPT = """Classify the user message as QUESTION or TROUBLESHOOT. Reply with ONE word only.
 
-Category:"""
+User: what is a fleet?
+QUESTION
 
-GENERAL_PROMPT = """You are the Vlinder support agent. Answer the user's question in 2-4 sentences.
+User: how do agents communicate?
+QUESTION
 
-Vlinder is a local-first AI agent orchestration platform written in Rust.
-Agents are OCI containers. Fleets compose multiple agents. NATS handles messaging.
-Ollama runs local LLMs. SQLite provides storage. CLI: vlinder daemon, vlinder support,
-vlinder agent run, vlinder fleet run, vlinder model add.
+User: what commands are available?
+QUESTION
 
-Rules:
-- Be concise. 2-4 sentences maximum.
-- Do NOT generate fake follow-up questions or conversations.
-- Do NOT invent CLI commands that were not listed above.
-- Stop after your single response.
+User: my agent crashes on startup
+TROUBLESHOOT
 
-Question: {query}
+User: I get a connection refused error
+TROUBLESHOOT
 
-Answer:"""
+User: logs show timeout errors
+TROUBLESHOOT
+
+User: {query}
+"""
 
 
 def triage(query):
-    """Decide whether a query is general or needs troubleshooting."""
+    """Classify a query as question or troubleshoot using few-shot prompt."""
     prompt = TRIAGE_PROMPT.format(query=query)
-    result = infer(prompt, max_tokens=16).strip().upper()
+    try:
+        result = infer(prompt, max_tokens=8).strip().upper()
+    except Exception:
+        return "question"
+
     if "TROUBLESHOOT" in result:
         return "troubleshoot"
-    return "general"
+    return "question"
 
 
 # =============================================================================
-# Orchestration
+# Question handler (grounded in retrieved docs)
 # =============================================================================
 
-SYNTHESIS_PROMPT = """You are the Vlinder support orchestrator. You have received two specialist reports
-about a user's problem: one from the log analyst (runtime behavior) and one from the
-code analyst (design intent).
+QUESTION_PROMPT = """You are the Vlinder support agent. Answer the user's question using ONLY the documentation below. If the documentation doesn't cover the topic, say so honestly.
 
-Synthesize these reports and classify the situation into exactly ONE category:
+Be concise: 2-5 sentences. Do NOT invent features, commands, or APIs not mentioned in the docs.
 
-1. MISCONFIGURATION — The user's setup is wrong. Include the correct configuration.
-2. BUG — Observed behavior contradicts design intent. Include: title, description, reproduction steps.
-3. FEATURE_REQUEST — The user wants something not yet supported. Include: title, description, rationale.
-4. AUTHOR_GUIDE — The user wants to build something on the platform. Include: manifest format, container contract, bridge endpoints.
-5. OUT_OF_SCOPE — The issue is unrelated to Vlinder. Acknowledge and redirect.
+Example Q&A:
 
-Format your response as:
+Q: What is Vlinder?
+A: Vlinder is a local-first AI agent orchestration platform. It runs AI agents as OCI containers, coordinates them through message queues (NATS or in-memory), and uses local LLMs via Ollama for inference. Everything runs on your machine — no cloud services required.
 
-[CATEGORY_NAME]
+Q: What is a fleet?
+A: A fleet is a group of agents that work together on a task. Fleets are defined in TOML manifests that specify which agents to include and how they connect. The support fleet, for example, composes a triage agent with specialist analysts.
 
-<your structured response based on the category>
+Q: How do I create an agent?
+A: Define an agent.toml manifest with the agent's name, runtime, and container image. The agent runs as an HTTP server inside the container — it receives work via POST requests and returns results. Mount any files the agent needs as read-only volumes.
 
-Be concise and actionable. Cite evidence from both reports."""
+=== Retrieved Documentation ===
+{docs}
+
+Q: {query}
+A:"""
+
+NO_DOCS_RESPONSE = """I don't have enough context to answer that question well. Here are some topics I can help with:
+
+- **Architecture** — agents, fleets, queues, messaging
+- **Configuration** — config.toml, agent manifests, model setup
+- **Commands** — vlinder daemon, vlinder support, vlinder agent run, vlinder fleet run
+- **Troubleshooting** — errors, crashes, log analysis
+
+Try asking about one of these specifically!"""
 
 
-def handle_general(query):
-    """Answer a general question directly."""
-    prompt = GENERAL_PROMPT.format(query=query)
-    return infer(prompt, max_tokens=256)
+def handle_question(query):
+    """Answer a question grounded in code-analyst's retrieved documentation."""
+    # Delegate to code-analyst for doc retrieval
+    try:
+        code_handle = delegate("code-analyst", query)
+        docs = wait_for(code_handle)
+    except Exception:
+        docs = ""
+
+    if not docs or len(docs.strip()) < 50:
+        return NO_DOCS_RESPONSE
+
+    prompt = QUESTION_PROMPT.format(docs=docs[:6000], query=query)
+    try:
+        return infer(prompt, max_tokens=256)
+    except Exception:
+        # LLM failed — return raw retrieval as fallback
+        return f"Here's what I found in the documentation:\n\n{docs[:3000]}"
+
+
+# =============================================================================
+# Troubleshoot handler (grounded in both specialists)
+# =============================================================================
+
+TROUBLESHOOT_PROMPT = """You are the Vlinder support agent. Diagnose the user's problem using the specialist reports below.
+
+The log analyst report shows runtime data (log entries, errors, config). The code analyst report shows design documentation (ADRs, source code). Use both to identify the issue.
+
+Provide a concise diagnosis in 4-6 sentences:
+1. What the evidence shows
+2. The likely cause
+3. What to try next
+
+Example:
+
+User problem: "agent not receiving messages"
+Diagnosis: The logs show the agent container started successfully but no messages were dispatched to it. The code analyst found ADR 044 which documents that agents must declare their queue subscriptions in agent.toml. Check that your agent's manifest includes the correct queue bindings — without them, the dispatcher won't route messages to your agent. Run `vlinder agent inspect <name>` to verify the resolved configuration.
+
+=== User's Problem ===
+{query}
+
+=== Log Analyst Report (runtime data) ===
+{log_report}
+
+=== Code Analyst Report (documentation) ===
+{code_report}
+
+Diagnosis:"""
+
+SPECIALISTS_UNAVAILABLE = """I'm having trouble reaching the specialist agents right now. Please make sure the support fleet is fully running:
+
+1. Check that all containers are up: `podman ps`
+2. Restart the fleet: `vlinder fleet run support`
+3. Try your question again
+
+If the problem persists, check the logs at `~/.vlinder/logs/` for errors."""
 
 
 def handle_troubleshoot(query):
-    """Delegate to specialists and synthesize their reports."""
+    """Delegate to both specialists and synthesize their reports."""
+    log_report = None
+    code_report = None
+
     # Delegate to both specialists in parallel
+    log_handle = None
+    code_handle = None
+
     try:
         log_handle = delegate("log-analyst", query)
     except Exception as e:
-        log_handle = None
         log_report = f"(log analysis unavailable: {e})"
 
     try:
         code_handle = delegate("code-analyst", query)
     except Exception as e:
-        code_handle = None
         code_report = f"(code analysis unavailable: {e})"
 
     # Wait for results
@@ -172,36 +255,43 @@ def handle_troubleshoot(query):
         except Exception as e:
             code_report = f"(code analysis failed: {e})"
 
-    # Synthesize with inference
-    prompt = f"""{SYNTHESIS_PROMPT}
+    # If both specialists are unavailable, return canned error
+    if log_report and log_report.startswith("(") and code_report and code_report.startswith("("):
+        return SPECIALISTS_UNAVAILABLE
 
-=== User's Problem ===
-{query}
+    # Truncate reports to fit prompt budget
+    log_text = (log_report or "(no log data)")[:MAX_REPORT_CHARS]
+    code_text = (code_report or "(no code data)")[:MAX_REPORT_CHARS]
 
-=== Log Analyst Report (runtime behavior) ===
-{log_report}
-
-=== Code Analyst Report (design intent) ===
-{code_report}
-
-Based on both reports, classify and respond:"""
+    prompt = TROUBLESHOOT_PROMPT.format(
+        query=query,
+        log_report=log_text,
+        code_report=code_text,
+    )
 
     try:
-        return infer(prompt)
-    except Exception as e:
+        return infer(prompt, max_tokens=512)
+    except Exception:
+        # LLM failed — return raw specialist reports as fallback
         return (
-            f"[SUPPORT ERROR] Classification failed: {e}\n\n"
-            f"--- Log Analysis ---\n{log_report}\n\n"
-            f"--- Code Analysis ---\n{code_report}"
+            f"--- Log Analysis ---\n{log_text}\n\n"
+            f"--- Code Analysis ---\n{code_text}"
         )
 
 
+# =============================================================================
+# Orchestration
+# =============================================================================
+
 def handle_query(query):
-    """Triage the query, then route to the appropriate handler."""
+    """Route: greeting → canned, question → grounded Q&A, troubleshoot → synthesis."""
+    if is_greeting(query):
+        return GREETING_RESPONSE
+
     category = triage(query)
     if category == "troubleshoot":
         return handle_troubleshoot(query)
-    return handle_general(query)
+    return handle_question(query)
 
 
 # =============================================================================

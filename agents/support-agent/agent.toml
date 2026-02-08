@@ -1,5 +1,5 @@
 name = "support"
-description = "Triage orchestrator that delegates to log-analyst and code-analyst, then classifies responses into five categories: misconfiguration, bug, feature request, author guide, or out of scope."
+description = "Grounded support orchestrator that retrieves docs via code-analyst and runtime data via log-analyst, then answers questions or diagnoses problems using a single LLM call."
 runtime = "container"
 executable = "localhost/vlinder-support:latest"
 

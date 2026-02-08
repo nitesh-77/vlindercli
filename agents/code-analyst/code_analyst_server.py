@@ -1,45 +1,96 @@
-"""Code analyst agent — searches source code and ADRs for design intent.
+"""Code analyst agent — pure retrieval from source code and ADRs.
 
 Receives a user's question, finds relevant code paths and documentation
-in the mounted source tree, and uses inference to explain whether behavior
-is by-design, a known limitation, or a gap.
+in the mounted source tree, and returns formatted excerpts. No LLM calls —
+the support orchestrator handles all inference.
 """
 
 import glob
-import json
 import os
-import urllib.request
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
-BRIDGE = os.environ.get("VLINDER_BRIDGE_URL", "")
-INFER_MODEL = "default"
 SOURCE_DIR = "/source"
 MAX_CONTEXT_CHARS = 8000
+FOUNDATION_BUDGET = 3000
 MAX_FILES = 15
 
+FOUNDATION_DOCS = ["VISION.md", "DOMAIN_MODEL.md", "README.md"]
+
+STOP_WORDS = {
+    "a", "an", "the", "is", "it", "in", "on", "at", "to", "of", "for",
+    "and", "or", "but", "not", "with", "from", "by", "as", "be", "was",
+    "were", "been", "are", "am", "do", "does", "did", "has", "have", "had",
+    "will", "would", "could", "should", "may", "might", "can", "shall",
+    "this", "that", "these", "those", "what", "which", "who", "whom",
+    "how", "why", "when", "where", "i", "me", "my", "we", "us", "our",
+    "you", "your", "he", "she", "they", "them", "its", "his", "her",
+    "their", "about", "if", "so", "up", "out", "no", "yes", "all",
+    "any", "some", "just", "only", "very", "also", "than", "then",
+    "now", "here", "there", "each", "every", "into", "over", "after",
+    "before", "between", "through", "during", "without",
+    # Question fragments
+    "does", "tell", "explain", "describe", "show", "give", "please",
+    "know", "work", "works", "thing", "things", "something", "anything",
+    "software", "program", "tool", "app", "application",
+}
+
 
 # =============================================================================
-# Bridge helpers
+# Search term extraction
 # =============================================================================
 
-def bridge_call(path, body):
-    """POST to a bridge endpoint and return the response body."""
-    url = f"{BRIDGE}{path}"
-    data = json.dumps(body).encode()
-    req = urllib.request.Request(url, data=data, method="POST")
-    req.add_header("Content-Type", "application/json")
-    with urllib.request.urlopen(req) as resp:
-        return resp.read()
+def extract_search_terms(query):
+    """Extract meaningful search terms from a query, filtering stop words.
+
+    Strips punctuation, lowercases, and removes common English stop words.
+    Returns a list of terms suitable for content matching.
+    """
+    # Strip punctuation and split
+    cleaned = ""
+    for ch in query:
+        if ch.isalnum() or ch in (" ", "-", "_"):
+            cleaned += ch
+        else:
+            cleaned += " "
+
+    terms = []
+    for word in cleaned.lower().split():
+        if word and word not in STOP_WORDS and len(word) > 1:
+            terms.append(word)
+    return terms
 
 
-def infer(prompt, max_tokens=512):
-    """Call the inference bridge endpoint."""
-    result = bridge_call("/infer", {
-        "model": INFER_MODEL,
-        "prompt": prompt,
-        "max_tokens": max_tokens,
-    })
-    return result.decode()
+# =============================================================================
+# Foundation documents
+# =============================================================================
+
+def read_foundation_docs():
+    """Read VISION.md, DOMAIN_MODEL.md, and README.md from source root.
+
+    These provide general project context and are always included in results.
+    Returns formatted text within the foundation budget.
+    """
+    parts = []
+    total = 0
+
+    for name in FOUNDATION_DOCS:
+        path = os.path.join(SOURCE_DIR, name)
+        try:
+            with open(path, "r", errors="replace") as f:
+                content = f.read()
+        except (OSError, IOError):
+            continue
+
+        budget_remaining = FOUNDATION_BUDGET - total
+        if budget_remaining <= 0:
+            break
+
+        truncated = content[:budget_remaining]
+        entry = f"--- {name} ---\n{truncated}"
+        parts.append(entry)
+        total += len(entry)
+
+    return "\n\n".join(parts)
 
 
 # =============================================================================
@@ -62,9 +113,11 @@ def find_source_files():
     return files
 
 
-def search_files(file_list, query):
-    """Search files for lines matching query terms. Returns relevant snippets."""
-    terms = query.lower().split()
+def search_files(file_list, terms):
+    """Search files for lines matching search terms. Returns relevant snippets."""
+    if not terms:
+        return []
+
     results = []
 
     for filepath in file_list:
@@ -73,7 +126,7 @@ def search_files(file_list, query):
                 content = f.read()
                 lower_content = content.lower()
 
-                # Score by how many query terms appear
+                # Score by how many search terms appear
                 score = sum(1 for term in terms if term in lower_content)
                 if score > 0:
                     rel_path = os.path.relpath(filepath, SOURCE_DIR)
@@ -90,9 +143,8 @@ def search_files(file_list, query):
     return results[:MAX_FILES]
 
 
-def extract_relevant_sections(content, query, max_chars=2000):
-    """Extract the most relevant sections from a file around query matches."""
-    terms = query.lower().split()
+def extract_relevant_sections(content, terms, max_chars=2000):
+    """Extract the most relevant sections from a file around term matches."""
     lines = content.splitlines()
     relevant_lines = set()
 
@@ -126,27 +178,27 @@ def extract_relevant_sections(content, query, max_chars=2000):
     return result[:max_chars]
 
 
-def find_relevant_adrs(query):
-    """Find ADRs relevant to the query."""
+def find_relevant_adrs(terms):
+    """Find ADRs relevant to the search terms."""
     adrs = find_adrs()
-    return search_files(adrs, query)
+    return search_files(adrs, terms)
 
 
-def find_relevant_source(query):
-    """Find source files relevant to the query."""
+def find_relevant_source(terms):
+    """Find source files relevant to the search terms."""
     sources = find_source_files()
-    return search_files(sources, query)
+    return search_files(sources, terms)
 
 
-def format_findings(findings, query):
-    """Format search results for the inference prompt."""
+def format_findings(findings, terms):
+    """Format search results as readable excerpts."""
     if not findings:
         return "(no relevant files found)"
 
     parts = []
     total_chars = 0
     for f in findings:
-        section = extract_relevant_sections(f["content"], query)
+        section = extract_relevant_sections(f["content"], terms)
         entry = f"--- {f['file']} ---\n{section}"
         if total_chars + len(entry) > MAX_CONTEXT_CHARS:
             break
@@ -157,43 +209,48 @@ def format_findings(findings, query):
 
 
 # =============================================================================
-# Analysis
+# Analysis (pure retrieval — no LLM)
 # =============================================================================
 
 def analyze(user_query):
-    """Analyze source code and documentation for a user query."""
-    # Search ADRs first (design intent)
-    adr_findings = find_relevant_adrs(user_query)
+    """Retrieve relevant source code and documentation for a user query.
 
-    # Then search source code (implementation)
-    source_findings = find_relevant_source(user_query)
+    Returns formatted excerpts directly — no LLM synthesis.
+    Foundation docs (VISION.md, DOMAIN_MODEL.md, README.md) are always included.
+    """
+    terms = extract_search_terms(user_query)
 
-    # Build the prompt
-    prompt_parts = [
-        "You are a code analyst for Vlinder, a local-first AI agent orchestration platform.",
-        "Your job is to explain the design intent behind the platform's behavior.",
-        "You have access to Architecture Decision Records (ADRs) and source code.",
+    # Always include foundation docs for general context
+    foundation = read_foundation_docs()
+
+    # Search ADRs and source code with filtered terms
+    adr_findings = find_relevant_adrs(terms)
+    source_findings = find_relevant_source(terms)
+
+    parts = [
+        f"=== Query: {user_query} ===",
         "",
-        f"User's question: {user_query}",
-        "",
-        "=== Relevant ADRs (design decisions) ===",
-        format_findings(adr_findings, user_query),
-        "",
-        "=== Relevant source code ===",
-        format_findings(source_findings, user_query),
-        "",
-        "Based on the documentation and code, provide a concise analysis:",
-        "1. Whether this behavior is by-design (cite the relevant ADR)",
-        "2. If it's a known limitation (documented but not yet implemented)",
-        "3. If it appears to be a gap (not covered by any ADR or code)",
-        "",
-        "Be specific — cite ADR numbers and source file paths.",
+        "=== Foundation (VISION / DOMAIN MODEL / README) ===",
+        foundation,
     ]
 
-    try:
-        return infer("\n".join(prompt_parts))
-    except Exception as e:
-        return f"[code analysis error] {e}"
+    adr_text = format_findings(adr_findings, terms)
+    if adr_text != "(no relevant files found)":
+        parts.append("")
+        parts.append("=== Relevant ADRs (design decisions) ===")
+        parts.append(adr_text)
+
+    source_text = format_findings(source_findings, terms)
+    if source_text != "(no relevant files found)":
+        parts.append("")
+        parts.append("=== Relevant source code ===")
+        parts.append(source_text)
+
+    if not terms:
+        parts.append("")
+        parts.append("(No specific search terms extracted — returning foundation docs only)")
+
+    return "\n".join(parts)
 
 
 # =============================================================================
@@ -207,7 +264,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_POST(self):
-        """Analyze source code and docs for the given query."""
+        """Retrieve source code and docs for the given query."""
         length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(length).decode()
 
