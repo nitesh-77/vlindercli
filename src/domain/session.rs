@@ -20,6 +20,9 @@ pub struct Session {
     pub agent: String,
     /// Completed conversation turns.
     pub history: Vec<HistoryEntry>,
+    /// Stable filename, computed once at creation time.
+    #[serde(skip)]
+    filename: String,
 }
 
 /// A single entry in the conversation history.
@@ -43,11 +46,14 @@ pub enum HistoryEntry {
 impl Session {
     /// Create a new empty session.
     pub fn new(session: SessionId, agent: impl Into<String>) -> Self {
+        let agent = agent.into();
+        let filename = make_filename(&session, &agent);
         Self {
             open: None,
             session,
-            agent: agent.into(),
+            agent,
             history: Vec::new(),
+            filename,
         }
     }
 
@@ -93,22 +99,13 @@ impl Session {
         });
     }
 
-    /// Generate the filename for this session's JSON file.
+    /// The stable filename for this session's JSON file.
     ///
     /// Format: `{datetime}_{agent}_{short_id}.json`
     /// Datetime uses filesystem-safe format: `2026-02-08T14-30-05Z`.
-    /// The short_id is the first 8 chars of the session UUID.
-    pub fn filename(&self) -> String {
-        let datetime = format_utc_datetime_filesafe();
-        let short_id = self.session.as_str()
-            .strip_prefix("ses-")
-            .unwrap_or(self.session.as_str());
-        let short_id = if short_id.len() > 8 {
-            &short_id[..8]
-        } else {
-            short_id
-        };
-        format!("{}_{}_{}.json", datetime, self.agent, short_id)
+    /// Computed once at creation time — never changes.
+    pub fn filename(&self) -> &str {
+        &self.filename
     }
 }
 
@@ -142,6 +139,20 @@ fn format_unix_timestamp(secs: u64) -> String {
     let y = if m <= 2 { y + 1 } else { y };
 
     format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", y, m, d, hours, minutes, seconds)
+}
+
+/// Compute the filename for a session. Called once at creation time.
+fn make_filename(session: &SessionId, agent: &str) -> String {
+    let datetime = format_utc_datetime_filesafe();
+    let short_id = session.as_str()
+        .strip_prefix("ses-")
+        .unwrap_or(session.as_str());
+    let short_id = if short_id.len() > 8 {
+        &short_id[..8]
+    } else {
+        short_id
+    };
+    format!("{}_{}_{}.json", datetime, agent, short_id)
 }
 
 /// Format current UTC datetime for filenames.
