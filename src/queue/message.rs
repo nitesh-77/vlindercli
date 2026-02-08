@@ -9,6 +9,8 @@
 use std::fmt;
 use uuid::Uuid;
 
+use serde::{Deserialize, Serialize};
+
 use crate::domain::{ResourceId, RuntimeType};
 
 // --- Supporting types ---
@@ -45,29 +47,28 @@ impl From<String> for MessageId {
     }
 }
 
-// --- SubmissionId (ADR 044) ---
+// --- SubmissionId (ADR 044, ADR 054) ---
 
 /// Unique identifier for a user-initiated submission.
 ///
-/// Format: `sub-{uuid}` for easy visual identification in logs.
+/// Value is a git commit SHA — directly pasteable into `git show`.
 /// A submission groups all messages related to a single user request.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct SubmissionId(String);
 
 impl SubmissionId {
-    /// Create a new submission ID with "sub-" prefix.
-    pub fn new() -> Self {
-        Self(format!("sub-{}", Uuid::new_v4()))
-    }
-
     pub fn as_str(&self) -> &str {
         &self.0
     }
-}
 
-impl Default for SubmissionId {
-    fn default() -> Self {
-        Self::new()
+    /// Create a placeholder SubmissionId for non-session contexts.
+    ///
+    /// In session mode, SubmissionIds are git commit SHAs derived from
+    /// the conversation store. This factory exists for backwards compatibility
+    /// and will be removed once all paths use session-derived IDs.
+    pub fn new() -> Self {
+        Self(Uuid::new_v4().to_string())
     }
 }
 
@@ -78,6 +79,45 @@ impl fmt::Display for SubmissionId {
 }
 
 impl From<String> for SubmissionId {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
+
+// --- SessionId (ADR 054) ---
+
+/// Unique identifier for a conversation session.
+///
+/// Format: `ses-{uuid}`. Groups multiple submissions into a conversation.
+/// Created by the CLI when the REPL starts.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct SessionId(String);
+
+impl SessionId {
+    /// Create a new session ID with "ses-" prefix.
+    pub fn new() -> Self {
+        Self(format!("ses-{}", Uuid::new_v4()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Default for SessionId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl fmt::Display for SessionId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<String> for SessionId {
     fn from(s: String) -> Self {
         Self(s)
     }
@@ -212,6 +252,7 @@ pub trait ExpectsReply {
 pub struct InvokeMessage {
     pub id: MessageId,
     pub submission: SubmissionId,
+    pub session: SessionId,
     pub harness: HarnessType,
     pub runtime: RuntimeType,
     pub agent_id: ResourceId,
@@ -221,6 +262,7 @@ pub struct InvokeMessage {
 impl InvokeMessage {
     pub fn new(
         submission: SubmissionId,
+        session: SessionId,
         harness: HarnessType,
         runtime: RuntimeType,
         agent_id: ResourceId,
@@ -229,6 +271,7 @@ impl InvokeMessage {
         Self {
             id: MessageId::new(),
             submission,
+            session,
             harness,
             runtime,
             agent_id,
@@ -456,31 +499,64 @@ mod tests {
     use super::*;
     use std::collections::HashSet;
 
+    fn test_submission() -> SubmissionId {
+        SubmissionId::from("a1b2c3d".to_string())
+    }
+
+    // --- SubmissionId tests ---
+
     #[test]
-    fn submission_id_generates_unique_ids() {
-        let id1 = SubmissionId::new();
-        let id2 = SubmissionId::new();
-        assert_ne!(id1, id2);
+    fn submission_id_from_string() {
+        let id = SubmissionId::from("a1b2c3d".to_string());
+        assert_eq!(id.as_str(), "a1b2c3d");
     }
 
     #[test]
-    fn submission_id_has_sub_prefix() {
-        let id = SubmissionId::new();
-        assert!(id.as_str().starts_with("sub-"));
-        assert!(id.to_string().starts_with("sub-"));
+    fn submission_id_display() {
+        let id = SubmissionId::from("a1b2c3d".to_string());
+        assert_eq!(format!("{}", id), "a1b2c3d");
     }
 
     #[test]
     fn submission_id_equality_and_hashing() {
-        let id1 = SubmissionId::from("sub-test-123".to_string());
-        let id2 = SubmissionId::from("sub-test-123".to_string());
-        let id3 = SubmissionId::from("sub-test-456".to_string());
+        let id1 = SubmissionId::from("a1b2c3d".to_string());
+        let id2 = SubmissionId::from("a1b2c3d".to_string());
+        let id3 = SubmissionId::from("b3c4d5e".to_string());
 
-        // Equality
         assert_eq!(id1, id2);
         assert_ne!(id1, id3);
 
-        // Hashing (can be used in HashSet/HashMap)
+        let mut set = HashSet::new();
+        set.insert(id1.clone());
+        assert!(set.contains(&id2));
+        assert!(!set.contains(&id3));
+    }
+
+    // --- SessionId tests ---
+
+    #[test]
+    fn session_id_generates_unique_ids() {
+        let id1 = SessionId::new();
+        let id2 = SessionId::new();
+        assert_ne!(id1, id2);
+    }
+
+    #[test]
+    fn session_id_has_ses_prefix() {
+        let id = SessionId::new();
+        assert!(id.as_str().starts_with("ses-"));
+        assert!(id.to_string().starts_with("ses-"));
+    }
+
+    #[test]
+    fn session_id_equality_and_hashing() {
+        let id1 = SessionId::from("ses-abc123".to_string());
+        let id2 = SessionId::from("ses-abc123".to_string());
+        let id3 = SessionId::from("ses-def456".to_string());
+
+        assert_eq!(id1, id2);
+        assert_ne!(id1, id3);
+
         let mut set = HashSet::new();
         set.insert(id1.clone());
         assert!(set.contains(&id2));
@@ -488,15 +564,15 @@ mod tests {
     }
 
     #[test]
-    fn submission_id_from_string() {
-        let id = SubmissionId::from("sub-custom-id".to_string());
-        assert_eq!(id.as_str(), "sub-custom-id");
+    fn session_id_from_string() {
+        let id = SessionId::from("ses-custom".to_string());
+        assert_eq!(id.as_str(), "ses-custom");
     }
 
     #[test]
-    fn submission_id_display() {
-        let id = SubmissionId::from("sub-abc123".to_string());
-        assert_eq!(format!("{}", id), "sub-abc123");
+    fn session_id_display() {
+        let id = SessionId::from("ses-abc123".to_string());
+        assert_eq!(format!("{}", id), "ses-abc123");
     }
 
     // --- Sequence tests ---
@@ -590,10 +666,12 @@ mod tests {
 
     #[test]
     fn invoke_message_creation() {
-        let submission = SubmissionId::new();
+        let submission = test_submission();
+        let session = SessionId::new();
         let agent_id = test_agent_id();
         let msg = InvokeMessage::new(
             submission.clone(),
+            session.clone(),
             HarnessType::Cli,
             RuntimeType::Container,
             agent_id.clone(),
@@ -601,6 +679,7 @@ mod tests {
         );
 
         assert_eq!(msg.submission, submission);
+        assert_eq!(msg.session, session);
         assert_eq!(msg.harness, HarnessType::Cli);
         assert_eq!(msg.runtime, RuntimeType::Container);
         assert_eq!(msg.agent_id, agent_id);
@@ -609,7 +688,7 @@ mod tests {
 
     #[test]
     fn request_message_creation() {
-        let submission = SubmissionId::new();
+        let submission = test_submission();
         let agent_id = test_agent_id();
         let msg = RequestMessage::new(
             submission.clone(),
@@ -632,7 +711,7 @@ mod tests {
 
     #[test]
     fn response_from_request_echoes_dimensions() {
-        let submission = SubmissionId::new();
+        let submission = test_submission();
         let agent_id = test_agent_id();
         let request = RequestMessage::new(
             submission.clone(),
@@ -664,7 +743,7 @@ mod tests {
 
     #[test]
     fn complete_message_creation() {
-        let submission = SubmissionId::new();
+        let submission = test_submission();
         let agent_id = test_agent_id();
         let msg = CompleteMessage::new(
             submission.clone(),
@@ -684,7 +763,8 @@ mod tests {
     #[test]
     fn invoke_create_reply_returns_complete() {
         let invoke = InvokeMessage::new(
-            SubmissionId::new(),
+            test_submission(),
+            SessionId::new(),
             HarnessType::Cli,
             RuntimeType::Container,
             test_agent_id(),
@@ -705,7 +785,7 @@ mod tests {
     #[test]
     fn request_create_reply_returns_response() {
         let request = RequestMessage::new(
-            SubmissionId::new(),
+            test_submission(),
             test_agent_id(),
             "kv",
             "sqlite",
@@ -742,7 +822,8 @@ mod tests {
     #[test]
     fn observable_message_from_invoke() {
         let invoke = InvokeMessage::new(
-            SubmissionId::new(),
+            test_submission(),
+            SessionId::new(),
             HarnessType::Cli,
             RuntimeType::Container,
             test_agent_id(),
@@ -761,7 +842,7 @@ mod tests {
     #[test]
     fn observable_message_from_request() {
         let request = RequestMessage::new(
-            SubmissionId::new(),
+            test_submission(),
             test_agent_id(),
             "kv",
             "sqlite",
@@ -779,10 +860,11 @@ mod tests {
 
     #[test]
     fn observable_message_common_accessors() {
-        let submission = SubmissionId::new();
+        let submission = test_submission();
         let agent_id = test_agent_id();
         let invoke = InvokeMessage::new(
             submission.clone(),
+            SessionId::new(),
             HarnessType::Cli,
             RuntimeType::Container,
             agent_id.clone(),

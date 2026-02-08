@@ -17,7 +17,7 @@ use tokio::runtime::Runtime;
 
 use super::{
     CompleteMessage, HarnessType, InvokeMessage, MessageId, MessageQueue, QueueError,
-    RequestMessage, ResponseMessage, Sequence, SubmissionId,
+    RequestMessage, ResponseMessage, Sequence, SessionId, SubmissionId,
 };
 use crate::domain::{ResourceId, RuntimeType};
 
@@ -228,6 +228,7 @@ impl MessageQueue for NatsQueue {
             let mut headers = async_nats::HeaderMap::new();
             headers.insert("msg-id", msg.id.as_str());
             headers.insert("submission-id", msg.submission.as_str());
+            headers.insert("session-id", msg.session.as_str());
             headers.insert("harness", msg.harness.as_str());
             headers.insert("runtime", msg.runtime.as_str());
             headers.insert("agent-id", msg.agent_id.as_str());
@@ -352,6 +353,7 @@ impl MessageQueue for NatsQueue {
             let msg = InvokeMessage {
                 id: MessageId::from(get_header(headers, "msg-id")?),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
+                session: SessionId::from(get_header(headers, "session-id")?),
                 harness: parse_harness_type(&get_header(headers, "harness")?)?,
                 runtime: parse_runtime_type(&get_header(headers, "runtime")?)?,
                 agent_id: ResourceId::new(&get_header(headers, "agent-id")?),

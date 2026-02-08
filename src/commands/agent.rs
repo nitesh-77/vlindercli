@@ -3,9 +3,9 @@ use std::sync::Arc;
 
 use clap::Subcommand;
 
-use vlindercli::config::{registry_db_path, Config};
+use vlindercli::config::{conversations_dir, registry_db_path, Config};
 use vlindercli::domain::{CliHarness, Daemon, Harness, PersistentRegistry, Registry};
-use vlindercli::queue::{MessageQueue, NatsQueue};
+use vlindercli::queue::{agent_routing_key, MessageQueue, NatsQueue};
 use vlindercli::registry_service::{GrpcRegistryClient, ping_registry};
 
 use super::repl;
@@ -63,6 +63,11 @@ fn run_local(path: Option<PathBuf>) {
     let agent_id = daemon.harness.deploy_from_path(&absolute_path)
         .expect("Failed to deploy agent");
 
+    // Start conversation session (ADR 054)
+    let agent_name = agent_routing_key(&agent_id);
+    daemon.harness.start_session(&agent_name, conversations_dir())
+        .expect("Failed to start session");
+
     // Run REPL
     repl::run(|input| {
         match daemon.harness.invoke(&agent_id, input) {
@@ -71,6 +76,7 @@ fn run_local(path: Option<PathBuf>) {
                 loop {
                     daemon.tick();
                     if let Some(result) = daemon.harness.poll(&job_id) {
+                        daemon.harness.record_response(&result);
                         return result;
                     }
                     std::thread::sleep(std::time::Duration::from_millis(1));
@@ -125,6 +131,11 @@ fn run_distributed(path: Option<PathBuf>, config: &Config) {
 
     tracing::info!(agent = %agent_id, "Agent deployed to distributed daemon");
 
+    // Start conversation session (ADR 054)
+    let agent_name = agent_routing_key(&agent_id);
+    harness.start_session(&agent_name, conversations_dir())
+        .expect("Failed to start session");
+
     // Run REPL - harness ticks to process responses
     repl::run(|input| {
         match harness.invoke(&agent_id, input) {
@@ -132,6 +143,7 @@ fn run_distributed(path: Option<PathBuf>, config: &Config) {
                 loop {
                     harness.tick();
                     if let Some(result) = harness.poll(&job_id) {
+                        harness.record_response(&result);
                         return result;
                     }
                     std::thread::sleep(std::time::Duration::from_millis(10));

@@ -8,13 +8,15 @@
 //! - `CliHarness`: Command-line implementation with tick loop and local paths
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::domain::registry::{JobId, JobStatus, Registry};
 use crate::domain::{Agent, ResourceId};
+use crate::domain::conversation_store::ConversationStore;
+use crate::domain::session::Session;
 use crate::queue::{
-    HarnessType, InvokeMessage, MessageQueue, SubmissionId,
+    HarnessType, InvokeMessage, MessageQueue, SessionId, SubmissionId,
 };
 
 /// Common harness operations shared across all harness types.
@@ -37,10 +39,14 @@ pub trait Harness {
 /// Adds CLI-specific functionality:
 /// - `deploy_from_path()`: Load agent from local filesystem
 /// - `tick()`: Polling loop for reconciling completed jobs
+/// - `start_session()`: Begin a conversation session (ADR 054)
+/// - `record_response()`: Record agent response and commit to git
 pub struct CliHarness {
     queue: Arc<dyn MessageQueue + Send + Sync>,
     registry: Arc<dyn Registry>,
     inflight: HashMap<SubmissionId, JobId>,
+    session: Option<Session>,
+    store: Option<ConversationStore>,
 }
 
 impl CliHarness {
@@ -52,6 +58,46 @@ impl CliHarness {
             queue,
             registry,
             inflight: HashMap::new(),
+            session: None,
+            store: None,
+        }
+    }
+
+    /// Start a conversation session for an agent (ADR 054).
+    ///
+    /// Creates a SessionId, Session, and opens the ConversationStore.
+    /// Must be called before invoke() to enable session support.
+    pub fn start_session(&mut self, agent_name: &str, conversations_dir: PathBuf) -> Result<(), String> {
+        let session_id = SessionId::new();
+        let session = Session::new(session_id, agent_name);
+        let store = ConversationStore::open(conversations_dir)
+            .map_err(|e| format!("failed to open conversation store: {}", e))?;
+
+        self.session = Some(session);
+        self.store = Some(store);
+        Ok(())
+    }
+
+    /// Record an agent response and commit to the conversation store.
+    ///
+    /// Clears the pending question and appends the completed turn to history.
+    pub fn record_response(&mut self, response: &str) {
+        if let (Some(session), Some(store)) = (self.session.as_mut(), self.store.as_ref()) {
+            // Find the submission ID for the current open question
+            let submission_id = session.history.iter().rev()
+                .find_map(|entry| {
+                    if let crate::domain::session::HistoryEntry::User { submission, .. } = entry {
+                        Some(submission.as_str().to_string())
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or_default();
+
+            session.record_agent_response(response);
+            if let Err(e) = store.commit_agent_response(session, &submission_id) {
+                tracing::warn!(error = %e, "failed to commit agent response");
+            }
         }
     }
 
@@ -164,19 +210,36 @@ impl Harness for CliHarness {
         let runtime = self.registry.select_runtime(&agent)
             .ok_or_else(|| format!("no runtime available for agent: {}", agent_id))?;
 
-        // Create submission context (ADR 044) - shared by job and message flow
-        let submission = SubmissionId::new();
+        // Derive submission and payload from session state (ADR 054)
+        let (submission, session_id, payload) = if let (Some(session), Some(store)) = (self.session.as_mut(), self.store.as_ref()) {
+            // Session mode: commit user input to git, SHA becomes SubmissionId
+            let enriched_payload = session.build_payload(input);
+            session.record_user_input(input, SubmissionId::from("pending".to_string()));
+            let sha = store.commit_user_input(session)
+                .map_err(|e| format!("failed to commit user input: {}", e))?;
+            // Fix the submission in history — replace placeholder with actual SHA
+            if let Some(last) = session.history.last_mut() {
+                if let crate::domain::session::HistoryEntry::User { submission, .. } = last {
+                    *submission = SubmissionId::from(sha.clone());
+                }
+            }
+            (SubmissionId::from(sha), session.session.clone(), enriched_payload)
+        } else {
+            // No session: fallback to UUID-based submission
+            (SubmissionId::new(), SessionId::new(), input.to_string())
+        };
 
         // Create job in registry with submission tracking
         let job_id = self.registry.create_job(submission.clone(), agent_id.clone(), input.to_string());
 
-        // Build and send typed InvokeMessage (ADR 044)
+        // Build and send typed InvokeMessage (ADR 044, ADR 054)
         let invoke = InvokeMessage::new(
             submission.clone(),
+            session_id,
             HarnessType::Cli,
             runtime,
             agent_id.clone(),
-            input.as_bytes().to_vec(),
+            payload.as_bytes().to_vec(),
         );
 
         self.queue
@@ -384,5 +447,110 @@ mod tests {
 
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("failed to load agent"));
+    }
+
+    // --- Session integration tests ---
+
+    #[test]
+    fn invoke_with_session_creates_sha_derived_submission() {
+        let queue = Arc::new(InMemoryQueue::new());
+        let registry = test_registry();
+        let mut harness = CliHarness::new(queue.clone(), registry.clone());
+
+        let agent_id = deploy_test_agent(&harness);
+
+        // Start session in a temp dir
+        let tmp = tempfile::TempDir::new().unwrap();
+        harness.start_session("test-agent", tmp.path().to_path_buf()).unwrap();
+
+        let job_id = harness.invoke(&agent_id, "hello").unwrap();
+
+        // Submission should be a valid hex SHA (not a UUID with sub- prefix)
+        let job = registry.get_job(&job_id).unwrap();
+        let submission_str = job.submission_id.as_str();
+        assert_eq!(submission_str.len(), 40, "SHA should be 40 chars: {}", submission_str);
+        assert!(submission_str.chars().all(|c| c.is_ascii_hexdigit()),
+            "submission should be hex: {}", submission_str);
+    }
+
+    #[test]
+    fn invoke_with_session_enriches_payload() {
+        let queue = Arc::new(InMemoryQueue::new());
+        let registry = test_registry();
+        let mut harness = CliHarness::new(queue.clone(), registry.clone());
+
+        let agent_id = deploy_test_agent(&harness);
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        harness.start_session("test-agent", tmp.path().to_path_buf()).unwrap();
+
+        harness.invoke(&agent_id, "first message").unwrap();
+
+        // Check the payload in the queue
+        let typed = queue.typed_queues.lock().unwrap();
+        let (_, messages) = typed.iter().next().unwrap();
+        let payload = messages[0].payload();
+        let payload_str = String::from_utf8_lossy(payload);
+
+        // First message should just be "User: first message"
+        assert_eq!(payload_str, "User: first message");
+    }
+
+    #[test]
+    fn invoke_with_session_includes_history_on_second_turn() {
+        let queue = Arc::new(InMemoryQueue::new());
+        let registry = test_registry();
+        let mut harness = CliHarness::new(queue.clone(), registry.clone());
+
+        let agent_id = deploy_test_agent(&harness);
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        harness.start_session("test-agent", tmp.path().to_path_buf()).unwrap();
+
+        // First turn
+        harness.invoke(&agent_id, "hello").unwrap();
+        harness.record_response("hi there");
+
+        // Clear queue for clean second invoke
+        queue.typed_queues.lock().unwrap().clear();
+
+        // Second turn — payload should include history
+        harness.invoke(&agent_id, "follow up").unwrap();
+
+        let typed = queue.typed_queues.lock().unwrap();
+        let (_, messages) = typed.iter().next().unwrap();
+        let payload = messages[0].payload();
+        let payload_str = String::from_utf8_lossy(payload);
+
+        assert!(payload_str.contains("User: hello"), "payload: {}", payload_str);
+        assert!(payload_str.contains("Agent: hi there"), "payload: {}", payload_str);
+        assert!(payload_str.contains("User: follow up"), "payload: {}", payload_str);
+    }
+
+    #[test]
+    fn record_response_commits_to_git() {
+        let queue = Arc::new(InMemoryQueue::new());
+        let registry = test_registry();
+        let mut harness = CliHarness::new(queue.clone(), registry.clone());
+
+        let agent_id = deploy_test_agent(&harness);
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        harness.start_session("test-agent", tmp.path().to_path_buf()).unwrap();
+
+        harness.invoke(&agent_id, "hello").unwrap();
+        harness.record_response("world");
+
+        // Verify git log has 2 commits (user + agent)
+        let output = std::process::Command::new("git")
+            .args(["log", "--oneline"])
+            .current_dir(tmp.path())
+            .output()
+            .unwrap();
+        let log = String::from_utf8_lossy(&output.stdout);
+        let lines: Vec<&str> = log.lines().collect();
+        assert_eq!(lines.len(), 2, "git log: {}", log);
+        assert!(lines[0].contains("agent"));
+        assert!(lines[1].contains("user"));
     }
 }

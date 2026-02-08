@@ -134,9 +134,33 @@ def todo_key(index):
 # Command handling
 # =============================================================================
 
+def parse_payload(raw_input):
+    """Extract the current command and conversation history from the payload.
+
+    The harness sends enriched payloads with history prepended:
+        User: add buy milk
+        Agent: Added: buy milk
+        User: what should I prioritize?
+
+    Returns (current_command, history_lines).
+    If there's no history format, treats the entire input as the command.
+    """
+    lines = raw_input.strip().splitlines()
+
+    # Check if the payload uses the session history format
+    if lines and lines[-1].startswith("User: "):
+        current = lines[-1][len("User: "):]
+        history = lines[:-1]
+        return current, history
+
+    # No history format — raw single-line input
+    return raw_input.strip(), []
+
+
 def handle_command(raw_input):
     """Parse and execute a todo command. Returns response text."""
-    text = raw_input.strip()
+    current_input, history = parse_payload(raw_input)
+    text = current_input.strip()
     if not text:
         return "Send a command: add, list, done, remove, clear, search, or ask a question."
 
@@ -196,7 +220,7 @@ def handle_command(raw_input):
         return f"Cleared {removed_count} completed todo(s).\n\n{format_todos(remaining)}"
 
     # --- anything else: ask the LLM ---
-    return ask_llm(text)
+    return ask_llm(text, history)
 
 
 def search_todos(query):
@@ -265,17 +289,24 @@ def reindex_vectors(todos):
             pass
 
 
-def ask_llm(question):
-    """Send the question + current todos to the LLM for advice."""
+def ask_llm(question, history=None):
+    """Send the question + current todos + conversation history to the LLM."""
     todos = load_todos()
     todo_list = format_todos(todos) if todos else "(empty list)"
 
-    prompt = (
-        f"You are a helpful todo list assistant. "
-        f"Here are the user's current todos:\n{todo_list}\n\n"
-        f"The user asks: {question}\n\n"
-        f"Give a brief, helpful response."
-    )
+    parts = [
+        "You are a helpful todo list assistant.",
+        f"Here are the user's current todos:\n{todo_list}",
+    ]
+
+    # Include conversation history for multi-turn context
+    if history:
+        parts.append("Recent conversation:\n" + "\n".join(history))
+
+    parts.append(f"The user asks: {question}")
+    parts.append("Give a brief, helpful response.")
+
+    prompt = "\n\n".join(parts)
 
     try:
         return infer(prompt, max_tokens=256)

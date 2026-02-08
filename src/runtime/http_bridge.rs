@@ -262,12 +262,13 @@ fn write_response(stream: &mut TcpStream, status: u16, body: &[u8]) {
 mod tests {
     use super::*;
     use crate::domain::{ResourceId, RuntimeType};
-    use crate::queue::{HarnessType, InMemoryQueue, InvokeMessage, MessageQueue, SequenceCounter, SubmissionId};
+    use crate::queue::{HarnessType, InMemoryQueue, InvokeMessage, MessageQueue, SequenceCounter, SessionId, SubmissionId};
 
     fn test_send_data() -> Arc<ServiceRouter> {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
         let invoke = InvokeMessage::new(
             SubmissionId::new(),
+            SessionId::new(),
             HarnessType::Cli,
             RuntimeType::Container,
             ResourceId::new("http://127.0.0.1:9000/agents/test"),

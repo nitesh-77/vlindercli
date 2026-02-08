@@ -20,7 +20,7 @@ use crate::config::Config;
 use crate::domain::ResourceId;
 
 pub use message::{
-    MessageId, SubmissionId, Sequence, SequenceCounter, HarnessType,
+    MessageId, SubmissionId, SessionId, Sequence, SequenceCounter, HarnessType,
     InvokeMessage, RequestMessage, ResponseMessage, CompleteMessage,
     ExpectsReply, ObservableMessage,
 };

@@ -10,6 +10,7 @@
 mod agent;
 mod agent_manifest;
 mod catalog;
+mod conversation_store;
 mod daemon;
 mod embedding;
 mod supervisor;
@@ -23,6 +24,7 @@ mod persistent_registry;
 mod registry;
 mod registry_repository;
 mod runtime;
+mod session;
 mod model_manifest;
 mod path;
 mod resource_id;
@@ -109,6 +111,8 @@ pub use sdk_message::{Hop, SdkMessage};
 // ============================================================================
 
 pub use harness::{Harness, CliHarness};
+pub use session::Session;
+pub use conversation_store::{ConversationStore, StoreError};
 
 // ============================================================================
 // Daemon & Registry

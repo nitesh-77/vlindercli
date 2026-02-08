@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use vlindercli::domain::{Agent, InMemoryRegistry, Registry, ResourceId, Runtime, RuntimeType};
-use vlindercli::queue::{InMemoryQueue, InvokeMessage, MessageQueue, HarnessType, SubmissionId};
+use vlindercli::queue::{InMemoryQueue, InvokeMessage, MessageQueue, HarnessType, SessionId, SubmissionId};
 use vlindercli::runtime::ContainerRuntime;
 
 #[test]
@@ -38,6 +38,7 @@ fn container_runtime_executes_echo_agent() {
     let submission = SubmissionId::new();
     let invoke = InvokeMessage::new(
         submission.clone(),
+        SessionId::new(),
         HarnessType::Cli,
         RuntimeType::Container,
         agent_id,

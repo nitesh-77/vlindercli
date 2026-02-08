@@ -199,8 +199,9 @@ impl Runtime for ContainerRuntime {
                     }
                 };
 
+                let session_id = invoke.session.as_str().to_string();
                 let handle = thread::spawn(move || {
-                    dispatch_to_container(host_port, &payload)
+                    dispatch_to_container(host_port, &payload, &session_id)
                 });
 
                 self.running.insert(agent.name.clone(), RunningTask { handle, invoke });
@@ -226,10 +227,15 @@ impl Runtime for ContainerRuntime {
 }
 
 /// Dispatch payload to a container's /invoke endpoint via HTTP POST.
-fn dispatch_to_container(host_port: u16, payload: &[u8]) -> Vec<u8> {
+///
+/// Passes the session ID as X-Vlinder-Session header (ADR 054).
+fn dispatch_to_container(host_port: u16, payload: &[u8], session_id: &str) -> Vec<u8> {
     let url = format!("http://127.0.0.1:{}/invoke", host_port);
 
-    match ureq::post(&url).send_bytes(payload) {
+    match ureq::post(&url)
+        .set("X-Vlinder-Session", session_id)
+        .send_bytes(payload)
+    {
         Ok(response) => {
             let mut body = Vec::new();
             response.into_reader().read_to_end(&mut body).unwrap_or_default();

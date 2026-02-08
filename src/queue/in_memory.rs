@@ -209,7 +209,7 @@ use super::agent_routing_key as agent_short_name;
 mod tests {
     use super::*;
     use crate::domain::{ResourceId, RuntimeType};
-    use crate::queue::{ExpectsReply, HarnessType, Sequence, SubmissionId};
+    use crate::queue::{ExpectsReply, HarnessType, Sequence, SessionId, SubmissionId};
 
     fn test_agent_id() -> ResourceId {
         ResourceId::new("http://127.0.0.1:9000/agents/echo-agent")
@@ -229,6 +229,7 @@ mod tests {
 
         let invoke = InvokeMessage::new(
             test_submission(),
+            SessionId::new(),
             HarnessType::Cli,
             RuntimeType::Container,
             test_agent_id(),
@@ -300,6 +301,7 @@ mod tests {
 
         let invoke = InvokeMessage::new(
             test_submission(),
+            SessionId::new(),
             HarnessType::Web,
             RuntimeType::Container,
             test_agent_id(),
@@ -337,6 +339,7 @@ mod tests {
 
         let invoke = InvokeMessage::new(
             test_submission(),
+            SessionId::new(),
             HarnessType::Cli,
             RuntimeType::Container,
             test_agent_id(),
@@ -366,6 +369,7 @@ mod tests {
 
         let invoke = InvokeMessage::new(
             submission.clone(),
+            SessionId::new(),
             HarnessType::Web,
             RuntimeType::Container,
             agent_id.clone(),
