@@ -16,8 +16,8 @@ use futures::StreamExt;
 use tokio::runtime::Runtime;
 
 use super::{
-    CompleteMessage, HarnessType, InvokeMessage, MessageId, MessageQueue, QueueError,
-    RequestMessage, ResponseMessage, Sequence, SessionId, SubmissionId,
+    CompleteMessage, DelegateMessage, HarnessType, InvokeMessage, MessageId, MessageQueue,
+    QueueError, RequestMessage, ResponseMessage, Sequence, SessionId, SubmissionId,
 };
 use crate::domain::{ResourceId, RuntimeType};
 
@@ -426,6 +426,103 @@ impl MessageQueue for NatsQueue {
     fn receive_complete(&self, submission: &SubmissionId, harness: &str) -> Result<(CompleteMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
         // Build filter: submission-scoped consumer (ADR 052)
         let filter = format!("vlinder.{}.complete.*.{}", submission, harness);
+
+        self.inner.runtime.block_on(async {
+            let (js_msg, ack_fn) = self.fetch_one(&filter).await?;
+
+            let headers = js_msg.headers.as_ref()
+                .ok_or_else(|| QueueError::ReceiveFailed("missing headers".to_string()))?;
+
+            let msg = CompleteMessage {
+                id: MessageId::from(get_header(headers, "msg-id")?),
+                submission: SubmissionId::from(get_header(headers, "submission-id")?),
+                agent_id: ResourceId::new(&get_header(headers, "agent-id")?),
+                harness: parse_harness_type(&get_header(headers, "harness")?)?,
+                payload: js_msg.payload.to_vec(),
+                state: get_header(headers, "state").ok(),
+            };
+
+            Ok((msg, ack_fn))
+        })
+    }
+
+    fn send_delegate(&self, msg: DelegateMessage) -> Result<(), QueueError> {
+        let subject = format!(
+            "vlinder.{}.delegate.{}.{}",
+            msg.submission, msg.caller_agent, msg.target_agent,
+        );
+
+        self.inner.runtime.block_on(async {
+            let mut headers = async_nats::HeaderMap::new();
+            headers.insert("msg-id", msg.id.as_str());
+            headers.insert("submission-id", msg.submission.as_str());
+            headers.insert("session-id", msg.session.as_str());
+            headers.insert("caller-agent", msg.caller_agent.as_str());
+            headers.insert("target-agent", msg.target_agent.as_str());
+            headers.insert("reply-subject", msg.reply_subject.as_str());
+
+            self.inner
+                .jetstream
+                .publish_with_headers(subject, headers, msg.payload.into())
+                .await
+                .map_err(|e| QueueError::SendFailed(e.to_string()))?
+                .await
+                .map_err(|e| QueueError::SendFailed(e.to_string()))?;
+
+            Ok(())
+        })
+    }
+
+    fn receive_delegate(&self, target_agent: &str) -> Result<(DelegateMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+        let filter = format!("vlinder.*.delegate.*.{}", target_agent);
+
+        self.inner.runtime.block_on(async {
+            let (js_msg, ack_fn) = self.fetch_one(&filter).await?;
+
+            let headers = js_msg.headers.as_ref()
+                .ok_or_else(|| QueueError::ReceiveFailed("missing headers".to_string()))?;
+
+            let msg = DelegateMessage {
+                id: MessageId::from(get_header(headers, "msg-id")?),
+                submission: SubmissionId::from(get_header(headers, "submission-id")?),
+                session: SessionId::from(get_header(headers, "session-id")?),
+                caller_agent: get_header(headers, "caller-agent")?,
+                target_agent: get_header(headers, "target-agent")?,
+                payload: js_msg.payload.to_vec(),
+                reply_subject: get_header(headers, "reply-subject")?,
+            };
+
+            Ok((msg, ack_fn))
+        })
+    }
+
+    fn send_complete_to_subject(&self, msg: CompleteMessage, subject: &str) -> Result<(), QueueError> {
+        let subject = subject.to_string();
+
+        self.inner.runtime.block_on(async {
+            let mut headers = async_nats::HeaderMap::new();
+            headers.insert("msg-id", msg.id.as_str());
+            headers.insert("submission-id", msg.submission.as_str());
+            headers.insert("agent-id", msg.agent_id.as_str());
+            headers.insert("harness", msg.harness.as_str());
+            if let Some(ref state) = msg.state {
+                headers.insert("state", state.as_str());
+            }
+
+            self.inner
+                .jetstream
+                .publish_with_headers(subject, headers, msg.payload.into())
+                .await
+                .map_err(|e| QueueError::SendFailed(e.to_string()))?
+                .await
+                .map_err(|e| QueueError::SendFailed(e.to_string()))?;
+
+            Ok(())
+        })
+    }
+
+    fn receive_complete_on_subject(&self, subject: &str) -> Result<(CompleteMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+        let filter = subject.to_string();
 
         self.inner.runtime.block_on(async {
             let (js_msg, ack_fn) = self.fetch_one(&filter).await?;

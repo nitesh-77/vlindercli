@@ -1,0 +1,15 @@
+name = "log-analyst"
+description = "Runtime behavior specialist that searches vlinder logs for relevant entries, correlates timestamps, and identifies error patterns."
+runtime = "container"
+executable = "localhost/vlinder-log-analyst:latest"
+
+[requirements]
+services = ["infer"]
+
+[requirements.models]
+default = "ollama://localhost:11434/phi3:latest"
+
+[[mounts]]
+host_path = "~/.vlinder/logs"
+guest_path = "/logs"
+mode = "ro"

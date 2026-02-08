@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
 use crate::domain::{Agent, ObjectStorageType, Registry, ResourceId, Runtime, RuntimeType, VectorStorageType};
-use crate::queue::{ExpectsReply, InvokeMessage, MessageQueue, SequenceCounter};
+use crate::queue::{ExpectsReply, HarnessType, InvokeMessage, MessageQueue, SequenceCounter};
 
 use super::http_bridge::HttpBridge;
 use super::service_router::ServiceRouter;
@@ -30,6 +30,9 @@ struct ManagedContainer {
 struct RunningTask {
     handle: JoinHandle<Vec<u8>>,
     invoke: InvokeMessage,
+    /// For delegated work: the subject to send the result to.
+    /// None for harness-invoked work (uses normal send_complete).
+    reply_subject: Option<String>,
 }
 
 pub struct ContainerRuntime {
@@ -88,6 +91,7 @@ impl ContainerRuntime {
             .or_else(|| kv_backend.as_ref().map(|_| String::new()));
         let send_data = Arc::new(ServiceRouter {
             queue: Arc::clone(&self.queue),
+            registry: Arc::clone(&self.registry),
             current_state: std::sync::RwLock::new(initial_state),
             invoke: std::sync::RwLock::new(invoke.clone()),
             kv_backend,
@@ -104,14 +108,28 @@ impl ContainerRuntime {
         // Use the agent's executable directly — it's a native OCI image ref
         let image = &agent.executable;
 
-        // Start container in detached mode with port mapping and bridge URL
+        // Start container in detached mode with port mapping, bridge URL, and mounts
+        let bridge_env = format!("VLINDER_BRIDGE_URL={}", bridge_url);
+        let mut podman_args = vec![
+            "run", "-d",
+            "-p", ":8080",
+            "-e", &bridge_env,
+        ];
+
+        // Add volume mounts from agent manifest (ADR 057)
+        let mount_flags: Vec<String> = agent.mounts.iter().map(|m| {
+            let mode = if m.readonly { "ro" } else { "rw" };
+            format!("{}:{}:{}", m.host_path, m.guest_path.display(), mode)
+        }).collect();
+        for flag in &mount_flags {
+            podman_args.push("-v");
+            podman_args.push(flag);
+        }
+
+        podman_args.push(image);
+
         let output = Command::new("podman")
-            .args([
-                "run", "-d",
-                "-p", ":8080",
-                "-e", &format!("VLINDER_BRIDGE_URL={}", bridge_url),
-                image,
-            ])
+            .args(&podman_args)
             .output()
             .map_err(|e| format!("failed to spawn podman: {}", e))?;
 
@@ -175,11 +193,17 @@ impl Runtime for ContainerRuntime {
                 .and_then(|mc| mc.bridge.final_state());
 
             let complete = task.invoke.create_reply_with_state(output, final_state);
-            self.queue.send_complete(complete).unwrap();
+
+            // Delegated work replies to the reply subject; invoked work replies to harness
+            if let Some(ref reply_subject) = task.reply_subject {
+                self.queue.send_complete_to_subject(complete, reply_subject).unwrap();
+            } else {
+                self.queue.send_complete(complete).unwrap();
+            }
             did_work = true;
         }
 
-        // 2. Dispatch new work to idle agents
+        // 2. Dispatch new invoke work to idle agents
         let all_agents = self.registry.get_agents();
         let container_agents: Vec<_> = all_agents.iter()
             .filter(|a| self.registry.select_runtime(a) == Some(RuntimeType::Container))
@@ -213,7 +237,58 @@ impl Runtime for ContainerRuntime {
                     dispatch_to_container(host_port, &payload, &session_id)
                 });
 
-                self.running.insert(agent.name.clone(), RunningTask { handle, invoke });
+                self.running.insert(agent.name.clone(), RunningTask {
+                    handle, invoke, reply_subject: None,
+                });
+                did_work = true;
+            }
+        }
+
+        // 3. Dispatch delegated work to idle agents (ADR 056)
+        for agent in &container_agents {
+            if self.running.contains_key(&agent.name) {
+                continue; // agent already busy
+            }
+
+            if let Ok((delegate, ack)) = self.queue.receive_delegate(&agent.name) {
+                let _ = ack();
+
+                // Build a synthetic InvokeMessage so the container sees a normal /invoke
+                let invoke = InvokeMessage::new(
+                    delegate.submission.clone(),
+                    delegate.session.clone(),
+                    HarnessType::Cli,  // placeholder — delegated work doesn't route to harness
+                    RuntimeType::Container,
+                    agent.id.clone(),
+                    delegate.payload.clone(),
+                    None,
+                );
+
+                let host_port = match self.ensure_container(agent, &invoke) {
+                    Ok(port) => port,
+                    Err(e) => {
+                        tracing::error!(agent = %agent.name, error = %e, "Failed to start container for delegation");
+                        // Send error back to reply subject so the waiting agent unblocks
+                        let complete = invoke.create_reply(
+                            format!("[error] container start failed: {}", e).into_bytes()
+                        );
+                        self.queue.send_complete_to_subject(complete, &delegate.reply_subject).unwrap();
+                        did_work = true;
+                        continue;
+                    }
+                };
+
+                let payload = delegate.payload;
+                let session_id = delegate.session.as_str().to_string();
+                let reply_subject = delegate.reply_subject;
+
+                let handle = thread::spawn(move || {
+                    dispatch_to_container(host_port, &payload, &session_id)
+                });
+
+                self.running.insert(agent.name.clone(), RunningTask {
+                    handle, invoke, reply_subject: Some(reply_subject),
+                });
                 did_work = true;
             }
         }

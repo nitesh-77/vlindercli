@@ -1,0 +1,15 @@
+name = "code-analyst"
+description = "Design intent specialist that searches source code and ADR documentation to explain whether behavior is by-design, a known limitation, or a gap."
+runtime = "container"
+executable = "localhost/vlinder-code-analyst:latest"
+
+[requirements]
+services = ["infer"]
+
+[requirements.models]
+default = "ollama://localhost:11434/phi3:latest"
+
+[[mounts]]
+host_path = "../.."
+guest_path = "/source"
+mode = "ro"

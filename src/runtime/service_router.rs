@@ -12,8 +12,10 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-use crate::domain::{ObjectStorageType, SdkMessage, VectorStorageType};
-use crate::queue::{InvokeMessage, MessageQueue, RequestMessage, SequenceCounter};
+use uuid::Uuid;
+
+use crate::domain::{ObjectStorageType, Registry, SdkMessage, VectorStorageType};
+use crate::queue::{DelegateMessage, InvokeMessage, MessageQueue, RequestMessage, SequenceCounter};
 
 /// Routes agent SDK calls to the appropriate backend service.
 ///
@@ -21,6 +23,7 @@ use crate::queue::{InvokeMessage, MessageQueue, RequestMessage, SequenceCounter}
 /// The invoke context is updated per invocation via `update_invoke()`.
 pub(crate) struct ServiceRouter {
     pub(crate) queue: Arc<dyn MessageQueue + Send + Sync>,
+    pub(crate) registry: Arc<dyn Registry>,
     /// The invoke that triggered this execution — carries submission + agent_id.
     /// Updated per invocation so SDK calls route on the correct submission ID.
     pub(crate) invoke: RwLock<InvokeMessage>,
@@ -59,11 +62,19 @@ impl ServiceRouter {
     /// Validates the payload, resolves the next hop, builds a typed request,
     /// sends it, and waits for the response. Returns the response payload.
     ///
-    /// For kv-put and kv-get operations, injects the current state hash into
-    /// the payload so the ObjectServiceWorker can perform versioned operations.
+    /// For delegate/wait operations (ADR 056), handles them directly without
+    /// hop routing. For kv-put and kv-get operations, injects the current state
+    /// hash into the payload so the ObjectServiceWorker can perform versioned operations.
     pub(crate) fn dispatch(&self, payload: Vec<u8>) -> Result<Vec<u8>, String> {
         let msg: SdkMessage = serde_json::from_slice(&payload)
             .map_err(|e| format!("invalid SDK message: {}", e))?;
+
+        // Delegation operations are handled here, not via hop routing (ADR 056)
+        match &msg {
+            SdkMessage::Delegate { agent, input } => return self.handle_delegate(agent, input),
+            SdkMessage::Wait { handle } => return self.handle_wait(handle),
+            _ => {}
+        }
 
         let hop = msg.hop(self.kv_backend, self.vec_backend, &self.model_backends)?;
         let is_kv = hop.service == "kv";
@@ -154,6 +165,84 @@ impl ServiceRouter {
                 tracing::debug!(new_state = %new_state, "extract_state: updated current_state");
                 *self.current_state.write().unwrap() = Some(new_state.clone());
             }
+        }
+    }
+
+    /// Handle a delegate request from the agent (ADR 056).
+    ///
+    /// Validates the target agent exists, builds a unique reply subject,
+    /// sends a DelegateMessage, and returns the handle.
+    fn handle_delegate(&self, target_agent: &str, input: &str) -> Result<Vec<u8>, String> {
+        // Verify target agent is registered
+        let _agent = self.registry.get_agent_by_name(target_agent)
+            .ok_or_else(|| format!("delegate: target agent '{}' not found", target_agent))?;
+
+        let invoke = self.invoke.read().unwrap();
+        let caller_agent = crate::queue::agent_routing_key(&invoke.agent_id);
+        let short_uuid = &Uuid::new_v4().to_string()[..8];
+        let reply_subject = format!(
+            "vlinder.{}.delegate-reply.{}.{}.{}",
+            invoke.submission, caller_agent, target_agent, short_uuid,
+        );
+
+        let delegate = DelegateMessage::new(
+            invoke.submission.clone(),
+            invoke.session.clone(),
+            &caller_agent,
+            target_agent,
+            input.as_bytes().to_vec(),
+            &reply_subject,
+        );
+        drop(invoke);
+
+        tracing::debug!(
+            caller = %caller_agent, target = %target_agent,
+            reply = %reply_subject, "handle_delegate: sending DelegateMessage"
+        );
+
+        self.queue.send_delegate(delegate)
+            .map_err(|e| format!("delegate send error: {}", e))?;
+
+        let result = serde_json::json!({ "handle": reply_subject });
+        serde_json::to_vec(&result)
+            .map_err(|e| format!("delegate serialize error: {}", e))
+    }
+
+    /// Handle a wait request from the agent (ADR 056).
+    ///
+    /// Polls the reply subject until a CompleteMessage arrives, then returns
+    /// the result payload.
+    fn handle_wait(&self, handle: &str) -> Result<Vec<u8>, String> {
+        tracing::debug!(handle = %handle, "handle_wait: polling for delegation result");
+        let poll_start = std::time::Instant::now();
+        let mut poll_count: u64 = 0;
+
+        loop {
+            match self.queue.receive_complete_on_subject(handle) {
+                Ok((complete, ack)) => {
+                    let payload = complete.payload.clone();
+                    let _ = ack();
+                    tracing::debug!(
+                        handle = %handle, polls = poll_count,
+                        elapsed = ?poll_start.elapsed(),
+                        "handle_wait: got delegation result"
+                    );
+                    let result = serde_json::json!({ "output": String::from_utf8_lossy(&payload) });
+                    return serde_json::to_vec(&result)
+                        .map_err(|e| format!("wait serialize error: {}", e));
+                }
+                Err(_) => {
+                    poll_count += 1;
+                    if poll_count % 5000 == 0 {
+                        tracing::warn!(
+                            handle = %handle, polls = poll_count,
+                            elapsed = ?poll_start.elapsed(),
+                            "handle_wait: still waiting for delegation result"
+                        );
+                    }
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
         }
     }
 }

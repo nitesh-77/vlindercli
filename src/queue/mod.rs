@@ -21,7 +21,7 @@ use crate::domain::ResourceId;
 
 pub use message::{
     MessageId, SubmissionId, SessionId, Sequence, SequenceCounter, HarnessType,
-    InvokeMessage, RequestMessage, ResponseMessage, CompleteMessage,
+    InvokeMessage, RequestMessage, ResponseMessage, CompleteMessage, DelegateMessage,
     ExpectsReply, ObservableMessage,
 };
 pub use traits::{MessageQueue, QueueError};

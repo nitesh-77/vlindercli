@@ -1,7 +1,7 @@
 //! In-memory queue implementation.
 
 use super::{
-    CompleteMessage, InvokeMessage, MessageQueue, ObservableMessage,
+    CompleteMessage, DelegateMessage, InvokeMessage, MessageQueue, ObservableMessage,
     QueueError, RequestMessage, ResponseMessage, SubmissionId,
 };
 use std::collections::{HashMap, VecDeque};
@@ -192,6 +192,61 @@ impl MessageQueue for InMemoryQueue {
 
                     return Ok((msg, Box::new(|| Ok(()))));
                 }
+            }
+        }
+
+        Err(QueueError::Timeout)
+    }
+
+    fn send_delegate(&self, msg: DelegateMessage) -> Result<(), QueueError> {
+        let subject = format!(
+            "vlinder.{}.delegate.{}.{}",
+            msg.submission, msg.caller_agent, msg.target_agent,
+        );
+
+        let mut typed = self.typed_queues.lock().unwrap();
+        typed
+            .entry(subject)
+            .or_default()
+            .push_back(ObservableMessage::Delegate(msg));
+        Ok(())
+    }
+
+    fn receive_delegate(&self, target_agent: &str) -> Result<(DelegateMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+        let mut typed = self.typed_queues.lock().unwrap();
+
+        for (subject, queue) in typed.iter_mut() {
+            if subject.contains("delegate") && subject.ends_with(target_agent) {
+                if let Some(ObservableMessage::Delegate(msg)) = queue.front() {
+                    let msg = msg.clone();
+                    queue.pop_front();
+
+                    return Ok((msg, Box::new(|| Ok(()))));
+                }
+            }
+        }
+
+        Err(QueueError::Timeout)
+    }
+
+    fn send_complete_to_subject(&self, msg: CompleteMessage, subject: &str) -> Result<(), QueueError> {
+        let mut typed = self.typed_queues.lock().unwrap();
+        typed
+            .entry(subject.to_string())
+            .or_default()
+            .push_back(ObservableMessage::Complete(msg));
+        Ok(())
+    }
+
+    fn receive_complete_on_subject(&self, subject: &str) -> Result<(CompleteMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+        let mut typed = self.typed_queues.lock().unwrap();
+
+        if let Some(queue) = typed.get_mut(subject) {
+            if let Some(ObservableMessage::Complete(msg)) = queue.front() {
+                let msg = msg.clone();
+                queue.pop_front();
+
+                return Ok((msg, Box::new(|| Ok(()))));
             }
         }
 
@@ -469,5 +524,114 @@ mod tests {
         assert_eq!(received.service, "infer");
         assert_eq!(received.backend, "ollama");
         assert_eq!(received.operation, "");
+    }
+
+    // ========================================================================
+    // Delegation tests (ADR 056)
+    // ========================================================================
+
+    #[test]
+    fn send_delegate_builds_correct_subject() {
+        let queue = InMemoryQueue::new();
+
+        let delegate = DelegateMessage::new(
+            test_submission(),
+            SessionId::new(),
+            "coordinator",
+            "summarizer",
+            b"summarize this".to_vec(),
+            "vlinder.sub.reply.coordinator.summarizer.abc",
+        );
+
+        queue.send_delegate(delegate).unwrap();
+
+        let typed = queue.typed_queues.lock().unwrap();
+        assert_eq!(typed.len(), 1);
+        let (subject, _) = typed.iter().next().unwrap();
+        assert_eq!(subject, "vlinder.sub-test-123.delegate.coordinator.summarizer");
+    }
+
+    #[test]
+    fn receive_delegate_returns_typed_message() {
+        let queue = InMemoryQueue::new();
+
+        let delegate = DelegateMessage::new(
+            test_submission(),
+            SessionId::new(),
+            "coordinator",
+            "summarizer",
+            b"payload".to_vec(),
+            "reply.subject",
+        );
+        let original_id = delegate.id.clone();
+
+        queue.send_delegate(delegate).unwrap();
+
+        let (received, ack) = queue.receive_delegate("summarizer").unwrap();
+
+        assert_eq!(received.id, original_id);
+        assert_eq!(received.caller_agent, "coordinator");
+        assert_eq!(received.target_agent, "summarizer");
+        assert_eq!(received.payload, b"payload");
+        assert_eq!(received.reply_subject, "reply.subject");
+
+        ack().unwrap();
+    }
+
+    #[test]
+    fn receive_delegate_times_out_for_wrong_target() {
+        let queue = InMemoryQueue::new();
+
+        let delegate = DelegateMessage::new(
+            test_submission(),
+            SessionId::new(),
+            "coordinator",
+            "summarizer",
+            b"payload".to_vec(),
+            "reply.subject",
+        );
+
+        queue.send_delegate(delegate).unwrap();
+
+        let result = queue.receive_delegate("fact-checker");
+        assert!(matches!(result, Err(QueueError::Timeout)));
+    }
+
+    #[test]
+    fn send_and_receive_complete_on_subject() {
+        let queue = InMemoryQueue::new();
+
+        let complete = CompleteMessage::new(
+            test_submission(),
+            test_agent_id(),
+            HarnessType::Cli,
+            b"result".to_vec(),
+            None,
+        );
+
+        let subject = "vlinder.sub.delegate-reply.coordinator.summarizer.abc123";
+        queue.send_complete_to_subject(complete, subject).unwrap();
+
+        let (received, ack) = queue.receive_complete_on_subject(subject).unwrap();
+        assert_eq!(received.payload, b"result");
+        ack().unwrap();
+    }
+
+    #[test]
+    fn receive_complete_on_subject_times_out_for_wrong_subject() {
+        let queue = InMemoryQueue::new();
+
+        let complete = CompleteMessage::new(
+            test_submission(),
+            test_agent_id(),
+            HarnessType::Cli,
+            b"result".to_vec(),
+            None,
+        );
+
+        queue.send_complete_to_subject(complete, "subject.a").unwrap();
+
+        let result = queue.receive_complete_on_subject("subject.b");
+        assert!(matches!(result, Err(QueueError::Timeout)));
     }
 }

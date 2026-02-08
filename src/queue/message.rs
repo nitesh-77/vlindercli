@@ -357,6 +357,45 @@ impl ResponseMessage {
     }
 }
 
+/// Delegate message: Agent → Agent (via runtime)
+///
+/// One agent invoking another. The platform routes through the queue,
+/// dispatches the target, and sends the result to the reply subject.
+/// Does NOT implement ExpectsReply — the reply is managed by the runtime,
+/// not the type system.
+#[derive(Clone, Debug)]
+pub struct DelegateMessage {
+    pub id: MessageId,
+    pub submission: SubmissionId,
+    pub session: SessionId,
+    pub caller_agent: String,
+    pub target_agent: String,
+    pub payload: Vec<u8>,
+    /// The "handle" — caller polls this for result.
+    pub reply_subject: String,
+}
+
+impl DelegateMessage {
+    pub fn new(
+        submission: SubmissionId,
+        session: SessionId,
+        caller_agent: impl Into<String>,
+        target_agent: impl Into<String>,
+        payload: Vec<u8>,
+        reply_subject: impl Into<String>,
+    ) -> Self {
+        Self {
+            id: MessageId::new(),
+            submission,
+            session,
+            caller_agent: caller_agent.into(),
+            target_agent: target_agent.into(),
+            payload,
+            reply_subject: reply_subject.into(),
+        }
+    }
+}
+
 /// Complete message: Runtime → Harness
 ///
 /// Signals that a submission has finished.
@@ -456,6 +495,7 @@ pub enum ObservableMessage {
     Request(RequestMessage),
     Response(ResponseMessage),
     Complete(CompleteMessage),
+    Delegate(DelegateMessage),
 }
 
 impl ObservableMessage {
@@ -466,6 +506,7 @@ impl ObservableMessage {
             ObservableMessage::Request(m) => &m.id,
             ObservableMessage::Response(m) => &m.id,
             ObservableMessage::Complete(m) => &m.id,
+            ObservableMessage::Delegate(m) => &m.id,
         }
     }
 
@@ -476,16 +517,7 @@ impl ObservableMessage {
             ObservableMessage::Request(m) => &m.submission,
             ObservableMessage::Response(m) => &m.submission,
             ObservableMessage::Complete(m) => &m.submission,
-        }
-    }
-
-    /// Get the agent ID.
-    pub fn agent_id(&self) -> &ResourceId {
-        match self {
-            ObservableMessage::Invoke(m) => &m.agent_id,
-            ObservableMessage::Request(m) => &m.agent_id,
-            ObservableMessage::Response(m) => &m.agent_id,
-            ObservableMessage::Complete(m) => &m.agent_id,
+            ObservableMessage::Delegate(m) => &m.submission,
         }
     }
 
@@ -496,6 +528,7 @@ impl ObservableMessage {
             ObservableMessage::Request(m) => &m.payload,
             ObservableMessage::Response(m) => &m.payload,
             ObservableMessage::Complete(m) => &m.payload,
+            ObservableMessage::Delegate(m) => &m.payload,
         }
     }
 }
@@ -521,6 +554,12 @@ impl From<ResponseMessage> for ObservableMessage {
 impl From<CompleteMessage> for ObservableMessage {
     fn from(msg: CompleteMessage) -> Self {
         ObservableMessage::Complete(msg)
+    }
+}
+
+impl From<DelegateMessage> for ObservableMessage {
+    fn from(msg: DelegateMessage) -> Self {
+        ObservableMessage::Delegate(msg)
     }
 }
 
@@ -912,7 +951,50 @@ mod tests {
 
         // All common fields accessible through enum
         assert_eq!(observable.submission(), &submission);
-        assert_eq!(observable.agent_id(), &agent_id);
         assert_eq!(observable.payload(), b"payload");
+    }
+
+    // --- DelegateMessage tests ---
+
+    #[test]
+    fn delegate_message_creation() {
+        let submission = test_submission();
+        let session = SessionId::new();
+        let msg = DelegateMessage::new(
+            submission.clone(),
+            session.clone(),
+            "coordinator",
+            "summarizer",
+            b"summarize this".to_vec(),
+            "vlinder.sub.delegate-reply.coordinator.summarizer.abc123",
+        );
+
+        assert_eq!(msg.submission, submission);
+        assert_eq!(msg.session, session);
+        assert_eq!(msg.caller_agent, "coordinator");
+        assert_eq!(msg.target_agent, "summarizer");
+        assert_eq!(msg.payload, b"summarize this");
+        assert!(msg.reply_subject.contains("delegate-reply"));
+    }
+
+    #[test]
+    fn observable_message_from_delegate() {
+        let submission = test_submission();
+        let delegate = DelegateMessage::new(
+            submission.clone(),
+            SessionId::new(),
+            "coordinator",
+            "summarizer",
+            b"test".to_vec(),
+            "reply.subject",
+        );
+        let id = delegate.id.clone();
+
+        let observable: ObservableMessage = delegate.into();
+
+        assert_eq!(observable.id(), &id);
+        assert_eq!(observable.submission(), &submission);
+        assert_eq!(observable.payload(), b"test");
+        assert!(matches!(observable, ObservableMessage::Delegate(_)));
     }
 }

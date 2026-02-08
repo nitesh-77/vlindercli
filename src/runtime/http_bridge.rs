@@ -30,6 +30,8 @@ fn op_for_path(path: &str) -> Option<&'static str> {
         "/vector/delete" => Some("vector-delete"),
         "/infer" => Some("infer"),
         "/embed" => Some("embed"),
+        "/delegate" => Some("delegate"),
+        "/wait" => Some("wait"),
         _ => None,
     }
 }
@@ -266,11 +268,12 @@ fn write_response(stream: &mut TcpStream, status: u16, body: &[u8]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{ResourceId, RuntimeType};
+    use crate::domain::{InMemoryRegistry, Registry, ResourceId, RuntimeType};
     use crate::queue::{HarnessType, InMemoryQueue, InvokeMessage, MessageQueue, SequenceCounter, SessionId, SubmissionId};
 
     fn test_send_data() -> Arc<ServiceRouter> {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
+        let registry: Arc<dyn Registry> = Arc::new(InMemoryRegistry::new());
         let invoke = InvokeMessage::new(
             SubmissionId::new(),
             SessionId::new(),
@@ -282,6 +285,7 @@ mod tests {
         );
         Arc::new(ServiceRouter {
             queue,
+            registry,
             invoke: std::sync::RwLock::new(invoke),
             kv_backend: None,
             vec_backend: None,
@@ -376,6 +380,8 @@ mod tests {
         assert_eq!(op_for_path("/vector/delete"), Some("vector-delete"));
         assert_eq!(op_for_path("/infer"), Some("infer"));
         assert_eq!(op_for_path("/embed"), Some("embed"));
+        assert_eq!(op_for_path("/delegate"), Some("delegate"));
+        assert_eq!(op_for_path("/wait"), Some("wait"));
         assert_eq!(op_for_path("/health"), None); // health handled separately
         assert_eq!(op_for_path("/unknown"), None);
     }

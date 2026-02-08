@@ -146,7 +146,14 @@ fn resolve_uri(uri: &str, agent_dir: &Path) -> String {
 }
 
 /// Resolve a host path, making relative paths absolute.
+///
+/// Handles tilde expansion: `~/foo` → `/home/user/foo`.
 fn resolve_host_path(host_path: &str, agent_dir: &Path) -> String {
+    if let Some(rest) = host_path.strip_prefix("~/") {
+        if let Some(home) = dirs::home_dir() {
+            return home.join(rest).display().to_string();
+        }
+    }
     if Path::new(host_path).is_absolute() {
         host_path.to_string()
     } else {

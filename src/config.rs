@@ -449,6 +449,10 @@ pub fn conversations_dir() -> PathBuf {
     vlinder_dir().join("conversations")
 }
 
+pub fn logs_dir() -> PathBuf {
+    vlinder_dir().join("logs")
+}
+
 pub fn registry_db_path() -> PathBuf {
     vlinder_dir().join("registry.db")
 }

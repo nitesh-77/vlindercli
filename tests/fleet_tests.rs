@@ -114,3 +114,25 @@ fn fleet_agent_path() {
     let path = fleet.agent_path("echo").unwrap();
     assert!(path.ends_with("agents/echo-agent"));
 }
+
+#[test]
+fn fleet_build_context_lists_non_entry_agents() {
+    let fleet = Fleet::load(&fleet_fixture("test-fleet")).unwrap();
+    let context = fleet.build_context().unwrap();
+
+    // Context should mention the fleet name
+    assert!(context.contains("test-fleet"), "context: {}", context);
+
+    // Context should list "upper" (non-entry agent) but not "echo" (entry agent)
+    assert!(context.contains("upper"), "context should list non-entry agent: {}", context);
+    assert!(context.contains("uppercases"), "context should include agent description: {}", context);
+    assert!(!context.contains("- echo:"), "context should NOT list entry agent: {}", context);
+}
+
+#[test]
+fn fleet_agents_iterator() {
+    let fleet = Fleet::load(&fleet_fixture("test-fleet")).unwrap();
+    let agent_names: Vec<&str> = fleet.agents().map(|(name, _)| name).collect();
+    assert!(agent_names.contains(&"echo"));
+    assert!(agent_names.contains(&"upper"));
+}

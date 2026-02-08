@@ -1,5 +1,7 @@
 mod agent;
 mod daemon;
+mod fleet;
+mod help;
 mod model;
 mod repl;
 mod timeline;
@@ -21,6 +23,13 @@ pub enum Command {
         #[command(subcommand)]
         cmd: agent::AgentCommand,
     },
+    /// Run a fleet of agents
+    Fleet {
+        #[command(subcommand)]
+        cmd: fleet::FleetCommand,
+    },
+    /// Interactive support — runs the bundled support fleet
+    Support,
     /// Manage models from catalogs
     Model {
         #[command(subcommand)]
@@ -40,6 +49,8 @@ pub fn run() {
 
     match cli.command {
         Command::Agent { cmd } => agent::execute(cmd),
+        Command::Fleet { cmd } => fleet::execute(cmd),
+        Command::Support => help::execute(),
         Command::Model { cmd } => model::execute(cmd),
         Command::Timeline { cmd } => timeline::execute(cmd),
         Command::Daemon => daemon::execute(),
@@ -148,5 +159,41 @@ mod tests {
                 }
             }
         );
+    }
+
+    #[test]
+    fn cli_fleet_run_default_path() {
+        let cli = Cli::try_parse_from(["vlinder", "fleet", "run"]).unwrap();
+        assert_eq!(
+            cli.command,
+            Command::Fleet {
+                cmd: fleet::FleetCommand::Run { path: None }
+            }
+        );
+    }
+
+    #[test]
+    fn cli_fleet_run_with_path() {
+        let cli = Cli::try_parse_from(["vlinder", "fleet", "run", "-p", "/tmp/fleet"]).unwrap();
+        assert_eq!(
+            cli.command,
+            Command::Fleet {
+                cmd: fleet::FleetCommand::Run {
+                    path: Some(PathBuf::from("/tmp/fleet")),
+                }
+            }
+        );
+    }
+
+    #[test]
+    fn cli_fleet_missing_action_fails() {
+        let result = Cli::try_parse_from(["vlinder", "fleet"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn cli_support() {
+        let cli = Cli::try_parse_from(["vlinder", "support"]).unwrap();
+        assert_eq!(cli.command, Command::Support);
     }
 }

@@ -42,6 +42,9 @@ pub enum SdkMessage {
     Infer { model: String, prompt: String, #[serde(default = "default_max_tokens")] max_tokens: u32 },
     // -- Embedding --
     Embed { model: String, text: String },
+    // -- Delegation (ADR 056) --
+    Delegate { agent: String, input: String },
+    Wait { handle: String },
 }
 
 fn default_max_tokens() -> u32 { 256 }
@@ -67,6 +70,8 @@ impl SdkMessage {
             SdkMessage::VectorDelete { .. } => vec_hop("delete", vec_backend),
             SdkMessage::Infer { model, .. } => infer_hop(model, model_backends),
             SdkMessage::Embed { model, .. } => embed_hop(model, model_backends),
+            SdkMessage::Delegate { .. } => Err("delegate is handled by ServiceRouter, not hop routing".to_string()),
+            SdkMessage::Wait { .. } => Err("wait is handled by ServiceRouter, not hop routing".to_string()),
         }
     }
 }
@@ -247,5 +252,52 @@ mod tests {
             SdkMessage::Infer { max_tokens, .. } => assert_eq!(max_tokens, 256),
             _ => panic!("expected Infer variant"),
         }
+    }
+
+    // --- Delegation tests (ADR 056) ---
+
+    #[test]
+    fn delegate_parses() {
+        let msg: SdkMessage = serde_json::from_str(
+            r#"{"op": "delegate", "agent": "summarizer", "input": "summarize this"}"#,
+        ).unwrap();
+        match msg {
+            SdkMessage::Delegate { agent, input } => {
+                assert_eq!(agent, "summarizer");
+                assert_eq!(input, "summarize this");
+            }
+            _ => panic!("expected Delegate variant"),
+        }
+    }
+
+    #[test]
+    fn wait_parses() {
+        let msg: SdkMessage = serde_json::from_str(
+            r#"{"op": "wait", "handle": "vlinder.sub.reply.abc123"}"#,
+        ).unwrap();
+        match msg {
+            SdkMessage::Wait { handle } => {
+                assert_eq!(handle, "vlinder.sub.reply.abc123");
+            }
+            _ => panic!("expected Wait variant"),
+        }
+    }
+
+    #[test]
+    fn delegate_hop_returns_err() {
+        let err = parse_and_hop(
+            r#"{"op": "delegate", "agent": "summarizer", "input": "test"}"#,
+            None, None, &empty_models(),
+        ).unwrap_err();
+        assert!(err.contains("delegate"));
+    }
+
+    #[test]
+    fn wait_hop_returns_err() {
+        let err = parse_and_hop(
+            r#"{"op": "wait", "handle": "reply.subject"}"#,
+            None, None, &empty_models(),
+        ).unwrap_err();
+        assert!(err.contains("wait"));
     }
 }

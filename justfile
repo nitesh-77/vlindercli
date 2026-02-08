@@ -18,6 +18,19 @@ build-todoapp:
 build-pensieve-container:
     podman build -t localhost/pensieve-container:latest agents/pensieve-container/
 
+# Build support fleet agents (OCI images via Podman)
+build-support-agent:
+    podman build -t localhost/vlinder-support:latest agents/support-agent/
+
+build-log-analyst:
+    podman build -t localhost/vlinder-log-analyst:latest agents/log-analyst/
+
+build-code-analyst:
+    podman build -t localhost/vlinder-code-analyst:latest agents/code-analyst/
+
+# Build all support fleet container images
+build-support-fleet: build-support-agent build-log-analyst build-code-analyst
+
 # =============================================================================
 # Main Commands
 # =============================================================================
@@ -27,6 +40,11 @@ build-pensieve-container:
 run agent:
     cargo build
     cd agents/{{agent}} && ../../target/debug/vlindercli agent run -p .
+
+# Run the interactive support fleet
+support:
+    cargo build
+    ./target/debug/vlindercli support
 
 # =============================================================================
 # Model Catalog Commands
