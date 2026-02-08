@@ -125,16 +125,16 @@ User        CLI       Harness     Registry      Queue       Runtime      Worker
 
 ## Key Points
 
-1. **Everything is async via queues** — no direct function calls between components
-2. **Registry is source of truth** — agents, jobs, capabilities all tracked there
-3. **Workers lazy-load backends** — first request triggers engine/storage initialization
-4. **Agent isolation** — each agent has its own storage, keyed by agent_id
-5. **Reply queues** — every request includes a reply_to for the response
+1. **Everything is async via queues:** no direct function calls between components
+2. **Registry is source of truth:** agents, jobs, capabilities all tracked there
+3. **Workers lazy-load backends:** first request triggers engine/storage initialization
+4. **Agent isolation:** each agent has its own storage, keyed by agent_id
+5. **Reply queues:** every request includes a reply_to for the response
 
 ---
 
 ## Related Documentation
 
-- [Domain Model](DOMAIN_MODEL.md) — types and traits
-- [ADR 018](adr/018-protocol-first-architecture.md) — queue-based architecture
-- [ADR 031](adr/031-vlinderd-as-runtime-registry.md) — registry and daemon design
+- [Domain Model](DOMAIN_MODEL.md): types and traits
+- [ADR 018](adr/018-protocol-first-architecture.md): queue-based architecture
+- [ADR 031](adr/031-vlinderd-as-runtime-registry.md): registry and daemon design

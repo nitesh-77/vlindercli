@@ -30,7 +30,7 @@ VlinderCLI uses a **queue-based message-passing architecture** (see ADR 018). Ev
 
 # Part 1: Domain (Abstract Protocol)
 
-The domain defines **what** the system does—types, traits, and contracts. Infrastructure-agnostic.
+The domain defines **what** the system does: types, traits, and contracts. Infrastructure-agnostic.
 
 Location: [`src/domain/`](../src/domain/mod.rs)
 
