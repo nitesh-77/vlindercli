@@ -89,6 +89,7 @@ impl ServiceRouter {
         };
 
         let invoke = self.invoke.read().unwrap();
+        let sha = invoke.submission.to_string();
         let request = RequestMessage::new(
             invoke.submission.clone(),
             invoke.agent_id.clone(),
@@ -100,12 +101,12 @@ impl ServiceRouter {
         );
         drop(invoke);
 
-        tracing::debug!(service = %request.service, backend = %request.backend, seq = %seq, "dispatch: sending request");
+        tracing::debug!(sha = %sha, event = "service.request", service = %request.service, backend = %request.backend, seq = %seq, "dispatch: sending request");
 
         self.queue.send_request(request.clone())
             .map_err(|e| format!("send error: {}", e))?;
 
-        tracing::debug!(service = %request.service, seq = %seq, "dispatch: polling for response");
+        tracing::debug!(sha = %sha, event = "service.polling", service = %request.service, seq = %seq, "dispatch: polling for response");
         let poll_start = std::time::Instant::now();
         let mut poll_count: u64 = 0;
 
@@ -115,6 +116,7 @@ impl ServiceRouter {
                     let response_payload = response.payload.clone();
                     let _ = ack();
                     tracing::debug!(
+                        sha = %sha, event = "service.response",
                         service = %request.service, seq = %seq,
                         polls = poll_count, elapsed = ?poll_start.elapsed(),
                         "dispatch: got response"
@@ -131,6 +133,7 @@ impl ServiceRouter {
                     poll_count += 1;
                     if poll_count % 5000 == 0 {
                         tracing::warn!(
+                            sha = %sha,
                             service = %request.service, seq = %seq,
                             polls = poll_count, elapsed = ?poll_start.elapsed(),
                             error = %e,
@@ -179,6 +182,7 @@ impl ServiceRouter {
 
         let invoke = self.invoke.read().unwrap();
         let caller_agent = crate::queue::agent_routing_key(&invoke.agent_id);
+        let sha = invoke.submission.to_string();
         let short_uuid = &Uuid::new_v4().to_string()[..8];
         let reply_subject = format!(
             "vlinder.{}.delegate-reply.{}.{}.{}",
@@ -195,9 +199,10 @@ impl ServiceRouter {
         );
         drop(invoke);
 
-        tracing::debug!(
+        tracing::info!(
+            sha = %sha, event = "delegation.sent",
             caller = %caller_agent, target = %target_agent,
-            reply = %reply_subject, "handle_delegate: sending DelegateMessage"
+            reply = %reply_subject, "Delegating to agent"
         );
 
         self.queue.send_delegate(delegate)
@@ -213,7 +218,8 @@ impl ServiceRouter {
     /// Polls the reply subject until a CompleteMessage arrives, then returns
     /// the result payload.
     fn handle_wait(&self, handle: &str) -> Result<Vec<u8>, String> {
-        tracing::debug!(handle = %handle, "handle_wait: polling for delegation result");
+        let sha = self.invoke.read().unwrap().submission.to_string();
+        tracing::debug!(sha = %sha, handle = %handle, "handle_wait: polling for delegation result");
         let poll_start = std::time::Instant::now();
         let mut poll_count: u64 = 0;
 
@@ -222,10 +228,11 @@ impl ServiceRouter {
                 Ok((complete, ack)) => {
                     let payload = complete.payload.clone();
                     let _ = ack();
-                    tracing::debug!(
+                    tracing::info!(
+                        sha = %sha, event = "delegation.completed",
                         handle = %handle, polls = poll_count,
                         elapsed = ?poll_start.elapsed(),
-                        "handle_wait: got delegation result"
+                        "Delegation result received"
                     );
                     let result = serde_json::json!({ "output": String::from_utf8_lossy(&payload) });
                     return serde_json::to_vec(&result)
@@ -235,6 +242,7 @@ impl ServiceRouter {
                     poll_count += 1;
                     if poll_count % 5000 == 0 {
                         tracing::warn!(
+                            sha = %sha,
                             handle = %handle, polls = poll_count,
                             elapsed = ?poll_start.elapsed(),
                             "handle_wait: still waiting for delegation result"

@@ -147,7 +147,7 @@ impl ContainerRuntime {
         // Wait for container to be ready
         wait_for_ready(host_port)?;
 
-        tracing::info!(agent = %agent.name, container = %container_id, port = host_port, "Container started");
+        tracing::info!(event = "container.started", agent = %agent.name, container = %container_id, port = host_port, "Container started");
 
         self.containers.insert(agent.name.clone(), ManagedContainer {
             container_id,
@@ -194,6 +194,13 @@ impl Runtime for ContainerRuntime {
 
             let complete = task.invoke.create_reply_with_state(output, final_state);
 
+            tracing::info!(
+                event = "dispatch.completed",
+                agent = %name,
+                delegated = task.reply_subject.is_some(),
+                "Task completed"
+            );
+
             // Delegated work replies to the reply subject; invoked work replies to harness
             if let Some(ref reply_subject) = task.reply_subject {
                 self.queue.send_complete_to_subject(complete, reply_subject).unwrap();
@@ -219,10 +226,18 @@ impl Runtime for ContainerRuntime {
                 let payload = invoke.payload.clone();
                 let _ = ack();
 
+                tracing::info!(
+                    event = "dispatch.started",
+                    sha = %invoke.submission,
+                    session = %invoke.session,
+                    agent = %agent.name,
+                    "Dispatching to container"
+                );
+
                 let host_port = match self.ensure_container(agent, &invoke) {
                     Ok(port) => port,
                     Err(e) => {
-                        tracing::error!(agent = %agent.name, error = %e, "Failed to start container");
+                        tracing::error!(event = "dispatch.failed", agent = %agent.name, error = %e, "Failed to start container");
                         let complete = invoke.create_reply(
                             format!("[error] container start failed: {}", e).into_bytes()
                         );
@@ -253,6 +268,15 @@ impl Runtime for ContainerRuntime {
             if let Ok((delegate, ack)) = self.queue.receive_delegate(&agent.name) {
                 let _ = ack();
 
+                tracing::info!(
+                    event = "delegation.received",
+                    sha = %delegate.submission,
+                    session = %delegate.session,
+                    agent = %agent.name,
+                    caller = %delegate.caller_agent,
+                    "Dispatching delegated work"
+                );
+
                 // Build a synthetic InvokeMessage so the container sees a normal /invoke
                 let invoke = InvokeMessage::new(
                     delegate.submission.clone(),
@@ -267,7 +291,7 @@ impl Runtime for ContainerRuntime {
                 let host_port = match self.ensure_container(agent, &invoke) {
                     Ok(port) => port,
                     Err(e) => {
-                        tracing::error!(agent = %agent.name, error = %e, "Failed to start container for delegation");
+                        tracing::error!(event = "dispatch.failed", agent = %agent.name, error = %e, "Failed to start container for delegation");
                         // Send error back to reply subject so the waiting agent unblocks
                         let complete = invoke.create_reply(
                             format!("[error] container start failed: {}", e).into_bytes()
@@ -298,7 +322,7 @@ impl Runtime for ContainerRuntime {
 
     fn shutdown(&mut self) {
         for (name, mc) in self.containers.drain() {
-            tracing::info!(agent = %name, container = %mc.container_id, "Stopping container");
+            tracing::info!(event = "container.stopped", agent = %name, container = %mc.container_id, "Stopping container");
             let _ = Command::new("podman")
                 .args(["stop", "-t", "5", &mc.container_id])
                 .output();
@@ -326,7 +350,7 @@ fn dispatch_to_container(host_port: u16, payload: &[u8], session_id: &str) -> Ve
             body
         }
         Err(e) => {
-            tracing::error!(port = host_port, error = %e, "Failed to dispatch to container");
+            tracing::error!(event = "dispatch.failed", port = host_port, error = %e, "Failed to dispatch to container");
             format!("[error] dispatch failed: {}", e).into_bytes()
         }
     }

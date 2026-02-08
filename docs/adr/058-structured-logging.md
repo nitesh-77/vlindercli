@@ -1,6 +1,6 @@
 # ADR 058: Structured Logging
 
-**Status:** Proposed
+**Status:** Accepted
 
 ## Context
 
