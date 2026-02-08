@@ -215,6 +215,10 @@ Append-only means storage grows. Unreachable objects — from failed invocations
 - **Agent-provided storage protocol** — `state_advance(key, content_hash)` and `state_resolve(key)` SDK calls for agents that bring their own Postgres, Qdrant, etc. The platform manages the pointer; the agent manages the data.
 - **Multi-agent state merging** — when two agents write to overlapping state, their branches need merge semantics. Same problem as git merge conflicts, same class of solutions.
 - **State-aware session viewer** — the existing HTML session viewer could show state hashes per turn and link to snapshot inspection.
+- **Session resumption** — three layers of increasing difficulty:
+  1. **Conversation history hydration** — git has every user/agent turn as commits. Sessions don't load prior history yet. Mechanical problem.
+  2. **One-way-door operations** — an agent may have sent an email, called an external API, or made other irreversible changes before failing. Resuming must not repeat those.
+  3. **Resume vs restart is agent-specific** — the platform can provide the mechanism (history, state snapshots, fork points) but can't decide the policy. Only the agent knows which operations are idempotent.
 
 ## Consequences
 
