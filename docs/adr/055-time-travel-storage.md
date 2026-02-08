@@ -1,112 +1,164 @@
-# ADR 055: Time-Travel Storage
+# ADR 055: Transactional Storage
 
 **Status:** Proposed
 
 ## Context
 
-ADR 054 made `SubmissionId` = git commit SHA. Every `RequestMessage` (kv-get, kv-put, vector-store, etc.) now carries a SHA that represents a position in a causal graph. Storage engines receive this on every operation but ignore it — they overwrite state on each write.
+ADR 054 made `SubmissionId` = git commit SHA. Every `RequestMessage` carries a SHA representing a position in a causal graph. Storage engines receive this on every operation but ignore it — they overwrite state on each write.
 
-This means storage is destructive. If an agent writes `/todos.json` on turn 3 then again on turn 5, the turn-3 state is gone. You can reconstruct the conversation from git, but you can't reconstruct the agent's data at any historical point.
+This means storage is destructive and non-isolated. If an agent crashes mid-invocation after 23 of 40 writes, the first 22 writes are permanently applied — half-finished work is visible. If two agents write to overlapping keys, they interleave unpredictably. There is no rollback, no isolation, no atomicity.
 
-The SHA flowing through every service call is a versioning key waiting to be used. If storage engines tag writes with the SHA, the entire system becomes a Merkle DAG: conversation history (git) + data state (storage) = complete snapshot at any turn. Time travel falls out for free.
+The fix isn't versioning — it's transactions. An agent's invocation is a **work unit**. Its mutations should be invisible until the work unit completes, and discardable if it fails. Time travel is a consequence of this contract, not a goal in itself.
 
-## Problem Statement
+## Decision
 
-**What storage contract makes time-travel work across any backend?**
+### The Contract
 
-Three things need answers:
+Each agent invocation is a **work unit** with transactional semantics:
 
-### 1. Storage Trait Contract
+**1. Begin.** When an invoke starts, the platform provides a parent SHA (the SubmissionId). This is the branch point — the state the agent inherits.
 
-Current write operations are destructive:
+**2. Mutate.** Every write (kv-put, vector-store, etc.) is a mutation within the work unit. Each mutation produces a new SHA, chained from the previous:
+
 ```
-kv-put(path, content)           → overwrites
-vector-store(key, vector, meta) → overwrites
-```
+incoming SHA: aaa
 
-Versioned writes would be append-only:
-```
-kv-put(path, content, submission)           → appends version
-vector-store(key, vector, meta, submission) → appends version
-```
-
-Read operations need an `at` parameter:
-```
-kv-get(path)                    → latest (backwards compatible)
-kv-get(path, at: sha)           → state at that turn
-vector-search(query, at: sha)   → search against vectors as of that turn
+op1: kv_put("/todos.json", data1)         → sha1 = hash(aaa  + op1) = bbb
+op2: embed("chunk-0", vec0, "intro")      → sha2 = hash(bbb  + op2) = ccc
+op3: kv_put("/todos.json", data2)         → sha3 = hash(ccc  + op3) = ddd
+...
+op40: kv_put("/metadata.json", meta)      → sha40 = hash(...) = zzz
 ```
 
-Questions to resolve:
-- Does `at` filter by exact SHA, or by "latest as of this SHA" (requires walking the commit parent chain)?
-- Who resolves "latest as of"? The storage engine, or a coordinator that knows the git DAG?
-- How does vector search work with versions? Filter by SHA in metadata? Maintain per-version indexes?
-- Is the submission on writes implicit (from the RequestMessage) or explicit in the SDK?
+The SHA is deterministic: `hash(parent_sha + op_type + key + content)`. Same inputs always produce the same chain.
 
-### 2. Backend Implementation Strategy
+**3. Commit.** When the agent returns successfully, all mutations become visible atomically. The final SHA (`zzz`) is the work unit's state identifier.
 
-The contract must work across fundamentally different storage engines:
+**4. Rollback.** If the agent crashes or errors, all mutations are discarded. State reverts to the parent SHA. The next retry starts a fresh work unit from the same parent.
 
-**Relational (SQLite, Postgres):** Add a `sha` column. Writes become INSERT (not UPSERT). Reads add `WHERE sha = ?`. "Latest" is `ORDER BY rowid DESC LIMIT 1` or requires a HEAD pointer.
+### Isolation Guarantees
 
-**Key-value (Redis, DynamoDB):** Composite key `{path}:{sha}`. Every version is a unique key. "Latest" needs an index or pointer.
+- **Read-your-own-writes.** Within a work unit, the agent sees its own mutations. After `kv_put("/foo", v2)`, a subsequent `kv_get("/foo")` returns `v2`.
+- **Snapshot isolation from other work units.** Other agents (or other sessions) see the state as of the last committed work unit, not in-progress mutations.
+- **Atomic visibility.** On commit, all mutations become visible at once. There is no window where partial state is observable.
 
-**Vector stores (SQLite-vec, Qdrant, Pinecone):** Vectors tagged with SHA in metadata. Search filters by version. Per-version indexes may be needed for performance.
+### The SHA Chain
 
-**Object stores (S3, MinIO):** Native versioning exists. SHA maps to version tag.
+Reads do not advance the chain. Only mutations do. The chain is linear within a work unit:
 
-Questions to resolve:
-- Is there a universal pattern, or does each backend need its own versioning strategy?
-- How do we handle storage growth? Pruning/compaction strategy? GC of versions older than N turns?
-- Does "latest" mean "most recent write to this path" or "write from the most recent ancestor in the git DAG"? The latter is correct but requires DAG awareness.
-
-### 3. User Experience
-
-Time travel is only useful if users can reach it. What does the UX look like?
-
-**Inspection:**
 ```
-vlinder inspect <sha>                    # show conversation + data state at this turn
-vlinder inspect <sha> --storage          # dump all KV/vector state at this turn
-vlinder diff <sha1> <sha2>              # what changed between two turns
+aaa → bbb → ccc → ddd → ... → zzz
+ ↑                               ↑
+ branch point                    commit point
+ (parent SHA)                    (final state SHA)
 ```
 
-**Replay:**
-```
-vlinder replay <sha>                     # re-run from this point with same inputs
-vlinder replay <sha> --from-turn 3       # re-run from turn 3 onwards
-```
+The platform computes the SHA. The agent receives it as the return value of each write:
 
-**Branching:**
-```
-vlinder branch <sha>                     # fork conversation at this turn
-vlinder run --session <sha>              # resume from a specific point
+```python
+sha1 = kv_put("/todos.json", content)    # returns "bbb..."
+sha2 = kv_put("/config.json", config)    # returns "ccc..."
 ```
 
-**Debugging:**
+Agents can ignore the return value (backwards compatible — it's just a string instead of `"ok"`). Agents that want fine-grained history can store and reference these SHAs.
+
+### Cross-Turn Continuity
+
+The conversation DAG (git) is the "macro" timeline. The SHA chain is the "micro" timeline within each turn. They link at the branch points:
+
 ```
-vlinder trace <sha>                      # show all service calls made during this turn
-vlinder trace <sha> --kv                 # show KV reads/writes for this turn
+conversation:  ── user1 ──── agent1 ──── user2 ──── agent2 ──
+                    │           ↑           │           ↑
+                    │        commit         │        commit
+                    ▼           │           ▼           │
+work units:         └─ a→b→...→z           └─ d→e→...→y
 ```
 
-Questions to resolve:
-- Which of these are day-one vs future?
-- Is `vlinder inspect` a read-only operation (query storage at SHA), or does it reconstruct state by replaying from the beginning?
-- How does branching interact with storage? Fork the data too, or share it (copy-on-write)?
-- Does the agent need to know it's being replayed, or is replay transparent?
+Each work unit's parent SHA is the conversation commit. The committed state SHA is recorded on the agent response commit (as a `State` trailer):
 
-## Constraints
+```
+agent
 
-- Backwards compatible: agents that don't use `at` get current behavior (latest)
-- The SHA already flows through `RequestMessage.submission` — no protocol changes needed
-- Storage growth must be bounded — infinite append-only is not viable for local-first
-- Git is the source of truth for causal ordering — storage engines should not need to understand the DAG
-- The SDK should make versioned reads opt-in, not mandatory
+This article discusses...
 
-## Open Questions
+Session: ses-abc123
+Submission: aaa
+State: zzz
+```
 
-1. **DAG awareness:** Should storage engines know about git parent chains, or should a coordinator resolve "state at SHA X" into concrete queries?
-2. **Garbage collection:** What's the retention policy? Keep all versions? Last N turns? Prune on `clear`?
-3. **Vector versioning:** Is per-version vector indexing practical, or should vectors be treated as append-only with metadata filtering?
-4. **Cross-agent state:** If agent A writes at SHA X and agent B reads at SHA Y, how do versions interact across sessions?
-5. **Performance:** What's the overhead of versioned reads/writes vs. current destructive operations?
+To resolve "latest state at the start of turn 2": read the `State` trailer from the previous agent response commit. This links the two DAGs without requiring storage engines to understand git.
+
+### Where the SHA is Computed
+
+The platform computes the chain. Specifically, the `ServiceRouter` (which dispatches bridge calls to storage workers) maintains the current chain position:
+
+1. Invoke starts → chain initialized to SubmissionId
+2. Agent calls `kv_put` → bridge computes `new_sha = hash(chain + payload)`, sends request tagged with `new_sha` to storage worker, advances chain
+3. Storage worker stores the mutation tagged with the SHA
+4. Bridge returns `new_sha` to agent
+5. Repeat for each mutation
+6. Invoke completes → final chain SHA is the committed state
+
+Agents that bring their own storage and want to participate in the chain implement the same hash function. The platform publishes the algorithm.
+
+## Implementation Levels
+
+The contract enables incremental implementation. Each level builds on the previous:
+
+### Level 1: Isolation (crash safety)
+
+Storage engines implement `begin` / `commit` / `rollback`. Mutations are buffered and applied atomically on commit. Discarded on rollback. No SHA chain, no versioning. Just correctness.
+
+- **Storage trait**: add `begin_work_unit(parent: &str)`, `commit_work_unit()`, `rollback_work_unit()`
+- **Workers**: call `begin` when receiving the first request for a submission, `commit` when invoke completes, `rollback` on timeout/error
+- **Agent change**: none
+
+### Level 2: SHA chain (audit log)
+
+Each mutation returns a SHA. The chain is recorded. Provides a complete operation log for debugging: "what did the agent actually do?"
+
+- **ServiceRouter**: maintain chain state, compute SHAs, return them to agents
+- **Storage engines**: tag each write with its SHA
+- **Agent change**: `kv_put` returns a SHA string instead of `"ok"` (backwards compatible)
+
+### Level 3: Historical reads (opt-in time travel)
+
+Agents can read state at any historical SHA. New SDK operation: `kv_get_at(path, sha)`.
+
+- **Storage trait**: add `get_file_at(path: &str, version: &str)`
+- **SdkMessage**: add `KvGetAt` variant
+- **Bridge**: add `/kv/get-at` endpoint
+- **Agent change**: opt-in — agents that want time travel use the new endpoint
+
+### Level 4: Scoped reads (transparent time travel)
+
+The platform scopes all reads to the current work unit's lineage. The agent calls `kv_get(path)` and gets the value from its lineage, not the global latest. Agents are fully isolated without knowing it.
+
+- **Read resolution**: platform provides ancestor list (from `State` trailers on conversation commits), storage queries `WHERE sha IN (ancestors)`
+- **Agent change**: none — reads are transparently scoped
+
+## Backend Strategy
+
+The contract is backend-agnostic. Each storage engine implements isolation and the SHA chain using its native mechanisms:
+
+| Backend | Isolation | SHA chain |
+|---------|-----------|-----------|
+| SQLite | `BEGIN` / `COMMIT` / `ROLLBACK` (native) | `version` column, INSERT not UPSERT |
+| Postgres | Same (native transactions) | Same |
+| Redis | `MULTI` / `EXEC` / `DISCARD` | Composite key `{path}:{sha}` |
+| S3 | Write to staging prefix, move on commit | Version tag in object metadata |
+| In-memory | Copy-on-write HashMap | Version-keyed entries |
+
+Agents that bring their own storage implement the contract however they choose. The platform doesn't impose a mechanism — just the semantics.
+
+## Consequences
+
+- Agent invocations gain crash safety — partial writes are never visible
+- The SHA chain provides a complete per-operation audit log for free
+- Time travel falls out of keeping mutations instead of discarding them
+- Replay = create a new work unit from an old parent SHA
+- Branching = two work units from the same parent SHA
+- Each level is independently useful — Level 1 alone is a significant improvement
+- Storage growth is bounded by GC policy (future ADR): prune committed work units older than N turns
+- The conversation DAG (git) and the operation chain (SHA) are two linked timelines: macro (turns) and micro (individual writes)
+- Agents that don't care about any of this see no change — `kv_put` / `kv_get` work exactly as before
