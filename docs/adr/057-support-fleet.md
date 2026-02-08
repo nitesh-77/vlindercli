@@ -33,7 +33,15 @@ path = "agents/code-analyst"
 
 **`support`** (entry agent) — The triage orchestrator. Receives the user's question, delegates to both specialists in parallel, waits for both reports, then classifies the situation and formats a response. Uses inference for classification and synthesis. No file access — pure orchestration.
 
-**`log-analyst`** — The runtime behavior specialist. Has a read-only mount to `~/.vlinder/logs/`. Given a user's error description, searches logs for relevant entries, correlates timestamps, identifies patterns. Uses inference to interpret log sequences and extract root causes.
+**`log-analyst`** — The runtime state specialist. Has a read-only mount to `~/.vlinder/`, which gives it access to the full operational picture:
+
+- `logs/` — what happened at runtime (errors, message transitions, inference calls)
+- `conversations/` — the system timeline with content-addressed SHAs linking every interaction
+- `config.toml` — how the system is configured (queue backend, model endpoints, worker counts)
+- `registry.db` — what's registered (agents, models, runtimes)
+- `agents/*/` — per-agent SQLite databases (object storage, vector storage state)
+
+Given a user's error description, the agent searches logs, correlates SHAs from the timeline, checks configuration for mismatches, and queries databases for registered state. Uses inference to synthesize across all sources and extract root causes. The name "log-analyst" understates what it does — it's a runtime state analyst — but the name is kept because "analyze what happened" is how users think about it.
 
 **`code-analyst`** — The design intent specialist. Has a read-only mount to the source tree and ADR directory. Given a user's question, finds relevant code paths and documentation. Uses inference to explain whether behavior is by-design, a known limitation, or a gap.
 
@@ -85,7 +93,7 @@ The container runtime maps agent mounts as podman volume flags:
 podman run -d \
   -p :8080 \
   -e VLINDER_BRIDGE_URL=... \
-  -v /Users/x/.vlinder/logs:/logs:ro \
+  -v /Users/x/.vlinder:/vlinder:ro \
   localhost/log-analyst:latest
 ```
 
@@ -105,6 +113,16 @@ The agents use the bridge URL for platform services:
 - `POST $VLINDER_BRIDGE_URL/kv/get` — read from storage
 
 Python (Flask) for the proof of concept. Small images, fast iteration, widely understood. Production agents can be rewritten in any language.
+
+### Design principles
+
+**The support fleet is the reference implementation.** It ships on every system that has Vlinder. It should be an example of what good looks like — proper mount usage, proper delegation, proper error handling. Other fleet authors will study it. The code-analyst can reference the support fleet's own source when answering questions about how to build agents. The fleet documents itself.
+
+**Optimize for the LLM, not the human.** Logs are no-op from a business logic perspective — they cannot harm the system. Verbosity is a challenge for humans reading terminal output, but the log-analyst is an LLM. It can process massive amounts of structured text. This means we should err on the side of logging too much rather than too little. Every message transition, every inference call, every delegation — log it all.
+
+**The SHA is the trace ID.** The system timeline (ADR 055) already assigns content-addressed SHAs to every interaction. The `SubmissionId` propagates through all messages. There is no need for a separate tracing primitive — the SHA is built into the core. Every log line should carry it so the log-analyst can correlate across agents and reconstruct full execution history by joining logs with the timeline.
+
+**Gaps in the support agent are the roadmap.** Whatever the log-analyst cannot answer reveals what is missing from the logging and observability story. Whatever the code-analyst cannot explain reveals gaps in documentation. The support fleet is a forcing function — its failures are direct improvement opportunities for the platform's supportability and observability domain model.
 
 ## Scope
 

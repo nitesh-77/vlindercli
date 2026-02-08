@@ -10,6 +10,6 @@ services = ["infer"]
 default = "ollama://localhost:11434/phi3:latest"
 
 [[mounts]]
-host_path = "~/.vlinder/logs"
-guest_path = "/logs"
+host_path = "~/.vlinder"
+guest_path = "/vlinder"
 mode = "ro"

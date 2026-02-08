@@ -1,8 +1,9 @@
-"""Log analyst agent — searches vlinder logs for error patterns and root causes.
+"""Log analyst agent — searches runtime state for error patterns and root causes.
 
-Receives a user's error description, searches the mounted log directory for
-relevant entries, correlates timestamps, and uses inference to interpret
-log sequences and extract root causes.
+Receives a user's error description. Has read-only access to the full
+~/.vlinder directory: logs, conversation store (timeline SHAs), and
+config. Joins these three perspectives to correlate what happened (logs),
+what was tracked (timeline), and how the system is configured (config.toml).
 """
 
 import glob
@@ -13,7 +14,10 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 
 BRIDGE = os.environ.get("VLINDER_BRIDGE_URL", "")
 INFER_MODEL = "default"
-LOGS_DIR = "/logs"
+VLINDER_DIR = "/vlinder"
+LOGS_DIR = os.path.join(VLINDER_DIR, "logs")
+CONFIG_PATH = os.path.join(VLINDER_DIR, "config.toml")
+CONVERSATIONS_DIR = os.path.join(VLINDER_DIR, "conversations")
 MAX_LOG_LINES = 200
 MAX_FILES = 10
 
