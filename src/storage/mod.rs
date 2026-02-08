@@ -10,6 +10,7 @@
 pub mod dispatch;
 mod object;
 mod registry;
+pub mod state_store;
 mod vector;
 
 // Re-export traits from domain for convenience

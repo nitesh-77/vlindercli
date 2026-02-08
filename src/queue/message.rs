@@ -257,6 +257,9 @@ pub struct InvokeMessage {
     pub runtime: RuntimeType,
     pub agent_id: ResourceId,
     pub payload: Vec<u8>,
+    /// Initial state hash from the previous turn's State trailer (ADR 055).
+    /// None for the first invocation or when state tracking is not active.
+    pub state: Option<String>,
 }
 
 impl InvokeMessage {
@@ -267,6 +270,7 @@ impl InvokeMessage {
         runtime: RuntimeType,
         agent_id: ResourceId,
         payload: Vec<u8>,
+        state: Option<String>,
     ) -> Self {
         Self {
             id: MessageId::new(),
@@ -276,6 +280,7 @@ impl InvokeMessage {
             runtime,
             agent_id,
             payload,
+            state,
         }
     }
 }
@@ -362,6 +367,9 @@ pub struct CompleteMessage {
     pub agent_id: ResourceId,
     pub harness: HarnessType,
     pub payload: Vec<u8>,
+    /// Final state hash after this invocation (ADR 055).
+    /// None when state tracking is not active.
+    pub state: Option<String>,
 }
 
 impl CompleteMessage {
@@ -370,6 +378,7 @@ impl CompleteMessage {
         agent_id: ResourceId,
         harness: HarnessType,
         payload: Vec<u8>,
+        state: Option<String>,
     ) -> Self {
         Self {
             id: MessageId::new(),
@@ -377,6 +386,7 @@ impl CompleteMessage {
             agent_id,
             harness,
             payload,
+            state,
         }
     }
 }
@@ -386,6 +396,9 @@ impl CompleteMessage {
 // ============================================================================
 
 /// InvokeMessage expects CompleteMessage as its reply.
+///
+/// Note: `create_reply()` does NOT carry state — the runtime sets state
+/// separately via `create_reply_with_state()` after reading from ServiceRouter.
 impl ExpectsReply for InvokeMessage {
     type Reply = CompleteMessage;
 
@@ -395,6 +408,23 @@ impl ExpectsReply for InvokeMessage {
             self.agent_id.clone(),
             self.harness,
             payload,
+            None,
+        )
+    }
+}
+
+impl InvokeMessage {
+    /// Create a reply with the final state hash (ADR 055).
+    ///
+    /// Used by the runtime when it has read the final state from the
+    /// ServiceRouter after the agent finishes.
+    pub fn create_reply_with_state(&self, payload: Vec<u8>, state: Option<String>) -> CompleteMessage {
+        CompleteMessage::new(
+            self.submission.clone(),
+            self.agent_id.clone(),
+            self.harness,
+            payload,
+            state,
         )
     }
 }
@@ -676,6 +706,7 @@ mod tests {
             RuntimeType::Container,
             agent_id.clone(),
             b"hello".to_vec(),
+            None,
         );
 
         assert_eq!(msg.submission, submission);
@@ -684,6 +715,7 @@ mod tests {
         assert_eq!(msg.runtime, RuntimeType::Container);
         assert_eq!(msg.agent_id, agent_id);
         assert_eq!(msg.payload, b"hello");
+        assert_eq!(msg.state, None);
     }
 
     #[test]
@@ -750,12 +782,14 @@ mod tests {
             agent_id.clone(),
             HarnessType::Cli,
             b"result".to_vec(),
+            None,
         );
 
         assert_eq!(msg.submission, submission);
         assert_eq!(msg.agent_id, agent_id);
         assert_eq!(msg.harness, HarnessType::Cli);
         assert_eq!(msg.payload, b"result");
+        assert_eq!(msg.state, None);
     }
 
     // --- ExpectsReply trait tests ---
@@ -769,6 +803,7 @@ mod tests {
             RuntimeType::Container,
             test_agent_id(),
             b"input".to_vec(),
+            None,
         );
 
         // create_reply returns CompleteMessage (compiler enforced)
@@ -828,6 +863,7 @@ mod tests {
             RuntimeType::Container,
             test_agent_id(),
             b"test".to_vec(),
+            None,
         );
         let id = invoke.id.clone();
         let submission = invoke.submission.clone();
@@ -869,6 +905,7 @@ mod tests {
             RuntimeType::Container,
             agent_id.clone(),
             b"payload".to_vec(),
+            None,
         );
 
         let observable: ObservableMessage = invoke.into();

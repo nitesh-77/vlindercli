@@ -234,6 +234,7 @@ mod tests {
             RuntimeType::Container,
             test_agent_id(),
             b"input".to_vec(),
+            None,
         );
 
         queue.send_invoke(invoke).unwrap();
@@ -306,6 +307,7 @@ mod tests {
             RuntimeType::Container,
             test_agent_id(),
             b"input".to_vec(),
+            None,
         );
         let complete = invoke.create_reply(b"output".to_vec());
 
@@ -344,6 +346,7 @@ mod tests {
             RuntimeType::Container,
             test_agent_id(),
             b"hello".to_vec(),
+            None,
         );
         let original_id = invoke.id.clone();
 
@@ -374,6 +377,7 @@ mod tests {
             RuntimeType::Container,
             agent_id.clone(),
             b"input".to_vec(),
+            None,
         );
 
         queue.send_invoke(invoke).unwrap();

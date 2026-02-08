@@ -52,6 +52,7 @@ fn container_bridge_kv_round_trip() {
         RuntimeType::Container,
         agent_id,
         b"bridge test data".to_vec(),
+        None,
     );
     queue.send_invoke(invoke).unwrap();
 

@@ -82,9 +82,13 @@ impl ContainerRuntime {
             }
         }
 
-        // Create ServiceRouter for the bridge
+        // Create ServiceRouter for the bridge.
+        // Bootstrap state to root ("") if agent uses KV but no prior state exists (ADR 055).
+        let initial_state = invoke.state.clone()
+            .or_else(|| kv_backend.as_ref().map(|_| String::new()));
         let send_data = Arc::new(ServiceRouter {
             queue: Arc::clone(&self.queue),
+            current_state: std::sync::RwLock::new(initial_state),
             invoke: std::sync::RwLock::new(invoke.clone()),
             kv_backend,
             vec_backend,
@@ -165,7 +169,12 @@ impl Runtime for ContainerRuntime {
         for name in finished {
             let task = self.running.remove(&name).unwrap();
             let output = task.handle.join().unwrap();
-            let complete = task.invoke.create_reply(output);
+
+            // Read final state from the ServiceRouter (ADR 055)
+            let final_state = self.containers.get(&name)
+                .and_then(|mc| mc.bridge.final_state());
+
+            let complete = task.invoke.create_reply_with_state(output, final_state);
             self.queue.send_complete(complete).unwrap();
             did_work = true;
         }

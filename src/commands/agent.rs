@@ -4,7 +4,7 @@ use std::sync::Arc;
 use clap::Subcommand;
 
 use vlindercli::config::{conversations_dir, registry_db_path, Config};
-use vlindercli::domain::{CliHarness, Daemon, Harness, PersistentRegistry, Registry};
+use vlindercli::domain::{CliHarness, ConversationStore, Daemon, Harness, PersistentRegistry, Registry};
 use vlindercli::queue::{agent_routing_key, MessageQueue, NatsQueue};
 use vlindercli::registry_service::{GrpcRegistryClient, ping_registry};
 
@@ -17,6 +17,9 @@ pub enum AgentCommand {
         /// Path to agent directory (default: current directory)
         #[arg(short, long)]
         path: Option<PathBuf>,
+        /// Fork from a historical conversation commit (state time-travel)
+        #[arg(long)]
+        from: Option<String>,
     },
     /// List deployed agents
     List,
@@ -29,24 +32,24 @@ pub enum AgentCommand {
 
 pub fn execute(cmd: AgentCommand) {
     match cmd {
-        AgentCommand::Run { path } => run(path),
+        AgentCommand::Run { path, from } => run(path, from),
         AgentCommand::List => list(),
         AgentCommand::Get { name } => get(&name),
     }
 }
 
-fn run(path: Option<PathBuf>) {
+fn run(path: Option<PathBuf>, from: Option<String>) {
     let config = Config::load();
 
     if config.distributed.enabled {
-        run_distributed(path, &config);
+        run_distributed(path, from, &config);
     } else {
-        run_local(path);
+        run_local(path, from);
     }
 }
 
 /// Run in local mode - creates embedded daemon with all services.
-fn run_local(path: Option<PathBuf>) {
+fn run_local(path: Option<PathBuf>, from: Option<String>) {
     let agent_path = path.unwrap_or_else(|| {
         std::env::current_dir().expect("Failed to get current directory")
     });
@@ -68,6 +71,11 @@ fn run_local(path: Option<PathBuf>) {
     daemon.harness.start_session(&agent_name, conversations_dir())
         .expect("Failed to start session");
 
+    // Fork from historical state if --from is provided
+    if let Some(ref commit) = from {
+        apply_from_state(&mut daemon.harness, commit);
+    }
+
     // Run REPL
     repl::run(|input| {
         match daemon.harness.invoke(&agent_id, input) {
@@ -88,7 +96,7 @@ fn run_local(path: Option<PathBuf>) {
 }
 
 /// Run in distributed mode - connect as client to existing daemon.
-fn run_distributed(path: Option<PathBuf>, config: &Config) {
+fn run_distributed(path: Option<PathBuf>, from: Option<String>, config: &Config) {
     let agent_path = path.unwrap_or_else(|| {
         std::env::current_dir().expect("Failed to get current directory")
     });
@@ -136,6 +144,11 @@ fn run_distributed(path: Option<PathBuf>, config: &Config) {
     harness.start_session(&agent_name, conversations_dir())
         .expect("Failed to start session");
 
+    // Fork from historical state if --from is provided
+    if let Some(ref commit) = from {
+        apply_from_state(&mut harness, commit);
+    }
+
     // Run REPL - harness ticks to process responses
     repl::run(|input| {
         match harness.invoke(&agent_id, input) {
@@ -152,6 +165,28 @@ fn run_distributed(path: Option<PathBuf>, config: &Config) {
             Err(e) => format!("[error] {}", e),
         }
     });
+}
+
+/// Read the State trailer from a historical conversation commit and initialize
+/// the harness to fork from that state (ADR 055 time-travel).
+fn apply_from_state(harness: &mut CliHarness, commit: &str) {
+    let store = ConversationStore::open(conversations_dir())
+        .expect("Failed to open conversation store");
+
+    match store.read_state_trailer(commit) {
+        Ok(Some(state)) => {
+            println!("Forking from state {}…", &state[..8.min(state.len())]);
+            harness.set_initial_state(state);
+        }
+        Ok(None) => {
+            eprintln!("Commit {} has no State trailer. Only agent response commits carry state.", &commit[..8.min(commit.len())]);
+            std::process::exit(1);
+        }
+        Err(e) => {
+            eprintln!("Failed to read state from commit {}: {}", &commit[..8.min(commit.len())], e);
+            std::process::exit(1);
+        }
+    }
 }
 
 fn list() {

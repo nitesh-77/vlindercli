@@ -43,6 +43,7 @@ fn container_runtime_executes_echo_agent() {
         RuntimeType::Container,
         agent_id,
         b"hello from container".to_vec(),
+        None,
     );
     queue.send_invoke(invoke).unwrap();
 

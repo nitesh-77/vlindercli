@@ -1,4 +1,4 @@
-# ADR 055: Transactional Storage
+# ADR 055: Version-Controlled Agent State
 
 **Status:** Proposed
 
@@ -8,73 +8,90 @@ ADR 054 made `SubmissionId` = git commit SHA. Every `RequestMessage` carries a S
 
 This means storage is destructive and non-isolated. If an agent crashes mid-invocation after 23 of 40 writes, the first 22 writes are permanently applied — half-finished work is visible. If two agents write to overlapping keys, they interleave unpredictably. There is no rollback, no isolation, no atomicity.
 
-The fix isn't versioning — it's transactions. An agent's invocation is a **work unit**. Its mutations should be invisible until the work unit completes, and discardable if it fails. Time travel is a consequence of this contract, not a goal in itself.
+Git already solves this problem — for source code. The same model solves it for agent state. Not git the tool. Git the model: immutable objects, content addressing, mutable pointers.
 
 ## Decision
 
-### The Contract
+### Three Rules
 
-Each agent invocation is a **work unit** with transactional semantics:
+**1. Immutable objects.** Writes create new objects. Old objects are never modified or deleted. A `kv_put` does not overwrite — it appends a new version. The old version still exists.
 
-**1. Begin.** When an invoke starts, the platform provides a parent SHA (the SubmissionId). This is the branch point — the state the agent inherits.
+**2. Content addressing.** Every object is identified by a hash of its content and lineage. Same content in the same context produces the same hash. The platform computes the hash — agents receive it as the return value of each write.
 
-**2. Mutate.** Every write (kv-put, vector-store, etc.) is a mutation within the work unit. Each mutation produces a new SHA, chained from the previous:
+**3. Platform-managed pointers.** "Current state" is a mutable pointer (a ref) managed by the platform. The data doesn't move — the perspective does.
 
-```
-incoming SHA: aaa
+### The Object Model
 
-op1: kv_put("/todos.json", data1)         → sha1 = hash(aaa  + op1) = bbb
-op2: embed("chunk-0", vec0, "intro")      → sha2 = hash(bbb  + op2) = ccc
-op3: kv_put("/todos.json", data2)         → sha3 = hash(ccc  + op3) = ddd
-...
-op40: kv_put("/metadata.json", meta)      → sha40 = hash(...) = zzz
-```
+Git has blobs (content), trees (snapshots), and commits (tree + parent). Agent state uses the same structure:
 
-The SHA is deterministic: `hash(parent_sha + op_type + key + content)`. Same inputs always produce the same chain.
+| Git | Agent state | Purpose |
+|-----|-------------|---------|
+| Blob | Value | The data — JSON, vector, metadata |
+| Tree | Snapshot | Mapping of all paths → value hashes at a point in time |
+| Commit | State commit | Snapshot hash + parent commit hash |
+| HEAD | Head pointer | The platform's ref to the agent's current state |
 
-**3. Commit.** When the agent returns successfully, all mutations become visible atomically. The final SHA (`zzz`) is the work unit's state identifier.
+### Writes
 
-**4. Rollback.** If the agent crashes or errors, all mutations are discarded. State reverts to the parent SHA. The next retry starts a fresh work unit from the same parent.
-
-### Isolation Guarantees
-
-- **Read-your-own-writes.** Within a work unit, the agent sees its own mutations. After `kv_put("/foo", v2)`, a subsequent `kv_get("/foo")` returns `v2`.
-- **Snapshot isolation from other work units.** Other agents (or other sessions) see the state as of the last committed work unit, not in-progress mutations.
-- **Atomic visibility.** On commit, all mutations become visible at once. There is no window where partial state is observable.
-
-### The SHA Chain
-
-Reads do not advance the chain. Only mutations do. The chain is linear within a work unit:
+A single mutation — `kv_put("/todos.json", new_data)`:
 
 ```
-aaa → bbb → ccc → ddd → ... → zzz
- ↑                               ↑
- branch point                    commit point
- (parent SHA)                    (final state SHA)
+1. Hash new_data                          → value_hash
+2. Clone parent snapshot, update entry    → snapshot' { "/todos.json" → value_hash }
+3. Create state commit: snapshot' + parent → commit_b
+
+Before:  HEAD → commit_a → { "/todos.json" → old_hash }
+After:   HEAD → commit_b → { "/todos.json" → value_hash }
+         commit_a still exists. old_hash still exists.
 ```
 
-The platform computes the SHA. The agent receives it as the return value of each write:
+Multiple mutations chain naturally:
 
-```python
-sha1 = kv_put("/todos.json", content)    # returns "bbb..."
-sha2 = kv_put("/config.json", config)    # returns "ccc..."
+```
+HEAD → commit_a
+
+kv_put("/todos.json", v2)       → commit_b
+embed("chunk-0", vec, meta)     → commit_c
+kv_put("/config.json", cfg)     → commit_d
+
+Success: HEAD → commit_d   (pointer advances)
+Failure: HEAD → commit_a   (pointer doesn't move)
 ```
 
-Agents can ignore the return value (backwards compatible — it's just a string instead of `"ok"`). Agents that want fine-grained history can store and reference these SHAs.
+### Reads
+
+`kv_get("/todos.json")` resolves through the current pointer:
+
+```
+HEAD → state commit → snapshot → "/todos.json" → value_hash → content
+```
+
+Within an invocation, the pointer advances locally — agents see their own writes. Other agents and sessions see the last committed head. This is snapshot isolation, emergent from immutability.
+
+### Agent Invocations
+
+Each invocation is a work unit:
+
+- **Start.** Platform reads the session's head pointer. The agent inherits this state.
+- **During.** Each mutation extends the chain from the head. The pointer advances locally.
+- **Success.** Platform advances the session's head to the final state commit.
+- **Failure.** Platform does not advance the head. Orphaned objects are eligible for GC.
+
+There is no `begin()`. No `commit()`. No `rollback()`. The pointer either moves forward or it doesn't.
 
 ### Cross-Turn Continuity
 
-The conversation DAG (git) is the "macro" timeline. The SHA chain is the "micro" timeline within each turn. They link at the branch points:
+The conversation DAG (git) and the state DAG (object model) are two timelines with the same structure. They link at the turn boundaries:
 
 ```
 conversation:  ── user1 ──── agent1 ──── user2 ──── agent2 ──
                     │           ↑           │           ↑
-                    │        commit         │        commit
-                    ▼           │           ▼           │
-work units:         └─ a→b→...→z           └─ d→e→...→y
+                    │        advance        │        advance
+                    ▼        head           ▼        head
+state:              └─ a→b→...→z           └─ d→e→...→y
 ```
 
-Each work unit's parent SHA is the conversation commit. The committed state SHA is recorded on the agent response commit (as a `State` trailer):
+The head pointer after each agent turn is recorded as a `State` trailer on the agent response commit:
 
 ```
 agent
@@ -86,79 +103,118 @@ Submission: aaa
 State: zzz
 ```
 
-To resolve "latest state at the start of turn 2": read the `State` trailer from the previous agent response commit. This links the two DAGs without requiring storage engines to understand git.
+### Platform-Provided Storage
 
-### Where the SHA is Computed
+For agents using the platform's kv and vector bridges, the platform implements the three rules transparently. Agents call `kv_put` / `kv_get` / `vector_store` / `vector_search` exactly as before. The platform handles hashing, snapshots, state commits, and pointer management behind the scenes.
 
-The platform computes the chain. Specifically, the `ServiceRouter` (which dispatches bridge calls to storage workers) maintains the current chain position:
+`kv_put` returns a hash string instead of `"ok"`. Backwards compatible — agents can ignore it. Agents that want fine-grained references can store these hashes.
 
-1. Invoke starts → chain initialized to SubmissionId
-2. Agent calls `kv_put` → bridge computes `new_sha = hash(chain + payload)`, sends request tagged with `new_sha` to storage worker, advances chain
-3. Storage worker stores the mutation tagged with the SHA
-4. Bridge returns `new_sha` to agent
-5. Repeat for each mutation
-6. Invoke completes → final chain SHA is the committed state
+### Agent-Provided Storage
 
-Agents that bring their own storage and want to participate in the chain implement the same hash function. The platform publishes the algorithm.
+Agents that bring their own storage follow the same three rules in their chosen backend:
 
-## Implementation Levels
+- Append-only writes (never overwrite or delete)
+- Content-addressed objects (keyed by hash)
+- Report state commit hashes back to the platform
 
-The contract enables incremental implementation. Each level builds on the previous:
+The platform publishes the hash algorithm. The platform manages the head pointer. The agent manages the data. Any backend works — the contract is the model, not the mechanism.
 
-### Level 1: Isolation (crash safety)
+### What Falls Out
 
-Storage engines implement `begin` / `commit` / `rollback`. Mutations are buffered and applied atomically on commit. Discarded on rollback. No SHA chain, no versioning. Just correctness.
+These are not features to build. They are consequences of the three rules:
 
-- **Storage trait**: add `begin_work_unit(parent: &str)`, `commit_work_unit()`, `rollback_work_unit()`
-- **Workers**: call `begin` when receiving the first request for a submission, `commit` when invoke completes, `rollback` on timeout/error
-- **Agent change**: none
+| Capability | Mechanism |
+|------------|-----------|
+| **Crash safety** | Pointer doesn't advance on failure |
+| **Isolation** | Concurrent work units write to different chains, reads scoped to each head |
+| **Undo** | Move pointer backward |
+| **Time travel** | Point at any historical state commit |
+| **Fork** | Two pointers from the same parent |
+| **Diff** | Compare snapshots at two state commits |
+| **Audit** | Walk the commit chain |
+| **Replay** | Start a new chain from an old state commit |
+| **Collaboration** | Share the object store and commit chain |
 
-### Level 2: SHA chain (audit log)
+### User Experience: Control Plane, Not Data Plane
 
-Each mutation returns a SHA. The chain is recorded. Provides a complete operation log for debugging: "what did the agent actually do?"
+Time travel is a platform operation, not an agent interaction. The agent never knows about history, forking, or undo — it reads and writes through the pointer. The user navigates the timeline from outside the REPL using `vlinder` subcommands.
 
-- **ServiceRouter**: maintain chain state, compute SHAs, return them to agents
-- **Storage engines**: tag each write with its SHA
-- **Agent change**: `kv_put` returns a SHA string instead of `"ok"` (backwards compatible)
+**The conversation repo is system-wide.** Every commit — from any agent, any session — lives in the same git DAG. Time travel operates at any scope: a single session, a single agent, or the entire system.
 
-### Level 3: Historical reads (opt-in time travel)
+```
+$ vlinder log
+abc1234  todoapp    ses-001  Turn 3: add clean the house     State: ddd
+def5678  pensieve   ses-002  Turn 1: summarize article        State: aaa
+ghi9012  todoapp    ses-001  Turn 4: complete all             State: eee
+jkl3456  pensieve   ses-002  Turn 2: what about point 3?      State: bbb
+mno7890  todoapp    ses-001  Turn 5: delete completed         State: fff
 
-Agents can read state at any historical SHA. New SDK operation: `kv_get_at(path, sha)`.
+$ vlinder log --session ses-001       # filter to one session
+$ vlinder log --agent pensieve        # filter to one agent
+```
 
-- **Storage trait**: add `get_file_at(path: &str, version: &str)`
-- **SdkMessage**: add `KvGetAt` variant
-- **Bridge**: add `/kv/get-at` endpoint
-- **Agent change**: opt-in — agents that want time travel use the new endpoint
+**Inspect state at any point:**
 
-### Level 4: Scoped reads (transparent time travel)
+```
+$ vlinder diff abc1234 mno7890
+  todoapp /todos.json: 3 items → 0 items
+  pensieve /articles.json: 0 articles → 1 article
+```
 
-The platform scopes all reads to the current work unit's lineage. The agent calls `kv_get(path)` and gets the value from its lineage, not the global latest. Agents are fully isolated without knowing it.
+**Fork from any point in history:**
 
-- **Read resolution**: platform provides ancestor list (from `State` trailers on conversation commits), storage queries `WHERE sha IN (ancestors)`
-- **Agent change**: none — reads are transparently scoped
+```
+$ vlinder agent run todoapp --from abc1234
+Forked session ses-xyz98765 from abc1234 (state: ddd)
+> list
+1. buy milk
+2. walk the dog
+3. clean the house
+```
 
-## Backend Strategy
+The agent sees the world as it was at `abc1234`. The user deleted everything in the original session — but the data was never gone. The platform just moved the pointer. Forking creates a new pointer from an old commit.
 
-The contract is backend-agnostic. Each storage engine implements isolation and the SHA chain using its native mechanisms:
+| Plane | Tool | Does what |
+|-------|------|-----------|
+| Control | `vlinder log` | Walk the system-wide commit chain |
+| Control | `vlinder diff` | Compare snapshots at any two commits |
+| Control | `--from <commit>` | Fork from any point in history |
+| Data | The REPL | Talk to the agent — no awareness of time travel |
 
-| Backend | Isolation | SHA chain |
-|---------|-----------|-----------|
-| SQLite | `BEGIN` / `COMMIT` / `ROLLBACK` (native) | `version` column, INSERT not UPSERT |
-| Postgres | Same (native transactions) | Same |
-| Redis | `MULTI` / `EXEC` / `DISCARD` | Composite key `{path}:{sha}` |
-| S3 | Write to staging prefix, move on commit | Version tag in object metadata |
-| In-memory | Copy-on-write HashMap | Version-keyed entries |
+### Garbage Collection
 
-Agents that bring their own storage implement the contract however they choose. The platform doesn't impose a mechanism — just the semantics.
+Append-only means storage grows. Unreachable objects — from failed invocations or history beyond a retention window — are eligible for GC. Retention policy is a separate concern (future ADR).
+
+## Scope
+
+### Day One
+
+- KV storage versioning (content-addressed append-only SQLite)
+- State tracking through the invocation lifecycle (ServiceRouter → Worker → messages → git trailers)
+- `vlinder session log` — system-wide timeline with state hashes
+- `--from <commit>` on `vlinder agent run` — fork from any point in history
+
+### Deferred
+
+- **`vlinder session diff`** — compare snapshots at two state commits. The data model supports it; the CLI command can come later.
+- **Vector storage versioning** — same three rules, same model. VectorServiceWorker changes mirror ObjectServiceWorker changes. Deferred because the demo only needs KV.
+- **In-memory StateStore** — SQLite-only for now. In-memory variant needed when agents declare `memory://` object storage.
+
+### Future Work
+
+- **Garbage collection** — retention policy for historical objects. Append-only means storage grows. Unreachable objects (failed invocations, history beyond a window) need pruning. Separate ADR.
+- **Agent-provided storage protocol** — `state_advance(key, content_hash)` and `state_resolve(key)` SDK calls for agents that bring their own Postgres, Qdrant, etc. The platform manages the pointer; the agent manages the data.
+- **Multi-agent state merging** — when two agents write to overlapping state, their branches need merge semantics. Same problem as git merge conflicts, same class of solutions.
+- **State-aware session viewer** — the existing HTML session viewer could show state hashes per turn and link to snapshot inspection.
 
 ## Consequences
 
-- Agent invocations gain crash safety — partial writes are never visible
-- The SHA chain provides a complete per-operation audit log for free
-- Time travel falls out of keeping mutations instead of discarding them
-- Replay = create a new work unit from an old parent SHA
-- Branching = two work units from the same parent SHA
-- Each level is independently useful — Level 1 alone is a significant improvement
-- Storage growth is bounded by GC policy (future ADR): prune committed work units older than N turns
-- The conversation DAG (git) and the operation chain (SHA) are two linked timelines: macro (turns) and micro (individual writes)
-- Agents that don't care about any of this see no change — `kv_put` / `kv_get` work exactly as before
+- The storage contract is three rules: immutable objects, content addressing, platform-managed pointers
+- Every capability (crash safety, isolation, undo, fork, time travel, diff, audit, replay) is a consequence of those rules, not a separately implemented feature
+- No transaction methods on the storage trait — the pointer mechanism replaces begin/commit/rollback
+- KV and vectors are unified under the same model — both are content-addressed objects
+- Agent authors choose their storage backend — the contract is backend-agnostic
+- The conversation DAG (git commits) and the state DAG (object model) are two linked timelines with the same structure
+- Git's UX vocabulary — checkout, branch, diff, log — maps directly to agent state operations
+- Agents that don't care see no change — `kv_put` / `kv_get` work exactly as before
+- The only new problem is garbage collection of historical objects

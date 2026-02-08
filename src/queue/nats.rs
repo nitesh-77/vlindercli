@@ -232,6 +232,9 @@ impl MessageQueue for NatsQueue {
             headers.insert("harness", msg.harness.as_str());
             headers.insert("runtime", msg.runtime.as_str());
             headers.insert("agent-id", msg.agent_id.as_str());
+            if let Some(ref state) = msg.state {
+                headers.insert("state", state.as_str());
+            }
 
             self.inner
                 .jetstream
@@ -326,6 +329,9 @@ impl MessageQueue for NatsQueue {
             headers.insert("submission-id", msg.submission.as_str());
             headers.insert("agent-id", msg.agent_id.as_str());
             headers.insert("harness", msg.harness.as_str());
+            if let Some(ref state) = msg.state {
+                headers.insert("state", state.as_str());
+            }
 
             self.inner
                 .jetstream
@@ -358,6 +364,7 @@ impl MessageQueue for NatsQueue {
                 runtime: parse_runtime_type(&get_header(headers, "runtime")?)?,
                 agent_id: ResourceId::new(&get_header(headers, "agent-id")?),
                 payload: js_msg.payload.to_vec(),
+                state: get_header(headers, "state").ok(),
             };
 
             Ok((msg, ack_fn))
@@ -432,6 +439,7 @@ impl MessageQueue for NatsQueue {
                 agent_id: ResourceId::new(&get_header(headers, "agent-id")?),
                 harness: parse_harness_type(&get_header(headers, "harness")?)?,
                 payload: js_msg.payload.to_vec(),
+                state: get_header(headers, "state").ok(),
             };
 
             Ok((msg, ack_fn))

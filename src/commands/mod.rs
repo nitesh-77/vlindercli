@@ -2,6 +2,7 @@ mod agent;
 mod daemon;
 mod model;
 mod repl;
+mod session;
 
 use clap::{Parser, Subcommand};
 
@@ -25,6 +26,11 @@ pub enum Command {
         #[command(subcommand)]
         cmd: model::ModelCommand,
     },
+    /// Inspect conversation sessions
+    Session {
+        #[command(subcommand)]
+        cmd: session::SessionCommand,
+    },
     /// Run the vlinder daemon
     Daemon,
 }
@@ -35,6 +41,7 @@ pub fn run() {
     match cli.command {
         Command::Agent { cmd } => agent::execute(cmd),
         Command::Model { cmd } => model::execute(cmd),
+        Command::Session { cmd } => session::execute(cmd),
         Command::Daemon => daemon::execute(),
     }
 }
@@ -51,7 +58,7 @@ mod tests {
         assert_eq!(
             cli.command,
             Command::Agent {
-                cmd: agent::AgentCommand::Run { path: None }
+                cmd: agent::AgentCommand::Run { path: None, from: None }
             }
         );
     }
@@ -63,7 +70,8 @@ mod tests {
             cli.command,
             Command::Agent {
                 cmd: agent::AgentCommand::Run {
-                    path: Some(PathBuf::from("/tmp/agent"))
+                    path: Some(PathBuf::from("/tmp/agent")),
+                    from: None,
                 }
             }
         );
@@ -77,7 +85,8 @@ mod tests {
             cli.command,
             Command::Agent {
                 cmd: agent::AgentCommand::Run {
-                    path: Some(PathBuf::from("./my-agent"))
+                    path: Some(PathBuf::from("./my-agent")),
+                    from: None,
                 }
             }
         );
@@ -102,6 +111,20 @@ mod tests {
             cli.command,
             Command::Agent {
                 cmd: agent::AgentCommand::List
+            }
+        );
+    }
+
+    #[test]
+    fn cli_agent_run_with_from() {
+        let cli = Cli::try_parse_from(["vlinder", "agent", "run", "--from", "abc123"]).unwrap();
+        assert_eq!(
+            cli.command,
+            Command::Agent {
+                cmd: agent::AgentCommand::Run {
+                    path: None,
+                    from: Some("abc123".to_string()),
+                }
             }
         );
     }

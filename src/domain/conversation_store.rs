@@ -109,6 +109,7 @@ impl ConversationStore {
     /// Commit an agent response. Returns the commit SHA.
     ///
     /// References the SubmissionId (user input commit SHA) in a trailer.
+    /// Optionally includes a State trailer linking to the state DAG (ADR 055).
     /// Commit message format:
     /// ```text
     /// agent
@@ -117,11 +118,13 @@ impl ConversationStore {
     ///
     /// Session: <session_id>
     /// Submission: <submission_sha>
+    /// State: <state_hash>          ← only if state is Some
     /// ```
     pub fn commit_agent_response(
         &self,
         session: &Session,
         submission_id: &str,
+        state: Option<&str>,
     ) -> Result<String, StoreError> {
         let filename = session.filename();
         let json = serde_json::to_string_pretty(session)?;
@@ -142,18 +145,38 @@ impl ConversationStore {
             })
             .unwrap_or("");
 
-        let message = format!(
+        let mut message = format!(
             "agent\n\n{}\n\nSession: {}\nSubmission: {}",
             response,
             session.session.as_str(),
             submission_id
         );
 
+        if let Some(state_hash) = state {
+            message.push_str(&format!("\nState: {}", state_hash));
+        }
+
         // git commit
         self.git(&["commit", "-m", &message])?;
 
         // Return SHA
         self.rev_parse_head()
+    }
+
+    /// Read the State trailer from a git commit message.
+    ///
+    /// Returns the state hash if the commit has a `State: <hash>` trailer.
+    pub fn read_state_trailer(&self, commit_sha: &str) -> Result<Option<String>, StoreError> {
+        let body = self.git(&["log", "-1", "--format=%B", commit_sha])?;
+        for line in body.lines() {
+            if let Some(hash) = line.strip_prefix("State: ") {
+                let hash = hash.trim();
+                if !hash.is_empty() {
+                    return Ok(Some(hash.to_string()));
+                }
+            }
+        }
+        Ok(None)
     }
 
     /// Load a session from a JSON file by filename.
@@ -250,7 +273,7 @@ mod tests {
         let sha1 = store.commit_user_input(&session).unwrap();
 
         session.record_agent_response("reply to first");
-        let sha2 = store.commit_agent_response(&session, &sha1).unwrap();
+        let sha2 = store.commit_agent_response(&session, &sha1, None).unwrap();
 
         assert_ne!(sha1, sha2);
     }
@@ -286,7 +309,7 @@ mod tests {
 
         // Turn 1: agent
         session.record_agent_response("Here's the summary...");
-        store.commit_agent_response(&session, &sha1).unwrap();
+        store.commit_agent_response(&session, &sha1, None).unwrap();
 
         // Turn 2: user
         session.record_user_input("what about point 3?", SubmissionId::from("placeholder2".to_string()));
@@ -294,7 +317,7 @@ mod tests {
 
         // Turn 2: agent
         session.record_agent_response("Point 3 discusses...");
-        store.commit_agent_response(&session, &sha2).unwrap();
+        store.commit_agent_response(&session, &sha2, None).unwrap();
 
         // Verify git log
         let log = store.git(&["log", "--oneline", "--reverse"]).unwrap();
@@ -331,10 +354,57 @@ mod tests {
         let sha = store.commit_user_input(&session).unwrap();
 
         session.record_agent_response("hi there");
-        store.commit_agent_response(&session, &sha).unwrap();
+        store.commit_agent_response(&session, &sha, None).unwrap();
 
         let log = store.git(&["log", "-1", "--format=%B"]).unwrap();
         assert!(log.contains("Session: ses-abc12345"));
         assert!(log.contains(&format!("Submission: {}", sha)));
+    }
+
+    #[test]
+    fn agent_commit_includes_state_trailer() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let store = ConversationStore::open(tmp.path().to_path_buf()).unwrap();
+
+        let mut session = test_session();
+        session.record_user_input("hello", SubmissionId::from("placeholder".to_string()));
+        let sha = store.commit_user_input(&session).unwrap();
+
+        session.record_agent_response("hi there");
+        let state_hash = "abc123def456";
+        store.commit_agent_response(&session, &sha, Some(state_hash)).unwrap();
+
+        let log = store.git(&["log", "-1", "--format=%B"]).unwrap();
+        assert!(log.contains(&format!("State: {}", state_hash)));
+    }
+
+    #[test]
+    fn read_state_trailer_returns_hash() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let store = ConversationStore::open(tmp.path().to_path_buf()).unwrap();
+
+        let mut session = test_session();
+        session.record_user_input("hello", SubmissionId::from("placeholder".to_string()));
+        let sha = store.commit_user_input(&session).unwrap();
+
+        session.record_agent_response("hi there");
+        let state_hash = "abc123def456";
+        let agent_sha = store.commit_agent_response(&session, &sha, Some(state_hash)).unwrap();
+
+        let result = store.read_state_trailer(&agent_sha).unwrap();
+        assert_eq!(result, Some(state_hash.to_string()));
+    }
+
+    #[test]
+    fn read_state_trailer_returns_none_for_user_commits() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let store = ConversationStore::open(tmp.path().to_path_buf()).unwrap();
+
+        let mut session = test_session();
+        session.record_user_input("hello", SubmissionId::from("placeholder".to_string()));
+        let sha = store.commit_user_input(&session).unwrap();
+
+        let result = store.read_state_trailer(&sha).unwrap();
+        assert_eq!(result, None);
     }
 }

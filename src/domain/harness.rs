@@ -47,6 +47,10 @@ pub struct CliHarness {
     inflight: HashMap<SubmissionId, JobId>,
     session: Option<Session>,
     store: Option<ConversationStore>,
+    /// Final state hash from the last completed invocation (ADR 055).
+    last_state: Option<String>,
+    /// Pending state from a just-completed invocation, not yet committed.
+    pending_state: Option<String>,
 }
 
 impl CliHarness {
@@ -60,6 +64,8 @@ impl CliHarness {
             inflight: HashMap::new(),
             session: None,
             store: None,
+            last_state: None,
+            pending_state: None,
         }
     }
 
@@ -81,6 +87,7 @@ impl CliHarness {
     /// Record an agent response and commit to the conversation store.
     ///
     /// Clears the pending question and appends the completed turn to history.
+    /// If state tracking is active (ADR 055), includes the State trailer.
     pub fn record_response(&mut self, response: &str) {
         if let (Some(session), Some(store)) = (self.session.as_mut(), self.store.as_ref()) {
             // Find the submission ID for the current open question
@@ -94,11 +101,30 @@ impl CliHarness {
                 })
                 .unwrap_or_default();
 
+            // Take pending_state and promote it to last_state after commit
+            let state = self.pending_state.take();
+
             session.record_agent_response(response);
-            if let Err(e) = store.commit_agent_response(session, &submission_id) {
+            if let Err(e) = store.commit_agent_response(
+                session,
+                &submission_id,
+                state.as_deref(),
+            ) {
                 tracing::warn!(error = %e, "failed to commit agent response");
             }
+
+            // Update last_state for next invocation
+            if state.is_some() {
+                self.last_state = state;
+            }
         }
+    }
+
+    /// Set the initial state for the next invocation (ADR 055).
+    ///
+    /// Used by `--from` to fork from a historical state.
+    pub fn set_initial_state(&mut self, state: String) {
+        self.last_state = Some(state);
     }
 
     /// Deploy an agent from a local directory path (CLI-specific).
@@ -152,6 +178,10 @@ impl CliHarness {
                 if let Some(job_id) = self.inflight.remove(&complete.submission) {
                     let result = String::from_utf8_lossy(&complete.payload).to_string();
                     self.registry.update_job_status(&job_id, JobStatus::Completed(result));
+                    // Stash state from the completed invocation (ADR 055)
+                    if complete.state.is_some() {
+                        self.pending_state = complete.state;
+                    }
                 }
                 let _ = ack();
             }
@@ -232,7 +262,7 @@ impl Harness for CliHarness {
         // Create job in registry with submission tracking
         let job_id = self.registry.create_job(submission.clone(), agent_id.clone(), input.to_string());
 
-        // Build and send typed InvokeMessage (ADR 044, ADR 054)
+        // Build and send typed InvokeMessage (ADR 044, ADR 054, ADR 055)
         let invoke = InvokeMessage::new(
             submission.clone(),
             session_id,
@@ -240,6 +270,7 @@ impl Harness for CliHarness {
             runtime,
             agent_id.clone(),
             payload.as_bytes().to_vec(),
+            self.last_state.clone(),
         );
 
         self.queue

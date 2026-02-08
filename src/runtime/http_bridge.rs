@@ -76,6 +76,11 @@ impl HttpBridge {
         self.send_data.update_invoke(invoke);
     }
 
+    /// Read the final state hash after an invocation completes (ADR 055).
+    pub(crate) fn final_state(&self) -> Option<String> {
+        self.send_data.final_state()
+    }
+
     /// The port the bridge is listening on.
     pub(crate) fn port(&self) -> u16 {
         self.port
@@ -273,6 +278,7 @@ mod tests {
             RuntimeType::Container,
             ResourceId::new("http://127.0.0.1:9000/agents/test"),
             b"test".to_vec(),
+            None,
         );
         Arc::new(ServiceRouter {
             queue,
@@ -281,6 +287,7 @@ mod tests {
             vec_backend: None,
             model_backends: std::collections::HashMap::new(),
             sequence: SequenceCounter::new(),
+            current_state: std::sync::RwLock::new(None),
         })
     }
 
