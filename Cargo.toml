@@ -4,11 +4,15 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
+[features]
+default = []
+metal = ["llama-cpp-2/metal"]
+
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 dirs = "6"
 indicatif = "0.17"
-llama-cpp-2 = { version = "0.1", features = ["metal"] }
+llama-cpp-2 = { version = "0.1" }
 reedline = "0.37"
 termimad = "0.30"
 serde = { version = "1", features = ["derive"] }
