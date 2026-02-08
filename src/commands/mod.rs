@@ -196,4 +196,100 @@ mod tests {
         let cli = Cli::try_parse_from(["vlinder", "support"]).unwrap();
         assert_eq!(cli.command, Command::Support);
     }
+
+    #[test]
+    fn cli_agent_new_python() {
+        let cli = Cli::try_parse_from(["vlinder", "agent", "new", "python", "my-agent"]).unwrap();
+        assert_eq!(
+            cli.command,
+            Command::Agent {
+                cmd: agent::AgentCommand::New {
+                    language: agent::Language::Python,
+                    name: "my-agent".to_string(),
+                }
+            }
+        );
+    }
+
+    #[test]
+    fn cli_agent_new_golang() {
+        let cli = Cli::try_parse_from(["vlinder", "agent", "new", "golang", "bar"]).unwrap();
+        assert_eq!(
+            cli.command,
+            Command::Agent {
+                cmd: agent::AgentCommand::New {
+                    language: agent::Language::Golang,
+                    name: "bar".to_string(),
+                }
+            }
+        );
+    }
+
+    #[test]
+    fn cli_agent_new_js() {
+        let cli = Cli::try_parse_from(["vlinder", "agent", "new", "js", "foo"]).unwrap();
+        assert_eq!(
+            cli.command,
+            Command::Agent {
+                cmd: agent::AgentCommand::New {
+                    language: agent::Language::Js,
+                    name: "foo".to_string(),
+                }
+            }
+        );
+    }
+
+    #[test]
+    fn cli_agent_new_ts() {
+        let cli = Cli::try_parse_from(["vlinder", "agent", "new", "ts", "bun-agent"]).unwrap();
+        assert_eq!(
+            cli.command,
+            Command::Agent {
+                cmd: agent::AgentCommand::New {
+                    language: agent::Language::Ts,
+                    name: "bun-agent".to_string(),
+                }
+            }
+        );
+    }
+
+    #[test]
+    fn cli_agent_new_java() {
+        let cli = Cli::try_parse_from(["vlinder", "agent", "new", "java", "jvm-agent"]).unwrap();
+        assert_eq!(
+            cli.command,
+            Command::Agent {
+                cmd: agent::AgentCommand::New {
+                    language: agent::Language::Java,
+                    name: "jvm-agent".to_string(),
+                }
+            }
+        );
+    }
+
+    #[test]
+    fn cli_agent_new_dotnet() {
+        let cli = Cli::try_parse_from(["vlinder", "agent", "new", "dotnet", "net-agent"]).unwrap();
+        assert_eq!(
+            cli.command,
+            Command::Agent {
+                cmd: agent::AgentCommand::New {
+                    language: agent::Language::Dotnet,
+                    name: "net-agent".to_string(),
+                }
+            }
+        );
+    }
+
+    #[test]
+    fn cli_agent_new_invalid_language_fails() {
+        let result = Cli::try_parse_from(["vlinder", "agent", "new", "ruby", "my-agent"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn cli_agent_new_missing_name_fails() {
+        let result = Cli::try_parse_from(["vlinder", "agent", "new", "python"]);
+        assert!(result.is_err());
+    }
 }
