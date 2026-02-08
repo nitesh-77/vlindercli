@@ -4,7 +4,7 @@
 //!   POST /kv/get, /kv/put, /infer, /embed, etc.
 //!
 //! The bridge merges the URL path into an `op` field in the request body,
-//! creating a full SdkMessage JSON that feeds into `handle_send`. This keeps
+//! creating a full SdkMessage JSON that feeds into `ServiceRouter::dispatch`. This keeps
 //! SdkMessage as the single routing truth while giving agents a clean REST API.
 //!
 //! Zero external dependencies — uses `std::net::TcpListener` only.
@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
-use super::send::SendFunctionData;
+use super::service_router::ServiceRouter;
 
 /// URL path → SdkMessage `op` field mapping.
 fn op_for_path(path: &str) -> Option<&'static str> {
@@ -42,7 +42,7 @@ pub(crate) struct HttpBridge {
     port: u16,
     stop_flag: Arc<AtomicBool>,
     handle: Option<JoinHandle<()>>,
-    send_data: Arc<SendFunctionData>,
+    send_data: Arc<ServiceRouter>,
 }
 
 impl HttpBridge {
@@ -50,7 +50,7 @@ impl HttpBridge {
     ///
     /// Binds to `0.0.0.0:0` (OS-assigned port). The container should
     /// connect to `http://host.containers.internal:{port}/`.
-    pub(crate) fn start(send_data: Arc<SendFunctionData>) -> std::io::Result<Self> {
+    pub(crate) fn start(send_data: Arc<ServiceRouter>) -> std::io::Result<Self> {
         let listener = TcpListener::bind("0.0.0.0:0")?;
         let port = listener.local_addr()?.port();
         listener.set_nonblocking(true)?;
@@ -105,7 +105,7 @@ impl Drop for HttpBridge {
 /// Main bridge loop. Accepts connections, handles one request per connection.
 fn run_bridge(
     listener: TcpListener,
-    send_data: Arc<SendFunctionData>,
+    send_data: Arc<ServiceRouter>,
     stop: Arc<AtomicBool>,
 ) {
     loop {
@@ -128,7 +128,7 @@ fn run_bridge(
 }
 
 /// Handle a single HTTP connection.
-fn handle_connection(mut stream: TcpStream, send_data: &SendFunctionData) {
+fn handle_connection(mut stream: TcpStream, send_data: &ServiceRouter) {
     let result = parse_and_handle(&stream, send_data);
 
     match result {
@@ -137,10 +137,10 @@ fn handle_connection(mut stream: TcpStream, send_data: &SendFunctionData) {
     }
 }
 
-/// Parse the HTTP request and delegate to handle_send.
+/// Parse the HTTP request and delegate to dispatch.
 fn parse_and_handle(
     stream: &TcpStream,
-    send_data: &SendFunctionData,
+    send_data: &ServiceRouter,
 ) -> Result<Vec<u8>, String> {
     let mut reader = BufReader::new(stream);
 
@@ -187,8 +187,8 @@ fn parse_and_handle(
     // Merge op into body JSON
     let merged = merge_op(op, &body)?;
 
-    // Delegate to the shared handle_send
-    send_data.handle_send(merged)
+    // Delegate to the shared dispatch
+    send_data.dispatch(merged)
 }
 
 /// Read headers and extract Content-Length. Consumes all headers up to the blank line.
@@ -264,7 +264,7 @@ mod tests {
     use crate::domain::{ResourceId, RuntimeType};
     use crate::queue::{HarnessType, InMemoryQueue, InvokeMessage, MessageQueue, SequenceCounter, SubmissionId};
 
-    fn test_send_data() -> Arc<SendFunctionData> {
+    fn test_send_data() -> Arc<ServiceRouter> {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
         let invoke = InvokeMessage::new(
             SubmissionId::new(),
@@ -273,7 +273,7 @@ mod tests {
             ResourceId::new("http://127.0.0.1:9000/agents/test"),
             b"test".to_vec(),
         );
-        Arc::new(SendFunctionData {
+        Arc::new(ServiceRouter {
             queue,
             invoke: std::sync::RwLock::new(invoke),
             kv_backend: None,

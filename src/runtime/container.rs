@@ -17,7 +17,7 @@ use crate::domain::{Agent, ObjectStorageType, Registry, ResourceId, Runtime, Run
 use crate::queue::{ExpectsReply, InvokeMessage, MessageQueue, SequenceCounter};
 
 use super::http_bridge::HttpBridge;
-use super::send::SendFunctionData;
+use super::service_router::ServiceRouter;
 
 /// A long-running container managed by the runtime.
 struct ManagedContainer {
@@ -82,8 +82,8 @@ impl ContainerRuntime {
             }
         }
 
-        // Create SendFunctionData for the bridge
-        let send_data = Arc::new(SendFunctionData {
+        // Create ServiceRouter for the bridge
+        let send_data = Arc::new(ServiceRouter {
             queue: Arc::clone(&self.queue),
             invoke: std::sync::RwLock::new(invoke.clone()),
             kv_backend,
@@ -136,19 +136,6 @@ impl ContainerRuntime {
         Ok(host_port)
     }
 
-    /// Stop and remove all managed containers.
-    pub fn shutdown(&mut self) {
-        for (name, mc) in self.containers.drain() {
-            tracing::info!(agent = %name, container = %mc.container_id, "Stopping container");
-            let _ = Command::new("podman")
-                .args(["stop", "-t", "5", &mc.container_id])
-                .output();
-            let _ = Command::new("podman")
-                .args(["rm", "-f", &mc.container_id])
-                .output();
-            mc.bridge.stop();
-        }
-    }
 }
 
 impl Drop for ContainerRuntime {
@@ -222,6 +209,19 @@ impl Runtime for ContainerRuntime {
         }
 
         did_work
+    }
+
+    fn shutdown(&mut self) {
+        for (name, mc) in self.containers.drain() {
+            tracing::info!(agent = %name, container = %mc.container_id, "Stopping container");
+            let _ = Command::new("podman")
+                .args(["stop", "-t", "5", &mc.container_id])
+                .output();
+            let _ = Command::new("podman")
+                .args(["rm", "-f", &mc.container_id])
+                .output();
+            mc.bridge.stop();
+        }
     }
 }
 

@@ -1,4 +1,4 @@
-//! SendFunctionData — shared agent→service call handler.
+//! ServiceRouter — shared agent→service call handler.
 //!
 //! Used by ContainerRuntime (via HTTP bridge).
 //! Contains the core logic: parse SdkMessage, resolve hop, build RequestMessage,
@@ -10,11 +10,11 @@ use std::sync::{Arc, RwLock};
 use crate::domain::{ObjectStorageType, SdkMessage, VectorStorageType};
 use crate::queue::{InvokeMessage, MessageQueue, RequestMessage, SequenceCounter};
 
-/// Data needed to handle service calls on behalf of an agent.
+/// Routes agent SDK calls to the appropriate backend service.
 ///
 /// Constructed once per container, shared across all service calls.
 /// The invoke context is updated per invocation via `update_invoke()`.
-pub(crate) struct SendFunctionData {
+pub(crate) struct ServiceRouter {
     pub(crate) queue: Arc<dyn MessageQueue + Send + Sync>,
     /// The invoke that triggered this execution — carries submission + agent_id.
     /// Updated per invocation so SDK calls route on the correct submission ID.
@@ -28,18 +28,18 @@ pub(crate) struct SendFunctionData {
     pub(crate) sequence: SequenceCounter,
 }
 
-impl SendFunctionData {
+impl ServiceRouter {
     /// Update the invoke context for a new invocation and reset the sequence counter.
     pub(crate) fn update_invoke(&self, invoke: InvokeMessage) {
         *self.invoke.write().unwrap() = invoke;
         self.sequence.reset();
     }
 
-    /// Handle a send call from the agent.
+    /// Dispatch a service call from the agent.
     ///
     /// Validates the payload, resolves the next hop, builds a typed request,
     /// sends it, and waits for the response. Returns the response payload.
-    pub(crate) fn handle_send(&self, payload: Vec<u8>) -> Result<Vec<u8>, String> {
+    pub(crate) fn dispatch(&self, payload: Vec<u8>) -> Result<Vec<u8>, String> {
         let msg: SdkMessage = serde_json::from_slice(&payload)
             .map_err(|e| format!("invalid SDK message: {}", e))?;
 

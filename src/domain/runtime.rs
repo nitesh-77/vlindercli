@@ -56,6 +56,12 @@ pub trait Runtime {
 
     /// Process agent work. Returns true if work was done.
     fn tick(&mut self) -> bool;
+
+    /// Release all resources held by this runtime.
+    ///
+    /// Called on graceful shutdown. Implementations should stop running
+    /// agents and clean up any external resources (containers, connections, etc).
+    fn shutdown(&mut self);
 }
 
 #[cfg(test)]
@@ -98,6 +104,8 @@ mod tests {
                 false
             }
         }
+
+        fn shutdown(&mut self) {}
     }
 
     #[test]

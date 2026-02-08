@@ -5,6 +5,6 @@
 
 mod container;
 mod http_bridge;
-pub(crate) mod send;
+pub(crate) mod service_router;
 
 pub use container::ContainerRuntime;

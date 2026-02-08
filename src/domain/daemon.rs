@@ -25,7 +25,7 @@ pub struct Daemon {
     registry: Arc<dyn Registry>,
     /// The API surface - use this for deploy/invoke/poll.
     pub harness: CliHarness,
-    container_runtime: ContainerRuntime,
+    runtime: Box<dyn Runtime>,
     provider: Provider,
 }
 
@@ -58,7 +58,7 @@ impl Daemon {
 
         Self {
             harness: CliHarness::new(queue.clone(), Arc::clone(&registry)),
-            container_runtime: ContainerRuntime::new(&registry_id, queue.clone(), Arc::clone(&registry)),
+            runtime: Box::new(ContainerRuntime::new(&registry_id, queue.clone(), Arc::clone(&registry))),
             registry: Arc::clone(&registry),
             provider: Provider::new(queue, registry),
         }
@@ -66,7 +66,7 @@ impl Daemon {
 
     /// Tick all components.
     pub fn tick(&mut self) {
-        self.container_runtime.tick();
+        self.runtime.tick();
         self.provider.tick();
         self.harness.tick();
     }
