@@ -1,6 +1,6 @@
 # ADR 055: Version-Controlled Agent State
 
-**Status:** Proposed
+**Status:** Accepted
 
 ## Context
 
@@ -135,50 +135,58 @@ These are not features to build. They are consequences of the three rules:
 | **Replay** | Start a new chain from an old state commit |
 | **Collaboration** | Share the object store and commit chain |
 
+### State Continuity
+
+New sessions automatically pick up where the last session left off. On `vlinder agent run`, the platform scans backwards from HEAD for the most recent `State` trailer for that agent and initializes the harness with it.
+
+`git log` naturally follows the current branch. After a `timeline fork`, agents see state from the fork point — no special logic needed.
+
 ### User Experience: Control Plane, Not Data Plane
 
-Time travel is a platform operation, not an agent interaction. The agent never knows about history, forking, or undo — it reads and writes through the pointer. The user navigates the timeline from outside the REPL using `vlinder` subcommands.
+Time travel is a platform operation, not an agent interaction. The agent never knows about history, forking, or undo — it reads and writes through the pointer. The user navigates the timeline from outside the REPL using `vlinder timeline` subcommands.
 
-**The conversation repo is system-wide.** Every commit — from any agent, any session — lives in the same git DAG. Time travel operates at any scope: a single session, a single agent, or the entire system.
+**The conversation repo is system-wide.** Every commit — from any agent, any session — lives in the same git DAG. Forking is a system-wide operation — it affects all agents because they share the same timeline. Git branches are the natural mechanism.
 
 ```
-$ vlinder log
+$ vlinder timeline log
 abc1234  todoapp    ses-001  Turn 3: add clean the house     State: ddd
 def5678  pensieve   ses-002  Turn 1: summarize article        State: aaa
 ghi9012  todoapp    ses-001  Turn 4: complete all             State: eee
 jkl3456  pensieve   ses-002  Turn 2: what about point 3?      State: bbb
 mno7890  todoapp    ses-001  Turn 5: delete completed         State: fff
 
-$ vlinder log --session ses-001       # filter to one session
-$ vlinder log --agent pensieve        # filter to one agent
+$ vlinder timeline log --agent pensieve   # filter to one agent
 ```
 
 **Inspect state at any point:**
 
 ```
-$ vlinder diff abc1234 mno7890
+$ vlinder timeline diff abc1234 mno7890
   todoapp /todos.json: 3 items → 0 items
   pensieve /articles.json: 0 articles → 1 article
 ```
 
-**Fork from any point in history:**
+**Fork the system timeline:**
 
 ```
-$ vlinder agent run todoapp --from abc1234
-Forked session ses-xyz98765 from abc1234 (state: ddd)
+$ vlinder timeline fork abc1234
+Forked timeline at abc1234 → branch fork-abc12345
+
+$ vlinder agent run todoapp
+Resuming from state ddd…
 > list
 1. buy milk
 2. walk the dog
 3. clean the house
 ```
 
-The agent sees the world as it was at `abc1234`. The user deleted everything in the original session — but the data was never gone. The platform just moved the pointer. Forking creates a new pointer from an old commit.
+The fork creates a new git branch in the conversation repo from the target commit. All subsequent `agent run` sessions land on this branch. The old timeline is preserved on the old branch.
 
 | Plane | Tool | Does what |
 |-------|------|-----------|
-| Control | `vlinder log` | Walk the system-wide commit chain |
-| Control | `vlinder diff` | Compare snapshots at any two commits |
-| Control | `--from <commit>` | Fork from any point in history |
+| Control | `vlinder timeline log` | Walk the system-wide commit chain |
+| Control | `vlinder timeline fork` | Fork the system timeline at any commit |
+| Control | `vlinder timeline diff` | Compare snapshots at any two commits |
 | Data | The REPL | Talk to the agent — no awareness of time travel |
 
 ### Garbage Collection
@@ -187,16 +195,17 @@ Append-only means storage grows. Unreachable objects — from failed invocations
 
 ## Scope
 
-### Day One
+### Done
 
 - KV storage versioning (content-addressed append-only SQLite)
 - State tracking through the invocation lifecycle (ServiceRouter → Worker → messages → git trailers)
-- `vlinder session log` — system-wide timeline with state hashes
-- `--from <commit>` on `vlinder agent run` — fork from any point in history
+- `vlinder timeline log` — system-wide timeline with state hashes (replaces `vlinder session log`)
+- `vlinder timeline fork <commit>` — system-wide fork via git branch (replaces `--from` on `agent run`)
+- State continuity — `latest_state_for_agent()` reads prior state on session start
 
 ### Deferred
 
-- **`vlinder session diff`** — compare snapshots at two state commits. The data model supports it; the CLI command can come later.
+- **`vlinder timeline diff`** — compare snapshots at two state commits. The data model supports it; the CLI command can come later.
 - **Vector storage versioning** — same three rules, same model. VectorServiceWorker changes mirror ObjectServiceWorker changes. Deferred because the demo only needs KV.
 - **In-memory StateStore** — SQLite-only for now. In-memory variant needed when agents declare `memory://` object storage.
 

@@ -179,6 +179,48 @@ impl ConversationStore {
         Ok(None)
     }
 
+    /// Find the latest state hash for a given agent on the current timeline.
+    ///
+    /// Scans backwards from HEAD for agent response commits that touched
+    /// this agent's session files, returns the first State trailer found.
+    /// Naturally follows the current git branch — forks are transparent.
+    pub fn latest_state_for_agent(&self, agent_name: &str) -> Result<Option<String>, StoreError> {
+        let pathspec = format!("*_{}_*.json", agent_name);
+        let output = match self.git(&[
+            "log", "--format=%s%n%b%n---END---", "--", &pathspec
+        ]) {
+            Ok(output) => output,
+            Err(_) => return Ok(None), // No history yet
+        };
+
+        for block in output.split("---END---") {
+            let block = block.trim();
+            if block.is_empty() { continue; }
+            let lines: Vec<&str> = block.lines().collect();
+            if lines.is_empty() || lines[0].trim() != "agent" { continue; }
+            for line in &lines[1..] {
+                if let Some(hash) = line.strip_prefix("State: ") {
+                    let hash = hash.trim();
+                    if !hash.is_empty() {
+                        return Ok(Some(hash.to_string()));
+                    }
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    /// Fork the conversation timeline at a given commit.
+    ///
+    /// Creates a new git branch from the target commit and switches to it.
+    /// All subsequent commits land on this branch. The old timeline is preserved.
+    pub fn fork_at(&self, commit: &str) -> Result<String, StoreError> {
+        let short = &commit[..8.min(commit.len())];
+        let branch_name = format!("fork-{}", short);
+        self.git(&["checkout", "-b", &branch_name, commit])?;
+        Ok(branch_name)
+    }
+
     /// Load a session from a JSON file by filename.
     pub fn load(&self, filename: &str) -> Result<Session, StoreError> {
         let filepath = self.dir.join(filename);
@@ -406,5 +448,76 @@ mod tests {
 
         let result = store.read_state_trailer(&sha).unwrap();
         assert_eq!(result, None);
+    }
+
+    #[test]
+    fn latest_state_returns_none_with_no_history() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let store = ConversationStore::open(tmp.path().to_path_buf()).unwrap();
+
+        let result = store.latest_state_for_agent("pensieve").unwrap();
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn latest_state_finds_state_from_agent_commit() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let store = ConversationStore::open(tmp.path().to_path_buf()).unwrap();
+
+        let mut session = test_session();
+        session.record_user_input("hello", SubmissionId::from("sub1".to_string()));
+        let sha = store.commit_user_input(&session).unwrap();
+
+        session.record_agent_response("hi there");
+        store.commit_agent_response(&session, &sha, Some("deadbeef1234")).unwrap();
+
+        let result = store.latest_state_for_agent("pensieve").unwrap();
+        assert_eq!(result, Some("deadbeef1234".to_string()));
+    }
+
+    #[test]
+    fn latest_state_skips_user_commits() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let store = ConversationStore::open(tmp.path().to_path_buf()).unwrap();
+
+        let mut session = test_session();
+
+        // Agent commit with state
+        session.record_user_input("hello", SubmissionId::from("sub1".to_string()));
+        let sha = store.commit_user_input(&session).unwrap();
+        session.record_agent_response("hi");
+        store.commit_agent_response(&session, &sha, Some("state111")).unwrap();
+
+        // Another user commit (no state)
+        session.record_user_input("more", SubmissionId::from("sub2".to_string()));
+        store.commit_user_input(&session).unwrap();
+
+        // latest_state should still find state111 (skipping user commit)
+        let result = store.latest_state_for_agent("pensieve").unwrap();
+        assert_eq!(result, Some("state111".to_string()));
+    }
+
+    #[test]
+    fn latest_state_returns_most_recent() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let store = ConversationStore::open(tmp.path().to_path_buf()).unwrap();
+
+        let mut session = test_session();
+
+        // First turn with state "aaa"
+        session.record_user_input("first", SubmissionId::from("sub1".to_string()));
+        let sha1 = store.commit_user_input(&session).unwrap();
+        session.record_agent_response("reply1");
+        store.commit_agent_response(&session, &sha1, Some("aaa")).unwrap();
+
+        // Second turn with state "bbb"
+        session.record_user_input("second", SubmissionId::from("sub2".to_string()));
+        let sha2 = store.commit_user_input(&session).unwrap();
+        session.record_agent_response("reply2");
+        store.commit_agent_response(&session, &sha2, Some("bbb")).unwrap();
+
+        // Should return the most recent state "bbb"
+        let result = store.latest_state_for_agent("pensieve").unwrap();
+        assert_eq!(result, Some("bbb".to_string()));
     }
 }

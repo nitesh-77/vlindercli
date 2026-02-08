@@ -1,27 +1,31 @@
-//! Session subcommands — inspect conversation history.
+//! Timeline subcommands — system-wide conversation timeline.
 
 use std::path::PathBuf;
 
 use clap::Subcommand;
 
 use vlindercli::config::conversations_dir;
+use vlindercli::domain::ConversationStore;
 
 #[derive(Subcommand, Debug, PartialEq)]
-pub enum SessionCommand {
-    /// Show conversation timeline from git history
+pub enum TimelineCommand {
+    /// Show the system-wide timeline
     Log {
-        /// Filter by session ID
-        #[arg(long)]
-        session: Option<String>,
         /// Filter by agent name
         #[arg(long)]
         agent: Option<String>,
     },
+    /// Fork the system timeline from a historical point
+    Fork {
+        /// Commit SHA to fork from (from `vlinder timeline log`)
+        commit: String,
+    },
 }
 
-pub fn execute(cmd: SessionCommand) {
+pub fn execute(cmd: TimelineCommand) {
     match cmd {
-        SessionCommand::Log { session, agent } => log(session, agent),
+        TimelineCommand::Log { agent } => log(agent),
+        TimelineCommand::Fork { commit } => fork(&commit),
     }
 }
 
@@ -34,7 +38,7 @@ struct LogEntry {
     state: Option<String>, // State trailer (agent commits only)
 }
 
-fn log(session_filter: Option<String>, agent_filter: Option<String>) {
+fn log(agent_filter: Option<String>) {
     let dir = conversations_dir();
 
     if !dir.join(".git").exists() {
@@ -58,18 +62,7 @@ fn log(session_filter: Option<String>, agent_filter: Option<String>) {
     // Apply filters
     let entries: Vec<_> = entries.into_iter()
         .filter(|e| {
-            if let Some(ref s) = session_filter {
-                if !e.session.contains(s) {
-                    return false;
-                }
-            }
-            true
-        })
-        .filter(|e| {
             if let Some(ref a) = agent_filter {
-                // Agent name appears in the session filename (session JSON),
-                // but we extract it from the commit body context. For now,
-                // filter on session ID prefix which typically includes agent name.
                 if !e.session.contains(a) && !e.body.contains(a) {
                     return false;
                 }
@@ -107,6 +100,33 @@ fn log(session_filter: Option<String>, agent_filter: Option<String>) {
         };
 
         println!("  {} {:>5}  {}{}", short_sha, entry.role, body, state_indicator);
+    }
+}
+
+fn fork(commit: &str) {
+    let dir = conversations_dir();
+
+    if !dir.join(".git").exists() {
+        eprintln!("No conversation history to fork from.");
+        return;
+    }
+
+    let store = match ConversationStore::open(dir) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Failed to open conversation store: {}", e);
+            return;
+        }
+    };
+
+    match store.fork_at(commit) {
+        Ok(branch) => {
+            let short = &commit[..8.min(commit.len())];
+            println!("Forked timeline at {} → branch {}", short, branch);
+        }
+        Err(e) => {
+            eprintln!("Failed to fork timeline: {}", e);
+        }
     }
 }
 
@@ -155,7 +175,7 @@ fn parse_git_log(dir: &PathBuf) -> Result<Vec<LogEntry>, String> {
                 session = s.trim().to_string();
             } else if let Some(s) = line.strip_prefix("State: ") {
                 state = Some(s.trim().to_string());
-            } else if let Some(_) = line.strip_prefix("Submission: ") {
+            } else if line.strip_prefix("Submission: ").is_some() {
                 // Skip submission trailer
             } else if body.is_empty() {
                 body = line.to_string();

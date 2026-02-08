@@ -4,7 +4,7 @@ use std::sync::Arc;
 use clap::Subcommand;
 
 use vlindercli::config::{conversations_dir, registry_db_path, Config};
-use vlindercli::domain::{CliHarness, ConversationStore, Daemon, Harness, PersistentRegistry, Registry};
+use vlindercli::domain::{CliHarness, Daemon, Harness, PersistentRegistry, Registry};
 use vlindercli::queue::{agent_routing_key, MessageQueue, NatsQueue};
 use vlindercli::registry_service::{GrpcRegistryClient, ping_registry};
 
@@ -17,9 +17,6 @@ pub enum AgentCommand {
         /// Path to agent directory (default: current directory)
         #[arg(short, long)]
         path: Option<PathBuf>,
-        /// Fork from a historical conversation commit (state time-travel)
-        #[arg(long)]
-        from: Option<String>,
     },
     /// List deployed agents
     List,
@@ -32,24 +29,24 @@ pub enum AgentCommand {
 
 pub fn execute(cmd: AgentCommand) {
     match cmd {
-        AgentCommand::Run { path, from } => run(path, from),
+        AgentCommand::Run { path } => run(path),
         AgentCommand::List => list(),
         AgentCommand::Get { name } => get(&name),
     }
 }
 
-fn run(path: Option<PathBuf>, from: Option<String>) {
+fn run(path: Option<PathBuf>) {
     let config = Config::load();
 
     if config.distributed.enabled {
-        run_distributed(path, from, &config);
+        run_distributed(path, &config);
     } else {
-        run_local(path, from);
+        run_local(path);
     }
 }
 
 /// Run in local mode - creates embedded daemon with all services.
-fn run_local(path: Option<PathBuf>, from: Option<String>) {
+fn run_local(path: Option<PathBuf>) {
     let agent_path = path.unwrap_or_else(|| {
         std::env::current_dir().expect("Failed to get current directory")
     });
@@ -71,10 +68,8 @@ fn run_local(path: Option<PathBuf>, from: Option<String>) {
     daemon.harness.start_session(&agent_name, conversations_dir())
         .expect("Failed to start session");
 
-    // Fork from historical state if --from is provided
-    if let Some(ref commit) = from {
-        apply_from_state(&mut daemon.harness, commit);
-    }
+    // Read state from the system timeline (current branch)
+    apply_latest_state(&mut daemon.harness, &agent_name);
 
     // Run REPL
     repl::run(|input| {
@@ -96,7 +91,7 @@ fn run_local(path: Option<PathBuf>, from: Option<String>) {
 }
 
 /// Run in distributed mode - connect as client to existing daemon.
-fn run_distributed(path: Option<PathBuf>, from: Option<String>, config: &Config) {
+fn run_distributed(path: Option<PathBuf>, config: &Config) {
     let agent_path = path.unwrap_or_else(|| {
         std::env::current_dir().expect("Failed to get current directory")
     });
@@ -144,10 +139,8 @@ fn run_distributed(path: Option<PathBuf>, from: Option<String>, config: &Config)
     harness.start_session(&agent_name, conversations_dir())
         .expect("Failed to start session");
 
-    // Fork from historical state if --from is provided
-    if let Some(ref commit) = from {
-        apply_from_state(&mut harness, commit);
-    }
+    // Read state from the system timeline (current branch)
+    apply_latest_state(&mut harness, &agent_name);
 
     // Run REPL - harness ticks to process responses
     repl::run(|input| {
@@ -167,24 +160,22 @@ fn run_distributed(path: Option<PathBuf>, from: Option<String>, config: &Config)
     });
 }
 
-/// Read the State trailer from a historical conversation commit and initialize
-/// the harness to fork from that state (ADR 055 time-travel).
-fn apply_from_state(harness: &mut CliHarness, commit: &str) {
-    let store = ConversationStore::open(conversations_dir())
-        .expect("Failed to open conversation store");
+/// Read the latest state for an agent from the system timeline and initialize
+/// the harness with it (state continuity across sessions).
+fn apply_latest_state(harness: &mut CliHarness, agent_name: &str) {
+    let store = match vlindercli::domain::ConversationStore::open(conversations_dir()) {
+        Ok(s) => s,
+        Err(_) => return, // No conversation store yet — first run
+    };
 
-    match store.read_state_trailer(commit) {
+    match store.latest_state_for_agent(agent_name) {
         Ok(Some(state)) => {
-            println!("Forking from state {}…", &state[..8.min(state.len())]);
+            println!("Resuming from state {}…", &state[..8.min(state.len())]);
             harness.set_initial_state(state);
         }
-        Ok(None) => {
-            eprintln!("Commit {} has no State trailer. Only agent response commits carry state.", &commit[..8.min(commit.len())]);
-            std::process::exit(1);
-        }
+        Ok(None) => {} // No prior state — starting fresh
         Err(e) => {
-            eprintln!("Failed to read state from commit {}: {}", &commit[..8.min(commit.len())], e);
-            std::process::exit(1);
+            eprintln!("Warning: failed to read state from timeline: {}", e);
         }
     }
 }

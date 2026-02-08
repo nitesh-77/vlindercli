@@ -2,7 +2,7 @@ mod agent;
 mod daemon;
 mod model;
 mod repl;
-mod session;
+mod timeline;
 
 use clap::{Parser, Subcommand};
 
@@ -26,10 +26,10 @@ pub enum Command {
         #[command(subcommand)]
         cmd: model::ModelCommand,
     },
-    /// Inspect conversation sessions
-    Session {
+    /// Inspect and fork the system timeline
+    Timeline {
         #[command(subcommand)]
-        cmd: session::SessionCommand,
+        cmd: timeline::TimelineCommand,
     },
     /// Run the vlinder daemon
     Daemon,
@@ -41,7 +41,7 @@ pub fn run() {
     match cli.command {
         Command::Agent { cmd } => agent::execute(cmd),
         Command::Model { cmd } => model::execute(cmd),
-        Command::Session { cmd } => session::execute(cmd),
+        Command::Timeline { cmd } => timeline::execute(cmd),
         Command::Daemon => daemon::execute(),
     }
 }
@@ -58,7 +58,7 @@ mod tests {
         assert_eq!(
             cli.command,
             Command::Agent {
-                cmd: agent::AgentCommand::Run { path: None, from: None }
+                cmd: agent::AgentCommand::Run { path: None }
             }
         );
     }
@@ -71,7 +71,6 @@ mod tests {
             Command::Agent {
                 cmd: agent::AgentCommand::Run {
                     path: Some(PathBuf::from("/tmp/agent")),
-                    from: None,
                 }
             }
         );
@@ -86,7 +85,6 @@ mod tests {
             Command::Agent {
                 cmd: agent::AgentCommand::Run {
                     path: Some(PathBuf::from("./my-agent")),
-                    from: None,
                 }
             }
         );
@@ -116,14 +114,24 @@ mod tests {
     }
 
     #[test]
-    fn cli_agent_run_with_from() {
-        let cli = Cli::try_parse_from(["vlinder", "agent", "run", "--from", "abc123"]).unwrap();
+    fn cli_timeline_log() {
+        let cli = Cli::try_parse_from(["vlinder", "timeline", "log"]).unwrap();
         assert_eq!(
             cli.command,
-            Command::Agent {
-                cmd: agent::AgentCommand::Run {
-                    path: None,
-                    from: Some("abc123".to_string()),
+            Command::Timeline {
+                cmd: timeline::TimelineCommand::Log { agent: None }
+            }
+        );
+    }
+
+    #[test]
+    fn cli_timeline_fork() {
+        let cli = Cli::try_parse_from(["vlinder", "timeline", "fork", "abc123"]).unwrap();
+        assert_eq!(
+            cli.command,
+            Command::Timeline {
+                cmd: timeline::TimelineCommand::Fork {
+                    commit: "abc123".to_string(),
                 }
             }
         );
