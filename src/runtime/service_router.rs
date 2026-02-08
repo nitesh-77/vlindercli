@@ -58,14 +58,38 @@ impl ServiceRouter {
         );
         drop(invoke);
 
+        tracing::debug!(service = %request.service, backend = %request.backend, seq = %seq, "dispatch: sending request");
+
         self.queue.send_request(request.clone())
             .map_err(|e| format!("send error: {}", e))?;
 
+        tracing::debug!(service = %request.service, seq = %seq, "dispatch: polling for response");
+        let poll_start = std::time::Instant::now();
+        let mut poll_count: u64 = 0;
+
         loop {
-            if let Ok((response, ack)) = self.queue.receive_response(&request) {
-                let payload = response.payload.clone();
-                let _ = ack();
-                return Ok(payload);
+            match self.queue.receive_response(&request) {
+                Ok((response, ack)) => {
+                    let payload = response.payload.clone();
+                    let _ = ack();
+                    tracing::debug!(
+                        service = %request.service, seq = %seq,
+                        polls = poll_count, elapsed = ?poll_start.elapsed(),
+                        "dispatch: got response"
+                    );
+                    return Ok(payload);
+                }
+                Err(e) => {
+                    poll_count += 1;
+                    if poll_count % 5000 == 0 {
+                        tracing::warn!(
+                            service = %request.service, seq = %seq,
+                            polls = poll_count, elapsed = ?poll_start.elapsed(),
+                            error = %e,
+                            "dispatch: still waiting for response"
+                        );
+                    }
+                }
             }
             std::thread::sleep(std::time::Duration::from_millis(1));
         }

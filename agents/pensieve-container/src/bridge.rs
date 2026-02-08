@@ -20,14 +20,22 @@ fn bridge_call(path: &str, body: &serde_json::Value) -> Result<Vec<u8>, String> 
     let payload = serde_json::to_string(body)
         .map_err(|e| format!("serialize error: {}", e))?;
 
+    eprintln!("[bridge] -> {} ({} bytes)", path, payload.len());
+    let start = std::time::Instant::now();
+
     let response = ureq::post(&url)
         .set("Content-Type", "application/json")
         .send_string(&payload)
-        .map_err(|e| format!("bridge call to {} failed: {}", path, e))?;
+        .map_err(|e| {
+            eprintln!("[bridge] !! {} failed after {:?}: {}", path, start.elapsed(), e);
+            format!("bridge call to {} failed: {}", path, e)
+        })?;
 
     let mut buf = Vec::new();
     response.into_reader().read_to_end(&mut buf)
         .map_err(|e| format!("read bridge response: {}", e))?;
+
+    eprintln!("[bridge] <- {} ({} bytes, {:?})", path, buf.len(), start.elapsed());
     Ok(buf)
 }
 

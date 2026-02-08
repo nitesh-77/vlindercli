@@ -25,34 +25,37 @@ impl OllamaEmbeddingEngine {
 
 impl EmbeddingEngine for OllamaEmbeddingEngine {
     fn embed(&self, text: &str) -> Result<Vec<f32>, String> {
-        let url = format!("{}/api/embeddings", self.endpoint);
+        let url = format!("{}/api/embed", self.endpoint);
 
-        let request = EmbeddingsRequest {
+        let request = EmbedRequest {
             model: &self.model,
-            prompt: text,
+            input: text,
         };
 
         let response = ureq::post(&url)
             .send_json(&request)
             .map_err(|e| format!("ollama request failed: {}", e))?;
 
-        let body: EmbeddingsResponse = response
+        let body: EmbedResponse = response
             .into_json()
             .map_err(|e| format!("failed to parse ollama response: {}", e))?;
 
-        Ok(body.embedding)
+        body.embeddings
+            .into_iter()
+            .next()
+            .ok_or_else(|| "ollama returned empty embeddings array".to_string())
     }
 }
 
 #[derive(Serialize)]
-struct EmbeddingsRequest<'a> {
+struct EmbedRequest<'a> {
     model: &'a str,
-    prompt: &'a str,
+    input: &'a str,
 }
 
 #[derive(Deserialize)]
-struct EmbeddingsResponse {
-    embedding: Vec<f32>,
+struct EmbedResponse {
+    embeddings: Vec<Vec<f32>>,
 }
 
 #[cfg(test)]

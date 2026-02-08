@@ -65,10 +65,15 @@ impl EmbeddingServiceWorker {
         // Receive typed RequestMessage (ADR 044)
         match self.queue.receive_request("embed", &self.backend, "run") {
             Ok((request, ack)) => {
+                tracing::debug!(seq = %request.sequence, agent = %request.agent_id, "embed worker: received request");
+                let start = std::time::Instant::now();
                 let response_payload = self.handle_embed(&request);
+                tracing::debug!(seq = %request.sequence, elapsed = ?start.elapsed(), "embed worker: handled, sending response");
                 // Use ExpectsReply to build properly-correlated ResponseMessage
                 let response = request.create_reply(response_payload);
-                let _ = self.queue.send_response(response);
+                if let Err(e) = self.queue.send_response(response) {
+                    tracing::error!(seq = %request.sequence, error = %e, "embed worker: failed to send response");
+                }
                 let _ = ack();
                 true
             }

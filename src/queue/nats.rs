@@ -121,11 +121,13 @@ impl NatsQueue {
             .await
             .map_err(|e| QueueError::ReceiveFailed(e.to_string()))?;
 
+        // TODO: inactive_threshold is hardcoded — see ADR 053 for adaptive timeout strategy
         let consumer = stream
             .create_consumer(consumer::pull::Config {
                 name: Some(name),
                 filter_subject: filter.to_string(),
                 ack_wait: Duration::from_secs(300),
+                inactive_threshold: Duration::from_secs(300),
                 ..Default::default()
             })
             .await
@@ -141,7 +143,23 @@ impl NatsQueue {
     }
 
     /// Fetch one message from a subject filter, returning the message and an ack closure.
+    ///
+    /// If the fetch fails with a 503 (consumer GC'd by server), evicts the
+    /// stale consumer from cache, recreates it, and retries once.
     async fn fetch_one(&self, filter: &str) -> Result<(JetStreamMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+        match self.try_fetch_one(filter).await {
+            Ok(result) => Ok(result),
+            Err(QueueError::ReceiveFailed(ref msg)) if msg.contains("503") => {
+                tracing::warn!(filter = filter, "consumer stale (503), recreating");
+                self.evict_consumer(filter);
+                self.try_fetch_one(filter).await
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Attempt a single fetch from the consumer for this filter.
+    async fn try_fetch_one(&self, filter: &str) -> Result<(JetStreamMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
         let consumer = self.get_or_create_consumer(filter).await?;
 
         let mut messages = consumer
@@ -175,6 +193,12 @@ impl NatsQueue {
         });
 
         Ok((js_msg, ack_fn))
+    }
+
+    /// Remove a cached consumer so the next fetch recreates it.
+    fn evict_consumer(&self, filter: &str) {
+        let mut consumers = self.inner.consumers.lock().unwrap();
+        consumers.remove(filter);
     }
 }
 

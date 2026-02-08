@@ -70,18 +70,24 @@ pub fn get_or_fetch_html(url: &str, url_key: &str) -> Result<String, String> {
 pub fn embed_and_store_chunks(url_key: &str, chunks: &[String]) -> Result<usize, String> {
     let mut stored_count = 0;
 
+    eprintln!("[pensieve] embedding {} chunks", chunks.len());
+
     for (i, chunk) in chunks.iter().enumerate() {
         // Skip very short chunks
         if chunk.len() < 50 {
+            eprintln!("[pensieve] chunk {}: skipped ({}b < 50)", i, chunk.len());
             continue;
         }
 
         // Generate embedding
+        eprintln!("[pensieve] chunk {}/{}: embedding ({}b)", i, chunks.len(), chunk.len());
         let embedding = bridge::embed("nomic-embed", chunk)?;
 
         if embedding.starts_with("[error]") {
+            eprintln!("[pensieve] chunk {}: embed error: {}", i, &embedding[..embedding.len().min(100)]);
             continue;
         }
+        eprintln!("[pensieve] chunk {}: embedded ({}b response)", i, embedding.len());
 
         // Store with metadata
         let key = format!("{}:chunk:{}", url_key, i);
@@ -92,10 +98,12 @@ pub fn embed_and_store_chunks(url_key: &str, chunks: &[String]) -> Result<usize,
             truncate(chunk, 100).replace('"', "'")
         );
 
+        eprintln!("[pensieve] chunk {}: storing vector", i);
         let result = bridge::store_embedding(&key, &embedding, &metadata)?;
         if !result.starts_with("[error]") {
             stored_count += 1;
         }
+        eprintln!("[pensieve] chunk {}: done (total stored: {})", i, stored_count);
     }
 
     Ok(stored_count)

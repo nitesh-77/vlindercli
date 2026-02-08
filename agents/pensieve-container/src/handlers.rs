@@ -63,21 +63,30 @@ pub fn handle_process_url(url: &str) -> Result<String, String> {
     let url_key = url_to_key(&url);
 
     // Step 1: Get clean text (from cache or fetch+process)
+    eprintln!("[pensieve] step 1: get content for {}", &url);
     let content = get_or_process_content(&url, &url_key)?;
+    eprintln!("[pensieve] step 1: done ({}b)", content.len());
 
     // Step 2: Chunk the content
     let chunks = chunk_text(&content, config::CHUNK_SIZE);
+    eprintln!("[pensieve] step 2: {} chunks from {}b content", chunks.len(), content.len());
 
     // Step 3: Embed and store chunks for semantic search
+    eprintln!("[pensieve] step 3: embed and store chunks");
     let embedded_count = embed_and_store_chunks(&url_key, &chunks)?;
+    eprintln!("[pensieve] step 3: done ({} embedded)", embedded_count);
 
     // Step 4: Generate summary
+    eprintln!("[pensieve] step 4: generate summary");
     let SummaryResult { briefing, .. } = generate_summary(&chunks)?;
+    eprintln!("[pensieve] step 4: done ({}b briefing)", briefing.len());
 
     // Step 5: Store article-level embedding with Core Argument only
+    eprintln!("[pensieve] step 5: store article embedding");
     let article_summary = extract_core_argument(&briefing)
         .unwrap_or_else(|| truncate(&content, 300));
     store_article_embedding(&url_key, &url, &article_summary)?;
+    eprintln!("[pensieve] step 5: done");
 
     Ok(format!(
         "Memory committed\n\
