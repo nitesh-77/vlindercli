@@ -91,37 +91,46 @@ curl -fsSL https://vlindercli.dev/install.sh | sh
 
 1. **Detect platform** — Darwin/Linux, x86_64/aarch64
 2. **Download vlinder binary** — from the latest GitHub release
-3. **Create directory structure** — `~/.vlinder/{agents,models,conversations,logs}`
+3. **Create directory structure** — `~/.vlinder/{agents,conversations,logs,registry}`
 4. **Write config** — `config.toml` with `distributed.enabled = true`, `queue.backend = "nats"`
-5. **Check prerequisites** — print what's present, print install commands for what's missing
-6. **Print next steps** — copy-pasteable commands to get running
+5. **Check prerequisites** — NATS, Podman, Ollama. If required deps are missing, print install commands and exit
+6. **Write NATS config** — `~/.vlinder/nats.conf` with JetStream enabled. Preserves existing config
+7. **Start NATS service** — launchd/systemd. Detects existing NATS services and skips with a JetStream reminder
+8. **Start vlinder daemon service** — launchd/systemd
+9. **Pull default model** — `ollama pull phi3` with visible progress (skipped if Ollama not present)
+10. **Register default model** — `vlinder model add phi3`
+11. **Deploy support fleet** — from container registry
+
+#### Two-phase install
+
+If NATS or Podman are missing, the script installs the vlinder binary and config but does **not** start any services. It prints platform-specific install commands and asks the user to re-run. This avoids crash-looping the daemon when prerequisites are absent.
+
+On re-run, the script detects that the binary and config already exist, skips those steps, and proceeds to service setup.
 
 #### Principles
 
-- **Explicit**: every action is printed before it happens. No silent side effects.
-- **Idempotent**: re-running skips what's already done (existing binaries, existing config, existing services).
-- **Graceful degradation**: if Ollama isn't available, the script warns and continues. The system works for everything except LLM inference.
-- **Non-invasive for prerequisites**: the script does not install third-party software. It checks for prerequisites and prints platform-specific install commands.
-- **Service-first**: vlinder daemon runs as a user service (launchd on macOS, systemd on Linux). No manual terminal management.
+- **Explicit**: every step prints a status line with a checkmark, cross, or dash
+- **Idempotent**: re-running skips what's already done (existing binaries, existing config, existing services)
+- **Graceful degradation**: if Ollama isn't available, the script skips model setup. The system works for everything except LLM inference
+- **Non-invasive**: the script does not install third-party software. It checks for prerequisites and prints platform-specific install commands
+- **Service-first**: NATS and vlinder daemon both run as user services. No manual terminal management
 
 #### Platform-specific service management
 
-| Concern | macOS | Linux |
-|---------|-------|-------|
-| Service manager | launchd (plist in `~/Library/LaunchAgents/`) | systemd (user unit in `~/.config/systemd/user/`) |
-| Auto-start | `RunAtLoad` in plist | `systemctl --user enable` |
-| Logs | `~/Library/Logs/vlinder/` or `log show` | `journalctl --user -u vlinder` |
-
-#### Platform-specific service management
+Two services are managed: `dev.vlinder.nats` (NATS with JetStream) and `dev.vlinder.daemon` (vlinder daemon).
 
 | Concern | macOS | Linux |
 |---------|-------|-------|
-| Package manager | Homebrew | apt (Debian/Ubuntu) or dnf (Fedora/RHEL) |
-| Service manager | launchd (plist in `~/Library/LaunchAgents/`) | systemd (user unit in `~/.config/systemd/user/`) |
+| Service manager | launchd (`~/Library/LaunchAgents/`) | systemd (`~/.config/systemd/user/`) |
 | Auto-start | `RunAtLoad` in plist | `systemctl --user enable` |
+| Vlinder logs | `~/Library/Logs/vlinder/daemon.log` | `journalctl --user -u vlinder` |
+| NATS logs | `~/Library/Logs/vlinder/nats.log` | `journalctl --user -u vlinder-nats` |
+
+If an existing NATS service is detected (e.g., brew-managed), the script skips NATS service creation and reminds the user to ensure JetStream is enabled.
 
 #### What the install script does NOT do
 
+- Install third-party software (NATS, Podman, Ollama)
 - Configure network or firewall rules
 - Build container images (agent images are pulled from a registry at deploy time)
 - Modify shell profiles or PATH
@@ -162,8 +171,8 @@ The installer checks for each and reports what's missing. NATS and Podman are ha
 ### Day One
 
 - CI workflow: lint, test, license check (no external services)
-- Release workflow: build binaries for 4 targets, publish GitHub release
-- `install.sh`: cross-platform (macOS + Linux), prerequisite install, service setup, model bootstrap
+- Release workflow: build binaries for 3 targets, publish GitHub release
+- `install.sh`: cross-platform (macOS + Linux), prerequisite check, NATS + daemon service setup, model bootstrap
 - Improved error message on `vlinder support` when prerequisites are missing
 
 ### Deferred
