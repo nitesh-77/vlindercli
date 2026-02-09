@@ -373,6 +373,8 @@ install_launchd_service() {
     <dict>
         <key>HOME</key>
         <string>${HOME}</string>
+        <key>PATH</key>
+        <string>${PATH}</string>
     </dict>
 </dict>
 </plist>
