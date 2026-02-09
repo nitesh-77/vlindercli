@@ -205,6 +205,128 @@ check_prerequisites() {
     fi
 }
 
+# --- NATS config and service ---
+
+NATS_CONF="${VLINDER_DIR}/nats.conf"
+NATS_DATA="${VLINDER_DIR}/nats-data"
+
+write_nats_config() {
+    if [ -f "$NATS_CONF" ]; then
+        ok "NATS config" "${NATS_CONF} (preserved)"
+        return
+    fi
+
+    mkdir -p "$NATS_DATA"
+
+    cat > "$NATS_CONF" << EOF
+# NATS configuration for Vlinder
+# JetStream is required for message durability.
+
+listen: 0.0.0.0:4222
+
+jetstream {
+    store_dir: ${NATS_DATA}
+}
+EOF
+
+    ok "NATS config" "${NATS_CONF}"
+}
+
+has_existing_nats_service() {
+    if [ "$OS" = "darwin" ]; then
+        # Check for brew-managed or other launchd NATS services
+        launchctl list 2>/dev/null | grep -q nats && return 0
+        [ -f "${HOME}/Library/LaunchAgents/homebrew.mxcl.nats-server.plist" ] && return 0
+    else
+        # Check for systemd NATS services
+        systemctl --user is-enabled nats-server.service >/dev/null 2>&1 && return 0
+        systemctl is-enabled nats-server.service >/dev/null 2>&1 && return 0
+    fi
+    return 1
+}
+
+install_nats_service() {
+    if has_existing_nats_service; then
+        ok "NATS" "existing service detected"
+        info "              Ensure JetStream is enabled in your NATS config."
+        return
+    fi
+
+    if [ "$OS" = "darwin" ]; then
+        install_nats_launchd
+    else
+        install_nats_systemd
+    fi
+}
+
+install_nats_launchd() {
+    NATS_PLIST_DIR="${HOME}/Library/LaunchAgents"
+    NATS_PLIST="${NATS_PLIST_DIR}/dev.vlinder.nats.plist"
+    NATS_LOG_DIR="${HOME}/Library/Logs/vlinder"
+    NATS_BIN=$(command -v nats-server)
+
+    mkdir -p "$NATS_PLIST_DIR"
+    mkdir -p "$NATS_LOG_DIR"
+
+    if [ -f "$NATS_PLIST" ]; then
+        launchctl bootout "gui/$(id -u)" "$NATS_PLIST" 2>/dev/null || true
+    fi
+
+    cat > "$NATS_PLIST" << PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>dev.vlinder.nats</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>${NATS_BIN}</string>
+        <string>-c</string>
+        <string>${NATS_CONF}</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>${NATS_LOG_DIR}/nats.log</string>
+    <key>StandardErrorPath</key>
+    <string>${NATS_LOG_DIR}/nats.err</string>
+</dict>
+</plist>
+PLIST
+
+    launchctl bootstrap "gui/$(id -u)" "$NATS_PLIST"
+    ok "NATS" "started with JetStream (launchd)"
+}
+
+install_nats_systemd() {
+    NATS_UNIT_DIR="${HOME}/.config/systemd/user"
+    NATS_UNIT="${NATS_UNIT_DIR}/vlinder-nats.service"
+    NATS_BIN=$(command -v nats-server)
+
+    mkdir -p "$NATS_UNIT_DIR"
+
+    cat > "$NATS_UNIT" << UNIT
+[Unit]
+Description=NATS server for Vlinder (JetStream enabled)
+Before=vlinder.service
+
+[Service]
+ExecStart=${NATS_BIN} -c ${NATS_CONF}
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+UNIT
+
+    systemctl --user daemon-reload
+    systemctl --user enable --now vlinder-nats.service
+    ok "NATS" "started with JetStream (systemd)"
+}
+
 # --- Install vlinder daemon service ---
 
 install_service() {
@@ -366,6 +488,8 @@ main() {
         exit 0
     fi
 
+    write_nats_config
+    install_nats_service
     install_service
     bootstrap_support
 
