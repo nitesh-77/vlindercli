@@ -1,6 +1,6 @@
 # ADR 059: Installation, CI, and Release
 
-**Status:** Proposed
+**Status:** Accepted
 
 ## Context
 
@@ -99,7 +99,8 @@ curl -fsSL https://vlindercli.dev/install.sh | sh
 8. **Start vlinder daemon service** — launchd/systemd
 9. **Pull default model** — `ollama pull phi3` with visible progress (skipped if Ollama not present)
 10. **Register default model** — `vlinder model add phi3`
-11. **Deploy support fleet** — from container registry
+11. **Pull support fleet images** — `ghcr.io/vlindercli/vlinder-{support,code-analyst,log-analyst}:latest`
+12. **Write support fleet manifests** — `fleet.toml` and `agent.toml` for each agent to `~/.vlinder/support-fleet/`
 
 #### Two-phase install
 
@@ -132,7 +133,7 @@ If an existing NATS service is detected (e.g., brew-managed), the script skips N
 
 - Install third-party software (NATS, Podman, Ollama)
 - Configure network or firewall rules
-- Build container images (agent images are pulled from a registry at deploy time)
+- Build container images (pre-built images are pulled from ghcr.io)
 - Modify shell profiles or PATH
 
 ### 4. The default model
@@ -183,6 +184,25 @@ The installer checks for each and reports what's missing. NATS and Podman are ha
 - Windows support
 - `vlinder doctor` — a diagnostic command that checks system health post-install
 
+### 7. Support fleet repo
+
+The support fleet (support, code-analyst, log-analyst) lives in a separate repo (`vlindercli/support-agent`). Tagging a release builds three container images and pushes them to ghcr.io:
+
+- `ghcr.io/vlindercli/vlinder-support:latest`
+- `ghcr.io/vlindercli/vlinder-code-analyst:latest`
+- `ghcr.io/vlindercli/vlinder-log-analyst:latest`
+
+The install script pulls these images and writes manifests to `~/.vlinder/support-fleet/`. The agents remain in the monorepo for local development (`just build-support-fleet`).
+
+### 8. Fleet path resolution
+
+`vlinder support` resolves the fleet path in two stages:
+
+1. **Production**: `~/.vlinder/support-fleet/` (written by the installer)
+2. **Development**: `CARGO_MANIFEST_DIR/fleets/support` (source tree fallback)
+
+This lets `vlinder support` work both from an installed binary and from `cargo run` during development.
+
 ## Consequences
 
 - `vlinder support` works immediately after installation — the bootstrapping gap is closed
@@ -192,3 +212,4 @@ The installer checks for each and reports what's missing. NATS and Podman are ha
 - The error path for missing prerequisites becomes actionable guidance instead of raw errors
 - The default model choice is centralized in the installer, not scattered across agent manifests
 - Single install script works on both macOS and Linux
+- Support fleet images are built independently from the main release — they can be updated without a new vlinder binary release
