@@ -135,7 +135,6 @@ write_config() {
 
 [logging]
 level = "info"
-llama_level = "error"
 
 [ollama]
 endpoint = "http://localhost:11434"
@@ -152,7 +151,7 @@ registry_addr = "http://127.0.0.1:9090"
 registry = 1
 
 [distributed.workers.agent]
-wasm = 1
+container = 1
 
 [distributed.workers.inference]
 ollama = 1

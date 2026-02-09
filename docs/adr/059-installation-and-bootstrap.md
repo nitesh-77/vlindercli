@@ -72,7 +72,6 @@ Triggered by pushing a version tag (`v*`). Builds release binaries for all suppo
 | Target | Runner | Notes |
 |--------|--------|-------|
 | `x86_64-unknown-linux-gnu` | `ubuntu-latest` | Standard Linux servers |
-| `aarch64-unknown-linux-gnu` | `ubuntu-latest` + cross | ARM servers (Graviton, Raspberry Pi) |
 | `x86_64-apple-darwin` | `macos-13` | Intel Macs |
 | `aarch64-apple-darwin` | `macos-latest` | Apple Silicon |
 
