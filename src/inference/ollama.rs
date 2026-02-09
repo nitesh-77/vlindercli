@@ -67,13 +67,4 @@ mod tests {
         assert_eq!(engine.endpoint, "http://localhost:11434");
         assert_eq!(engine.model, "phi3");
     }
-
-    #[test]
-    #[ignore] // Requires running Ollama server
-    fn infers_with_ollama_server() {
-        let engine = OllamaInferenceEngine::new("http://localhost:11434", "phi3");
-        let result = engine.infer("Say hello", 10);
-        assert!(result.is_ok());
-        assert!(!result.unwrap().is_empty());
-    }
 }

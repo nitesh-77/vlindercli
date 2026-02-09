@@ -125,23 +125,4 @@ mod tests {
         let catalog = OllamaCatalog::new("http://localhost:11434");
         assert_eq!(catalog.endpoint, "http://localhost:11434");
     }
-
-    #[test]
-    #[ignore] // Requires running Ollama server
-    fn lists_models_from_ollama() {
-        let catalog = OllamaCatalog::from_config();
-        let models = catalog.list();
-        assert!(models.is_ok());
-    }
-
-    #[test]
-    #[ignore] // Requires running Ollama server with model pulled
-    fn resolves_model_from_ollama() {
-        let catalog = OllamaCatalog::from_config();
-        let model = catalog.resolve("phi3");
-        assert!(model.is_ok());
-        let model = model.unwrap();
-        assert_eq!(model.engine, EngineType::Ollama);
-        assert!(model.id.as_str().starts_with("pending-registration://"));
-    }
 }

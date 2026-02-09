@@ -17,13 +17,10 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             runner: ubuntu-latest
-            features: ""
           - target: x86_64-apple-darwin
             runner: macos-13
-            features: "--features metal"
           - target: aarch64-apple-darwin
             runner: macos-latest
-            features: "--features metal"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -35,14 +32,14 @@ jobs:
 
       - name: Install build dependencies (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler cmake
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
 
       - name: Install build dependencies (macOS)
         if: runner.os == 'macOS'
-        run: brew install protobuf cmake
+        run: brew install protobuf
 
       - name: Build
-        run: cargo build --release --target ${{ matrix.target }} ${{ matrix.features }}
+        run: cargo build --release --target ${{ matrix.target }}
 
       - name: Package
         run: |

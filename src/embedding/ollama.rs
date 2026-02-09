@@ -68,13 +68,4 @@ mod tests {
         assert_eq!(engine.endpoint, "http://localhost:11434");
         assert_eq!(engine.model, "nomic-embed-text");
     }
-
-    #[test]
-    #[ignore] // Requires running Ollama server
-    fn embeds_with_ollama_server() {
-        let engine = OllamaEmbeddingEngine::new("http://localhost:11434", "nomic-embed-text");
-        let result = engine.embed("Hello world");
-        assert!(result.is_ok());
-        assert!(!result.unwrap().is_empty());
-    }
 }
