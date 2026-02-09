@@ -516,7 +516,7 @@ bootstrap_support() {
 
     pull_support_images
     write_support_manifests
-    ok "Support" "fleet installed — run 'vlinder support' to start"
+    ok "Support" "fleet installed (reference implementation)"
 }
 
 # --- Main ---
@@ -580,7 +580,7 @@ main() {
     fi
 
     printf '\n  Try it:\n\n'
-    info "  vlinder support"
+    info "  vlinder help"
     printf '\n'
 }
 
