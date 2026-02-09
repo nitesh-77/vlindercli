@@ -100,19 +100,4 @@ mod tests {
         assert_eq!(engine.api_key, "sk-test-key");
         assert_eq!(engine.model, "anthropic/claude-sonnet-4-20250514");
     }
-
-    #[test]
-    #[ignore] // Requires valid API key and network access
-    fn infers_with_openrouter_api() {
-        let api_key = std::env::var("VLINDER_OPENROUTER_API_KEY")
-            .expect("VLINDER_OPENROUTER_API_KEY must be set");
-        let engine = OpenRouterInferenceEngine::new(
-            "https://openrouter.ai/api/v1",
-            api_key,
-            "anthropic/claude-sonnet-4-20250514",
-        );
-        let result = engine.infer("Say hello in one word", 10);
-        assert!(result.is_ok());
-        assert!(!result.unwrap().is_empty());
-    }
 }

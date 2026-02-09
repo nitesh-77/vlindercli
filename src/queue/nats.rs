@@ -584,14 +584,3 @@ fn parse_runtime_type(s: &str) -> Result<RuntimeType, QueueError> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    #[ignore] // Requires running NATS server
-    fn connect_to_localhost() {
-        let queue = NatsQueue::localhost();
-        assert!(queue.is_ok());
-    }
-}

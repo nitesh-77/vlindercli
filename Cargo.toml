@@ -5,6 +5,9 @@ edition = "2021"
 license = "Apache-2.0"
 publish = false
 
+[features]
+default = []
+
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 dirs = "6"

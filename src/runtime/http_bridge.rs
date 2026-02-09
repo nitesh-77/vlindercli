@@ -90,7 +90,7 @@ impl HttpBridge {
 
     /// The URL the container should use to reach this bridge.
     pub(crate) fn container_url(&self) -> String {
-        format!("http://host.containers.internal:{}", self.port)
+        format!("http://host.containers.internal:{}", self.port())
     }
 
     /// Signal the bridge to stop and wait for it to finish.

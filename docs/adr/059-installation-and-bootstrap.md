@@ -1,6 +1,6 @@
-# ADR 059: Installation and Bootstrap
+# ADR 059: Installation, CI, and Release
 
-**Status:** Proposed
+**Status:** Accepted
 
 ## Context
 
@@ -26,37 +26,117 @@ This means:
 - `vlinder daemon` is the standard way to run the platform
 - The in-memory queue should never appear in a user-facing installation path
 
+### Inference is Ollama-only
+
+Local inference goes through Ollama (ADR 060). There is no in-process llama.cpp backend. This simplifies the build — no native C++ toolchain required — but makes Ollama a prerequisite for any agent that uses LLMs.
+
 ## Decision
 
-### Installation via package manager or installer script
+### 1. CI pipeline
 
-Vlinder is installed through standard distribution channels, not a CLI bootstrap command:
+CI runs on every push and pull request. It validates that the code compiles, passes tests, and meets quality standards — without requiring external services.
+
+#### Test tiers
+
+| Tier | Runs in CI | Requires | Invocation |
+|------|-----------|----------|------------|
+| Unit + integration (no services) | Yes | Nothing | `cargo test` |
+| Ollama integration | No | Running Ollama | `cargo test -- --ignored` |
+| NATS integration | No | Running NATS | `cargo test -- --ignored` |
+| Container integration | No | Podman + built images | `cargo test -- --ignored` |
+
+Tests that need external services are `#[ignore]`-annotated. `cargo test` skips them by default, so CI runs the full test suite without special configuration.
+
+#### CI jobs
+
+| Job | Purpose |
+|-----|---------|
+| **Lint** | `cargo fmt --check` + `cargo clippy -- -D warnings` |
+| **Test** | `cargo test` (unit + integration, no external services) |
+| **License** | `cargo deny check licenses` (no GPL/copyleft) |
+
+Build dependencies: `protobuf-compiler` only. No cmake, no C++ toolchain (ADR 060 removed llama-cpp-2).
+
+#### What CI does NOT do
+
+- Run ignored tests (those need Ollama, NATS, or Podman)
+- Build release artifacts (that's the release workflow)
+- Deploy anything
+
+### 2. Release pipeline
+
+Triggered by pushing a version tag (`v*`). Builds release binaries for all supported targets and publishes them as a GitHub release.
+
+#### Targets
+
+| Target | Runner | Notes |
+|--------|--------|-------|
+| `x86_64-unknown-linux-gnu` | `ubuntu-latest` | Standard Linux servers |
+| `x86_64-apple-darwin` | `macos-13` | Intel Macs |
+| `aarch64-apple-darwin` | `macos-latest` | Apple Silicon |
+
+#### Artifact format
+
+Each target produces a tarball: `vlinder-{target}.tar.gz` containing the `vlinder` binary. These are attached to the GitHub release. The install script downloads the appropriate tarball based on `uname -s` and `uname -m`.
+
+### 3. Install script
+
+A single `install.sh` that works on both macOS and Linux. The install script is the primary distribution channel.
 
 ```bash
-# macOS
-brew install vlinder
-
-# or
-curl -fsSL https://vlinder.dev/install.sh | sh
+curl -fsSL https://vlindercli.dev/install.sh | sh
 ```
 
-The installer is responsible for the full bootstrap:
+#### What it does
 
-1. Install the `vlinder` binary
-2. Install or verify prerequisites (NATS, Podman, Ollama)
-3. Create `~/.vlinder/` directory structure (config, logs, agents, models, conversations)
-4. Write `config.toml` with distributed mode enabled and NATS as queue backend
-5. Pull the default model via Ollama
-6. Register the default model in the registry
+1. **Detect platform** — Darwin/Linux, x86_64/aarch64
+2. **Download vlinder binary** — from the latest GitHub release
+3. **Create directory structure** — `~/.vlinder/{agents,conversations,logs,registry}`
+4. **Write config** — `config.toml` with `distributed.enabled = true`, `queue.backend = "nats"`
+5. **Check prerequisites** — NATS, Podman, Ollama. If required deps are missing, print install commands and exit
+6. **Write NATS config** — `~/.vlinder/nats.conf` with JetStream enabled. Preserves existing config
+7. **Start NATS service** — launchd/systemd. Detects existing NATS services and skips with a JetStream reminder
+8. **Start vlinder daemon service** — launchd/systemd
+9. **Pull default model** — `ollama pull phi3` with visible progress (skipped if Ollama not present)
+10. **Register default model** — `vlinder model add phi3`
+11. **Pull support fleet images** — `ghcr.io/vlindercli/vlinder-{support,code-analyst,log-analyst}:latest`
+12. **Write support fleet manifests** — `fleet.toml` and `agent.toml` for each agent to `~/.vlinder/support-fleet/`
 
-After installation, the user has a working system:
+#### Two-phase install
 
-```bash
-vlinder daemon    # start the platform
-vlinder support   # ask for help
-```
+If NATS or Podman are missing, the script installs the vlinder binary and config but does **not** start any services. It prints platform-specific install commands and asks the user to re-run. This avoids crash-looping the daemon when prerequisites are absent.
 
-### The default model
+On re-run, the script detects that the binary and config already exist, skips those steps, and proceeds to service setup.
+
+#### Principles
+
+- **Explicit**: every step prints a status line with a checkmark, cross, or dash
+- **Idempotent**: re-running skips what's already done (existing binaries, existing config, existing services)
+- **Graceful degradation**: if Ollama isn't available, the script skips model setup. The system works for everything except LLM inference
+- **Non-invasive**: the script does not install third-party software. It checks for prerequisites and prints platform-specific install commands
+- **Service-first**: NATS and vlinder daemon both run as user services. No manual terminal management
+
+#### Platform-specific service management
+
+Two services are managed: `dev.vlinder.nats` (NATS with JetStream) and `dev.vlinder.daemon` (vlinder daemon).
+
+| Concern | macOS | Linux |
+|---------|-------|-------|
+| Service manager | launchd (`~/Library/LaunchAgents/`) | systemd (`~/.config/systemd/user/`) |
+| Auto-start | `RunAtLoad` in plist | `systemctl --user enable` |
+| Vlinder logs | `~/Library/Logs/vlinder/daemon.log` | `journalctl --user -u vlinder` |
+| NATS logs | `~/Library/Logs/vlinder/nats.log` | `journalctl --user -u vlinder-nats` |
+
+If an existing NATS service is detected (e.g., brew-managed), the script skips NATS service creation and reminds the user to ensure JetStream is enabled.
+
+#### What the install script does NOT do
+
+- Install third-party software (NATS, Podman, Ollama)
+- Configure network or firewall rules
+- Build container images (pre-built images are pulled from ghcr.io)
+- Modify shell profiles or PATH
+
+### 4. The default model
 
 The support fleet needs a model. The choice of which model is a configuration decision, not an agent decision. The agent manifests declare a logical alias (`default`), and the installer ensures that alias resolves to a real model.
 
@@ -64,7 +144,7 @@ The initial default is `phi3:latest` via Ollama. This is a pragmatic choice: sma
 
 If Ollama is not available during install, the installer warns the user and skips model setup. The system is partially installed — everything except inference works. This is better than failing entirely.
 
-### Guard on `vlinder support`
+### 5. Guard on `vlinder support`
 
 `vlinder support` should never show a raw registration error. If the support fleet fails to deploy, the command should detect why and print actionable guidance:
 
@@ -75,7 +155,7 @@ Run 'vlinder model add phi3' to register one manually.
 
 This is a UI concern, not an architecture change. The registry validation is correct — the error message is the problem.
 
-### Prerequisites
+### 6. Prerequisites
 
 Three external services form the minimum viable Vlinder installation:
 
@@ -87,31 +167,49 @@ Three external services form the minimum viable Vlinder installation:
 
 The installer checks for each and reports what's missing. NATS and Podman are hard requirements. Ollama is soft — the platform works without inference, but agents that need LLMs won't run.
 
-### What the installer does NOT do
-
-- Start NATS, Podman, or Ollama as services. The user manages service lifecycle (launchd, systemd, manual start).
-- Build container images. Agent images are pulled from a registry, not built during install.
-- Configure network or firewall rules.
-
 ## Scope
 
 ### Day One
 
-- `install.sh` script: binary install, directory creation, config writing (distributed + NATS), prerequisite detection, model pull + registration
+- CI workflow: lint, test, license check (no external services)
+- Release workflow: build binaries for 3 targets, publish GitHub release
+- `install.sh`: cross-platform (macOS + Linux), prerequisite check, NATS + daemon service setup, model bootstrap
 - Improved error message on `vlinder support` when prerequisites are missing
-- Homebrew formula
 
 ### Deferred
 
+- Homebrew formula
 - DMG installer for macOS
-- Linux package managers (apt, dnf)
+- Linux package managers (apt, dnf) as standalone packages
 - Windows support
 - `vlinder doctor` — a diagnostic command that checks system health post-install
+
+### 7. Support fleet repo
+
+The support fleet (support, code-analyst, log-analyst) lives in a separate repo (`vlindercli/support-agent`). Tagging a release builds three container images and pushes them to ghcr.io:
+
+- `ghcr.io/vlindercli/vlinder-support:latest`
+- `ghcr.io/vlindercli/vlinder-code-analyst:latest`
+- `ghcr.io/vlindercli/vlinder-log-analyst:latest`
+
+The install script pulls these images and writes manifests to `~/.vlinder/support-fleet/`. The agents remain in the monorepo for local development (`just build-support-fleet`).
+
+### 8. Fleet path resolution
+
+`vlinder support` resolves the fleet path in two stages:
+
+1. **Production**: `~/.vlinder/support-fleet/` (written by the installer)
+2. **Development**: `CARGO_MANIFEST_DIR/fleets/support` (source tree fallback)
+
+This lets `vlinder support` work both from an installed binary and from `cargo run` during development.
 
 ## Consequences
 
 - `vlinder support` works immediately after installation — the bootstrapping gap is closed
+- CI catches regressions without requiring external services
+- Release artifacts are produced automatically on tag push
 - No intermediate init step. Install → daemon → use.
 - The error path for missing prerequisites becomes actionable guidance instead of raw errors
 - The default model choice is centralized in the installer, not scattered across agent manifests
-- Standard distribution channels (brew, curl) lower the barrier to entry
+- Single install script works on both macOS and Linux
+- Support fleet images are built independently from the main release — they can be updated without a new vlinder binary release
