@@ -15,14 +15,14 @@ fn model_manifest_parses_inference_type() {
     let manifest: ModelManifest = parse_model_manifest(r#"
         name = "phi3"
         type = "inference"
-        engine = "llama"
-        model_path = "file://./phi3.gguf"
+        engine = "ollama"
+        model_path = "ollama://localhost:11434/phi3"
     "#).unwrap();
 
     assert_eq!(manifest.name, "phi3");
     assert_eq!(manifest.model_type, ModelTypeConfig::Inference);
-    assert_eq!(manifest.engine, ModelEngineConfig::Llama);
-    assert_eq!(manifest.model_path, "file://./phi3.gguf");
+    assert_eq!(manifest.engine, ModelEngineConfig::Ollama);
+    assert_eq!(manifest.model_path, "ollama://localhost:11434/phi3");
 }
 
 #[test]
@@ -30,13 +30,13 @@ fn model_manifest_parses_embedding_type() {
     let manifest: ModelManifest = parse_model_manifest(r#"
         name = "nomic-embed"
         type = "embedding"
-        engine = "llama"
-        model_path = "file://./nomic.gguf"
+        engine = "ollama"
+        model_path = "ollama://localhost:11434/nomic-embed-text"
     "#).unwrap();
 
     assert_eq!(manifest.name, "nomic-embed");
     assert_eq!(manifest.model_type, ModelTypeConfig::Embedding);
-    assert_eq!(manifest.engine, ModelEngineConfig::Llama);
+    assert_eq!(manifest.engine, ModelEngineConfig::Ollama);
 }
 
 #[test]
@@ -82,8 +82,8 @@ fn model_manifest_fails_for_invalmodel_type() {
     let result = parse_model_manifest(r#"
         name = "bad"
         type = "unknown"
-        engine = "llama"
-        model_path = "file://./model.gguf"
+        engine = "ollama"
+        model_path = "ollama://localhost:11434/bad"
     "#);
     assert!(result.is_err());
 }
@@ -93,7 +93,7 @@ fn model_manifest_fails_for_missing_field() {
     let result = parse_model_manifest(r#"
         name = "incomplete"
         type = "inference"
-        engine = "llama"
+        engine = "ollama"
     "#);
     assert!(result.is_err());
 }
@@ -108,23 +108,18 @@ fn model_load_parses_manifest() {
     let _ = std::fs::remove_dir_all(&temp_dir);
     std::fs::create_dir_all(&temp_dir).unwrap();
 
-    // Create a dummy model file
-    std::fs::write(temp_dir.join("phi3.gguf"), b"dummy").unwrap();
-
     let manifest = r#"
         name = "phi3"
         type = "inference"
-        engine = "llama"
-        model_path = "file://./phi3.gguf"
+        engine = "ollama"
+        model_path = "ollama://localhost:11434/phi3"
     "#;
     std::fs::write(temp_dir.join("model.toml"), manifest).unwrap();
 
     let model = Model::load(&temp_dir.join("model.toml")).unwrap();
-    assert_eq!(model.name, "llama/phi3");
+    assert_eq!(model.name, "ollama/phi3");
     assert_eq!(model.model_type, ModelType::Inference);
-    assert_eq!(model.engine, EngineType::Llama);
-    assert_eq!(model.model_path.scheme(), Some("file"));
-    assert!(model.model_path.path().unwrap().ends_with("phi3.gguf"));
+    assert_eq!(model.engine, EngineType::Ollama);
 
     let _ = std::fs::remove_dir_all(&temp_dir);
 }
@@ -135,14 +130,12 @@ fn model_type_from_manifest() {
     let _ = std::fs::remove_dir_all(&temp_dir);
     std::fs::create_dir_all(&temp_dir).unwrap();
 
-    std::fs::write(temp_dir.join("model.gguf"), b"dummy").unwrap();
-
     // Test inference type
     let inference_manifest = r#"
         name = "inference-model"
         type = "inference"
-        engine = "llama"
-        model_path = "file://./model.gguf"
+        engine = "ollama"
+        model_path = "ollama://localhost:11434/inference-model"
     "#;
     std::fs::write(temp_dir.join("inference.toml"), inference_manifest).unwrap();
     let model = Model::load(&temp_dir.join("inference.toml")).unwrap();
@@ -152,8 +145,8 @@ fn model_type_from_manifest() {
     let embedding_manifest = r#"
         name = "embedding-model"
         type = "embedding"
-        engine = "llama"
-        model_path = "file://./model.gguf"
+        engine = "ollama"
+        model_path = "ollama://localhost:11434/embedding-model"
     "#;
     std::fs::write(temp_dir.join("embedding.toml"), embedding_manifest).unwrap();
     let model = Model::load(&temp_dir.join("embedding.toml")).unwrap();
@@ -171,13 +164,12 @@ fn model_type_can_be_compared() {
     let temp_dir = std::env::temp_dir().join("vlinder-test-model-compare");
     let _ = std::fs::remove_dir_all(&temp_dir);
     std::fs::create_dir_all(&temp_dir).unwrap();
-    std::fs::write(temp_dir.join("model.gguf"), b"dummy").unwrap();
 
     let manifest = r#"
         name = "test"
         type = "inference"
-        engine = "llama"
-        model_path = "file://./model.gguf"
+        engine = "ollama"
+        model_path = "ollama://localhost:11434/test"
     "#;
     std::fs::write(temp_dir.join("model.toml"), manifest).unwrap();
 
@@ -191,23 +183,21 @@ fn model_type_can_be_compared() {
 }
 
 #[test]
-fn model_engine_is_llama() {
+fn model_engine_is_ollama() {
     let temp_dir = std::env::temp_dir().join("vlinder-test-model-engine");
     let _ = std::fs::remove_dir_all(&temp_dir);
     std::fs::create_dir_all(&temp_dir).unwrap();
-    std::fs::write(temp_dir.join("model.gguf"), b"dummy").unwrap();
 
     let manifest = r#"
         name = "test"
         type = "inference"
-        engine = "llama"
-        model_path = "file://./model.gguf"
+        engine = "ollama"
+        model_path = "ollama://localhost:11434/test"
     "#;
     std::fs::write(temp_dir.join("model.toml"), manifest).unwrap();
 
     let model = Model::load(&temp_dir.join("model.toml")).unwrap();
-    assert_eq!(model.engine, EngineType::Llama);
+    assert_eq!(model.engine, EngineType::Ollama);
 
     let _ = std::fs::remove_dir_all(&temp_dir);
 }
-

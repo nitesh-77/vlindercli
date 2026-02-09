@@ -67,8 +67,6 @@ pub struct Config {
 pub struct LoggingConfig {
     /// App log level: trace, debug, info, warn, error
     pub level: String,
-    /// llama.cpp/ggml log level (usually "error" to suppress noise)
-    pub llama_level: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -207,7 +205,6 @@ impl Default for LoggingConfig {
     fn default() -> Self {
         Self {
             level: "warn".to_string(),
-            llama_level: "error".to_string(),
         }
     }
 }
@@ -333,10 +330,6 @@ impl Config {
         if let Ok(v) = std::env::var("VLINDER_LOGGING_LEVEL") {
             self.logging.level = v;
         }
-        if let Ok(v) = std::env::var("VLINDER_LOGGING_LLAMA_LEVEL") {
-            self.logging.llama_level = v;
-        }
-
         // Ollama
         if let Ok(v) = std::env::var("VLINDER_OLLAMA_ENDPOINT") {
             self.ollama.endpoint = v;
@@ -397,10 +390,8 @@ impl Config {
     /// don't pollute the user's terminal.
     pub fn tracing_filter(&self) -> String {
         format!(
-            "warn,vlindercli={},ggml={},llama={}",
-            self.logging.level,
-            self.logging.llama_level,
-            self.logging.llama_level
+            "warn,vlindercli={}",
+            self.logging.level
         )
     }
 }

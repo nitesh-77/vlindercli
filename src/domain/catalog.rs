@@ -12,7 +12,7 @@ pub trait ModelCatalog: Send + Sync {
     /// Resolve a model name to a fully configured Model.
     ///
     /// The returned Model includes the engine type, which determines
-    /// how the model will be executed (Ollama HTTP, llama.cpp local, etc.).
+    /// how the model will be executed (Ollama HTTP, OpenRouter API, etc.).
     fn resolve(&self, name: &str) -> Result<Model, CatalogError>;
 
     /// List available models in this catalog.

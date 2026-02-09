@@ -33,8 +33,6 @@ pub enum ModelType {
 /// the registry (what implementations are available).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum EngineType {
-    /// Llama.cpp-based engine (local GGUF files).
-    Llama,
     /// Ollama HTTP API.
     Ollama,
     /// OpenRouter API (cloud LLMs via OpenAI-compatible endpoint).
@@ -47,7 +45,6 @@ impl EngineType {
     /// Backend string used for queue routing subjects.
     pub fn as_backend_str(&self) -> &str {
         match self {
-            EngineType::Llama => "llama",
             EngineType::Ollama => "ollama",
             EngineType::OpenRouter => "openrouter",
             EngineType::InMemory => "memory",
@@ -117,7 +114,6 @@ impl From<ModelTypeConfig> for ModelType {
 impl From<ModelEngineConfig> for EngineType {
     fn from(config: ModelEngineConfig) -> Self {
         match config {
-            ModelEngineConfig::Llama => EngineType::Llama,
             ModelEngineConfig::Ollama => EngineType::Ollama,
             ModelEngineConfig::OpenRouter => EngineType::OpenRouter,
         }

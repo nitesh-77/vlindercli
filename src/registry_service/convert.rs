@@ -194,7 +194,6 @@ impl From<proto::ModelType> for ModelType {
 impl From<EngineType> for proto::EngineType {
     fn from(t: EngineType) -> Self {
         match t {
-            EngineType::Llama => proto::EngineType::Llama,
             EngineType::Ollama => proto::EngineType::Ollama,
             EngineType::OpenRouter => proto::EngineType::Openrouter,
             EngineType::InMemory => proto::EngineType::InMemory,
@@ -205,7 +204,7 @@ impl From<EngineType> for proto::EngineType {
 impl From<proto::EngineType> for EngineType {
     fn from(t: proto::EngineType) -> Self {
         match t {
-            proto::EngineType::Llama => EngineType::Llama,
+            proto::EngineType::Llama => EngineType::Ollama, // Legacy: treat as Ollama
             proto::EngineType::Ollama => EngineType::Ollama,
             proto::EngineType::Openrouter => EngineType::OpenRouter,
             proto::EngineType::InMemory => EngineType::InMemory,

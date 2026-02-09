@@ -24,7 +24,7 @@ impl Default for InferenceBackend {
         InferenceBackend {
             max_tokens: 1024,
             temperature: 0.7,
-            kind: InferenceKind::Llama(LlamaConfig::default()),
+            kind: InferenceKind::Ollama,
         }
     }
 }
@@ -32,21 +32,5 @@ impl Default for InferenceBackend {
 /// The specific inference implementation.
 #[derive(Clone, Debug)]
 pub enum InferenceKind {
-    Llama(LlamaConfig),
-}
-
-/// Configuration for local Llama inference.
-#[derive(Clone, Debug)]
-pub struct LlamaConfig {
-    pub model_path: String,
-    pub context_size: u32,
-}
-
-impl Default for LlamaConfig {
-    fn default() -> Self {
-        LlamaConfig {
-            model_path: String::new(),
-            context_size: 8192,
-        }
-    }
+    Ollama,
 }

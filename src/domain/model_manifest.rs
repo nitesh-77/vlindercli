@@ -24,7 +24,6 @@ pub enum ModelTypeConfig {
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum ModelEngineConfig {
-    Llama,
     Ollama,
     OpenRouter,
 }

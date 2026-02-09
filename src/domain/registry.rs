@@ -634,17 +634,17 @@ mod tests {
         let registry = InMemoryRegistry::new();
 
         // Initially nothing available
-        assert!(!registry.has_inference_engine(EngineType::Llama));
+        assert!(!registry.has_inference_engine(EngineType::Ollama));
         assert!(!registry.has_inference_engine(EngineType::InMemory));
 
-        // Register Llama
-        registry.register_inference_engine(EngineType::Llama);
-        assert!(registry.has_inference_engine(EngineType::Llama));
+        // Register Ollama
+        registry.register_inference_engine(EngineType::Ollama);
+        assert!(registry.has_inference_engine(EngineType::Ollama));
         assert!(!registry.has_inference_engine(EngineType::InMemory));
 
         // Register InMemory
         registry.register_inference_engine(EngineType::InMemory);
-        assert!(registry.has_inference_engine(EngineType::Llama));
+        assert!(registry.has_inference_engine(EngineType::Ollama));
         assert!(registry.has_inference_engine(EngineType::InMemory));
     }
 
@@ -655,17 +655,17 @@ mod tests {
         let registry = InMemoryRegistry::new();
 
         // Initially nothing available
-        assert!(!registry.has_embedding_engine(EngineType::Llama));
+        assert!(!registry.has_embedding_engine(EngineType::Ollama));
         assert!(!registry.has_embedding_engine(EngineType::InMemory));
 
-        // Register Llama
-        registry.register_embedding_engine(EngineType::Llama);
-        assert!(registry.has_embedding_engine(EngineType::Llama));
+        // Register Ollama
+        registry.register_embedding_engine(EngineType::Ollama);
+        assert!(registry.has_embedding_engine(EngineType::Ollama));
         assert!(!registry.has_embedding_engine(EngineType::InMemory));
 
         // Register InMemory
         registry.register_embedding_engine(EngineType::InMemory);
-        assert!(registry.has_embedding_engine(EngineType::Llama));
+        assert!(registry.has_embedding_engine(EngineType::Ollama));
         assert!(registry.has_embedding_engine(EngineType::InMemory));
     }
 }

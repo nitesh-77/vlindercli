@@ -33,7 +33,7 @@ pub enum EmbeddingKind {
     Nomic(NomicConfig),
 }
 
-/// Configuration for Nomic embedding (via llama.cpp).
+/// Configuration for Nomic embedding (via Ollama).
 #[derive(Clone, Debug)]
 pub struct NomicConfig {
     pub model_path: String,

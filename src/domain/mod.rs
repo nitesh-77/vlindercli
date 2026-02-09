@@ -64,7 +64,7 @@ pub use resource_id::ResourceId;
 
 pub use inference::{
     InferenceEngine,
-    Inference, InferenceBackend, InferenceKind, LlamaConfig,
+    Inference, InferenceBackend, InferenceKind,
 };
 
 // ============================================================================

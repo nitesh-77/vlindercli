@@ -126,7 +126,7 @@ enum ModelType {
 
 enum EngineType {
   ENGINE_TYPE_UNSPECIFIED = 0;
-  ENGINE_TYPE_LLAMA = 1;
+  ENGINE_TYPE_LLAMA = 1;       // Deprecated: kept for wire compatibility
   ENGINE_TYPE_OLLAMA = 2;
   ENGINE_TYPE_IN_MEMORY = 3;
   ENGINE_TYPE_OPENROUTER = 4;

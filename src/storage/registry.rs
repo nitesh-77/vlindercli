@@ -176,11 +176,11 @@ mod tests {
         repo.save_model(&model).unwrap();
 
         // Update engine type
-        model.engine = EngineType::Llama;
+        model.engine = EngineType::OpenRouter;
         repo.save_model(&model).unwrap();
 
         let models = repo.load_models().unwrap();
         assert_eq!(models.len(), 1);
-        assert_eq!(models[0].engine, EngineType::Llama);
+        assert_eq!(models[0].engine, EngineType::OpenRouter);
     }
 }
