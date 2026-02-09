@@ -112,6 +112,7 @@ impl ContainerRuntime {
         let bridge_env = format!("VLINDER_BRIDGE_URL={}", bridge_url);
         let mut podman_args = vec![
             "run", "-d",
+            "--pull=never",
             "-p", ":8080",
             "-e", &bridge_env,
         ];

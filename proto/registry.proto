@@ -67,6 +67,13 @@ message Agent {
   VectorStorageConfig vector_storage = 7;
   string runtime = 8;     // Runtime type (e.g., "container")
   string executable = 9;  // Native artifact ref (e.g., OCI image)
+  repeated Mount mounts = 10;  // Host→guest filesystem mounts (ADR 057)
+}
+
+message Mount {
+  string host_path = 1;   // Absolute path on host
+  string guest_path = 2;  // Path inside container
+  bool readonly = 3;
 }
 
 message ObjectStorageConfig {

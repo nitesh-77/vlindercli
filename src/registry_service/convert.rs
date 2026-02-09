@@ -3,8 +3,8 @@
 use std::collections::HashMap;
 
 use crate::domain::{
-    Agent, EngineType, Job, JobId, JobStatus, Model, ModelType, Requirements, ResourceId,
-    RuntimeType,
+    AbsolutePath, Agent, EngineType, Job, JobId, JobStatus, Model, ModelType, Mount, Requirements,
+    ResourceId, RuntimeType,
 };
 use crate::queue::SubmissionId;
 use super::proto;
@@ -98,6 +98,11 @@ impl From<Agent> for proto::Agent {
             }),
             runtime: agent.runtime.as_str().to_string(),
             executable: agent.executable,
+            mounts: agent.mounts.into_iter().map(|m| proto::Mount {
+                host_path: m.host_path.to_string(),
+                guest_path: m.guest_path.to_string_lossy().to_string(),
+                readonly: m.readonly,
+            }).collect(),
         }
     }
 }
@@ -129,7 +134,12 @@ impl TryFrom<proto::Agent> for Agent {
             vector_storage: agent.vector_storage
                 .and_then(|cfg| cfg.resource_id)
                 .map(|r| r.into()),
-            mounts: vec![], // Mounts not sent over gRPC
+            mounts: agent.mounts.into_iter().map(|m| Mount {
+                host_path: AbsolutePath::from_absolute(std::path::Path::new(&m.host_path))
+                    .expect("mount host_path from gRPC should be absolute"),
+                guest_path: std::path::PathBuf::from(m.guest_path),
+                readonly: m.readonly,
+            }).collect(),
             source: None,
             prompts: None,
         })
