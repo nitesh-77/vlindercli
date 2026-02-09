@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted
+Superseded by ADR 060 (Ollama-only inference) for engine-related decisions.
+
+The `ModelCatalog` trait and `OllamaCatalog` remain. `HuggingFaceCatalog`/`LocalCatalog` producing `engine: Llama` models are no longer supported — llama.cpp was removed. All local inference goes through Ollama.
 
 ## Context
 

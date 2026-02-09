@@ -1,7 +1,9 @@
 # ADR 023: Model Manifest Format
 
 ## Status
-Accepted
+Superseded by ADR 040 (Model Catalog) and ADR 060 (Ollama-only inference)
+
+The manifest format is still used, but the `engine` field no longer supports `"llama"`. Supported engines are `"ollama"` and `"openrouter"`.
 
 ## Context
 Agent manifests declare model requirements as names (e.g., `models = ["phi3", "nomic-embed"]`). The runtime mapped these names to files via a hardcoded convention: `~/.vlinder/models/{name}.gguf`.
