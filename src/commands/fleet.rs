@@ -18,12 +18,65 @@ pub enum FleetCommand {
         #[arg(short, long)]
         path: Option<PathBuf>,
     },
+    /// Create a new fleet from a template
+    New {
+        /// Fleet name (becomes the directory name)
+        name: String,
+    },
 }
 
 pub fn execute(cmd: FleetCommand) {
     match cmd {
         FleetCommand::Run { path } => run(path),
+        FleetCommand::New { name } => scaffold(&name),
     }
+}
+
+fn scaffold(name: &str) {
+    let target = std::path::Path::new(name);
+
+    if target.exists() {
+        eprintln!("Error: directory '{}' already exists.", name);
+        std::process::exit(1);
+    }
+
+    std::fs::create_dir(target).unwrap_or_else(|e| {
+        eprintln!("Error: failed to create directory '{}': {}", name, e);
+        std::process::exit(1);
+    });
+
+    let fleet_toml = format!(
+        r#"name = "{name}"
+
+# Entry agent — the agent that receives user input.
+# entry = "coordinator"
+
+# Add agents using: vlinder agent new <language> agents/<name>
+# Then register them here:
+#
+# [agents.coordinator]
+# path = "agents/coordinator"
+#
+# [agents.researcher]
+# path = "agents/researcher"
+
+# Docs: https://docs.vlinder.ai/fleets
+"#
+    );
+
+    std::fs::write(target.join("fleet.toml"), fleet_toml).unwrap_or_else(|e| {
+        eprintln!("Error: failed to write fleet.toml: {}", e);
+        std::process::exit(1);
+    });
+
+    println!("Created fleet '{}'.", name);
+    println!();
+    println!("Next steps:");
+    println!("  cd {}", name);
+    println!("  mkdir -p agents");
+    println!("  vlinder agent new <language> agents/<agent-name>");
+    println!("  # repeat for each agent, then update fleet.toml");
+    println!("  vlinder fleet run");
 }
 
 pub fn run(path: Option<PathBuf>) {

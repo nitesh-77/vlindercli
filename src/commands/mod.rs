@@ -186,6 +186,25 @@ mod tests {
     }
 
     #[test]
+    fn cli_fleet_new() {
+        let cli = Cli::try_parse_from(["vlinder", "fleet", "new", "my-fleet"]).unwrap();
+        assert_eq!(
+            cli.command,
+            Command::Fleet {
+                cmd: fleet::FleetCommand::New {
+                    name: "my-fleet".to_string(),
+                }
+            }
+        );
+    }
+
+    #[test]
+    fn cli_fleet_new_missing_name_fails() {
+        let result = Cli::try_parse_from(["vlinder", "fleet", "new"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn cli_fleet_missing_action_fails() {
         let result = Cli::try_parse_from(["vlinder", "fleet"]);
         assert!(result.is_err());
