@@ -409,8 +409,9 @@ UNIT
 
 # --- Bootstrap support fleet ---
 
-# TODO: Replace with real ghcr.io URL once support fleet repo CI publishes images.
-SUPPORT_FLEET_IMAGE="ghcr.io/vlindercli/support-fleet:latest"
+SUPPORT_FLEET_DIR="${VLINDER_DIR}/support-fleet"
+
+SUPPORT_IMAGES="ghcr.io/vlindercli/vlinder-support:latest ghcr.io/vlindercli/vlinder-code-analyst:latest ghcr.io/vlindercli/vlinder-log-analyst:latest"
 
 wait_for_daemon() {
     # Give the daemon a moment to start accepting connections.
@@ -423,6 +424,78 @@ wait_for_daemon() {
         sleep 1
     done
     return 1
+}
+
+pull_support_images() {
+    for img in $SUPPORT_IMAGES; do
+        podman pull "$img" || { fail "Image" "failed to pull $img"; return 1; }
+    done
+    ok "Images" "support fleet pulled"
+}
+
+write_support_manifests() {
+    mkdir -p "${SUPPORT_FLEET_DIR}/agents/support"
+    mkdir -p "${SUPPORT_FLEET_DIR}/agents/code-analyst"
+    mkdir -p "${SUPPORT_FLEET_DIR}/agents/log-analyst"
+
+    cat > "${SUPPORT_FLEET_DIR}/fleet.toml" << 'FLEET'
+name = "vlinder-support"
+entry = "support"
+
+[agents.support]
+path = "agents/support"
+
+[agents.log-analyst]
+path = "agents/log-analyst"
+
+[agents.code-analyst]
+path = "agents/code-analyst"
+FLEET
+
+    cat > "${SUPPORT_FLEET_DIR}/agents/support/agent.toml" << 'AGENT'
+name = "support"
+description = "Grounded support orchestrator that retrieves docs via code-analyst and runtime data via log-analyst, then answers questions or diagnoses problems using a single LLM call."
+runtime = "container"
+executable = "ghcr.io/vlindercli/vlinder-support:latest"
+
+[requirements]
+services = ["infer"]
+
+[requirements.models]
+default = "ollama://localhost:11434/phi3:latest"
+AGENT
+
+    cat > "${SUPPORT_FLEET_DIR}/agents/code-analyst/agent.toml" << 'AGENT'
+name = "code-analyst"
+description = "Design intent specialist that searches source code and ADR documentation to explain whether behavior is by-design, a known limitation, or a gap."
+runtime = "container"
+executable = "ghcr.io/vlindercli/vlinder-code-analyst:latest"
+
+[requirements]
+services = []
+
+[[mounts]]
+host_path = "../.."
+guest_path = "/source"
+mode = "ro"
+AGENT
+
+    cat > "${SUPPORT_FLEET_DIR}/agents/log-analyst/agent.toml" << 'AGENT'
+name = "log-analyst"
+description = "Runtime behavior specialist that searches vlinder logs for relevant entries, correlates timestamps, and identifies error patterns."
+runtime = "container"
+executable = "ghcr.io/vlindercli/vlinder-log-analyst:latest"
+
+[requirements]
+services = []
+
+[[mounts]]
+host_path = "~/.vlinder"
+guest_path = "/vlinder"
+mode = "ro"
+AGENT
+
+    ok "Manifests" "${SUPPORT_FLEET_DIR}"
 }
 
 bootstrap_support() {
@@ -441,8 +514,9 @@ bootstrap_support() {
         skip "Model" "skipped (Ollama not available)"
     fi
 
-    "${INSTALL_DIR}/vlinder" fleet run "${SUPPORT_FLEET_IMAGE}" >/dev/null 2>&1 || true
-    ok "Support" "fleet deployed"
+    pull_support_images
+    write_support_manifests
+    ok "Support" "fleet installed — run 'vlinder support' to start"
 }
 
 # --- Main ---

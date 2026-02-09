@@ -35,5 +35,11 @@ pub fn execute() {
 }
 
 fn bundled_fleet_path() -> PathBuf {
+    // Production: ~/.vlinder/support-fleet (written by installer)
+    let installed = vlindercli::config::vlinder_dir().join("support-fleet");
+    if installed.exists() {
+        return installed;
+    }
+    // Development: source tree
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fleets").join("support")
 }
