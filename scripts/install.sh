@@ -467,17 +467,12 @@ AGENT
 
     cat > "${SUPPORT_FLEET_DIR}/agents/code-analyst/agent.toml" << 'AGENT'
 name = "code-analyst"
-description = "Design intent specialist that searches source code and ADR documentation to explain whether behavior is by-design, a known limitation, or a gap."
+description = "Documentation server that serves VlinderCLI docs from the public GitHub repo. Supports navigation, page retrieval, and keyword search."
 runtime = "container"
 executable = "ghcr.io/vlindercli/vlinder-code-analyst:latest"
 
 [requirements]
 services = []
-
-[[mounts]]
-host_path = "../.."
-guest_path = "/source"
-mode = "ro"
 AGENT
 
     cat > "${SUPPORT_FLEET_DIR}/agents/log-analyst/agent.toml" << 'AGENT'
