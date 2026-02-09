@@ -84,28 +84,33 @@ Each target produces a tarball: `vlinder-{target}.tar.gz` containing the `vlinde
 A single `install.sh` that works on both macOS and Linux. The install script is the primary distribution channel.
 
 ```bash
-curl -fsSL https://vlinder.dev/install.sh | sh
+curl -fsSL https://vlindercli.dev/install.sh | sh
 ```
 
 #### What it does
 
 1. **Detect platform** — Darwin/Linux, x86_64/aarch64
-2. **Check prerequisites** — print what's present and what's missing
-3. **Install prerequisites** — NATS, Podman, Ollama via platform package manager (brew on macOS, apt/dnf on Linux)
-4. **Download vlinder binary** — from the latest GitHub release
-5. **Create directory structure** — `~/.vlinder/{agents,models,conversations,logs}`
-6. **Write config** — `config.toml` with `distributed.enabled = true`, `queue.backend = "nats"`
-7. **Start services** — NATS and vlinder daemon (launchd on macOS, systemd on Linux)
-8. **Pull default model** — `phi3:latest` via Ollama
-9. **Register default model** — `vlinder model add phi3`
-10. **Print summary** — everything that was installed, started, and configured
+2. **Download vlinder binary** — from the latest GitHub release
+3. **Create directory structure** — `~/.vlinder/{agents,models,conversations,logs}`
+4. **Write config** — `config.toml` with `distributed.enabled = true`, `queue.backend = "nats"`
+5. **Check prerequisites** — print what's present, print install commands for what's missing
+6. **Print next steps** — copy-pasteable commands to get running
 
 #### Principles
 
 - **Explicit**: every action is printed before it happens. No silent side effects.
 - **Idempotent**: re-running skips what's already done (existing binaries, existing config, existing services).
 - **Graceful degradation**: if Ollama isn't available, the script warns and continues. The system works for everything except LLM inference.
-- **No surprises**: the script does not modify shell profiles, PATH, or environment variables beyond what it prints.
+- **Non-invasive for prerequisites**: the script does not install third-party software. It checks for prerequisites and prints platform-specific install commands.
+- **Service-first**: vlinder daemon runs as a user service (launchd on macOS, systemd on Linux). No manual terminal management.
+
+#### Platform-specific service management
+
+| Concern | macOS | Linux |
+|---------|-------|-------|
+| Service manager | launchd (plist in `~/Library/LaunchAgents/`) | systemd (user unit in `~/.config/systemd/user/`) |
+| Auto-start | `RunAtLoad` in plist | `systemctl --user enable` |
+| Logs | `~/Library/Logs/vlinder/` or `log show` | `journalctl --user -u vlinder` |
 
 #### Platform-specific service management
 
