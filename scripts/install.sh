@@ -432,7 +432,9 @@ bootstrap_support() {
     fi
 
     if [ "$HAVE_OLLAMA" = true ]; then
-        ollama pull phi3 >/dev/null 2>&1 || true
+        printf '\n  Pulling phi3 model (this may take a few minutes)...\n\n'
+        ollama pull phi3 || true
+        printf '\n'
         "${INSTALL_DIR}/vlinder" model add phi3 >/dev/null 2>&1 || true
         ok "Model" "phi3 pulled and registered"
     else
