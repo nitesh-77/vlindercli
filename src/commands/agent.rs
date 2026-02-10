@@ -4,7 +4,7 @@ use std::sync::Arc;
 use clap::{Subcommand, ValueEnum};
 
 use vlindercli::config::{conversations_dir, Config};
-use vlindercli::domain::{CliHarness, Harness, Registry};
+use vlindercli::domain::{CliHarness, ConversationStore, Harness, Registry};
 use vlindercli::queue::{agent_routing_key, MessageQueue, NatsQueue};
 use vlindercli::registry_service::{GrpcRegistryClient, ping_registry};
 
@@ -148,7 +148,7 @@ fn run(path: Option<PathBuf>) {
 /// Read the latest state for an agent from the system timeline and initialize
 /// the harness with it (state continuity across sessions).
 fn apply_latest_state(harness: &mut CliHarness, agent_name: &str) {
-    let store = match vlindercli::domain::ConversationStore::open(conversations_dir()) {
+    let store = match vlindercli::domain::GitConversationStore::open(conversations_dir()) {
         Ok(s) => s,
         Err(_) => return, // No conversation store yet — first run
     };

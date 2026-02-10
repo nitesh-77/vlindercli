@@ -106,7 +106,7 @@ pub use sdk_message::{Hop, SdkMessage};
 pub use harness::{Harness, CliHarness};
 pub use session::Session;
 pub use session_server::SessionServer;
-pub use conversation_store::{ConversationStore, StoreError};
+pub use conversation_store::{ConversationStore, GitConversationStore, StoreError};
 
 // ============================================================================
 // Supervisor & Registry
