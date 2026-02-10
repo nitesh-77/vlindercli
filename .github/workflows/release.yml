@@ -44,7 +44,7 @@ jobs:
       - name: Package
         run: |
           mkdir -p staging
-          cp target/${{ matrix.target }}/release/vlinder staging/vlinder
+          cp target/${{ matrix.target }}/release/vlindercli staging/vlinder
           cd staging
           tar czf ../vlinder-${{ matrix.target }}.tar.gz vlinder
 

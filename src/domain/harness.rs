@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use crate::domain::registry::{JobId, JobStatus, Registry};
 use crate::domain::{Agent, ResourceId};
-use crate::domain::conversation_store::{ConversationStore, GitConversationStore};
+use crate::domain::conversation_store::ConversationStore;
 use crate::domain::session::Session;
 use crate::queue::{
     HarnessType, InvokeMessage, MessageQueue, SessionId, SubmissionId,
@@ -46,7 +46,7 @@ pub struct CliHarness {
     registry: Arc<dyn Registry>,
     inflight: HashMap<SubmissionId, JobId>,
     session: Option<Session>,
-    store: Option<Box<dyn ConversationStore>>,
+    store: Option<ConversationStore>,
     /// Final state hash from the last completed invocation (ADR 055).
     last_state: Option<String>,
     /// Pending state from a just-completed invocation, not yet committed.
@@ -76,11 +76,11 @@ impl CliHarness {
     pub fn start_session(&mut self, agent_name: &str, conversations_dir: PathBuf) -> Result<(), String> {
         let session_id = SessionId::new();
         let session = Session::new(session_id, agent_name);
-        let store = GitConversationStore::open(conversations_dir)
+        let store = ConversationStore::open(conversations_dir)
             .map_err(|e| format!("failed to open conversation store: {}", e))?;
 
         self.session = Some(session);
-        self.store = Some(Box::new(store));
+        self.store = Some(store);
         Ok(())
     }
 

@@ -39,12 +39,12 @@ build-support-fleet: build-support-agent build-log-analyst build-code-analyst
 # Uses ~/.vlinder by default (no VLINDER_DIR override needed)
 run agent:
     cargo build
-    cd agents/{{agent}} && ../../target/debug/vlinder agent run -p .
+    cd agents/{{agent}} && ../../target/debug/vlindercli agent run -p .
 
 # Run the interactive support fleet
 support:
     cargo build
-    ./target/debug/vlinder support
+    ./target/debug/vlindercli support
 
 # =============================================================================
 # Model Catalog Commands

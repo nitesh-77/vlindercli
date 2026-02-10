@@ -10,26 +10,11 @@ use std::process::Command;
 
 use super::session::Session;
 
-/// Abstract conversation persistence backend.
-///
-/// Different harness types can use different backends:
-/// - CLI: git-backed (`GitConversationStore`)
-/// - Web API: could use Postgres
-/// - WhatsApp: could use any persistent store
-pub trait ConversationStore: Send + Sync {
-    fn commit_user_input(&self, session: &Session) -> Result<String, StoreError>;
-    fn commit_agent_response(&self, session: &Session, submission_id: &str, state: Option<&str>) -> Result<String, StoreError>;
-    fn read_state_trailer(&self, commit_sha: &str) -> Result<Option<String>, StoreError>;
-    fn latest_state_for_agent(&self, agent_name: &str) -> Result<Option<String>, StoreError>;
-    fn fork_at(&self, commit: &str) -> Result<String, StoreError>;
-    fn load(&self, filename: &str) -> Result<Session, StoreError>;
-}
-
 /// Git-backed conversation store.
 ///
 /// Manages a git repository of session JSON files. Each commit represents
 /// a single message (user input or agent response).
-pub struct GitConversationStore {
+pub struct ConversationStore {
     dir: PathBuf,
 }
 
@@ -63,7 +48,7 @@ impl From<serde_json::Error> for StoreError {
     }
 }
 
-impl GitConversationStore {
+impl ConversationStore {
     /// Open a conversation store at the given directory.
     ///
     /// Creates the directory and initializes a git repo if needed.
@@ -86,33 +71,18 @@ impl GitConversationStore {
         Ok(Self { dir })
     }
 
-    /// Run a git command in the store directory.
-    fn git(&self, args: &[&str]) -> Result<String, StoreError> {
-        let output = Command::new("git")
-            .args(args)
-            .current_dir(&self.dir)
-            .output()?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(StoreError::Git(format!(
-                "git {} failed: {}",
-                args.join(" "),
-                stderr
-            )));
-        }
-
-        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
-    }
-
-    /// Get the SHA of HEAD.
-    fn rev_parse_head(&self) -> Result<String, StoreError> {
-        self.git(&["rev-parse", "HEAD"])
-    }
-}
-
-impl ConversationStore for GitConversationStore {
-    fn commit_user_input(&self, session: &Session) -> Result<String, StoreError> {
+    /// Commit a user input message. Returns the commit SHA.
+    ///
+    /// The SHA becomes the SubmissionId — no self-referential trailer.
+    /// Commit message format:
+    /// ```text
+    /// user
+    ///
+    /// <user input>
+    ///
+    /// Session: <session_id>
+    /// ```
+    pub fn commit_user_input(&self, session: &Session) -> Result<String, StoreError> {
         let filename = session.filename();
         let json = serde_json::to_string_pretty(session)?;
         let filepath = self.dir.join(&filename);
@@ -136,7 +106,21 @@ impl ConversationStore for GitConversationStore {
         self.rev_parse_head()
     }
 
-    fn commit_agent_response(
+    /// Commit an agent response. Returns the commit SHA.
+    ///
+    /// References the SubmissionId (user input commit SHA) in a trailer.
+    /// Optionally includes a State trailer linking to the state DAG (ADR 055).
+    /// Commit message format:
+    /// ```text
+    /// agent
+    ///
+    /// <agent response>
+    ///
+    /// Session: <session_id>
+    /// Submission: <submission_sha>
+    /// State: <state_hash>          ← only if state is Some
+    /// ```
+    pub fn commit_agent_response(
         &self,
         session: &Session,
         submission_id: &str,
@@ -179,7 +163,10 @@ impl ConversationStore for GitConversationStore {
         self.rev_parse_head()
     }
 
-    fn read_state_trailer(&self, commit_sha: &str) -> Result<Option<String>, StoreError> {
+    /// Read the State trailer from a git commit message.
+    ///
+    /// Returns the state hash if the commit has a `State: <hash>` trailer.
+    pub fn read_state_trailer(&self, commit_sha: &str) -> Result<Option<String>, StoreError> {
         let body = self.git(&["log", "-1", "--format=%B", commit_sha])?;
         for line in body.lines() {
             if let Some(hash) = line.strip_prefix("State: ") {
@@ -192,7 +179,12 @@ impl ConversationStore for GitConversationStore {
         Ok(None)
     }
 
-    fn latest_state_for_agent(&self, agent_name: &str) -> Result<Option<String>, StoreError> {
+    /// Find the latest state hash for a given agent on the current timeline.
+    ///
+    /// Scans backwards from HEAD for agent response commits that touched
+    /// this agent's session files, returns the first State trailer found.
+    /// Naturally follows the current git branch — forks are transparent.
+    pub fn latest_state_for_agent(&self, agent_name: &str) -> Result<Option<String>, StoreError> {
         let pathspec = format!("*_{}_*.json", agent_name);
         let output = match self.git(&[
             "log", "--format=%s%n%b%n---END---", "--", &pathspec
@@ -218,18 +210,47 @@ impl ConversationStore for GitConversationStore {
         Ok(None)
     }
 
-    fn fork_at(&self, commit: &str) -> Result<String, StoreError> {
+    /// Fork the conversation timeline at a given commit.
+    ///
+    /// Creates a new git branch from the target commit and switches to it.
+    /// All subsequent commits land on this branch. The old timeline is preserved.
+    pub fn fork_at(&self, commit: &str) -> Result<String, StoreError> {
         let short = &commit[..8.min(commit.len())];
         let branch_name = format!("fork-{}", short);
         self.git(&["checkout", "-b", &branch_name, commit])?;
         Ok(branch_name)
     }
 
-    fn load(&self, filename: &str) -> Result<Session, StoreError> {
+    /// Load a session from a JSON file by filename.
+    pub fn load(&self, filename: &str) -> Result<Session, StoreError> {
         let filepath = self.dir.join(filename);
         let json = std::fs::read_to_string(&filepath)?;
         let session: Session = serde_json::from_str(&json)?;
         Ok(session)
+    }
+
+    /// Run a git command in the store directory.
+    fn git(&self, args: &[&str]) -> Result<String, StoreError> {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(&self.dir)
+            .output()?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(StoreError::Git(format!(
+                "git {} failed: {}",
+                args.join(" "),
+                stderr
+            )));
+        }
+
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    }
+
+    /// Get the SHA of HEAD.
+    fn rev_parse_head(&self) -> Result<String, StoreError> {
+        self.git(&["rev-parse", "HEAD"])
     }
 }
 
@@ -248,7 +269,7 @@ mod tests {
     #[test]
     fn open_creates_git_repo() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let store = GitConversationStore::open(tmp.path().to_path_buf()).unwrap();
+        let store = ConversationStore::open(tmp.path().to_path_buf()).unwrap();
 
         assert!(tmp.path().join(".git").exists());
         // Verify it's a valid git repo
@@ -261,8 +282,8 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
 
         // Open twice — should not fail
-        GitConversationStore::open(tmp.path().to_path_buf()).unwrap();
-        let store = GitConversationStore::open(tmp.path().to_path_buf()).unwrap();
+        ConversationStore::open(tmp.path().to_path_buf()).unwrap();
+        let store = ConversationStore::open(tmp.path().to_path_buf()).unwrap();
 
         assert!(tmp.path().join(".git").exists());
         let result = store.git(&["status"]);
@@ -272,7 +293,7 @@ mod tests {
     #[test]
     fn commit_user_input_returns_sha() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let store = GitConversationStore::open(tmp.path().to_path_buf()).unwrap();
+        let store = ConversationStore::open(tmp.path().to_path_buf()).unwrap();
 
         let mut session = test_session();
         session.record_user_input("hello", SubmissionId::from("placeholder".to_string()));
@@ -287,7 +308,7 @@ mod tests {
     #[test]
     fn commit_returns_different_shas() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let store = GitConversationStore::open(tmp.path().to_path_buf()).unwrap();
+        let store = ConversationStore::open(tmp.path().to_path_buf()).unwrap();
 
         let mut session = test_session();
         session.record_user_input("first", SubmissionId::from("sub1".to_string()));
@@ -302,7 +323,7 @@ mod tests {
     #[test]
     fn load_round_trips() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let store = GitConversationStore::open(tmp.path().to_path_buf()).unwrap();
+        let store = ConversationStore::open(tmp.path().to_path_buf()).unwrap();
 
         let mut session = test_session();
         session.record_user_input("hello", SubmissionId::from("a1b2c3d".to_string()));
@@ -320,7 +341,7 @@ mod tests {
     #[test]
     fn git_log_reads_like_conversation() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let store = GitConversationStore::open(tmp.path().to_path_buf()).unwrap();
+        let store = ConversationStore::open(tmp.path().to_path_buf()).unwrap();
 
         let mut session = test_session();
 
@@ -355,7 +376,7 @@ mod tests {
     #[test]
     fn commit_message_includes_session_trailer() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let store = GitConversationStore::open(tmp.path().to_path_buf()).unwrap();
+        let store = ConversationStore::open(tmp.path().to_path_buf()).unwrap();
 
         let mut session = test_session();
         session.record_user_input("hello", SubmissionId::from("placeholder".to_string()));
@@ -368,7 +389,7 @@ mod tests {
     #[test]
     fn agent_commit_includes_submission_trailer() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let store = GitConversationStore::open(tmp.path().to_path_buf()).unwrap();
+        let store = ConversationStore::open(tmp.path().to_path_buf()).unwrap();
 
         let mut session = test_session();
         session.record_user_input("hello", SubmissionId::from("placeholder".to_string()));
@@ -385,7 +406,7 @@ mod tests {
     #[test]
     fn agent_commit_includes_state_trailer() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let store = GitConversationStore::open(tmp.path().to_path_buf()).unwrap();
+        let store = ConversationStore::open(tmp.path().to_path_buf()).unwrap();
 
         let mut session = test_session();
         session.record_user_input("hello", SubmissionId::from("placeholder".to_string()));
@@ -402,7 +423,7 @@ mod tests {
     #[test]
     fn read_state_trailer_returns_hash() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let store = GitConversationStore::open(tmp.path().to_path_buf()).unwrap();
+        let store = ConversationStore::open(tmp.path().to_path_buf()).unwrap();
 
         let mut session = test_session();
         session.record_user_input("hello", SubmissionId::from("placeholder".to_string()));
@@ -419,7 +440,7 @@ mod tests {
     #[test]
     fn read_state_trailer_returns_none_for_user_commits() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let store = GitConversationStore::open(tmp.path().to_path_buf()).unwrap();
+        let store = ConversationStore::open(tmp.path().to_path_buf()).unwrap();
 
         let mut session = test_session();
         session.record_user_input("hello", SubmissionId::from("placeholder".to_string()));
@@ -432,7 +453,7 @@ mod tests {
     #[test]
     fn latest_state_returns_none_with_no_history() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let store = GitConversationStore::open(tmp.path().to_path_buf()).unwrap();
+        let store = ConversationStore::open(tmp.path().to_path_buf()).unwrap();
 
         let result = store.latest_state_for_agent("pensieve").unwrap();
         assert_eq!(result, None);
@@ -441,7 +462,7 @@ mod tests {
     #[test]
     fn latest_state_finds_state_from_agent_commit() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let store = GitConversationStore::open(tmp.path().to_path_buf()).unwrap();
+        let store = ConversationStore::open(tmp.path().to_path_buf()).unwrap();
 
         let mut session = test_session();
         session.record_user_input("hello", SubmissionId::from("sub1".to_string()));
@@ -457,7 +478,7 @@ mod tests {
     #[test]
     fn latest_state_skips_user_commits() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let store = GitConversationStore::open(tmp.path().to_path_buf()).unwrap();
+        let store = ConversationStore::open(tmp.path().to_path_buf()).unwrap();
 
         let mut session = test_session();
 
@@ -479,7 +500,7 @@ mod tests {
     #[test]
     fn latest_state_returns_most_recent() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let store = GitConversationStore::open(tmp.path().to_path_buf()).unwrap();
+        let store = ConversationStore::open(tmp.path().to_path_buf()).unwrap();
 
         let mut session = test_session();
 

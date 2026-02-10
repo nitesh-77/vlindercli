@@ -45,7 +45,9 @@ pub fn run_worker_loop(role: WorkerRole, shutdown: Arc<AtomicBool>) {
         WorkerRole::InferenceOpenRouter => run_inference_openrouter_worker(&config, &shutdown),
         WorkerRole::EmbeddingOllama => run_embedding_ollama_worker(&config, &shutdown),
         WorkerRole::StorageObjectSqlite => run_storage_object_sqlite_worker(&config, &shutdown),
+        WorkerRole::StorageObjectMemory => run_storage_object_memory_worker(&config, &shutdown),
         WorkerRole::StorageVectorSqlite => run_storage_vector_sqlite_worker(&config, &shutdown),
+        WorkerRole::StorageVectorMemory => run_storage_vector_memory_worker(&config, &shutdown),
     }
 
     tracing::info!(role = %role, "Worker shutdown complete");
@@ -68,7 +70,9 @@ fn run_registry_worker(config: &Config, shutdown: &AtomicBool) {
     // Register non-engine capabilities (engines are registered by open())
     registry.register_runtime(RuntimeType::Container);
     registry.register_object_storage(ObjectStorageType::Sqlite);
+    registry.register_object_storage(ObjectStorageType::InMemory);
     registry.register_vector_storage(VectorStorageType::SqliteVec);
+    registry.register_vector_storage(VectorStorageType::InMemory);
 
     let registry: Arc<dyn Registry> = Arc::new(registry);
 
@@ -223,6 +227,29 @@ fn run_storage_object_sqlite_worker(config: &Config, shutdown: &AtomicBool) {
     }
 }
 
+fn run_storage_object_memory_worker(config: &Config, shutdown: &AtomicBool) {
+    use crate::domain::workers::ObjectServiceWorker;
+    use crate::queue;
+    use crate::registry_service::GrpcRegistryClient;
+
+    let queue = queue::from_config().expect("Failed to create queue");
+
+    let registry_addr = grpc_registry_addr(config);
+    let registry: Arc<dyn Registry> = Arc::new(
+        GrpcRegistryClient::connect(&registry_addr)
+            .expect("Failed to connect to registry")
+    );
+
+    let worker = ObjectServiceWorker::new(queue, registry, "memory");
+
+    tracing::info!(registry = %registry_addr, "In-memory object storage worker ready");
+
+    while !shutdown.load(Ordering::Relaxed) {
+        worker.tick();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
 fn run_storage_vector_sqlite_worker(config: &Config, shutdown: &AtomicBool) {
     use crate::domain::workers::VectorServiceWorker;
     use crate::queue;
@@ -239,6 +266,29 @@ fn run_storage_vector_sqlite_worker(config: &Config, shutdown: &AtomicBool) {
     let worker = VectorServiceWorker::new(queue, registry, "sqlite-vec");
 
     tracing::info!(registry = %registry_addr, "SQLite-vec vector storage worker ready");
+
+    while !shutdown.load(Ordering::Relaxed) {
+        worker.tick();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+fn run_storage_vector_memory_worker(config: &Config, shutdown: &AtomicBool) {
+    use crate::domain::workers::VectorServiceWorker;
+    use crate::queue;
+    use crate::registry_service::GrpcRegistryClient;
+
+    let queue = queue::from_config().expect("Failed to create queue");
+
+    let registry_addr = grpc_registry_addr(config);
+    let registry: Arc<dyn Registry> = Arc::new(
+        GrpcRegistryClient::connect(&registry_addr)
+            .expect("Failed to connect to registry")
+    );
+
+    let worker = VectorServiceWorker::new(queue, registry, "memory");
+
+    tracing::info!(registry = %registry_addr, "In-memory vector storage worker ready");
 
     while !shutdown.load(Ordering::Relaxed) {
         worker.tick();

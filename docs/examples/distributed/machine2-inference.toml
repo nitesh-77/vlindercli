@@ -23,6 +23,7 @@ nats_url = "nats://nats.local:4222"
 endpoint = "http://localhost:11434"
 
 [distributed]
+enabled = true
 # Connect to registry on machine1
 registry_addr = "http://machine1.local:9090"
 
@@ -45,7 +46,9 @@ ollama = 1
 [distributed.workers.storage.object]
 # No storage workers here - they run on machine3
 sqlite = 0
+memory = 0
 
 [distributed.workers.storage.vector]
 # No storage workers here - they run on machine3
 sqlite = 0
+memory = 0

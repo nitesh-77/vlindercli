@@ -88,9 +88,9 @@ pub struct OpenRouterConfig {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct QueueConfig {
-    /// Queue backend: "nats" (default). Extensible for future backends (e.g. Kafka, SQS).
+    /// Queue backend: "memory" or "nats"
     pub backend: String,
-    /// NATS server URL (when backend = "nats")
+    /// NATS server URL (if backend = "nats")
     pub nats_url: String,
 }
 
@@ -100,11 +100,13 @@ pub struct QueueConfig {
 
 /// Configuration for distributed multi-process deployments.
 ///
-/// The daemon spawns separate worker processes for each service type.
-/// Workers communicate via NATS queues.
+/// When `enabled = true`, the daemon spawns separate worker processes
+/// for each service type. Workers communicate via NATS queues.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct DistributedConfig {
+    /// Enable distributed mode (spawn worker processes)
+    pub enabled: bool,
     /// Registry gRPC address for worker coordination
     pub registry_addr: String,
     /// Worker process counts by type
@@ -169,6 +171,8 @@ pub struct StorageWorkerCounts {
 pub struct ObjectStorageWorkerCounts {
     /// SQLite object storage workers
     pub sqlite: u32,
+    /// In-memory object storage workers
+    pub memory: u32,
 }
 
 /// Vector storage worker counts by backend.
@@ -177,6 +181,8 @@ pub struct ObjectStorageWorkerCounts {
 pub struct VectorStorageWorkerCounts {
     /// SQLite-vec vector storage workers
     pub sqlite: u32,
+    /// In-memory vector storage workers
+    pub memory: u32,
 }
 
 // ============================================================================
@@ -223,7 +229,7 @@ impl Default for OpenRouterConfig {
 impl Default for QueueConfig {
     fn default() -> Self {
         Self {
-            backend: "nats".to_string(),
+            backend: "memory".to_string(),
             nats_url: "nats://localhost:4222".to_string(),
         }
     }
@@ -232,6 +238,7 @@ impl Default for QueueConfig {
 impl Default for DistributedConfig {
     fn default() -> Self {
         Self {
+            enabled: false,
             registry_addr: "http://127.0.0.1:9090".to_string(),
             workers: WorkerCounts::default(),
         }
@@ -279,13 +286,13 @@ impl Default for StorageWorkerCounts {
 
 impl Default for ObjectStorageWorkerCounts {
     fn default() -> Self {
-        Self { sqlite: 1 }
+        Self { sqlite: 1, memory: 0 }
     }
 }
 
 impl Default for VectorStorageWorkerCounts {
     fn default() -> Self {
-        Self { sqlite: 1 }
+        Self { sqlite: 1, memory: 0 }
     }
 }
 
@@ -345,6 +352,9 @@ impl Config {
         }
 
         // Distributed
+        if let Ok(v) = std::env::var("VLINDER_DISTRIBUTED_ENABLED") {
+            self.distributed.enabled = v.parse().unwrap_or(false);
+        }
         if let Ok(v) = std::env::var("VLINDER_DISTRIBUTED_REGISTRY_ADDR") {
             self.distributed.registry_addr = v;
         }
@@ -451,7 +461,6 @@ mod tests {
         let config = Config::default();
         assert_eq!(config.logging.level, "warn");
         assert_eq!(config.ollama.endpoint, "http://localhost:11434");
-        assert_eq!(config.queue.backend, "nats");
     }
 
     #[test]
@@ -482,6 +491,7 @@ mod tests {
     #[test]
     fn default_distributed_config() {
         let config = Config::default();
+        assert!(!config.distributed.enabled);
         assert_eq!(config.distributed.registry_addr, "http://127.0.0.1:9090");
         assert_eq!(config.distributed.workers.registry, 1);
         assert_eq!(config.distributed.workers.agent.container, 1);
@@ -492,12 +502,15 @@ mod tests {
     }
 
     #[test]
-    fn env_override_distributed_registry_addr() {
+    fn env_override_distributed_enabled() {
+        std::env::set_var("VLINDER_DISTRIBUTED_ENABLED", "true");
         std::env::set_var("VLINDER_DISTRIBUTED_REGISTRY_ADDR", "http://remote:9090");
         let mut config = Config::default();
         config.apply_env_overrides();
+        std::env::remove_var("VLINDER_DISTRIBUTED_ENABLED");
         std::env::remove_var("VLINDER_DISTRIBUTED_REGISTRY_ADDR");
 
+        assert!(config.distributed.enabled);
         assert_eq!(config.distributed.registry_addr, "http://remote:9090");
     }
 

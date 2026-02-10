@@ -27,8 +27,12 @@ pub enum WorkerRole {
     EmbeddingOllama,
     /// SQLite object storage service
     StorageObjectSqlite,
+    /// In-memory object storage service
+    StorageObjectMemory,
     /// SQLite-vec vector storage service
     StorageVectorSqlite,
+    /// In-memory vector storage service
+    StorageVectorMemory,
 }
 
 impl WorkerRole {
@@ -50,7 +54,9 @@ impl WorkerRole {
             WorkerRole::InferenceOpenRouter => "inference-openrouter",
             WorkerRole::EmbeddingOllama => "embedding-ollama",
             WorkerRole::StorageObjectSqlite => "storage-object-sqlite",
+            WorkerRole::StorageObjectMemory => "storage-object-memory",
             WorkerRole::StorageVectorSqlite => "storage-vector-sqlite",
+            WorkerRole::StorageVectorMemory => "storage-vector-memory",
         }
     }
 
@@ -63,7 +69,9 @@ impl WorkerRole {
             WorkerRole::InferenceOpenRouter => "OpenRouter inference service",
             WorkerRole::EmbeddingOllama => "Ollama embedding service",
             WorkerRole::StorageObjectSqlite => "SQLite object storage",
+            WorkerRole::StorageObjectMemory => "In-memory object storage",
             WorkerRole::StorageVectorSqlite => "SQLite-vec vector storage",
+            WorkerRole::StorageVectorMemory => "In-memory vector storage",
         }
     }
 }
@@ -85,7 +93,9 @@ impl FromStr for WorkerRole {
             "inference-openrouter" => Ok(WorkerRole::InferenceOpenRouter),
             "embedding-ollama" => Ok(WorkerRole::EmbeddingOllama),
             "storage-object-sqlite" => Ok(WorkerRole::StorageObjectSqlite),
+            "storage-object-memory" => Ok(WorkerRole::StorageObjectMemory),
             "storage-vector-sqlite" => Ok(WorkerRole::StorageVectorSqlite),
+            "storage-vector-memory" => Ok(WorkerRole::StorageVectorMemory),
             _ => Err(ParseWorkerRoleError(s.to_string())),
         }
     }

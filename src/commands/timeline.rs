@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use clap::Subcommand;
 
 use vlindercli::config::conversations_dir;
-use vlindercli::domain::{ConversationStore, GitConversationStore};
+use vlindercli::domain::ConversationStore;
 
 #[derive(Subcommand, Debug, PartialEq)]
 pub enum TimelineCommand {
@@ -111,7 +111,7 @@ fn fork(commit: &str) {
         return;
     }
 
-    let store = match GitConversationStore::open(dir) {
+    let store = match ConversationStore::open(dir) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("Failed to open conversation store: {}", e);

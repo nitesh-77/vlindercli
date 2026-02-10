@@ -101,10 +101,20 @@ impl Supervisor {
                 workers.push(child);
             }
         }
+        for _ in 0..counts.storage.object.memory {
+            if let Some(child) = spawn_worker(WorkerRole::StorageObjectMemory) {
+                workers.push(child);
+            }
+        }
 
         // Vector storage workers
         for _ in 0..counts.storage.vector.sqlite {
             if let Some(child) = spawn_worker(WorkerRole::StorageVectorSqlite) {
+                workers.push(child);
+            }
+        }
+        for _ in 0..counts.storage.vector.memory {
+            if let Some(child) = spawn_worker(WorkerRole::StorageVectorMemory) {
                 workers.push(child);
             }
         }
@@ -165,6 +175,7 @@ mod tests {
     fn supervisor_with_zero_counts_spawns_nothing() {
         let config = Config {
             distributed: crate::config::DistributedConfig {
+                enabled: true,
                 registry_addr: "http://127.0.0.1:9090".to_string(),
                 workers: crate::config::WorkerCounts {
                     registry: 0,
@@ -172,8 +183,8 @@ mod tests {
                     inference: crate::config::InferenceWorkerCounts { ollama: 0, openrouter: 0 },
                     embedding: crate::config::EmbeddingWorkerCounts { ollama: 0 },
                     storage: crate::config::StorageWorkerCounts {
-                        object: crate::config::ObjectStorageWorkerCounts { sqlite: 0 },
-                        vector: crate::config::VectorStorageWorkerCounts { sqlite: 0 },
+                        object: crate::config::ObjectStorageWorkerCounts { sqlite: 0, memory: 0 },
+                        vector: crate::config::VectorStorageWorkerCounts { sqlite: 0, memory: 0 },
                     },
                 },
             },
