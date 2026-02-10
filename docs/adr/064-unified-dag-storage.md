@@ -102,6 +102,47 @@ Payload-Out-Hash: <sha256>
 
 Full payloads stored as git blobs referenced from the commit tree. Summaries in the commit message for `git log` readability.
 
+### Physical structure
+
+The repo lives at `~/.vlinder/conversations/` — the same location as today's ConversationStore. What changes is what's inside it.
+
+**Today**: the repo stores session JSON files. Each commit rewrites a JSON file that accumulates the conversation history. Git tracks changes to that file. The conversation is *in* the file.
+
+```
+~/.vlinder/conversations/
+├── .git/
+├── 2026-02-08T14-30-05Z_pensieve_abc12345.json
+├── 2026-02-10T09-00-00Z_todoapp_def67890.json
+```
+
+**ADR 064**: there are no session files. Each commit IS one interaction. The commit tree holds payload blobs. The conversation is the commit graph itself.
+
+```
+~/.vlinder/conversations/
+├── .git/
+│   └── objects/   ← commits, trees, payload blobs
+```
+
+A commit's tree contains two blobs:
+
+```
+$ git ls-tree f3a1b2c
+100644 blob abc123...  payload_in
+100644 blob def456...  payload_out
+```
+
+The working tree may be empty. The data lives entirely in `.git/objects/`. The session is the chain of commits sharing the same `Session:` trailer — not a file on disk.
+
+| | Today | ADR 064 |
+|---|---|---|
+| What's committed | Session JSON files | Payload blobs |
+| Where the conversation lives | In the JSON file contents | In the commit graph |
+| What a commit means | "I updated this session file" | "This agent interaction happened" |
+| Fleet internals | Invisible | Every delegation is a commit |
+| Branching | `git checkout -b` | Same |
+
+This is the shift from document store to event log. Instead of updating a file that represents current state, each commit is an event that happened. Current state is derived from the log.
+
 ## Consequences
 
 - Every git client is a Vlinder viewer — visualization, diffing, branching for free
