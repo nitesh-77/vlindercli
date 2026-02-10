@@ -50,14 +50,6 @@ impl EngineType {
             EngineType::InMemory => "memory",
         }
     }
-
-    /// Qualify a bare model name with its engine prefix.
-    ///
-    /// Prevents name collisions across engines (e.g., Ollama and OpenRouter
-    /// both offering "llama3"). The qualified name is the registry key.
-    pub fn qualify_name(&self, bare_name: &str) -> String {
-        format!("{}/{}", self.as_backend_str(), bare_name)
-    }
 }
 
 impl Model {
@@ -68,23 +60,13 @@ impl Model {
         ResourceId::new(format!("pending-registration://models/{}", name))
     }
 
-    /// Strip the registry engine prefix to get the name the engine API expects.
-    ///
-    /// Registry qualifies names to avoid collisions: "ollama/phi3:latest".
-    /// Ollama's HTTP API needs the bare name: "phi3:latest". Without this,
-    /// /api/generate and /api/embeddings return 404.
-    pub fn bare_name(&self) -> &str {
-        let prefix = format!("{}/", self.engine.as_backend_str());
-        self.name.strip_prefix(&prefix).unwrap_or(&self.name)
-    }
-
     /// Create a model from a manifest with a pre-computed digest.
     ///
     /// The `id` field is set to a placeholder. The registry assigns the real
     /// id (`<registry_id>/models/<name>`) during registration.
     pub fn from_manifest(manifest: ModelManifest, digest: String) -> Model {
         let engine: EngineType = manifest.engine.into();
-        let name = engine.qualify_name(&manifest.name);
+        let name = name_from_model_path(&manifest.model_path, engine);
         Model {
             id: Self::placeholder_id(&name),
             name,
@@ -100,6 +82,32 @@ impl Model {
         let manifest = ModelManifest::load(path)?;
         Ok(Self::from_manifest(manifest, String::new()))
     }
+}
+
+/// Extract the backend-native model name from a `model_path` URI.
+///
+/// The `model_path` is the canonical source of the model's name.
+///
+/// Examples:
+/// - `ollama://localhost:11434/nomic-embed-text:latest` → `"nomic-embed-text:latest"`
+/// - `openrouter://anthropic/claude-sonnet-4` → `"anthropic/claude-sonnet-4"`
+/// - `memory://test/my-model` → `"my-model"`
+fn name_from_model_path(model_path: &str, engine: EngineType) -> String {
+    if let Some(after_scheme) = model_path.split("://").nth(1) {
+        // For openrouter:// the entire after-scheme part IS the model id
+        if engine == EngineType::OpenRouter {
+            return after_scheme.to_string();
+        }
+        // For ollama:// and others, strip authority (host:port) to get /model-name
+        if let Some(slash_idx) = after_scheme.find('/') {
+            let path = &after_scheme[slash_idx + 1..];
+            if !path.is_empty() {
+                return path.to_string();
+            }
+        }
+    }
+    // Fallback: use the full model_path
+    model_path.to_string()
 }
 
 impl From<ModelTypeConfig> for ModelType {

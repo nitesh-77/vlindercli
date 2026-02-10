@@ -6,7 +6,8 @@ use std::path::Path;
 /// Model manifest as read from a model.toml file.
 #[derive(Clone, Debug, Deserialize)]
 pub struct ModelManifest {
-    pub name: String,
+    #[serde(default)]
+    pub name: Option<String>,
     #[serde(rename = "type")]
     pub model_type: ModelTypeConfig,
     pub engine: ModelEngineConfig,

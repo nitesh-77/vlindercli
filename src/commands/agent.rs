@@ -114,8 +114,13 @@ fn run(path: Option<PathBuf>) {
     let mut harness = CliHarness::new(queue, registry);
 
     // Deploy agent via remote registry
-    let agent_id = harness.deploy_from_path(&absolute_path)
-        .expect("Failed to deploy agent");
+    let agent_id = match harness.deploy_from_path(&absolute_path) {
+        Ok(id) => id,
+        Err(e) => {
+            eprintln!("Failed to deploy agent: {}", e);
+            std::process::exit(1);
+        }
+    };
 
     tracing::info!(agent = %agent_id, "Agent deployed to distributed daemon");
 

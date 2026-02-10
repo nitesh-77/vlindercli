@@ -48,10 +48,9 @@ impl ModelCatalog for OllamaCatalog {
         let digest = info.digest.clone()
             .ok_or_else(|| CatalogError::Parse("missing digest from Ollama API".to_string()))?;
 
-        let qualified = EngineType::Ollama.qualify_name(&info.name);
         Ok(Model {
-            id: Model::placeholder_id(&qualified),
-            name: qualified,
+            id: Model::placeholder_id(&info.name),
+            name: info.name.clone(),
             model_type,
             engine: EngineType::Ollama,
             model_path: ResourceId::new(format!("ollama://{}/{}", host, info.name)),

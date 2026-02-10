@@ -20,19 +20,13 @@ pub fn open_inference_engine(model: &Model) -> Result<Arc<dyn InferenceEngine>, 
             let endpoint = model.model_path.authority()
                 .map(|a| format!("http://{}", a))
                 .unwrap_or_else(|| Config::load().ollama.endpoint);
-            Ok(Arc::new(OllamaInferenceEngine::new(endpoint, model.bare_name())))
+            Ok(Arc::new(OllamaInferenceEngine::new(endpoint, model.name.clone())))
         }
         EngineType::OpenRouter => {
             let config = Config::load();
             let endpoint = config.openrouter.endpoint;
             let api_key = config.openrouter.api_key;
-            // model_path is "openrouter://anthropic/claude-sonnet-4-20250514"
-            // Strip the scheme to get the OpenRouter model identifier
-            let model_id = model.model_path.as_str()
-                .strip_prefix("openrouter://")
-                .unwrap_or(model.model_path.as_str())
-                .to_string();
-            Ok(Arc::new(OpenRouterInferenceEngine::new(endpoint, api_key, model_id)))
+            Ok(Arc::new(OpenRouterInferenceEngine::new(endpoint, api_key, model.name.clone())))
         }
         EngineType::InMemory => {
             Err("InMemory engine should be injected directly in tests".to_string())

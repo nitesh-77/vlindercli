@@ -46,10 +46,9 @@ impl ModelCatalog for OpenRouterCatalog {
             ModelType::Inference
         };
 
-        let qualified = EngineType::OpenRouter.qualify_name(&info.name);
         Ok(Model {
-            id: Model::placeholder_id(&qualified),
-            name: qualified,
+            id: Model::placeholder_id(&info.name),
+            name: info.name.clone(),
             model_type,
             engine: EngineType::OpenRouter,
             model_path: ResourceId::new(format!("openrouter://{}", info.name)),

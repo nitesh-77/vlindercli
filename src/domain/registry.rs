@@ -73,7 +73,8 @@ pub enum RegistrationError {
     /// Agent declares vector storage type not available.
     VectorStorageUnavailable(VectorStorageType),
     /// Agent requires a model that is not registered.
-    ModelNotRegistered(String),
+    /// Contains the agent's alias and the model_path URI.
+    ModelNotRegistered(String, ResourceId),
     /// Agent requires an inference engine that is not available.
     InferenceEngineUnavailable(EngineType, String),
     /// Agent requires an embedding engine that is not available.
@@ -82,22 +83,72 @@ pub enum RegistrationError {
     ModelInUse(String, Vec<String>),
     /// Persistence operation failed (disk I/O, database error, etc.).
     Persistence(String),
+    /// Error forwarded from a remote registry (gRPC).
+    /// Contains the server's error message as-is — already user-friendly.
+    Remote(String),
 }
 
 impl std::fmt::Display for RegistrationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             RegistrationError::DuplicateName(name) => write!(f, "agent already registered: {}", name),
-            RegistrationError::NoRuntime(id) => write!(f, "no runtime available for agent executable: {}", id),
+            RegistrationError::NoRuntime(id) => {
+                write!(f, "no runtime available for agent executable: {}\n\nIs the daemon running? Start it with: vlinder daemon", id)
+            }
             RegistrationError::UnknownObjectStorageScheme(s) => write!(f, "unknown object storage scheme: {}", s),
             RegistrationError::ObjectStorageUnavailable(t) => write!(f, "object storage not available: {:?}", t),
             RegistrationError::UnknownVectorStorageScheme(s) => write!(f, "unknown vector storage scheme: {}", s),
             RegistrationError::VectorStorageUnavailable(t) => write!(f, "vector storage not available: {:?}", t),
-            RegistrationError::ModelNotRegistered(name) => write!(f, "model not registered: {}", name),
-            RegistrationError::InferenceEngineUnavailable(engine, model) => write!(f, "inference engine {:?} not available (required by model '{}')", engine, model),
-            RegistrationError::EmbeddingEngineUnavailable(engine, model) => write!(f, "embedding engine {:?} not available (required by model '{}')", engine, model),
+            RegistrationError::ModelNotRegistered(alias, uri) => {
+                let hint = model_add_hint(uri.as_str());
+                write!(f, "model '{}' is not registered ({})\n\nAdd it first: {}", alias, uri, hint)
+            }
+            RegistrationError::InferenceEngineUnavailable(engine, model) => {
+                write!(f, "no {} inference engine available for model '{}'\n\nIs the daemon running? Start it with: vlinder daemon", engine.as_backend_str(), model)
+            }
+            RegistrationError::EmbeddingEngineUnavailable(engine, model) => {
+                write!(f, "no {} embedding engine available for model '{}'\n\nIs the daemon running? Start it with: vlinder daemon", engine.as_backend_str(), model)
+            }
             RegistrationError::ModelInUse(name, agents) => write!(f, "model '{}' is in use by agents: {}", name, agents.join(", ")),
             RegistrationError::Persistence(msg) => write!(f, "persistence error: {}", msg),
+            RegistrationError::Remote(msg) => write!(f, "{}", msg),
+        }
+    }
+}
+
+/// Build a complete `vlinder model add` command from a model_path URI.
+///
+/// The scheme determines the catalog and how to extract the model name:
+/// - `ollama://host:port/name:tag` → `vlinder model add name`
+/// - `openrouter://provider/model`  → `vlinder model add provider/model --catalog openrouter`
+///
+/// Examples:
+/// - `ollama://localhost:11434/nomic-embed-text:latest` → `"vlinder model add nomic-embed-text"`
+/// - `openrouter://anthropic/claude-sonnet-4` → `"vlinder model add anthropic/claude-sonnet-4 --catalog openrouter"`
+fn model_add_hint(uri: &str) -> String {
+    let (scheme, after_scheme) = match uri.split_once("://") {
+        Some((s, rest)) => (s, rest),
+        None => return format!("vlinder model add {}", uri),
+    };
+
+    match scheme {
+        "ollama" => {
+            // Strip authority (host:port) to get the model name, then strip :tag
+            let name = after_scheme
+                .split_once('/')
+                .map(|(_, path)| path)
+                .unwrap_or(after_scheme);
+            let name = name.split(':').next().unwrap_or(name);
+            format!("vlinder model add {}", name)
+        }
+        "openrouter" => {
+            // The entire after-scheme part is the model id (e.g. "anthropic/claude-sonnet-4")
+            format!("vlinder model add {} --catalog openrouter", after_scheme)
+        }
+        _ => {
+            // Unknown scheme — best effort: last path segment
+            let name = after_scheme.rsplit('/').next().unwrap_or(after_scheme);
+            format!("vlinder model add {}", name)
         }
     }
 }
@@ -303,7 +354,7 @@ impl Registry for InMemoryRegistry {
             let model = state.models.values()
                 .find(|m| &m.model_path == manifest_uri);
             let Some(model) = model else {
-                return Err(RegistrationError::ModelNotRegistered(model_alias.clone()));
+                return Err(RegistrationError::ModelNotRegistered(model_alias.clone(), manifest_uri.clone()));
             };
 
             match model.model_type {

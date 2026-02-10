@@ -68,16 +68,16 @@ fn select_runtime_returns_none_without_registered_runtime() {
 fn register_model_test_agent(registry: &InMemoryRegistry) {
     // model-test-agent requires phi3 and nomic-embed with these exact URIs
     let phi3 = Model {
-        id: Model::placeholder_id("ollama/phi3"),
-        name: "ollama/phi3".to_string(),
+        id: Model::placeholder_id("phi3"),
+        name: "phi3".to_string(),
         model_type: ModelType::Inference,
         engine: EngineType::Ollama,
         model_path: ResourceId::new("http://127.0.0.1:9000/models/phi3"),
         digest: String::new(),
     };
     let nomic = Model {
-        id: Model::placeholder_id("ollama/nomic-embed"),
-        name: "ollama/nomic-embed".to_string(),
+        id: Model::placeholder_id("nomic-embed"),
+        name: "nomic-embed".to_string(),
         model_type: ModelType::Embedding,
         engine: EngineType::Ollama,
         model_path: ResourceId::new("http://127.0.0.1:9000/models/nomic-embed"),
@@ -97,20 +97,20 @@ fn delete_model_blocked_by_deployed_agent() {
     let registry = InMemoryRegistry::new();
     register_model_test_agent(&registry);
 
-    let result = registry.delete_model("ollama/phi3");
+    let result = registry.delete_model("phi3");
     assert!(result.is_err());
 
     let err = result.unwrap_err();
     match err {
         RegistrationError::ModelInUse(name, agents) => {
-            assert_eq!(name, "ollama/phi3");
+            assert_eq!(name, "phi3");
             assert!(agents.contains(&"model-test-agent".to_string()));
         }
         other => panic!("expected ModelInUse, got: {}", other),
     }
 
     // Model still exists
-    assert!(registry.get_model("ollama/phi3").is_some());
+    assert!(registry.get_model("phi3").is_some());
 }
 
 #[test]
@@ -119,8 +119,8 @@ fn delete_model_succeeds_without_dependent_agents() {
     registry.register_inference_engine(EngineType::Ollama);
 
     let model = Model {
-        id: Model::placeholder_id("ollama/unused"),
-        name: "ollama/unused".to_string(),
+        id: Model::placeholder_id("unused"),
+        name: "unused".to_string(),
         model_type: ModelType::Inference,
         engine: EngineType::Ollama,
         model_path: ResourceId::new("ollama://localhost:11434/unused"),
@@ -128,9 +128,9 @@ fn delete_model_succeeds_without_dependent_agents() {
     };
     registry.register_model(model).unwrap();
 
-    let deleted = registry.delete_model("ollama/unused").unwrap();
+    let deleted = registry.delete_model("unused").unwrap();
     assert!(deleted);
-    assert!(registry.get_model("ollama/unused").is_none());
+    assert!(registry.get_model("unused").is_none());
 }
 
 // ============================================================================
@@ -143,8 +143,8 @@ fn register_model_rejected_without_inference_engine() {
     // No inference engine registered
 
     let model = Model {
-        id: Model::placeholder_id("ollama/phi3"),
-        name: "ollama/phi3".to_string(),
+        id: Model::placeholder_id("phi3"),
+        name: "phi3".to_string(),
         model_type: ModelType::Inference,
         engine: EngineType::Ollama,
         model_path: ResourceId::new("http://127.0.0.1:9000/models/phi3"),
@@ -156,7 +156,7 @@ fn register_model_rejected_without_inference_engine() {
     match result.unwrap_err() {
         RegistrationError::InferenceEngineUnavailable(engine, model) => {
             assert_eq!(engine, EngineType::Ollama);
-            assert_eq!(model, "ollama/phi3");
+            assert_eq!(model, "phi3");
         }
         other => panic!("expected InferenceEngineUnavailable, got: {}", other),
     }
@@ -168,8 +168,8 @@ fn register_model_rejected_without_embedding_engine() {
     // No embedding engine registered
 
     let model = Model {
-        id: Model::placeholder_id("ollama/nomic-embed"),
-        name: "ollama/nomic-embed".to_string(),
+        id: Model::placeholder_id("nomic-embed"),
+        name: "nomic-embed".to_string(),
         model_type: ModelType::Embedding,
         engine: EngineType::Ollama,
         model_path: ResourceId::new("http://127.0.0.1:9000/models/nomic-embed"),
@@ -181,7 +181,7 @@ fn register_model_rejected_without_embedding_engine() {
     match result.unwrap_err() {
         RegistrationError::EmbeddingEngineUnavailable(engine, model) => {
             assert_eq!(engine, EngineType::Ollama);
-            assert_eq!(model, "ollama/nomic-embed");
+            assert_eq!(model, "nomic-embed");
         }
         other => panic!("expected EmbeddingEngineUnavailable, got: {}", other),
     }

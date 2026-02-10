@@ -83,15 +83,15 @@ impl Registry for GrpcRegistryClient {
             self.client.lock().unwrap()
                 .register_agent(request)
                 .await
-        }).map_err(|e| RegistrationError::NoRuntime(ResourceId::new(&e.to_string())))?;
+        }).map_err(|e| RegistrationError::Remote(e.to_string()))?;
 
         let resp = response.into_inner();
         if resp.success {
             Ok(())
         } else {
-            Err(RegistrationError::NoRuntime(ResourceId::new(
-                &resp.error.unwrap_or_else(|| "unknown error".to_string())
-            )))
+            Err(RegistrationError::Remote(
+                resp.error.unwrap_or_else(|| "unknown error".to_string())
+            ))
         }
     }
 

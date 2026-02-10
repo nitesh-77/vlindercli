@@ -216,7 +216,7 @@ fn list_available(catalog_name: &str, filter: Option<&str>, config: &Config) {
                     } else {
                         format!(" ({})", size)
                     };
-                    println!("  {}/{}{}", name, model.name, detail);
+                    println!("  {}{}", model.name, detail);
                 }
                 println!();
             }
