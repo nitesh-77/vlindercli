@@ -6,13 +6,28 @@ Proposed
 
 ## Context
 
-ADR 061 introduced the runtime-captured DAG: a worker observes invoke/complete pairs from the NATS stream and writes content-addressed nodes into SQLite. The data is being collected, but nothing consumes it yet.
+When a user talks to a fleet, many conversations happen. The user asks the entry agent a question. The entry agent delegates to a log-analyst. The log-analyst responds. The entry agent delegates to a code-analyst. The code-analyst responds. The entry agent synthesizes everything and replies to the user.
 
-The most common analytical question for fleets is: **what route did a request take?** A user submits input, the entry agent delegates to specialists, specialists respond, and the entry agent synthesizes a final answer. Each agent invocation is a stop. The ordered sequence of stops is the route.
+Five conversations happened. The user only sees one: their question and the final answer. Everything in between is invisible.
 
-The DAG already captures this — `get_session_nodes(session_id)` returns every invoke/complete pair in a session, ordered by timestamp. But there's no domain concept that gives these nodes meaning as a route.
+The Session model (ADR 054) captures the user↔entry-agent exchange. It records `HistoryEntry::User` and `HistoryEntry::Agent` turns for a single agent. It doesn't know about delegations. From the user's perspective, a fleet is a black box.
 
-### Why a domain model, not just a CLI formatter
+The DAG (ADR 061) already captures every agent boundary — every invoke/complete pair, including internal delegations. The data exists. Nothing surfaces it to the user yet.
+
+### The gap
+
+A conversation is any request↔response exchange between two parties. It doesn't have to be user↔agent — it can be agent↔agent. In a fleet, the full picture is a chain of conversations:
+
+```
+user → support-agent          (conversation 1)
+  support-agent → log-analyst   (conversation 2)
+  support-agent → code-analyst  (conversation 3)
+support-agent → user          (conversation 4)
+```
+
+Each arrow is a conversation. The ordered sequence is the **route** — every stop a request hits between the user's question and the user's answer.
+
+### Why a domain model
 
 The route is a concept that multiple consumers need:
 
@@ -20,11 +35,11 @@ The route is a concept that multiple consumers need:
 - The support fleet's log-analyst (programmatic query)
 - Future: web harness, API, export
 
-If Route is just rendering logic in the command layer, every consumer reimplements the same interpretation. If it's a domain type, consumers format; they don't interpret.
+If Route is rendering logic in the command layer, every consumer reimplements the same interpretation. If it's a domain type, consumers format; they don't interpret.
 
 ## Decision
 
-**Route is a domain type that represents the ordered sequence of agent stops a request takes through a fleet.** It is constructed from DAG nodes and provides the vocabulary for inspection.
+**Route is a domain type that represents the full chain of conversations a request triggers — every agent stop between user input and user output.** It is constructed from DAG nodes and makes fleet internals visible.
 
 ### Types
 
@@ -43,7 +58,9 @@ pub struct Stop {
 }
 ```
 
-A Route is derived from a `Vec<DagNode>` for a session. Construction is a projection: strip the Merkle chain details (parent_hash), keep what describes the stop.
+Each Stop is one conversation: someone sent `payload_in`, the agent returned `payload_out`. A Route is the ordered sequence of all conversations in a session.
+
+A single-agent session is a Route with one stop. A fleet produces a Route with many stops. The model is the same.
 
 ### Construction
 
@@ -53,14 +70,14 @@ impl Route {
 }
 ```
 
-The factory takes the session ID and the ordered nodes from the DAG store. No DagStore dependency in the domain type — the caller queries the store and passes the result.
+The factory takes the session ID and the ordered nodes from the DAG store. No DagStore dependency in the domain type — the caller queries the store and passes the result. Construction is a projection: strip Merkle chain details (parent_hash), keep what describes the stop.
 
 ### What Route provides
 
 | Method | Returns | Purpose |
 |--------|---------|---------|
 | `stops()` | `&[Stop]` | Ordered stops |
-| `stop_count()` | `usize` | Number of agent invocations |
+| `stop_count()` | `usize` | Number of conversations in the chain |
 | `agents()` | `Vec<&str>` | Unique agents in invocation order |
 | `duration_secs()` | `Option<f64>` | Elapsed time from first to last stop |
 
@@ -70,7 +87,7 @@ The factory takes the session ID and the ordered nodes from the DAG store. No Da
 vlinder timeline route <session_id>
 ```
 
-Renders the route as a vertical diagram showing each stop with agent name, elapsed time, hash prefix, and a truncated payload preview.
+Renders the route as a vertical diagram showing each stop with agent name, elapsed time, hash prefix, and a truncated payload preview. The user sees every conversation that happened, not just the outer one.
 
 ### File location
 
@@ -78,8 +95,9 @@ Renders the route as a vertical diagram showing each stop with agent name, elaps
 
 ## Consequences
 
+- Fleet internals become visible to the user — every agent-to-agent conversation is surfaced
 - Route is a domain type, not a presentation concern — any harness can render it
+- A single-agent session and a fleet session use the same model — Route generalizes both
 - DagStore remains a storage concern; Route doesn't depend on it
 - The `timeline route` command becomes thin: query DagStore, construct Route, format output
 - Future analytical operations (diff two routes, find divergence point) compose naturally on top of Route
-
