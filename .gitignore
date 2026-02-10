@@ -13,8 +13,8 @@ tests/fixtures/agents/echo-agent/echo-agent.wasm
 tests/fixtures/agents/upper-agent/upper-agent.wasm
 tests/fixtures/agents/reverse-agent/reverse-agent.wasm
 
-# Pensieve data directory
-agents/pensieve/data/
+# Agent runtime data directories
+agents/*/data/
 
 # Python bytecode
 __pycache__/
