@@ -33,6 +33,8 @@ pub enum WorkerRole {
     StorageVectorSqlite,
     /// In-memory vector storage service
     StorageVectorMemory,
+    /// DAG capture - indexes invoke/complete pairs into Merkle DAG
+    DagCapture,
 }
 
 impl WorkerRole {
@@ -57,6 +59,7 @@ impl WorkerRole {
             WorkerRole::StorageObjectMemory => "storage-object-memory",
             WorkerRole::StorageVectorSqlite => "storage-vector-sqlite",
             WorkerRole::StorageVectorMemory => "storage-vector-memory",
+            WorkerRole::DagCapture => "dag-capture",
         }
     }
 
@@ -72,6 +75,7 @@ impl WorkerRole {
             WorkerRole::StorageObjectMemory => "In-memory object storage",
             WorkerRole::StorageVectorSqlite => "SQLite-vec vector storage",
             WorkerRole::StorageVectorMemory => "In-memory vector storage",
+            WorkerRole::DagCapture => "DAG capture service",
         }
     }
 }
@@ -96,6 +100,7 @@ impl FromStr for WorkerRole {
             "storage-object-memory" => Ok(WorkerRole::StorageObjectMemory),
             "storage-vector-sqlite" => Ok(WorkerRole::StorageVectorSqlite),
             "storage-vector-memory" => Ok(WorkerRole::StorageVectorMemory),
+            "dag-capture" => Ok(WorkerRole::DagCapture),
             _ => Err(ParseWorkerRoleError(s.to_string())),
         }
     }
@@ -124,6 +129,7 @@ mod tests {
         assert_eq!("embedding-ollama".parse::<WorkerRole>().unwrap(), WorkerRole::EmbeddingOllama);
         assert_eq!("storage-object-sqlite".parse::<WorkerRole>().unwrap(), WorkerRole::StorageObjectSqlite);
         assert_eq!("storage-vector-sqlite".parse::<WorkerRole>().unwrap(), WorkerRole::StorageVectorSqlite);
+        assert_eq!("dag-capture".parse::<WorkerRole>().unwrap(), WorkerRole::DagCapture);
     }
 
     #[test]
@@ -141,6 +147,7 @@ mod tests {
             WorkerRole::EmbeddingOllama,
             WorkerRole::StorageObjectSqlite,
             WorkerRole::StorageVectorSqlite,
+            WorkerRole::DagCapture,
         ] {
             let env_val = role.as_env_value();
             let parsed: WorkerRole = env_val.parse().unwrap();

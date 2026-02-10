@@ -48,6 +48,7 @@ pub fn run_worker_loop(role: WorkerRole, shutdown: Arc<AtomicBool>) {
         WorkerRole::StorageObjectMemory => run_storage_object_memory_worker(&config, &shutdown),
         WorkerRole::StorageVectorSqlite => run_storage_vector_sqlite_worker(&config, &shutdown),
         WorkerRole::StorageVectorMemory => run_storage_vector_memory_worker(&config, &shutdown),
+        WorkerRole::DagCapture => run_dag_capture_worker(&config, &shutdown),
     }
 
     tracing::info!(role = %role, "Worker shutdown complete");
@@ -293,6 +294,90 @@ fn run_storage_vector_memory_worker(config: &Config, shutdown: &AtomicBool) {
     while !shutdown.load(Ordering::Relaxed) {
         worker.tick();
         std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+fn run_dag_capture_worker(_config: &Config, shutdown: &AtomicBool) {
+    use std::collections::HashMap;
+    use crate::config::dag_db_path;
+    use crate::domain::workers::DagCaptureWorker;
+    use crate::storage::dag_store::SqliteDagStore;
+    use crate::queue::NatsQueue;
+
+    let nats = NatsQueue::localhost()
+        .expect("Failed to connect to NATS");
+
+    let db_path = dag_db_path();
+    let store = SqliteDagStore::open(&db_path)
+        .expect("Failed to open DAG store");
+
+    let mut worker = DagCaptureWorker::new(Box::new(store));
+
+    tracing::info!(db = %db_path.display(), "DAG capture worker ready");
+
+    // Create a dedicated consumer for the DAG worker on vlinder.>
+    let js = nats.jetstream().clone();
+    let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
+
+    let consumer = rt.block_on(async {
+        let stream = js.get_stream("VLINDER").await
+            .expect("Failed to get VLINDER stream");
+
+        stream.create_consumer(async_nats::jetstream::consumer::pull::Config {
+            name: Some("dag-capture".to_string()),
+            filter_subject: "vlinder.>".to_string(),
+            ack_wait: std::time::Duration::from_secs(300),
+            inactive_threshold: std::time::Duration::from_secs(300),
+            ..Default::default()
+        }).await.expect("Failed to create dag-capture consumer")
+    });
+
+    while !shutdown.load(Ordering::Relaxed) {
+        let msg_result = rt.block_on(async {
+            use futures::StreamExt;
+            let mut messages = consumer.fetch()
+                .max_messages(1)
+                .expires(std::time::Duration::from_millis(100))
+                .messages()
+                .await
+                .map_err(|e| format!("fetch failed: {}", e))?;
+
+            match messages.next().await {
+                Some(Ok(msg)) => Ok(Some(msg)),
+                Some(Err(e)) => Err(format!("message error: {}", e)),
+                None => Ok(None),
+            }
+        });
+
+        match msg_result {
+            Ok(Some(msg)) => {
+                let subject = msg.subject.to_string();
+                let mut headers = HashMap::new();
+                if let Some(h) = &msg.headers {
+                    for (key, values) in h.iter() {
+                        if let Some(first) = values.first() {
+                            headers.insert(
+                                key.to_string().to_lowercase(),
+                                first.to_string(),
+                            );
+                        }
+                    }
+                }
+                let payload = msg.payload.to_vec();
+
+                worker.process_message(&subject, &headers, &payload);
+
+                let _ = rt.block_on(async { msg.ack().await });
+            }
+            Ok(None) => {
+                // No message available — brief sleep before retry
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "DAG capture fetch error");
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+        }
     }
 }
 

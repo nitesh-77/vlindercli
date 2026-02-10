@@ -77,7 +77,8 @@ impl NatsQueue {
         let config = stream::Config {
             name: "VLINDER".to_string(),
             subjects: vec!["vlinder.>".to_string()],
-            retention: stream::RetentionPolicy::WorkQueue,
+            retention: stream::RetentionPolicy::Limits,
+            max_age: Duration::from_secs(7 * 24 * 60 * 60), // 7 days
             ..Default::default()
         };
 

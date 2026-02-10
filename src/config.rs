@@ -127,6 +127,8 @@ pub struct WorkerCounts {
     pub embedding: EmbeddingWorkerCounts,
     /// Storage service workers
     pub storage: StorageWorkerCounts,
+    /// DAG capture workers
+    pub dag: DagWorkerCounts,
 }
 
 /// Agent runtime worker counts by backend.
@@ -183,6 +185,14 @@ pub struct VectorStorageWorkerCounts {
     pub sqlite: u32,
     /// In-memory vector storage workers
     pub memory: u32,
+}
+
+/// DAG worker counts.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct DagWorkerCounts {
+    /// DAG capture workers
+    pub capture: u32,
 }
 
 // ============================================================================
@@ -253,6 +263,7 @@ impl Default for WorkerCounts {
             inference: InferenceWorkerCounts::default(),
             embedding: EmbeddingWorkerCounts::default(),
             storage: StorageWorkerCounts::default(),
+            dag: DagWorkerCounts::default(),
         }
     }
 }
@@ -293,6 +304,12 @@ impl Default for ObjectStorageWorkerCounts {
 impl Default for VectorStorageWorkerCounts {
     fn default() -> Self {
         Self { sqlite: 1, memory: 0 }
+    }
+}
+
+impl Default for DagWorkerCounts {
+    fn default() -> Self {
+        Self { capture: 1 }
     }
 }
 
@@ -381,6 +398,9 @@ impl Config {
         if let Ok(v) = std::env::var("VLINDER_WORKERS_STORAGE_VECTOR_SQLITE") {
             self.distributed.workers.storage.vector.sqlite = v.parse().unwrap_or(1);
         }
+        if let Ok(v) = std::env::var("VLINDER_WORKERS_DAG_CAPTURE") {
+            self.distributed.workers.dag.capture = v.parse().unwrap_or(1);
+        }
     }
 
     /// Build tracing EnvFilter from config.
@@ -452,6 +472,10 @@ pub fn registry_db_path() -> PathBuf {
     vlinder_dir().join("registry.db")
 }
 
+pub fn dag_db_path() -> PathBuf {
+    vlinder_dir().join("dag.db")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -499,6 +523,7 @@ mod tests {
         assert_eq!(config.distributed.workers.embedding.ollama, 1);
         assert_eq!(config.distributed.workers.storage.object.sqlite, 1);
         assert_eq!(config.distributed.workers.storage.vector.sqlite, 1);
+        assert_eq!(config.distributed.workers.dag.capture, 1);
     }
 
     #[test]

@@ -7,6 +7,7 @@
 //!
 //! Traits are defined in `crate::domain`. This module provides implementations.
 
+pub mod dag_store;
 pub mod dispatch;
 mod object;
 mod registry;

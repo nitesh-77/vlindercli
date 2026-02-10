@@ -119,6 +119,13 @@ impl Supervisor {
             }
         }
 
+        // DAG capture workers
+        for _ in 0..counts.dag.capture {
+            if let Some(child) = spawn_worker(WorkerRole::DagCapture) {
+                workers.push(child);
+            }
+        }
+
         tracing::info!(
             worker_count = workers.len(),
             "Supervisor started in distributed mode"
@@ -186,6 +193,7 @@ mod tests {
                         object: crate::config::ObjectStorageWorkerCounts { sqlite: 0, memory: 0 },
                         vector: crate::config::VectorStorageWorkerCounts { sqlite: 0, memory: 0 },
                     },
+                    dag: crate::config::DagWorkerCounts { capture: 0 },
                 },
             },
             ..Default::default()
