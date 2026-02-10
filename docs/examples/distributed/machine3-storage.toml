@@ -22,7 +22,6 @@ nats_url = "nats://nats.local:4222"
 endpoint = "http://machine2.local:11434"
 
 [distributed]
-enabled = true
 # Connect to registry on machine1
 registry_addr = "http://machine1.local:9090"
 
@@ -45,9 +44,7 @@ ollama = 0
 [distributed.workers.storage.object]
 # Run 2 SQLite object storage workers
 sqlite = 2
-memory = 0
 
 [distributed.workers.storage.vector]
 # Run 2 SQLite-vec vector storage workers
 sqlite = 2
-memory = 0

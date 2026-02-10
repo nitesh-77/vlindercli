@@ -11,7 +11,6 @@ mod agent;
 mod agent_manifest;
 mod catalog;
 mod conversation_store;
-mod daemon;
 mod embedding;
 mod supervisor;
 mod fleet;
@@ -19,7 +18,6 @@ mod fleet_manifest;
 mod harness;
 mod inference;
 mod model;
-mod provider;
 mod persistent_registry;
 mod registry;
 mod registry_repository;
@@ -90,12 +88,6 @@ pub use model_manifest::{ModelManifest, ModelTypeConfig, ModelEngineConfig};
 pub use catalog::{ModelCatalog, ModelInfo, CatalogError};
 
 // ============================================================================
-// Provider
-// ============================================================================
-
-pub use provider::Provider;
-
-// ============================================================================
 // Runtime (trait)
 // ============================================================================
 
@@ -117,10 +109,9 @@ pub use session_server::SessionServer;
 pub use conversation_store::{ConversationStore, StoreError};
 
 // ============================================================================
-// Daemon & Registry
+// Supervisor & Registry
 // ============================================================================
 
-pub use daemon::Daemon;
 pub use supervisor::Supervisor;
 pub use persistent_registry::PersistentRegistry;
 pub use registry::{InMemoryRegistry, Job, JobId, JobStatus, RegistrationError, Registry};

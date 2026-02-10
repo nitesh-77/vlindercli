@@ -6,9 +6,8 @@
 //! - `ResponseMessage`: Service → Runtime (service replies)
 //! - `CompleteMessage`: Runtime → Harness (submission finished)
 //!
-//! Implementations:
-//! - `InMemoryQueue`: Single-process, for local development
-//! - `NatsQueue`: Distributed, with JetStream durability
+//! Production: `NatsQueue` with JetStream durability.
+//! Tests: `InMemoryQueue` as a fast, deterministic test double.
 
 mod message;
 mod traits;
@@ -45,8 +44,8 @@ pub fn agent_routing_key(agent_id: &ResourceId) -> String {
 
 /// Create a queue from configuration.
 ///
-/// Returns `InMemoryQueue` for `backend = "memory"` (default),
-/// or `NatsQueue` for `backend = "nats"`.
+/// Dispatches on `queue.backend`. Currently only "nats" is supported;
+/// the extension point exists for future backends (Kafka, SQS, etc.).
 pub fn from_config() -> Result<Arc<dyn MessageQueue + Send + Sync>, QueueError> {
     let config = Config::load();
     match config.queue.backend.as_str() {
@@ -54,8 +53,8 @@ pub fn from_config() -> Result<Arc<dyn MessageQueue + Send + Sync>, QueueError> 
             let queue = NatsQueue::connect(&config.queue.nats_url)?;
             Ok(Arc::new(queue))
         }
-        "memory" | _ => {
-            Ok(Arc::new(InMemoryQueue::new()))
-        }
+        other => Err(QueueError::QueueNotFound(
+            format!("unknown queue backend: '{}' (supported: nats)", other),
+        )),
     }
 }

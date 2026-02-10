@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use clap::{Subcommand, ValueEnum};
 
-use vlindercli::config::{conversations_dir, registry_db_path, Config};
-use vlindercli::domain::{CliHarness, Daemon, Harness, PersistentRegistry, Registry};
+use vlindercli::config::{conversations_dir, Config};
+use vlindercli::domain::{CliHarness, Harness, Registry};
 use vlindercli::queue::{agent_routing_key, MessageQueue, NatsQueue};
 use vlindercli::registry_service::{GrpcRegistryClient, ping_registry};
 
@@ -72,63 +72,11 @@ pub fn execute(cmd: AgentCommand) {
     }
 }
 
+/// Run an agent interactively via NATS + gRPC registry.
+///
+/// Requires a running daemon (`vlinder daemon`).
 fn run(path: Option<PathBuf>) {
     let config = Config::load();
-
-    if config.distributed.enabled {
-        run_distributed(path, &config);
-    } else {
-        run_local(path);
-    }
-}
-
-/// Run in local mode - creates embedded daemon with all services.
-fn run_local(path: Option<PathBuf>) {
-    let agent_path = path.unwrap_or_else(|| {
-        std::env::current_dir().expect("Failed to get current directory")
-    });
-
-    // Canonicalize to absolute path
-    let absolute_path = agent_path
-        .canonicalize()
-        .expect("Failed to resolve agent path");
-
-    // Create daemon (includes runtime, provider, registry)
-    let mut daemon = Daemon::new();
-
-    // Deploy agent (register with Registry - runtime discovers automatically)
-    let agent_id = daemon.harness.deploy_from_path(&absolute_path)
-        .expect("Failed to deploy agent");
-
-    // Start conversation session (ADR 054)
-    let agent_name = agent_routing_key(&agent_id);
-    daemon.harness.start_session(&agent_name, conversations_dir())
-        .expect("Failed to start session");
-
-    // Read state from the system timeline (current branch)
-    apply_latest_state(&mut daemon.harness, &agent_name);
-
-    // Run REPL
-    repl::run(|input| {
-        match daemon.harness.invoke(&agent_id, input) {
-            Ok(job_id) => {
-                // Tick until complete
-                loop {
-                    daemon.tick();
-                    if let Some(result) = daemon.harness.poll(&job_id) {
-                        daemon.harness.record_response(&result);
-                        return result;
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(1));
-                }
-            }
-            Err(e) => format!("[error] {}", e),
-        }
-    });
-}
-
-/// Run in distributed mode - connect as client to existing daemon.
-fn run_distributed(path: Option<PathBuf>, config: &Config) {
     let agent_path = path.unwrap_or_else(|| {
         std::env::current_dir().expect("Failed to get current directory")
     });
@@ -261,36 +209,25 @@ fn get(name: &str) {
     }
 }
 
-/// Connect to the registry — gRPC in distributed mode, local SQLite otherwise.
+/// Connect to the registry via gRPC.
 fn open_registry(config: &Config) -> Option<Arc<dyn Registry>> {
-    if config.distributed.enabled {
-        let registry_addr = if config.distributed.registry_addr.starts_with("http://")
-            || config.distributed.registry_addr.starts_with("https://") {
-            config.distributed.registry_addr.clone()
-        } else {
-            format!("http://{}", config.distributed.registry_addr)
-        };
-
-        if ping_registry(&registry_addr).is_none() {
-            eprintln!("Cannot reach registry at {}. Is the daemon running?", registry_addr);
-            return None;
-        }
-
-        match GrpcRegistryClient::connect(&registry_addr) {
-            Ok(client) => Some(Arc::new(client)),
-            Err(e) => {
-                eprintln!("Failed to connect to registry: {}", e);
-                None
-            }
-        }
+    let registry_addr = if config.distributed.registry_addr.starts_with("http://")
+        || config.distributed.registry_addr.starts_with("https://") {
+        config.distributed.registry_addr.clone()
     } else {
-        let db_path = registry_db_path();
-        match PersistentRegistry::open(&db_path, config) {
-            Ok(r) => Some(Arc::new(r)),
-            Err(e) => {
-                eprintln!("Failed to open registry: {}", e);
-                None
-            }
+        format!("http://{}", config.distributed.registry_addr)
+    };
+
+    if ping_registry(&registry_addr).is_none() {
+        eprintln!("Cannot reach registry at {}. Is the daemon running?", registry_addr);
+        return None;
+    }
+
+    match GrpcRegistryClient::connect(&registry_addr) {
+        Ok(client) => Some(Arc::new(client)),
+        Err(e) => {
+            eprintln!("Failed to connect to registry: {}", e);
+            None
         }
     }
 }
