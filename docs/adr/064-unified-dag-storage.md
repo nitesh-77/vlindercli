@@ -1,4 +1,4 @@
-# ADR 064: Unified DAG Storage
+# ADR 064: Git as Agent Protocol
 
 ## Status
 
@@ -8,107 +8,107 @@ Proposed
 
 Vlinder has two stores that capture chains of content-addressed nodes:
 
-**ConversationStore** (ADR 054) — a git repo at `~/.vlinder/conversations/`. Each commit is a user message or agent response. Parent links form a chain. Fork is `git checkout -b`. Only sees user↔entry-agent turns.
+**ConversationStore** (ADR 054) — a git repo at `~/.vlinder/conversations/`. Each commit is a user message or agent response. Only sees user↔entry-agent turns.
 
-**DagStore** (ADR 061) — SQLite with a `dag_nodes` table. Each node is an invoke/complete pair. `parent_hash` links form a chain. Sees all agent boundaries including internal delegations.
+**DagStore** (ADR 061) — SQLite with a `dag_nodes` table. Each node is an invoke/complete pair. Sees all agent boundaries including internal delegations.
 
-They are structurally identical:
+They are structurally identical: content-addressed, append-only, parent-linked chains scoped by session. One uses git, the other uses SQLite. Both are DAGs.
 
-| | ConversationStore | DagStore |
-|--|--|--|
-| Unit | Git commit | DagNode |
-| Identity | SHA-1 | SHA-256 |
-| Chain | Parent commit | parent_hash |
-| Scope | Per session | Per session |
-| Append-only | Yes | Yes |
-| Fork | git checkout -b | Not yet implemented |
+ADR 063 identified the gap: fleet internals are invisible to the user. The DAG has the complete picture but lives in SQLite. The conversation store has git's tooling but only sees the outer conversation.
 
-Both are content-addressed, append-only, parent-linked chains scoped by session. One uses git as a backend, the other uses SQLite. Both are DAGs.
+### The realization
 
-### The problem
+Git is a content-addressed DAG store with refs for branching. That's not an analogy — that's literally what git was designed to be. The DagStore trait maps 1:1 onto git operations:
 
-Two stores for the same shape of data creates friction:
+| DagStore operation | Git operation |
+|---|---|
+| `insert_node()` | `git commit` |
+| `get_node(hash)` | `git show` |
+| `get_session_nodes()` | `git log` |
+| `get_children()` | `git log --children` |
+| `ancestors()` | `git log --ancestry-path` |
+| fork | `git checkout -b` |
+| refs | `git branch` |
 
-- The conversation store only sees the outer conversation. Fleet internals are invisible (the gap ADR 063 identified).
-- The DAG store sees everything but can't fork — that's a git operation.
-- Route (ADR 063) needs the DAG's completeness. Session needs the conversation store's operational role. They should be the same data.
-- Two write paths, two schemas, two failure modes for what is conceptually one chain.
+DAG nodes are one per agent invocation — the same frequency as conversation commits, which git already handles fine. The performance argument for SQLite (many small KV writes) doesn't apply here.
 
-### What git provides today
+### What git gives us for free
 
-- Content-addressed commits (SHA-1)
-- Parent links (commit chain)
-- Branching (`git checkout -b` for fork)
-- Log (`git log` for timeline)
-- Native tooling (`git diff`, `git branch`, etc.)
+If every agent interaction is a git commit, every git client becomes a Vlinder viewer:
 
-### What SQLite provides today
+- `git log --graph --all` — route visualization with branching
+- `git diff <hash1> <hash2>` — payload comparison
+- `git branch` — list all forks
+- `git show <hash>` — inspect any node
+- `git bisect` — binary search for where behavior diverged
+- `git format-patch` / `git bundle` — export and share sessions
+- `gitk`, VS Code, GitHub UI, `tig` — visualization without building anything
+- `git push` — share a session
+- `git verify-commit` — audit
 
-- Content-addressed nodes (SHA-256)
-- Parent links (parent_hash column)
-- Indexed queries (by session, by agent, by parent)
-- Recursive CTEs for ancestry walks
-- WAL mode for concurrent access
-
-Everything git provides can be expressed as DAG operations on SQLite. Fork = insert a new node with an existing node as parent. Log = query by session ordered by timestamp. Branch tracking = a refs table mapping branch names to node hashes.
+This is an enormous UX surface we never have to build. Every developer already knows how to use it.
 
 ## Decision
 
-**The DagStore trait becomes the unified interface for all chain-structured, content-addressed storage.** The git-backed ConversationStore is replaced by a SQLite-backed implementation of the same trait.
+**Git is the unified store for all agent interactions.** Every conversation — user↔agent and agent↔agent — is a git commit. The conversation doesn't use git for storage. The conversation *is* git.
+
+The DagStore trait is the domain vocabulary for operations that git implements. The SQLite DagStore becomes the test double. Git is the production backend.
+
+### What a fleet execution looks like
+
+```
+$ git log --graph --all --oneline
+
+* f3a1b2c (HEAD -> main) support-agent → user: "Run podman pull..."
+* d4e5f6a support-agent → code-analyst: "Check podman docs"
+* b7c8d9e code-analyst → support-agent: "Requires pull before run"
+* a1b2c3d support-agent → log-analyst: "Find errors"
+* 9e8f7a6 log-analyst → support-agent: "dispatch.failed: container not found"
+* 5c6d7e8 user → support-agent: "Why did my agent fail?"
+```
+
+That's not a debug view. That's the actual conversation. Every agent-to-agent delegation is a commit. The full route is visible in any git client.
 
 ### What changes
 
-- `DagStore` gains fork and ref-tracking operations
-- `ConversationStore` is replaced — session data is stored as DagNodes
-- The git repo at `~/.vlinder/conversations/` is no longer needed
-- One database, one schema, one write path
-
-### Extended DagStore trait
-
-```rust
-pub trait DagStore: Send + Sync {
-    // Existing
-    fn insert_node(&self, node: &DagNode) -> Result<(), String>;
-    fn get_node(&self, hash: &str) -> Result<Option<DagNode>, String>;
-    fn get_session_nodes(&self, session_id: &str) -> Result<Vec<DagNode>, String>;
-    fn get_children(&self, parent_hash: &str) -> Result<Vec<DagNode>, String>;
-
-    // New: ref tracking (replaces git branches)
-    fn set_ref(&self, name: &str, hash: &str) -> Result<(), String>;
-    fn get_ref(&self, name: &str) -> Result<Option<String>, String>;
-    fn list_refs(&self) -> Result<Vec<(String, String)>, String>;
-
-    // New: ancestry (replaces git log)
-    fn ancestors(&self, hash: &str) -> Result<Vec<DagNode>, String>;
-}
-```
-
-Refs replace git branches. `main` points to the latest node. Fork creates a new ref pointing to an existing node. Switching branches = changing which ref the harness reads from.
-
-### Schema additions
-
-```sql
--- Refs: named pointers to nodes (like git branches)
-CREATE TABLE dag_refs (
-    name TEXT PRIMARY KEY,
-    hash TEXT NOT NULL REFERENCES dag_nodes(hash)
-);
-```
+- The DagCaptureWorker writes git commits instead of SQLite rows
+- All agent interactions (not just user↔entry-agent) become commits
+- The SQLite `dag_nodes` table becomes `#[cfg(test)]` only
+- `ConversationStore` and `DagStore` converge into one git-backed implementation
+- Route (ADR 063) is `git log` with the right format
 
 ### What doesn't change
 
-- DagNode structure stays the same
-- Content addressing stays the same (SHA-256)
-- Merkle chain property stays the same
-- The DagCaptureWorker still writes nodes from NATS traffic
-- Route (ADR 063) constructs from DagNodes — unaffected
+- DagNode as a domain type stays — it's the commit's content
+- Content addressing stays — git does it natively
+- Merkle chain stays — git's commit graph
+- The DagStore trait stays — git implements it
+- Fork stays `git checkout -b`
+
+### Commit format
+
+Each commit stores the agent interaction:
+
+```
+<from> → <to>
+
+<payload_out summary>
+
+Session: <session_id>
+Agent: <agent_name>
+Payload-In-Hash: <sha256>
+Payload-Out-Hash: <sha256>
+```
+
+Full payloads stored as git blobs referenced from the commit tree. Summaries in the commit message for `git log` readability.
 
 ## Consequences
 
-- One store instead of two — conversation and DAG data live in the same database
-- Fleet internals and user conversations are stored uniformly
-- Fork is a DAG operation (new ref pointing to existing node), not a git operation
-- Git dependency removed from the operational path
-- Route, diff, bisect, fork all operate on the same data through the same trait
-- The `git log`/`git show` debugging escape hatch is lost — replaced by `vlinder timeline` commands that query SQLite
-- Migration path needed for existing conversation repos (or clean break for pre-1.0)
+- Every git client is a Vlinder viewer — visualization, diffing, branching for free
+- Fleet internals are visible in the same commit history as user conversations
+- One store, one protocol, one data model
+- `vlinder timeline route` becomes sugar over `git log`
+- Sessions are portable — `git clone` to share, `git push` to back up
+- The platform doesn't use git — the platform IS git
+- SQLite DagStore remains as fast test double
+- Developers debug agent conversations with tools they already know
