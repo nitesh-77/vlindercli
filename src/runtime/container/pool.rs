@@ -10,13 +10,13 @@ use crate::domain::Agent;
 use crate::queue::{ContainerDiagnostics, ContainerRuntimeInfo, InvokeMessage};
 
 use super::podman::{Podman, PodmanCli};
-use crate::runtime::http_bridge::HttpBridge;
+use crate::runtime::http_bridge_server::HttpBridgeServer;
 
 /// A long-running container managed by the pool.
 pub(super) struct ManagedContainer {
     container_id: String,
     host_port: u16,
-    pub(super) bridge: HttpBridge,
+    pub(super) bridge: HttpBridgeServer,
     /// What was passed to `podman run` (tag in mutable mode, digest in pinned mode).
     image_ref: String,
     /// Content-addressed digest from `podman image inspect` at container start.
@@ -91,7 +91,7 @@ impl ContainerPool {
         &mut self,
         name: &str,
         agent: &Agent,
-        bridge: HttpBridge,
+        bridge: HttpBridgeServer,
     ) -> Result<u16, String> {
         let bridge_url = bridge.container_url();
 

@@ -4,8 +4,8 @@
 //! - ContainerRuntime: queue-based OCI container agent execution
 
 mod container;
-mod http_bridge;
-pub(crate) mod service_router;
+pub(crate) mod http_bridge;
+mod http_bridge_server;
 
 pub use container::ContainerRuntime;
 pub use container::ImagePolicy;

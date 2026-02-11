@@ -481,7 +481,7 @@ impl CompleteMessage {
 /// InvokeMessage expects CompleteMessage as its reply.
 ///
 /// Note: `create_reply()` does NOT carry state — the runtime sets state
-/// separately via `create_reply_with_state()` after reading from ServiceRouter.
+/// separately via `create_reply_with_state()` after reading from HttpBridge.
 /// Uses placeholder ContainerDiagnostics — the runtime replaces with real diagnostics.
 impl ExpectsReply for InvokeMessage {
     type Reply = CompleteMessage;
@@ -503,7 +503,7 @@ impl InvokeMessage {
     /// Create a reply with the final state hash (ADR 055).
     ///
     /// Used by the runtime when it has read the final state from the
-    /// ServiceRouter after the agent finishes.
+    /// HttpBridge after the agent finishes.
     pub fn create_reply_with_state(&self, payload: Vec<u8>, state: Option<String>) -> CompleteMessage {
         CompleteMessage::new(
             self.submission.clone(),
@@ -518,7 +518,7 @@ impl InvokeMessage {
 
     /// Create a reply with state and real container diagnostics (ADR 073).
     ///
-    /// Used by the runtime when it has both the final state from ServiceRouter
+    /// Used by the runtime when it has both the final state from HttpBridge
     /// and real container metadata from Podman.
     pub fn create_reply_with_diagnostics(
         &self,

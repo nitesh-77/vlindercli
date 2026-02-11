@@ -7,7 +7,7 @@
 //! | Message   | Diagnostics type       | Emitter                  |
 //! |-----------|------------------------|--------------------------|
 //! | Invoke    | InvokeDiagnostics      | Harness                  |
-//! | Request   | RequestDiagnostics     | ServiceRouter (bridge)   |
+//! | Request   | RequestDiagnostics     | HttpBridge (bridge)   |
 //! | Response  | ServiceDiagnostics     | Service workers          |
 //! | Complete  | ContainerDiagnostics   | Container runtime        |
 //! | Delegate  | DelegateDiagnostics    | Container runtime        |
@@ -28,7 +28,7 @@ pub struct InvokeDiagnostics {
 }
 
 // ============================================================================
-// RequestDiagnostics — ServiceRouter (HTTP bridge)
+// RequestDiagnostics — HttpBridge (HTTP bridge)
 // ============================================================================
 
 /// Diagnostics emitted by the bridge when intercepting an agent SDK call.

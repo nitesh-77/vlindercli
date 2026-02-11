@@ -1,393 +1,348 @@
-//! HTTP Bridge — minimal HTTP server for container agent service calls.
+//! HttpBridge — queue-backed implementation of AgentBridge (ADR 074).
 //!
-//! Provides per-operation endpoints that map to SDK methods:
-//!   POST /kv/get, /kv/put, /infer, /embed, etc.
+//! Routes typed platform service calls through the MessageQueue.
+//! Each trait method builds the appropriate request, sends it to the
+//! queue, and polls for a response.
 //!
-//! The bridge is the JSON-to-typed boundary: it deserializes agent requests
-//! into SdkMessage variants, calls typed AgentBridge methods, and serializes
-//! the results back to HTTP responses.
+//! State tracking (ADR 055): For KV operations, injects the current
+//! state hash into requests and extracts the new hash from kv-put
+//! responses. This makes the router the "state cursor" for each invocation.
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use std::thread::JoinHandle;
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 
-use crate::domain::{AgentBridge, SdkMessage};
+use uuid::Uuid;
 
-use super::service_router::ServiceRouter;
+use crate::domain::{AgentBridge, Hop, ObjectStorageType, Registry, VectorMatch, VectorStorageType};
+use crate::queue::{
+    DelegateMessage, DelegateDiagnostics, ContainerDiagnostics, InvokeMessage,
+    MessageQueue, RequestMessage, RequestDiagnostics, SequenceCounter,
+};
 
-/// URL path → SdkMessage `op` field mapping.
-fn op_for_path(path: &str) -> Option<&'static str> {
-    match path {
-        "/kv/get" => Some("kv-get"),
-        "/kv/put" => Some("kv-put"),
-        "/kv/list" => Some("kv-list"),
-        "/kv/delete" => Some("kv-delete"),
-        "/vector/store" => Some("vector-store"),
-        "/vector/search" => Some("vector-search"),
-        "/vector/delete" => Some("vector-delete"),
-        "/infer" => Some("infer"),
-        "/embed" => Some("embed"),
-        "/delegate" => Some("delegate"),
-        "/wait" => Some("wait"),
-        _ => None,
-    }
-}
-
-/// A running HTTP bridge server.
+/// Routes agent SDK calls to the appropriate backend service.
 ///
-/// Created by `start()`, runs in a background thread.
-/// Shuts down when `stop()` is called or the struct is dropped.
+/// Constructed once per container, shared across all service calls.
+/// The invoke context is updated per invocation via `update_invoke()`.
 pub(crate) struct HttpBridge {
-    port: u16,
-    stop_flag: Arc<AtomicBool>,
-    handle: Option<JoinHandle<()>>,
-    send_data: Arc<ServiceRouter>,
+    pub(crate) queue: Arc<dyn MessageQueue + Send + Sync>,
+    pub(crate) registry: Arc<dyn Registry>,
+    /// The invoke that triggered this execution — carries submission + agent_id.
+    /// Updated per invocation so SDK calls route on the correct submission ID.
+    pub(crate) invoke: RwLock<InvokeMessage>,
+    /// Resolved backends from agent config (None if agent didn't declare storage)
+    pub(crate) kv_backend: Option<ObjectStorageType>,
+    pub(crate) vec_backend: Option<VectorStorageType>,
+    /// Model name → backend string mapping (built from agent's declared models)
+    pub(crate) model_backends: HashMap<String, String>,
+    /// Sequence counter — incremented per service call, reset per invocation
+    pub(crate) sequence: SequenceCounter,
+    /// Current state hash for the active invocation (ADR 055).
+    /// Updated on kv-put responses. Read by runtime on task completion.
+    pub(crate) current_state: RwLock<Option<String>>,
 }
 
 impl HttpBridge {
-    /// Start the bridge server in a background thread.
+    /// Update the invoke context for a new invocation and reset the sequence counter.
     ///
-    /// Binds to `0.0.0.0:0` (OS-assigned port). The container should
-    /// connect to `http://host.containers.internal:{port}/`.
-    pub(crate) fn start(send_data: Arc<ServiceRouter>) -> std::io::Result<Self> {
-        let server = tiny_http::Server::http("0.0.0.0:0")
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
-        let port = server.server_addr().to_ip().unwrap().port();
-
-        let stop_flag = Arc::new(AtomicBool::new(false));
-        let stop = Arc::clone(&stop_flag);
-
-        let bridge_data = Arc::clone(&send_data);
-        let handle = std::thread::spawn(move || {
-            run_bridge(server, bridge_data, stop);
-        });
-
-        Ok(Self {
-            port,
-            stop_flag,
-            handle: Some(handle),
-            send_data,
-        })
+    /// If the invoke carries no state but the agent has KV storage, bootstraps
+    /// to root state ("") so versioned operations start tracking (ADR 055).
+    pub(crate) fn update_invoke(&self, invoke: InvokeMessage) {
+        let state = invoke.state.clone()
+            .or_else(|| self.kv_backend.as_ref().map(|_| String::new()));
+        *self.invoke.write().unwrap() = invoke;
+        *self.current_state.write().unwrap() = state;
+        self.sequence.reset();
     }
 
-    /// Update the invoke context for a new invocation.
-    pub(crate) fn update_invoke(&self, invoke: crate::queue::InvokeMessage) {
-        self.send_data.update_invoke(invoke);
-    }
-
-    /// Read the final state hash after an invocation completes (ADR 055).
+    /// Read the final state hash after an invocation completes.
     pub(crate) fn final_state(&self) -> Option<String> {
-        self.send_data.final_state()
+        self.current_state.read().unwrap().clone()
     }
 
-    /// The port the bridge is listening on.
-    pub(crate) fn port(&self) -> u16 {
-        self.port
-    }
+    // ========================================================================
+    // Private helpers
+    // ========================================================================
 
-    /// The URL the container should use to reach this bridge.
-    pub(crate) fn container_url(&self) -> String {
-        format!("http://host.containers.internal:{}", self.port())
-    }
+    /// Send a service request through the queue and poll for the response.
+    fn send_service_request(&self, hop: Hop, payload: Vec<u8>) -> Result<Vec<u8>, String> {
+        let seq = self.sequence.next();
+        let invoke = self.invoke.read().unwrap();
+        let sha = invoke.submission.to_string();
 
-    /// Signal the bridge to stop and wait for it to finish.
-    pub(crate) fn stop(mut self) {
-        self.stop_flag.store(true, Ordering::Relaxed);
-        if let Some(handle) = self.handle.take() {
-            let _ = handle.join();
-        }
-    }
-}
-
-impl Drop for HttpBridge {
-    fn drop(&mut self) {
-        self.stop_flag.store(true, Ordering::Relaxed);
-        // Don't join in Drop — the thread will notice the flag on next poll
-    }
-}
-
-/// Main bridge loop.
-fn run_bridge(
-    server: tiny_http::Server,
-    send_data: Arc<ServiceRouter>,
-    stop: Arc<AtomicBool>,
-) {
-    loop {
-        if stop.load(Ordering::Relaxed) {
-            break;
-        }
-
-        // Non-blocking receive with timeout so we can check the stop flag
-        let request = match server.recv_timeout(std::time::Duration::from_millis(50)) {
-            Ok(Some(req)) => req,
-            Ok(None) => continue,    // timeout, check stop flag
-            Err(_) => break,
+        let received_at_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        let request_diag = RequestDiagnostics {
+            sequence: seq.as_u32(),
+            endpoint: format!("/{}", hop.service),
+            request_bytes: payload.len() as u64,
+            received_at_ms,
         };
 
-        handle_request(request, &*send_data);
-    }
-}
-
-/// Handle a single HTTP request.
-fn handle_request(mut request: tiny_http::Request, bridge: &dyn AgentBridge) {
-    let method = request.method().clone();
-    let path = request.url().to_string();
-
-    // Health check
-    if method == tiny_http::Method::Get && path == "/health" {
-        let response = tiny_http::Response::from_data(b"ok".to_vec());
-        let _ = request.respond(response);
-        return;
-    }
-
-    if method != tiny_http::Method::Post {
-        let body = format!("expected POST, got {}", method);
-        let response = tiny_http::Response::from_data(body.into_bytes())
-            .with_status_code(500);
-        let _ = request.respond(response);
-        return;
-    }
-
-    // Map path to op
-    let op = match op_for_path(&path) {
-        Some(op) => op,
-        None => {
-            let body = format!("unknown endpoint: {}", path);
-            let response = tiny_http::Response::from_data(body.into_bytes())
-                .with_status_code(500);
-            let _ = request.respond(response);
-            return;
-        }
-    };
-
-    // Read body
-    let mut body = Vec::new();
-    if let Err(e) = request.as_reader().read_to_end(&mut body) {
-        let msg = format!("body read error: {}", e);
-        let response = tiny_http::Response::from_data(msg.into_bytes())
-            .with_status_code(500);
-        let _ = request.respond(response);
-        return;
-    }
-
-    // Merge op into body JSON, deserialize, and route to typed methods
-    match merge_op(op, &body).and_then(|merged| dispatch(bridge, merged)) {
-        Ok(result) => {
-            let response = tiny_http::Response::from_data(result);
-            let _ = request.respond(response);
-        }
-        Err(msg) => {
-            let response = tiny_http::Response::from_data(msg.into_bytes())
-                .with_status_code(500);
-            let _ = request.respond(response);
-        }
-    }
-}
-
-/// Deserialize an SdkMessage and route to typed AgentBridge methods.
-///
-/// This is the JSON-to-typed boundary: serde on the way in, serde on the way out.
-/// Everything between is typed Rust calls on the AgentBridge trait.
-fn dispatch(bridge: &dyn AgentBridge, payload: Vec<u8>) -> Result<Vec<u8>, String> {
-    let msg: SdkMessage = serde_json::from_slice(&payload)
-        .map_err(|e| format!("invalid SDK message: {}", e))?;
-
-    match msg {
-        SdkMessage::KvGet { path } => {
-            bridge.kv_get(&path)
-        }
-        SdkMessage::KvPut { path, content } => {
-            bridge.kv_put(&path, &content)?;
-            Ok(b"ok".to_vec())
-        }
-        SdkMessage::KvList { path } => {
-            let paths = bridge.kv_list(&path)?;
-            serde_json::to_vec(&paths)
-                .map_err(|e| format!("serialize error: {}", e))
-        }
-        SdkMessage::KvDelete { path } => {
-            let existed = bridge.kv_delete(&path)?;
-            Ok(if existed { b"ok".to_vec() } else { b"not_found".to_vec() })
-        }
-        SdkMessage::VectorStore { key, vector, metadata } => {
-            bridge.vector_store(&key, &vector, &metadata)?;
-            Ok(b"ok".to_vec())
-        }
-        SdkMessage::VectorSearch { vector, limit } => {
-            let matches = bridge.vector_search(&vector, limit)?;
-            serde_json::to_vec(&matches)
-                .map_err(|e| format!("serialize error: {}", e))
-        }
-        SdkMessage::VectorDelete { key } => {
-            let existed = bridge.vector_delete(&key)?;
-            Ok(if existed { b"ok".to_vec() } else { b"not_found".to_vec() })
-        }
-        SdkMessage::Infer { model, prompt, max_tokens } => {
-            let text = bridge.infer(&model, &prompt, max_tokens)?;
-            Ok(text.into_bytes())
-        }
-        SdkMessage::Embed { model, text } => {
-            let vector = bridge.embed(&model, &text)?;
-            serde_json::to_vec(&vector)
-                .map_err(|e| format!("serialize error: {}", e))
-        }
-        SdkMessage::Delegate { agent, input } => {
-            let handle = bridge.delegate(&agent, &input)?;
-            serde_json::to_vec(&serde_json::json!({ "handle": handle }))
-                .map_err(|e| format!("serialize error: {}", e))
-        }
-        SdkMessage::Wait { handle } => {
-            let output = bridge.wait(&handle)?;
-            serde_json::to_vec(&serde_json::json!({ "output": String::from_utf8_lossy(&output) }))
-                .map_err(|e| format!("serialize error: {}", e))
-        }
-    }
-}
-
-/// Merge the `op` field into a JSON object body.
-///
-/// Input: op = "kv-get", body = `{"path": "/foo"}`
-/// Output: `{"op": "kv-get", "path": "/foo"}`
-fn merge_op(op: &str, body: &[u8]) -> Result<Vec<u8>, String> {
-    let mut map: serde_json::Map<String, serde_json::Value> = serde_json::from_slice(body)
-        .map_err(|e| format!("invalid JSON body: {}", e))?;
-
-    map.insert("op".to_string(), serde_json::Value::String(op.to_string()));
-
-    serde_json::to_vec(&map)
-        .map_err(|e| format!("JSON serialization error: {}", e))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::domain::{InMemoryRegistry, Registry, ResourceId, RuntimeType};
-    use crate::queue::{HarnessType, InMemoryQueue, InvokeDiagnostics, InvokeMessage, MessageQueue, SequenceCounter, SessionId, SubmissionId};
-    use std::io::{Read, Write};
-    use std::net::TcpStream;
-
-    fn test_send_data() -> Arc<ServiceRouter> {
-        let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
-        let registry: Arc<dyn Registry> = Arc::new(InMemoryRegistry::new());
-        let invoke = InvokeMessage::new(
-            SubmissionId::new(),
-            SessionId::new(),
-            HarnessType::Cli,
-            RuntimeType::Container,
-            ResourceId::new("http://127.0.0.1:9000/agents/test"),
-            b"test".to_vec(),
-            None,
-            InvokeDiagnostics { harness_version: String::new(), history_turns: 0 },
+        let request = RequestMessage::new(
+            invoke.submission.clone(),
+            invoke.session.clone(),
+            invoke.agent_id.clone(),
+            hop.service,
+            hop.backend,
+            hop.operation,
+            seq,
+            payload,
+            request_diag,
         );
-        Arc::new(ServiceRouter {
-            queue,
-            registry,
-            invoke: std::sync::RwLock::new(invoke),
-            kv_backend: None,
-            vec_backend: None,
-            model_backends: std::collections::HashMap::new(),
-            sequence: SequenceCounter::new(),
-            current_state: std::sync::RwLock::new(None),
-        })
+        drop(invoke);
+
+        tracing::debug!(sha = %sha, event = "service.request", service = %request.service, backend = %request.backend, seq = %seq, "sending service request");
+
+        self.queue.send_request(request.clone())
+            .map_err(|e| format!("send error: {}", e))?;
+
+        tracing::debug!(sha = %sha, event = "service.polling", service = %request.service, seq = %seq, "polling for response");
+        let poll_start = std::time::Instant::now();
+        let mut poll_count: u64 = 0;
+
+        loop {
+            match self.queue.receive_response(&request) {
+                Ok((response, ack)) => {
+                    let response_payload = response.payload.clone();
+                    let _ = ack();
+                    tracing::debug!(
+                        sha = %sha, event = "service.response",
+                        service = %request.service, seq = %seq,
+                        polls = poll_count, elapsed = ?poll_start.elapsed(),
+                        "got response"
+                    );
+                    return Ok(response_payload);
+                }
+                Err(e) => {
+                    poll_count += 1;
+                    if poll_count % 5000 == 0 {
+                        tracing::warn!(
+                            sha = %sha,
+                            service = %request.service, seq = %seq,
+                            polls = poll_count, elapsed = ?poll_start.elapsed(),
+                            error = %e,
+                            "still waiting for response"
+                        );
+                    }
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
     }
 
-    #[test]
-    fn bridge_starts_and_stops() {
-        let send_data = test_send_data();
-        let bridge = HttpBridge::start(send_data).unwrap();
-        assert!(bridge.port() > 0);
-        assert!(bridge.container_url().contains("host.containers.internal"));
-        bridge.stop();
+    /// Build a KV request payload with state injection (ADR 055).
+    fn build_kv_payload(&self, op: &str, fields: serde_json::Value) -> Result<Vec<u8>, String> {
+        let mut map = match fields {
+            serde_json::Value::Object(m) => m,
+            _ => return Err("build_kv_payload: expected JSON object".to_string()),
+        };
+        map.insert("op".to_string(), serde_json::Value::String(op.to_string()));
+        if let Some(ref state) = *self.current_state.read().unwrap() {
+            map.insert("state".to_string(), serde_json::Value::String(state.clone()));
+        }
+        serde_json::to_vec(&map).map_err(|e| format!("serialize error: {}", e))
     }
 
-    #[test]
-    fn bridge_health_check() {
-        let send_data = test_send_data();
-        let bridge = HttpBridge::start(send_data).unwrap();
-        let port = bridge.port();
-
-        let mut stream = TcpStream::connect(format!("127.0.0.1:{}", port)).unwrap();
-        stream.write_all(b"GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n").unwrap();
-
-        let mut response = String::new();
-        stream.read_to_string(&mut response).unwrap();
-        assert!(response.contains("200 OK"));
-        assert!(response.contains("ok"));
-
-        bridge.stop();
+    /// Extract the new state hash from a kv-put response and update current_state.
+    fn extract_state(&self, response_payload: &[u8]) {
+        if let Ok(map) = serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(response_payload) {
+            if let Some(serde_json::Value::String(new_state)) = map.get("state") {
+                tracing::debug!(new_state = %new_state, "extract_state: updated current_state");
+                *self.current_state.write().unwrap() = Some(new_state.clone());
+            }
+        }
     }
 
-    #[test]
-    fn bridge_rejects_unknown_path() {
-        let send_data = test_send_data();
-        let bridge = HttpBridge::start(send_data).unwrap();
-        let port = bridge.port();
+    /// Check for `[error]` prefix in a worker response.
+    fn check_worker_error(response: &[u8]) -> Result<(), String> {
+        if response.starts_with(b"[error]") {
+            Err(String::from_utf8_lossy(response).to_string())
+        } else {
+            Ok(())
+        }
+    }
+}
 
-        let body = b"{}";
-        let request = format!(
-            "POST /unknown HTTP/1.1\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-            body.len(),
-            std::str::from_utf8(body).unwrap()
-        );
+// ============================================================================
+// AgentBridge trait implementation
+// ============================================================================
 
-        let mut stream = TcpStream::connect(format!("127.0.0.1:{}", port)).unwrap();
-        stream.write_all(request.as_bytes()).unwrap();
-
-        let mut response = String::new();
-        stream.read_to_string(&mut response).unwrap();
-        assert!(response.contains("500"));
-        assert!(response.contains("unknown endpoint"));
-
-        bridge.stop();
+impl AgentBridge for HttpBridge {
+    fn kv_get(&self, path: &str) -> Result<Vec<u8>, String> {
+        let backend = self.kv_backend
+            .ok_or("agent called kv-get but has no object_storage configured")?;
+        let hop = Hop { service: "kv", backend: backend.as_str().to_string(), operation: "get" };
+        let payload = self.build_kv_payload("kv-get", serde_json::json!({"path": path}))?;
+        let response = self.send_service_request(hop, payload)?;
+        Self::check_worker_error(&response)?;
+        Ok(response)
     }
 
-    #[test]
-    fn bridge_rejects_kv_without_backend() {
-        let send_data = test_send_data(); // no kv_backend configured
-        let bridge = HttpBridge::start(send_data).unwrap();
-        let port = bridge.port();
+    fn kv_put(&self, path: &str, content: &str) -> Result<(), String> {
+        let backend = self.kv_backend
+            .ok_or("agent called kv-put but has no object_storage configured")?;
+        let hop = Hop { service: "kv", backend: backend.as_str().to_string(), operation: "put" };
+        let payload = self.build_kv_payload("kv-put", serde_json::json!({"path": path, "content": content}))?;
+        let response = self.send_service_request(hop, payload)?;
+        Self::check_worker_error(&response)?;
+        self.extract_state(&response);
+        Ok(())
+    }
 
-        let body = br#"{"path": "/test.txt"}"#;
-        let request = format!(
-            "POST /kv/get HTTP/1.1\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-            body.len(),
-            std::str::from_utf8(body).unwrap()
+    fn kv_list(&self, prefix: &str) -> Result<Vec<String>, String> {
+        let backend = self.kv_backend
+            .ok_or("agent called kv-list but has no object_storage configured")?;
+        let hop = Hop { service: "kv", backend: backend.as_str().to_string(), operation: "list" };
+        let payload = self.build_kv_payload("kv-list", serde_json::json!({"path": prefix}))?;
+        let response = self.send_service_request(hop, payload)?;
+        Self::check_worker_error(&response)?;
+        serde_json::from_slice(&response)
+            .map_err(|e| format!("kv-list response parse error: {}", e))
+    }
+
+    fn kv_delete(&self, path: &str) -> Result<bool, String> {
+        let backend = self.kv_backend
+            .ok_or("agent called kv-delete but has no object_storage configured")?;
+        let hop = Hop { service: "kv", backend: backend.as_str().to_string(), operation: "delete" };
+        let payload = self.build_kv_payload("kv-delete", serde_json::json!({"path": path}))?;
+        let response = self.send_service_request(hop, payload)?;
+        Self::check_worker_error(&response)?;
+        Ok(response == b"ok")
+    }
+
+    fn vector_store(&self, key: &str, vector: &[f32], metadata: &str) -> Result<(), String> {
+        let backend = self.vec_backend
+            .ok_or("agent called vector-store but has no vector_storage configured")?;
+        let hop = Hop { service: "vec", backend: backend.as_str().to_string(), operation: "store" };
+        let payload = serde_json::to_vec(&serde_json::json!({
+            "op": "vector-store", "key": key, "vector": vector, "metadata": metadata,
+        })).unwrap();
+        let response = self.send_service_request(hop, payload)?;
+        Self::check_worker_error(&response)?;
+        Ok(())
+    }
+
+    fn vector_search(&self, vector: &[f32], limit: u32) -> Result<Vec<VectorMatch>, String> {
+        let backend = self.vec_backend
+            .ok_or("agent called vector-search but has no vector_storage configured")?;
+        let hop = Hop { service: "vec", backend: backend.as_str().to_string(), operation: "search" };
+        let payload = serde_json::to_vec(&serde_json::json!({
+            "op": "vector-search", "vector": vector, "limit": limit,
+        })).unwrap();
+        let response = self.send_service_request(hop, payload)?;
+        Self::check_worker_error(&response)?;
+        serde_json::from_slice(&response)
+            .map_err(|e| format!("vector-search response parse error: {}", e))
+    }
+
+    fn vector_delete(&self, key: &str) -> Result<bool, String> {
+        let backend = self.vec_backend
+            .ok_or("agent called vector-delete but has no vector_storage configured")?;
+        let hop = Hop { service: "vec", backend: backend.as_str().to_string(), operation: "delete" };
+        let payload = serde_json::to_vec(&serde_json::json!({
+            "op": "vector-delete", "key": key,
+        })).unwrap();
+        let response = self.send_service_request(hop, payload)?;
+        Self::check_worker_error(&response)?;
+        Ok(response == b"ok")
+    }
+
+    fn infer(&self, model: &str, prompt: &str, max_tokens: u32) -> Result<String, String> {
+        let backend = self.model_backends.get(model)
+            .ok_or_else(|| format!("agent called infer with undeclared model '{}'", model))?;
+        let hop = Hop { service: "infer", backend: backend.clone(), operation: "run" };
+        let payload = serde_json::to_vec(&serde_json::json!({
+            "op": "infer", "model": model, "prompt": prompt, "max_tokens": max_tokens,
+        })).unwrap();
+        let response = self.send_service_request(hop, payload)?;
+        Self::check_worker_error(&response)?;
+        String::from_utf8(response)
+            .map_err(|e| format!("infer response not valid UTF-8: {}", e))
+    }
+
+    fn embed(&self, model: &str, text: &str) -> Result<Vec<f32>, String> {
+        let backend = self.model_backends.get(model)
+            .ok_or_else(|| format!("agent called embed with undeclared model '{}'", model))?;
+        let hop = Hop { service: "embed", backend: backend.clone(), operation: "run" };
+        let payload = serde_json::to_vec(&serde_json::json!({
+            "op": "embed", "model": model, "text": text,
+        })).unwrap();
+        let response = self.send_service_request(hop, payload)?;
+        Self::check_worker_error(&response)?;
+        serde_json::from_slice(&response)
+            .map_err(|e| format!("embed response parse error: {}", e))
+    }
+
+    fn delegate(&self, target_agent: &str, input: &str) -> Result<String, String> {
+        let _agent = self.registry.get_agent_by_name(target_agent)
+            .ok_or_else(|| format!("delegate: target agent '{}' not found", target_agent))?;
+
+        let invoke = self.invoke.read().unwrap();
+        let caller_agent = crate::queue::agent_routing_key(&invoke.agent_id);
+        let sha = invoke.submission.to_string();
+        let short_uuid = &Uuid::new_v4().to_string()[..8];
+        let reply_subject = format!(
+            "vlinder.{}.delegate-reply.{}.{}.{}",
+            invoke.submission, caller_agent, target_agent, short_uuid,
         );
 
-        let mut stream = TcpStream::connect(format!("127.0.0.1:{}", port)).unwrap();
-        stream.write_all(request.as_bytes()).unwrap();
+        let delegate = DelegateMessage::new(
+            invoke.submission.clone(),
+            invoke.session.clone(),
+            &caller_agent,
+            target_agent,
+            input.as_bytes().to_vec(),
+            &reply_subject,
+            DelegateDiagnostics { container: ContainerDiagnostics::placeholder(0) },
+        );
+        drop(invoke);
 
-        let mut response = String::new();
-        stream.read_to_string(&mut response).unwrap();
-        assert!(response.contains("500"));
-        assert!(response.contains("no object_storage configured"));
+        tracing::info!(
+            sha = %sha, event = "delegation.sent",
+            caller = %caller_agent, target = %target_agent,
+            reply = %reply_subject, "Delegating to agent"
+        );
 
-        bridge.stop();
+        self.queue.send_delegate(delegate)
+            .map_err(|e| format!("delegate send error: {}", e))?;
+
+        Ok(reply_subject)
     }
 
-    #[test]
-    fn op_mapping_covers_all_endpoints() {
-        assert_eq!(op_for_path("/kv/get"), Some("kv-get"));
-        assert_eq!(op_for_path("/kv/put"), Some("kv-put"));
-        assert_eq!(op_for_path("/kv/list"), Some("kv-list"));
-        assert_eq!(op_for_path("/kv/delete"), Some("kv-delete"));
-        assert_eq!(op_for_path("/vector/store"), Some("vector-store"));
-        assert_eq!(op_for_path("/vector/search"), Some("vector-search"));
-        assert_eq!(op_for_path("/vector/delete"), Some("vector-delete"));
-        assert_eq!(op_for_path("/infer"), Some("infer"));
-        assert_eq!(op_for_path("/embed"), Some("embed"));
-        assert_eq!(op_for_path("/delegate"), Some("delegate"));
-        assert_eq!(op_for_path("/wait"), Some("wait"));
-        assert_eq!(op_for_path("/health"), None); // health handled separately
-        assert_eq!(op_for_path("/unknown"), None);
-    }
+    fn wait(&self, handle: &str) -> Result<Vec<u8>, String> {
+        let sha = self.invoke.read().unwrap().submission.to_string();
+        tracing::debug!(sha = %sha, handle = %handle, "wait: polling for delegation result");
+        let poll_start = std::time::Instant::now();
+        let mut poll_count: u64 = 0;
 
-    #[test]
-    fn merge_op_adds_field() {
-        let body = br#"{"path": "/foo"}"#;
-        let merged = merge_op("kv-get", body).unwrap();
-        let map: serde_json::Map<String, serde_json::Value> = serde_json::from_slice(&merged).unwrap();
-        assert_eq!(map["op"], "kv-get");
-        assert_eq!(map["path"], "/foo");
+        loop {
+            match self.queue.receive_complete_on_subject(handle) {
+                Ok((complete, ack)) => {
+                    let payload = complete.payload.clone();
+                    let _ = ack();
+                    tracing::info!(
+                        sha = %sha, event = "delegation.completed",
+                        handle = %handle, polls = poll_count,
+                        elapsed = ?poll_start.elapsed(),
+                        "Delegation result received"
+                    );
+                    return Ok(payload);
+                }
+                Err(_) => {
+                    poll_count += 1;
+                    if poll_count % 5000 == 0 {
+                        tracing::warn!(
+                            sha = %sha,
+                            handle = %handle, polls = poll_count,
+                            elapsed = ?poll_start.elapsed(),
+                            "wait: still waiting for delegation result"
+                        );
+                    }
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
     }
 }

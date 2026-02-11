@@ -24,7 +24,7 @@ use crate::queue::{
 use self::podman::{Podman, PodmanCli};
 use self::pool::ContainerPool;
 use super::http_bridge::HttpBridge;
-use super::service_router::ServiceRouter;
+use super::http_bridge_server::HttpBridgeServer;
 
 pub use pool::ImagePolicy;
 
@@ -89,11 +89,11 @@ impl ContainerRuntime {
         self.pool.start(&agent.name, agent, bridge)
     }
 
-    /// Build the HTTP bridge + service router for a new container.
+    /// Build the HTTP bridge server for a new container.
     ///
-    /// Needs `queue` + `registry` to construct the ServiceRouter, which is why
+    /// Needs `queue` + `registry` to construct the HttpBridge, which is why
     /// this lives on ContainerRuntime rather than ContainerPool.
-    fn build_bridge(&self, agent: &Agent, invoke: &InvokeMessage) -> Result<HttpBridge, String> {
+    fn build_bridge(&self, agent: &Agent, invoke: &InvokeMessage) -> Result<HttpBridgeServer, String> {
         // Extract storage backends from agent config
         let kv_backend = agent.object_storage.as_ref()
             .and_then(|uri| ObjectStorageType::from_scheme(uri.scheme()));
@@ -108,11 +108,11 @@ impl ContainerRuntime {
             }
         }
 
-        // Create ServiceRouter for the bridge.
+        // Create HttpBridge for the server.
         // Bootstrap state to root ("") if agent uses KV but no prior state exists (ADR 055).
         let initial_state = invoke.state.clone()
             .or_else(|| kv_backend.as_ref().map(|_| String::new()));
-        let send_data = Arc::new(ServiceRouter {
+        let send_data = Arc::new(HttpBridge {
             queue: Arc::clone(&self.queue),
             registry: Arc::clone(&self.registry),
             current_state: std::sync::RwLock::new(initial_state),
@@ -123,7 +123,7 @@ impl ContainerRuntime {
             sequence: SequenceCounter::new(),
         });
 
-        HttpBridge::start(send_data)
+        HttpBridgeServer::start(send_data)
             .map_err(|e| format!("failed to start bridge: {}", e))
     }
 
