@@ -7,9 +7,10 @@
 //! - Provides an HTTP bridge for service callbacks (kv, infer, etc.)
 //! - Stops containers on shutdown
 
+mod podman;
+
 use std::collections::HashMap;
 use std::io::Read;
-use std::process::Command;
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::Instant;
@@ -20,6 +21,7 @@ use crate::queue::{
     ExpectsReply, HarnessType, InvokeDiagnostics, InvokeMessage, MessageQueue, SequenceCounter,
 };
 
+use self::podman::{Podman, PodmanCli};
 use super::http_bridge::HttpBridge;
 use super::service_router::ServiceRouter;
 
@@ -89,6 +91,8 @@ pub struct ContainerRuntime {
     engine_version: Option<semver::Version>,
     /// Image resolution policy (ADR 073).
     image_policy: ImagePolicy,
+    /// Podman engine abstraction — all CLI calls go through this.
+    podman: Box<dyn Podman>,
 }
 
 impl ContainerRuntime {
@@ -103,7 +107,8 @@ impl ContainerRuntime {
             registry_id.as_str(),
             RuntimeType::Container.as_str()
         ));
-        let engine_version = detect_engine_version();
+        let podman = Box::new(PodmanCli);
+        let engine_version = podman.engine_version();
         if let Some(ref v) = engine_version {
             tracing::info!(event = "podman.detected", version = %v, "Podman engine detected");
         } else {
@@ -118,6 +123,7 @@ impl ContainerRuntime {
             containers: HashMap::new(),
             engine_version,
             image_policy,
+            podman,
         }
     }
 
@@ -171,47 +177,30 @@ impl ContainerRuntime {
 
         // Start container in detached mode with port mapping, bridge URL, and mounts
         let bridge_env = format!("VLINDER_BRIDGE_URL={}", bridge_url);
-        let mut podman_args = vec![
-            "run", "-d",
-            "--pull=never",
-            "-p", ":8080",
-            "-e", &bridge_env,
-        ];
 
-        // Add volume mounts from agent manifest (ADR 057)
+        // Build volume mount flags from agent manifest (ADR 057)
         let mount_flags: Vec<String> = agent.mounts.iter().map(|m| {
             let mode = if m.readonly { "ro" } else { "rw" };
             format!("{}:{}:{}", m.host_path, m.guest_path.display(), mode)
         }).collect();
-        for flag in &mount_flags {
-            podman_args.push("-v");
-            podman_args.push(flag);
-        }
 
-        podman_args.push(&image);
-
-        let output = Command::new("podman")
-            .args(&podman_args)
-            .output()
-            .map_err(|e| format!("failed to spawn podman: {}", e))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            bridge.stop();
-            return Err(format!("podman run failed: {}", stderr));
-        }
-
-        let container_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let container_id = match self.podman.run(&image, &bridge_env, &mount_flags) {
+            Ok(id) => id,
+            Err(e) => {
+                bridge.stop();
+                return Err(e);
+            }
+        };
 
         // Capture image metadata for diagnostics (ADR 073)
-        let image_digest = resolve_image_digest(&image);
+        let image_digest = self.podman.image_digest(&image);
         let image_ref = image;
 
         // Discover the mapped host port
-        let host_port = discover_host_port(&container_id)?;
+        let host_port = self.podman.port(&container_id)?;
 
         // Wait for container to be ready
-        wait_for_ready(host_port)?;
+        self.podman.wait_for_ready(host_port)?;
 
         tracing::info!(
             event = "container.started",
@@ -248,12 +237,7 @@ impl ContainerRuntime {
                 container = %mc.container_id,
                 "Evicting stale container"
             );
-            let _ = Command::new("podman")
-                .args(["stop", "-t", "2", &mc.container_id])
-                .output();
-            let _ = Command::new("podman")
-                .args(["rm", "-f", &mc.container_id])
-                .output();
+            self.podman.stop_and_remove(&mc.container_id, 2);
             mc.bridge.stop();
         }
     }
@@ -526,12 +510,7 @@ impl Runtime for ContainerRuntime {
     fn shutdown(&mut self) {
         for (name, mc) in self.containers.drain() {
             tracing::info!(event = "container.stopped", agent = %name, container = %mc.container_id, "Stopping container");
-            let _ = Command::new("podman")
-                .args(["stop", "-t", "5", &mc.container_id])
-                .output();
-            let _ = Command::new("podman")
-                .args(["rm", "-f", &mc.container_id])
-                .output();
+            self.podman.stop_and_remove(&mc.container_id, 5);
             mc.bridge.stop();
         }
     }
@@ -578,78 +557,12 @@ fn dispatch_to_container(host_port: u16, payload: &[u8], session_id: &str) -> Re
     }
 }
 
-/// Detect the Podman engine version. Returns None if Podman is unavailable.
-///
-/// Captured once at `ContainerRuntime::new()` — a Podman upgrade requires
-/// a service restart, so the version cannot change mid-process.
-fn detect_engine_version() -> Option<semver::Version> {
-    Command::new("podman")
-        .args(["version", "--format", "{{.Client.Version}}"])
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .and_then(|o| {
-            let raw = String::from_utf8_lossy(&o.stdout).trim().to_string();
-            semver::Version::parse(&raw).ok()
-        })
-}
-
 /// Resolve the content-addressed digest for an image via `podman image inspect`.
 /// Returns None if the inspect fails (image not found, Podman unavailable, etc.).
+///
+/// Thin delegation to `PodmanCli` — keeps the public API stable for `harness.rs`.
 pub(crate) fn resolve_image_digest(image_ref: &str) -> Option<String> {
-    Command::new("podman")
-        .args(["image", "inspect", image_ref, "--format", "{{.Digest}}"])
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .filter(|s| !s.is_empty())
-}
-
-/// Discover the host port mapped to container port 8080.
-fn discover_host_port(container_id: &str) -> Result<u16, String> {
-    let output = Command::new("podman")
-        .args(["port", container_id, "8080"])
-        .output()
-        .map_err(|e| format!("podman port failed: {}", e))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("podman port failed: {}", stderr));
-    }
-
-    // Output format: "0.0.0.0:XXXXX\n"
-    let port_str = String::from_utf8_lossy(&output.stdout);
-    let port_str = port_str.trim();
-
-    // Extract port after the last ':'
-    let port = port_str
-        .rsplit(':')
-        .next()
-        .ok_or_else(|| format!("unexpected podman port output: {}", port_str))?
-        .parse::<u16>()
-        .map_err(|e| format!("invalid port number: {}", e))?;
-
-    Ok(port)
-}
-
-/// Wait for a container to become ready by polling its /health endpoint.
-fn wait_for_ready(host_port: u16) -> Result<(), String> {
-    let url = format!("http://127.0.0.1:{}/health", host_port);
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-
-    loop {
-        if std::time::Instant::now() > deadline {
-            return Err("container did not become ready within 30 seconds".to_string());
-        }
-
-        match ureq::get(&url).call() {
-            Ok(_) => return Ok(()),
-            Err(_) => {
-                std::thread::sleep(std::time::Duration::from_millis(100));
-            }
-        }
-    }
+    PodmanCli.image_digest(image_ref)
 }
 
 #[cfg(test)]
