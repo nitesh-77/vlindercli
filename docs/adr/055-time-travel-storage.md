@@ -1,6 +1,10 @@
 # ADR 055: Version-Controlled Agent State
 
-**Status:** Accepted
+**Status:** Partially superseded by ADR 061, 064, 065, 068
+
+> **Note (post ADR 064-069):** The DAG described here (content-addressed state store with snapshots and state commits) is no longer needed for timeline or fork operations. ADR 061 moved DAG capture to observed NATS traffic; ADR 064/065 project that into git and SQLite. The `State:` trailer linking conversation to state, and the `vlinder timeline log/fork/diff` CLI commands, are replaced by ADR 068 (timeline is git passthrough).
+>
+> **What survives:** The three rules (immutable objects, content addressing, platform-managed pointers) remain valid for agent KV versioning as an independent concern. The conceptual model of append-only writes and snapshot isolation may be revisited in a future ADR.
 
 ## Context
 

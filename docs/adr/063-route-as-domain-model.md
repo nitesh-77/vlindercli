@@ -2,7 +2,9 @@
 
 ## Status
 
-Proposed
+Accepted (updated for ADR 067 per-message node model)
+
+> **Note (post ADR 067):** The Stop struct below was designed for ADR 061's paired invoke/complete model (`payload_in` + `payload_out` per node). ADR 067 changed to one node per message with a single `payload`. Route construction now groups individual message nodes into Stops rather than mapping 1:1 from paired nodes. The Route concept and its purpose are unchanged.
 
 ## Context
 
@@ -12,7 +14,7 @@ Five conversations happened. The user only sees one: their question and the fina
 
 The Session model (ADR 054) captures the user↔entry-agent exchange. It records `HistoryEntry::User` and `HistoryEntry::Agent` turns for a single agent. It doesn't know about delegations. From the user's perspective, a fleet is a black box.
 
-The DAG (ADR 061) already captures every agent boundary — every invoke/complete pair, including internal delegations. The data exists. Nothing surfaces it to the user yet.
+The DAG (ADR 061, now superseded by ADR 067) captures every agent boundary. With ADR 067, every individual message (invoke, request, response, complete, delegate) is a separate DAG node. The data exists. Nothing surfaces it to the user yet.
 
 ### The gap
 

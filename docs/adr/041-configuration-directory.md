@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted
+Accepted (directory layout refined by ADR 066)
+
+> **Note (post ADR 066):** The directory structure shown here (`config.toml`, `registry.db`, `agents/`, `models/`) has been refined by ADR 066 (platform root) which adds `conversations/`, `state/`, and `dag/` subdirectories. The config resolution mechanism (`VLINDER_DIR` env override, `~/.vlinder/` default) is unchanged.
 
 ## Context
 

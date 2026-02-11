@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted
 
 **Supersedes:** ADR 061 (the paired invoke/complete model)
 

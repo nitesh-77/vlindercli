@@ -1,6 +1,10 @@
 # ADR 054: Session Support
 
-**Status:** Accepted
+**Status:** Partially superseded by ADR 064, 067, 068
+
+> **Note (post ADR 064-069):** The conversation storage model described here — JSON session files, `SubmissionId = commit SHA`, two commits per turn — is replaced by ADR 064 (git as agent protocol) and ADR 067 (one message, one node). Each agent message is now a git commit written by the DAG worker using plumbing commands; there are no JSON session files. The `vlinder timeline` CLI surface is replaced by ADR 068 (timeline is git passthrough). Agent identity in commits is defined by ADR 069.
+>
+> **What survives:** `SessionId` as a grouping concept, history-in-payload for multi-turn continuity, and git as a hard dependency. The harness still owns session lifecycle.
 
 ## Context
 

@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted
+Accepted (extended by ADR 056, 067, 069)
+
+> **Note (post ADR 056-069):** A fifth message type — **Delegate** (Agent → Agent, for fleet routing) — was introduced by ADR 056 and formalized by ADR 067. ADR 067 captures all five types as individual DAG nodes (one per message, not paired). ADR 069 maps the sender of each message to a git commit author, making the subject's from/to segments the basis for identity in the git projection.
 
 ## Context
 
@@ -44,6 +46,7 @@ There are exactly five sender-receiver interactions in the system. Each message 
 | **Request** | Runtime | Service | Agent calls a service |
 | **Response** | Service | Runtime | Service replies to agent |
 | **Complete** | Runtime | Harness | Submission finished |
+| **Delegate** | Agent | Agent | Agent-to-agent delegation (ADR 056) |
 
 ### 2. Each Type Has Explicit Fields
 
