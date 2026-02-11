@@ -11,7 +11,7 @@ use std::time::Instant;
 
 use serde::Deserialize;
 
-use crate::domain::InferenceEngine;
+use crate::domain::{InferenceEngine, InferenceResult};
 use crate::domain::registry::Registry;
 use crate::inference::open_inference_engine;
 use crate::queue::{MessageQueue, RequestMessage, ResponseMessage, ServiceDiagnostics, ServiceMetrics};
@@ -74,16 +74,21 @@ impl InferenceServiceWorker {
             Ok((request, ack)) => {
                 let model = self.extract_model_name(&request);
                 let start = Instant::now();
-                let response_payload = self.handle_infer(&request);
+                let result = self.handle_infer(&request);
                 let duration_ms = start.elapsed().as_millis() as u64;
+
+                let (response_payload, tokens_input, tokens_output) = match result {
+                    Ok(r) => (r.text.into_bytes(), r.tokens_input, r.tokens_output),
+                    Err(err_bytes) => (err_bytes, 0, 0),
+                };
 
                 let diag = ServiceDiagnostics {
                     service: "infer".to_string(),
                     backend: self.backend.clone(),
                     duration_ms,
                     metrics: ServiceMetrics::Inference {
-                        tokens_input: 0,
-                        tokens_output: 0,
+                        tokens_input,
+                        tokens_output,
                         model,
                     },
                 };
@@ -105,29 +110,21 @@ impl InferenceServiceWorker {
             .unwrap_or_default()
     }
 
-    fn handle_infer(&self, request: &RequestMessage) -> Vec<u8> {
-        let req: InferRequest = match serde_json::from_slice(&request.payload) {
-            Ok(r) => r,
-            Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
-        };
+    fn handle_infer(&self, request: &RequestMessage) -> Result<InferenceResult, Vec<u8>> {
+        let req: InferRequest = serde_json::from_slice(&request.payload)
+            .map_err(|e| format!("[error] invalid request: {}", e).into_bytes())?;
 
         // Resolve model alias to model_path via agent's manifest
-        let model_path = match self.resolve_model_uri(request.agent_id.as_str(), &req.model) {
-            Ok(uri) => uri,
-            Err(e) => return format!("[error] {}", e).into_bytes(),
-        };
+        let model_path = self.resolve_model_uri(request.agent_id.as_str(), &req.model)
+            .map_err(|e| format!("[error] {}", e).into_bytes())?;
 
         // Try to get cached engine, or lazy-load from registry
-        let engine = match self.get_or_load_engine(&req.model, &model_path) {
-            Ok(e) => e,
-            Err(e) => return format!("[error] {}", e).into_bytes(),
-        };
+        let engine = self.get_or_load_engine(&req.model, &model_path)
+            .map_err(|e| format!("[error] {}", e).into_bytes())?;
 
         // Call pure service function
-        match inference::run_infer(engine.as_ref(), &req.prompt, req.max_tokens) {
-            Ok(result) => result.into_bytes(),
-            Err(e) => format!("[error] {}", e).into_bytes(),
-        }
+        inference::run_infer(engine.as_ref(), &req.prompt, req.max_tokens)
+            .map_err(|e| format!("[error] {}", e).into_bytes())
     }
 
     /// Validate that an agent declared the model and return its URI.

@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::domain::InferenceEngine;
+use crate::domain::{InferenceEngine, InferenceResult};
 
 /// Inference engine that calls Ollama's HTTP API.
 pub struct OllamaInferenceEngine {
@@ -24,7 +24,7 @@ impl OllamaInferenceEngine {
 }
 
 impl InferenceEngine for OllamaInferenceEngine {
-    fn infer(&self, prompt: &str, _max_tokens: u32) -> Result<String, String> {
+    fn infer(&self, prompt: &str, _max_tokens: u32) -> Result<InferenceResult, String> {
         let url = format!("{}/api/generate", self.endpoint);
 
         let request = GenerateRequest {
@@ -41,7 +41,11 @@ impl InferenceEngine for OllamaInferenceEngine {
             .into_json()
             .map_err(|e| format!("failed to parse ollama response: {}", e))?;
 
-        Ok(body.response)
+        Ok(InferenceResult {
+            text: body.response,
+            tokens_input: body.prompt_eval_count,
+            tokens_output: body.eval_count,
+        })
     }
 }
 
@@ -55,6 +59,10 @@ struct GenerateRequest<'a> {
 #[derive(Deserialize)]
 struct GenerateResponse {
     response: String,
+    #[serde(default)]
+    prompt_eval_count: u32,
+    #[serde(default)]
+    eval_count: u32,
 }
 
 #[cfg(test)]

@@ -36,5 +36,5 @@ fn infers_with_openrouter_api() {
     );
     let result = engine.infer("Say hello in one word", 10);
     assert!(result.is_ok());
-    assert!(!result.unwrap().is_empty());
+    assert!(!result.unwrap().text.is_empty());
 }

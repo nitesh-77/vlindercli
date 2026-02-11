@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::domain::InferenceEngine;
+use crate::domain::{InferenceEngine, InferenceResult};
 
 /// Inference engine that calls OpenRouter's OpenAI-compatible API.
 pub struct OpenRouterInferenceEngine {
@@ -31,7 +31,7 @@ impl OpenRouterInferenceEngine {
 }
 
 impl InferenceEngine for OpenRouterInferenceEngine {
-    fn infer(&self, prompt: &str, max_tokens: u32) -> Result<String, String> {
+    fn infer(&self, prompt: &str, max_tokens: u32) -> Result<InferenceResult, String> {
         let url = format!("{}/chat/completions", self.endpoint);
 
         let request = ChatCompletionRequest {
@@ -49,11 +49,17 @@ impl InferenceEngine for OpenRouterInferenceEngine {
             .into_json()
             .map_err(|e| format!("failed to parse openrouter response: {}", e))?;
 
-        body.choices
+        let text = body.choices
             .into_iter()
             .next()
             .map(|c| c.message.content)
-            .ok_or_else(|| "openrouter returned no choices".to_string())
+            .ok_or_else(|| "openrouter returned no choices".to_string())?;
+
+        let (tokens_input, tokens_output) = body.usage
+            .map(|u| (u.prompt_tokens, u.completion_tokens))
+            .unwrap_or((0, 0));
+
+        Ok(InferenceResult { text, tokens_input, tokens_output })
     }
 }
 
@@ -73,6 +79,14 @@ struct ChatMessage<'a> {
 #[derive(Deserialize)]
 struct ChatCompletionResponse {
     choices: Vec<ChatChoice>,
+    #[serde(default)]
+    usage: Option<Usage>,
+}
+
+#[derive(Deserialize)]
+struct Usage {
+    prompt_tokens: u32,
+    completion_tokens: u32,
 }
 
 #[derive(Deserialize)]

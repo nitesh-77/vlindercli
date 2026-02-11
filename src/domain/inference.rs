@@ -1,8 +1,15 @@
 //! Inference capability domain types and traits.
 
+/// Result of an inference call, carrying the generated text and token counts.
+pub struct InferenceResult {
+    pub text: String,
+    pub tokens_input: u32,
+    pub tokens_output: u32,
+}
+
 /// Inference engine for text generation.
 pub trait InferenceEngine: Send + Sync {
-    fn infer(&self, prompt: &str, max_tokens: u32) -> Result<String, String>;
+    fn infer(&self, prompt: &str, max_tokens: u32) -> Result<InferenceResult, String>;
 }
 
 /// An inference capability for text generation.

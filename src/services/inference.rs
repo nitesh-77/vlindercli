@@ -1,12 +1,12 @@
 //! Inference service - text generation.
 
-use crate::domain::InferenceEngine;
+use crate::domain::{InferenceEngine, InferenceResult};
 
 /// Run inference with a pre-resolved engine.
 ///
 /// This is the production function called by service workers
 /// after looking up the engine by model name.
-pub fn run_infer(engine: &dyn InferenceEngine, prompt: &str, max_tokens: u32) -> Result<String, Error> {
+pub fn run_infer(engine: &dyn InferenceEngine, prompt: &str, max_tokens: u32) -> Result<InferenceResult, Error> {
     engine.infer(prompt, max_tokens)
         .map_err(Error::Inference)
 }
