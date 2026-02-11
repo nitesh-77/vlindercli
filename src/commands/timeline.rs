@@ -1,275 +1,130 @@
-//! Timeline subcommands — system-wide conversation timeline.
+//! Timeline subcommand — git passthrough for conversation exploration (ADR 068).
+//!
+//! `vlinder timeline <args>` passes arguments to `git -C <conversations_dir>`.
+//! Any git subcommand works: log, show, diff, branch, bisect.
+//!
+//! The `route` subcommand is the only domain-specific addition — it shows
+//! the full chain of messages for a session.
 
-use std::path::PathBuf;
+use std::path::Path;
+use std::process::Command;
 
 use clap::Subcommand;
 
 use vlindercli::config::conversations_dir;
-use vlindercli::domain::ConversationStore;
 
 #[derive(Subcommand, Debug, PartialEq)]
 pub enum TimelineCommand {
-    /// Show the system-wide timeline
-    Log {
-        /// Filter by agent name
-        #[arg(long)]
-        agent: Option<String>,
+    /// Show the route for a session (all messages in order)
+    Route {
+        /// Session ID to show
+        session_id: String,
     },
-    /// Fork the system timeline from a historical point
-    Fork {
-        /// Commit SHA to fork from (from `vlinder timeline log`)
-        commit: String,
-    },
+    /// Any other argument is passed directly to git
+    #[command(external_subcommand)]
+    Git(Vec<String>),
 }
 
 pub fn execute(cmd: TimelineCommand) {
+    let dir = conversations_dir();
+
+    if !dir.join(".git").exists() {
+        eprintln!("No conversations yet. Run an agent first.");
+        return;
+    }
+
     match cmd {
-        TimelineCommand::Log { agent } => log(agent),
-        TimelineCommand::Fork { commit } => fork(&commit),
+        TimelineCommand::Route { session_id } => route(&dir, &session_id),
+        TimelineCommand::Git(args) => passthrough(&dir, &args),
     }
 }
 
-/// A parsed entry from the conversation git log.
-struct LogEntry {
-    sha: String,
-    role: String,       // "user" or "agent"
-    body: String,       // First line of message body
-    session: String,    // Session trailer
-    state: Option<String>, // State trailer (agent commits only)
-}
+/// Show the route for a session — all commits on its branch.
+fn route(dir: &Path, session_id: &str) {
+    let branch = format!("sessions/{}", session_id);
+    let status = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["log", "--oneline", "--reverse"])
+        .arg(&branch)
+        .status();
 
-fn log(agent_filter: Option<String>) {
-    let dir = conversations_dir();
-
-    if !dir.join(".git").exists() {
-        println!("No conversations yet.");
-        return;
-    }
-
-    let entries = match parse_git_log(&dir) {
-        Ok(entries) => entries,
-        Err(e) => {
-            eprintln!("Failed to read conversation log: {}", e);
-            return;
-        }
-    };
-
-    if entries.is_empty() {
-        println!("No conversations yet.");
-        return;
-    }
-
-    // Apply filters
-    let entries: Vec<_> = entries.into_iter()
-        .filter(|e| {
-            if let Some(ref a) = agent_filter {
-                if !e.session.contains(a) && !e.body.contains(a) {
-                    return false;
-                }
-            }
-            true
-        })
-        .collect();
-
-    if entries.is_empty() {
-        println!("No matching conversations.");
-        return;
-    }
-
-    // Print formatted timeline
-    let mut current_session = String::new();
-    for entry in &entries {
-        if entry.session != current_session {
-            if !current_session.is_empty() {
-                println!();
-            }
-            println!("Session: {}", entry.session);
-            current_session = entry.session.clone();
-        }
-
-        let short_sha = &entry.sha[..7.min(entry.sha.len())];
-        let state_indicator = entry.state.as_ref()
-            .map(|s| format!("  State: {}…", &s[..8.min(s.len())]))
-            .unwrap_or_default();
-
-        // Truncate body for display
-        let body = if entry.body.len() > 60 {
-            format!("{}…", &entry.body[..60])
-        } else {
-            entry.body.clone()
-        };
-
-        println!("  {} {:>5}  {}{}", short_sha, entry.role, body, state_indicator);
-    }
-}
-
-fn fork(commit: &str) {
-    let dir = conversations_dir();
-
-    if !dir.join(".git").exists() {
-        eprintln!("No conversation history to fork from.");
-        return;
-    }
-
-    let store = match ConversationStore::open(dir) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("Failed to open conversation store: {}", e);
-            return;
-        }
-    };
-
-    match store.fork_at(commit) {
-        Ok(branch) => {
-            let short = &commit[..8.min(commit.len())];
-            println!("Forked timeline at {} → branch {}", short, branch);
+    match status {
+        Ok(s) if !s.success() => {
+            eprintln!("Session '{}' not found.", session_id);
         }
         Err(e) => {
-            eprintln!("Failed to fork timeline: {}", e);
+            eprintln!("Failed to run git: {}", e);
         }
+        _ => {}
     }
 }
 
-/// Parse the git log from the conversations directory into structured entries.
-fn parse_git_log(dir: &PathBuf) -> Result<Vec<LogEntry>, String> {
-    let output = std::process::Command::new("git")
-        .args(["log", "--reverse", "--format=%H%n%s%n%b%n---END---"])
-        .current_dir(dir)
-        .output()
-        .map_err(|e| format!("git log failed: {}", e))?;
+/// Pass arguments directly to git operating on the conversations repo.
+fn passthrough(dir: &Path, args: &[String]) {
+    let status = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .status();
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("git log failed: {}", stderr));
+    match status {
+        Ok(s) if !s.success() => {
+            std::process::exit(s.code().unwrap_or(1));
+        }
+        Err(e) => {
+            eprintln!("Failed to run git: {}", e);
+            std::process::exit(1);
+        }
+        _ => {}
     }
-
-    let text = String::from_utf8_lossy(&output.stdout);
-    let mut entries = Vec::new();
-
-    // Split on our delimiter
-    for block in text.split("---END---") {
-        let block = block.trim();
-        if block.is_empty() {
-            continue;
-        }
-
-        let lines: Vec<&str> = block.lines().collect();
-        if lines.len() < 2 {
-            continue;
-        }
-
-        let sha = lines[0].to_string();
-        let role = lines[1].to_string(); // "user" or "agent"
-
-        // Parse body (first non-empty line after subject) and trailers
-        let mut body = String::new();
-        let mut session = String::new();
-        let mut state = None;
-
-        for line in &lines[2..] {
-            let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
-            if let Some(s) = line.strip_prefix("Session: ") {
-                session = s.trim().to_string();
-            } else if let Some(s) = line.strip_prefix("State: ") {
-                state = Some(s.trim().to_string());
-            } else if line.strip_prefix("Submission: ").is_some() {
-                // Skip submission trailer
-            } else if body.is_empty() {
-                body = line.to_string();
-            }
-        }
-
-        if !sha.is_empty() && !role.is_empty() {
-            entries.push(LogEntry {
-                sha,
-                role,
-                body,
-                session,
-                state,
-            });
-        }
-    }
-
-    Ok(entries)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use vlindercli::domain::workers::{DagWorker, GitDagWorker};
+    use vlindercli::storage::dag_store::{DagNode, MessageType, hash_dag_node};
 
-    #[test]
-    fn parse_log_with_state_trailer() {
-        // Create a temp git repo with conversation commits
-        let tmp = tempfile::TempDir::new().unwrap();
-        let dir = tmp.path().to_path_buf();
-
-        // Init repo
-        std::process::Command::new("git")
-            .args(["init"])
-            .current_dir(&dir)
-            .output()
-            .unwrap();
-
-        // Create a file and commit as user
-        std::fs::write(dir.join("session.json"), "{}").unwrap();
-        std::process::Command::new("git")
-            .args(["add", "."])
-            .current_dir(&dir)
-            .output()
-            .unwrap();
-        std::process::Command::new("git")
-            .args(["commit", "-m", "user\n\nhello world\n\nSession: ses-abc123"])
-            .current_dir(&dir)
-            .output()
-            .unwrap();
-
-        // Commit as agent with state
-        std::fs::write(dir.join("session.json"), "{\"v\":2}").unwrap();
-        std::process::Command::new("git")
-            .args(["add", "."])
-            .current_dir(&dir)
-            .output()
-            .unwrap();
-        std::process::Command::new("git")
-            .args(["commit", "-m", "agent\n\nHere is the summary\n\nSession: ses-abc123\nSubmission: aaa\nState: deadbeef1234"])
-            .current_dir(&dir)
-            .output()
-            .unwrap();
-
-        let entries = parse_git_log(&dir).unwrap();
-        assert_eq!(entries.len(), 2);
-
-        assert_eq!(entries[0].role, "user");
-        assert_eq!(entries[0].body, "hello world");
-        assert_eq!(entries[0].session, "ses-abc123");
-        assert!(entries[0].state.is_none());
-
-        assert_eq!(entries[1].role, "agent");
-        assert_eq!(entries[1].body, "Here is the summary");
-        assert_eq!(entries[1].session, "ses-abc123");
-        assert_eq!(entries[1].state, Some("deadbeef1234".to_string()));
+    fn test_node(
+        payload: &[u8],
+        parent_hash: &str,
+        message_type: MessageType,
+        from: &str,
+        to: &str,
+        session_id: &str,
+    ) -> DagNode {
+        DagNode {
+            hash: hash_dag_node(payload, parent_hash, &message_type),
+            parent_hash: parent_hash.to_string(),
+            message_type,
+            from: from.to_string(),
+            to: to.to_string(),
+            session_id: session_id.to_string(),
+            submission_id: "sub-1".to_string(),
+            payload: payload.to_vec(),
+            created_at: "1000".to_string(),
+        }
     }
 
     #[test]
-    fn parse_log_empty_repo() {
+    fn route_shows_session_commits() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let dir = tmp.path().to_path_buf();
+        let mut worker = GitDagWorker::open(tmp.path(), "registry.local:9000").unwrap();
 
-        std::process::Command::new("git")
-            .args(["init"])
-            .current_dir(&dir)
+        let n1 = test_node(b"q", "", MessageType::Invoke, "cli", "agent-a", "sess-1");
+        worker.on_message(&n1);
+        let n2 = test_node(b"a", &n1.hash, MessageType::Complete, "agent-a", "cli", "sess-1");
+        worker.on_message(&n2);
+
+        // Verify the session branch exists and has 2 commits
+        let output = std::process::Command::new("git")
+            .arg("-C")
+            .arg(tmp.path())
+            .args(["rev-list", "--count", "sessions/sess-1"])
             .output()
             .unwrap();
 
-        // git log on empty repo will fail — that's OK, we handle it
-        let result = parse_git_log(&dir);
-        // Either returns an error or empty vec, both acceptable
-        match result {
-            Ok(entries) => assert!(entries.is_empty()),
-            Err(_) => {} // also fine
-        }
+        let count = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        assert_eq!(count, "2");
     }
 }

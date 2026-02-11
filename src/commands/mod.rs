@@ -35,7 +35,7 @@ pub enum Command {
         #[command(subcommand)]
         cmd: model::ModelCommand,
     },
-    /// Inspect and fork the system timeline
+    /// Explore agent conversations via git
     Timeline {
         #[command(subcommand)]
         cmd: timeline::TimelineCommand,
@@ -125,25 +125,28 @@ mod tests {
     }
 
     #[test]
-    fn cli_timeline_log() {
-        let cli = Cli::try_parse_from(["vlinder", "timeline", "log"]).unwrap();
+    fn cli_timeline_route() {
+        let cli = Cli::try_parse_from(["vlinder", "timeline", "route", "sess-1"]).unwrap();
         assert_eq!(
             cli.command,
             Command::Timeline {
-                cmd: timeline::TimelineCommand::Log { agent: None }
+                cmd: timeline::TimelineCommand::Route {
+                    session_id: "sess-1".to_string(),
+                }
             }
         );
     }
 
     #[test]
-    fn cli_timeline_fork() {
-        let cli = Cli::try_parse_from(["vlinder", "timeline", "fork", "abc123"]).unwrap();
+    fn cli_timeline_passthrough() {
+        let cli = Cli::try_parse_from(["vlinder", "timeline", "log", "--oneline"]).unwrap();
         assert_eq!(
             cli.command,
             Command::Timeline {
-                cmd: timeline::TimelineCommand::Fork {
-                    commit: "abc123".to_string(),
-                }
+                cmd: timeline::TimelineCommand::Git(vec![
+                    "log".to_string(),
+                    "--oneline".to_string(),
+                ])
             }
         );
     }

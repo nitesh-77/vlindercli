@@ -1,26 +1,59 @@
-//! DagCaptureWorker — stateless NATS observer that writes one DAG node per message (ADR 067).
+//! DagCaptureWorker — stateless NATS dispatcher that fans out to DAG workers (ADR 065, 067).
 //!
 //! Subscribes to `vlinder.>` via its own JetStream consumer and captures
 //! every message as an independent DAG node. No pairing, no buffering.
 //!
-//! Message arrives → parse subject → build node → write. Done.
+//! Message arrives → parse subject → build node → dispatch to workers. Done.
 //! The only state is `last_node` for Merkle chaining per session.
+//!
+//! Workers are pluggable projections (ADR 065). Each implements `DagWorker`
+//! and receives every node. SQLite for queries, git for time-travel — both
+//! are just projections of the same NATS event stream.
 
 use std::collections::HashMap;
 
 use crate::storage::dag_store::{DagNode, DagStore, MessageType, hash_dag_node};
 
-/// Worker that captures NATS messages and writes DAG nodes.
-pub struct DagCaptureWorker {
+/// A projection that receives DAG nodes (ADR 065).
+///
+/// Any backend that wants to observe the NATS message stream implements this.
+/// `SqliteDagWorker` writes to SQLite for queries. `GitDagWorker` (future)
+/// writes git commits for time-travel debugging. Both receive every node.
+pub trait DagWorker: Send {
+    /// Called for each node the dispatcher builds from a NATS message.
+    fn on_message(&mut self, node: &DagNode);
+}
+
+/// DAG worker that writes nodes to a `DagStore` (SQLite).
+pub struct SqliteDagWorker {
     store: Box<dyn DagStore>,
+}
+
+impl SqliteDagWorker {
+    pub fn new(store: Box<dyn DagStore>) -> Self {
+        Self { store }
+    }
+}
+
+impl DagWorker for SqliteDagWorker {
+    fn on_message(&mut self, node: &DagNode) {
+        if let Err(e) = self.store.insert_node(node) {
+            tracing::error!(error = %e, hash = %node.hash, "Failed to write DAG node");
+        }
+    }
+}
+
+/// Dispatcher that parses NATS messages and fans out to DagWorkers.
+pub struct DagCaptureWorker {
+    workers: Vec<Box<dyn DagWorker>>,
     /// Last node hash per session_id — for Merkle chaining.
     last_node: HashMap<String, String>,
 }
 
 impl DagCaptureWorker {
-    pub fn new(store: Box<dyn DagStore>) -> Self {
+    pub fn new(workers: Vec<Box<dyn DagWorker>>) -> Self {
         Self {
-            store,
+            workers,
             last_node: HashMap::new(),
         }
     }
@@ -85,9 +118,8 @@ impl DagCaptureWorker {
             created_at: now,
         };
 
-        if let Err(e) = self.store.insert_node(&node) {
-            tracing::error!(error = %e, hash = %hash, "Failed to write DAG node");
-            return;
+        for worker in &mut self.workers {
+            worker.on_message(&node);
         }
 
         // Update chain pointer for this session
@@ -159,6 +191,11 @@ mod tests {
         (worker_store, query_store)
     }
 
+    fn make_dispatcher(store: Box<SqliteDagStore>) -> DagCaptureWorker {
+        let sqlite_worker = SqliteDagWorker::new(store);
+        DagCaptureWorker::new(vec![Box::new(sqlite_worker)])
+    }
+
     fn headers(session_id: &str) -> HashMap<String, String> {
         let mut h = HashMap::new();
         h.insert("session-id".to_string(), session_id.to_string());
@@ -168,9 +205,9 @@ mod tests {
     #[test]
     fn invoke_writes_dag_node() {
         let (worker_store, query_store) = test_store_pair();
-        let mut worker = DagCaptureWorker::new(worker_store);
+        let mut dispatcher = make_dispatcher(worker_store);
 
-        worker.process_message(
+        dispatcher.process_message(
             "vlinder.sub-1.invoke.cli.container.myagent",
             &headers("sess-1"),
             b"invoke-payload",
@@ -189,9 +226,9 @@ mod tests {
     #[test]
     fn complete_writes_dag_node() {
         let (worker_store, query_store) = test_store_pair();
-        let mut worker = DagCaptureWorker::new(worker_store);
+        let mut dispatcher = make_dispatcher(worker_store);
 
-        worker.process_message(
+        dispatcher.process_message(
             "vlinder.sub-1.complete.myagent.cli",
             &headers("sess-1"),
             b"complete-payload",
@@ -207,9 +244,9 @@ mod tests {
     #[test]
     fn request_writes_dag_node() {
         let (worker_store, query_store) = test_store_pair();
-        let mut worker = DagCaptureWorker::new(worker_store);
+        let mut dispatcher = make_dispatcher(worker_store);
 
-        worker.process_message(
+        dispatcher.process_message(
             "vlinder.sub-1.req.myagent.infer.ollama.run.1",
             &headers("sess-1"),
             b"request-payload",
@@ -225,9 +262,9 @@ mod tests {
     #[test]
     fn response_writes_dag_node() {
         let (worker_store, query_store) = test_store_pair();
-        let mut worker = DagCaptureWorker::new(worker_store);
+        let mut dispatcher = make_dispatcher(worker_store);
 
-        worker.process_message(
+        dispatcher.process_message(
             "vlinder.sub-1.res.infer.ollama.myagent.run.1",
             &headers("sess-1"),
             b"response-payload",
@@ -243,9 +280,9 @@ mod tests {
     #[test]
     fn delegate_writes_dag_node() {
         let (worker_store, query_store) = test_store_pair();
-        let mut worker = DagCaptureWorker::new(worker_store);
+        let mut dispatcher = make_dispatcher(worker_store);
 
-        worker.process_message(
+        dispatcher.process_message(
             "vlinder.sub-1.delegate.coordinator.summarizer",
             &headers("sess-1"),
             b"delegate-payload",
@@ -261,19 +298,19 @@ mod tests {
     #[test]
     fn messages_chain_in_session() {
         let (worker_store, query_store) = test_store_pair();
-        let mut worker = DagCaptureWorker::new(worker_store);
+        let mut dispatcher = make_dispatcher(worker_store);
 
-        worker.process_message(
+        dispatcher.process_message(
             "vlinder.sub-1.invoke.cli.container.agent-a",
             &headers("sess-1"),
             b"first",
         );
-        worker.process_message(
+        dispatcher.process_message(
             "vlinder.sub-1.req.agent-a.infer.ollama.run.1",
             &headers("sess-1"),
             b"second",
         );
-        worker.process_message(
+        dispatcher.process_message(
             "vlinder.sub-1.res.infer.ollama.agent-a.run.1",
             &headers("sess-1"),
             b"third",
@@ -293,9 +330,9 @@ mod tests {
     #[test]
     fn unknown_message_type_is_ignored() {
         let (worker_store, query_store) = test_store_pair();
-        let mut worker = DagCaptureWorker::new(worker_store);
+        let mut dispatcher = make_dispatcher(worker_store);
 
-        worker.process_message(
+        dispatcher.process_message(
             "vlinder.sub-1.foobar.something",
             &headers("sess-1"),
             b"payload",
@@ -308,9 +345,9 @@ mod tests {
     #[test]
     fn missing_session_header_is_ignored() {
         let (worker_store, query_store) = test_store_pair();
-        let mut worker = DagCaptureWorker::new(worker_store);
+        let mut dispatcher = make_dispatcher(worker_store);
 
-        worker.process_message(
+        dispatcher.process_message(
             "vlinder.sub-1.invoke.cli.container.agent",
             &HashMap::new(),
             b"payload",
@@ -323,19 +360,19 @@ mod tests {
     #[test]
     fn different_sessions_chain_independently() {
         let (worker_store, query_store) = test_store_pair();
-        let mut worker = DagCaptureWorker::new(worker_store);
+        let mut dispatcher = make_dispatcher(worker_store);
 
-        worker.process_message(
+        dispatcher.process_message(
             "vlinder.sub-1.invoke.cli.container.a",
             &headers("sess-1"),
             b"sess1-first",
         );
-        worker.process_message(
+        dispatcher.process_message(
             "vlinder.sub-2.invoke.cli.container.b",
             &headers("sess-2"),
             b"sess2-first",
         );
-        worker.process_message(
+        dispatcher.process_message(
             "vlinder.sub-1.complete.a.cli",
             &headers("sess-1"),
             b"sess1-second",
@@ -351,5 +388,39 @@ mod tests {
         assert_eq!(sess1[1].parent_hash, sess1[0].hash);
         // sess-2's first node has empty parent
         assert_eq!(sess2[0].parent_hash, "");
+    }
+
+    #[test]
+    fn fan_out_to_multiple_workers() {
+        // Two independent SQLite stores, both receiving every node.
+        let tmp1 = tempfile::NamedTempFile::new().unwrap();
+        let tmp2 = tempfile::NamedTempFile::new().unwrap();
+
+        let store1 = Box::new(SqliteDagStore::open(tmp1.path()).unwrap());
+        let store2 = Box::new(SqliteDagStore::open(tmp2.path()).unwrap());
+
+        let query1 = SqliteDagStore::open(tmp1.path()).unwrap();
+        let query2 = SqliteDagStore::open(tmp2.path()).unwrap();
+
+        let worker1 = SqliteDagWorker::new(store1);
+        let worker2 = SqliteDagWorker::new(store2);
+
+        let mut dispatcher = DagCaptureWorker::new(vec![
+            Box::new(worker1),
+            Box::new(worker2),
+        ]);
+
+        dispatcher.process_message(
+            "vlinder.sub-1.invoke.cli.container.agent-a",
+            &headers("sess-1"),
+            b"hello",
+        );
+
+        let nodes1 = query1.get_session_nodes("sess-1").unwrap();
+        let nodes2 = query2.get_session_nodes("sess-1").unwrap();
+
+        assert_eq!(nodes1.len(), 1);
+        assert_eq!(nodes2.len(), 1);
+        assert_eq!(nodes1[0].hash, nodes2[0].hash);
     }
 }

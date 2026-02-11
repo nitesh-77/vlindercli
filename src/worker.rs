@@ -300,7 +300,7 @@ fn run_storage_vector_memory_worker(config: &Config, shutdown: &AtomicBool) {
 fn run_dag_capture_worker(_config: &Config, shutdown: &AtomicBool) {
     use std::collections::HashMap;
     use crate::config::dag_db_path;
-    use crate::domain::workers::DagCaptureWorker;
+    use crate::domain::workers::{DagCaptureWorker, SqliteDagWorker};
     use crate::storage::dag_store::SqliteDagStore;
     use crate::queue::NatsQueue;
 
@@ -311,7 +311,8 @@ fn run_dag_capture_worker(_config: &Config, shutdown: &AtomicBool) {
     let store = SqliteDagStore::open(&db_path)
         .expect("Failed to open DAG store");
 
-    let mut worker = DagCaptureWorker::new(Box::new(store));
+    let sqlite_worker = SqliteDagWorker::new(Box::new(store));
+    let mut worker = DagCaptureWorker::new(vec![Box::new(sqlite_worker)]);
 
     tracing::info!(db = %db_path.display(), "DAG capture worker ready");
 
