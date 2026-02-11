@@ -12,7 +12,7 @@ use serde::Deserialize;
 
 use crate::domain::registry::Registry;
 use crate::domain::{VectorStorage, ResourceId};
-use crate::queue::{ExpectsReply, MessageQueue, RequestMessage};
+use crate::queue::{MessageQueue, RequestMessage, ResponseMessage, ServiceDiagnostics};
 use crate::services::vector_storage;
 use crate::storage::dispatch::open_vector_storage_from_uri;
 
@@ -103,8 +103,15 @@ impl VectorServiceWorker {
         // Receive typed RequestMessage (ADR 044)
         match self.queue.receive_request("vec", &self.backend, "store") {
             Ok((request, ack)) => {
+                let start = std::time::Instant::now();
                 let response_payload = self.handle_store(&request);
-                let response = request.create_reply(response_payload);
+                let duration_ms = start.elapsed().as_millis() as u64;
+                let diag = ServiceDiagnostics::storage(
+                    "vec", &self.backend, "store", response_payload.len() as u64, duration_ms,
+                );
+                let response = ResponseMessage::from_request_with_diagnostics(
+                    &request, response_payload, diag,
+                );
                 let _ = self.queue.send_response(response);
                 let _ = ack();
                 true
@@ -116,8 +123,15 @@ impl VectorServiceWorker {
     fn try_search(&self) -> bool {
         match self.queue.receive_request("vec", &self.backend, "search") {
             Ok((request, ack)) => {
+                let start = std::time::Instant::now();
                 let response_payload = self.handle_search(&request);
-                let response = request.create_reply(response_payload);
+                let duration_ms = start.elapsed().as_millis() as u64;
+                let diag = ServiceDiagnostics::storage(
+                    "vec", &self.backend, "search", response_payload.len() as u64, duration_ms,
+                );
+                let response = ResponseMessage::from_request_with_diagnostics(
+                    &request, response_payload, diag,
+                );
                 let _ = self.queue.send_response(response);
                 let _ = ack();
                 true
@@ -129,8 +143,15 @@ impl VectorServiceWorker {
     fn try_delete(&self) -> bool {
         match self.queue.receive_request("vec", &self.backend, "delete") {
             Ok((request, ack)) => {
+                let start = std::time::Instant::now();
                 let response_payload = self.handle_delete(&request);
-                let response = request.create_reply(response_payload);
+                let duration_ms = start.elapsed().as_millis() as u64;
+                let diag = ServiceDiagnostics::storage(
+                    "vec", &self.backend, "delete", response_payload.len() as u64, duration_ms,
+                );
+                let response = ResponseMessage::from_request_with_diagnostics(
+                    &request, response_payload, diag,
+                );
                 let _ = self.queue.send_response(response);
                 let _ = ack();
                 true

@@ -7,13 +7,14 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
+use std::time::Instant;
 
 use serde::Deserialize;
 
 use crate::domain::InferenceEngine;
 use crate::domain::registry::Registry;
 use crate::inference::open_inference_engine;
-use crate::queue::{ExpectsReply, MessageQueue, RequestMessage};
+use crate::queue::{MessageQueue, RequestMessage, ResponseMessage, ServiceDiagnostics, ServiceMetrics};
 use crate::services::inference;
 
 // ============================================================================
@@ -71,15 +72,37 @@ impl InferenceServiceWorker {
         // Receive typed RequestMessage (ADR 044)
         match self.queue.receive_request("infer", &self.backend, "run") {
             Ok((request, ack)) => {
+                let model = self.extract_model_name(&request);
+                let start = Instant::now();
                 let response_payload = self.handle_infer(&request);
-                // Use ExpectsReply to build properly-correlated ResponseMessage
-                let response = request.create_reply(response_payload);
+                let duration_ms = start.elapsed().as_millis() as u64;
+
+                let diag = ServiceDiagnostics {
+                    service: "infer".to_string(),
+                    backend: self.backend.clone(),
+                    duration_ms,
+                    metrics: ServiceMetrics::Inference {
+                        tokens_input: 0,
+                        tokens_output: 0,
+                        model,
+                    },
+                };
+                let response = ResponseMessage::from_request_with_diagnostics(
+                    &request, response_payload, diag,
+                );
                 let _ = self.queue.send_response(response);
                 let _ = ack();
                 true
             }
             Err(_) => false,
         }
+    }
+
+    /// Best-effort extraction of model name from request payload.
+    fn extract_model_name(&self, request: &RequestMessage) -> String {
+        serde_json::from_slice::<InferRequest>(&request.payload)
+            .map(|r| r.model)
+            .unwrap_or_default()
     }
 
     fn handle_infer(&self, request: &RequestMessage) -> Vec<u8> {

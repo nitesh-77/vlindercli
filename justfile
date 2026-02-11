@@ -79,6 +79,15 @@ clean:
     cargo clean
     rm -rf agents/*/target
 
+# Clean data plane (DBs, WAL files, state pointers, conversations)
+clean-data:
+    rm -f ~/.vlinder/*.db ~/.vlinder/*.db-shm ~/.vlinder/*.db-wal
+    rm -rf ~/.vlinder/conversations
+    rm -rf ~/.vlinder/state
+    find agents -name "*.db" -path "*/data/*" -delete
+    find agents -name "*.db-shm" -path "*/data/*" -delete
+    find agents -name "*.db-wal" -path "*/data/*" -delete
+
 # Check license compliance (fails on GPL/copyleft)
 license-check:
     cargo deny check licenses

@@ -13,7 +13,7 @@ use serde::Deserialize;
 use crate::domain::EmbeddingEngine;
 use crate::domain::registry::Registry;
 use crate::embedding::open_embedding_engine;
-use crate::queue::{ExpectsReply, MessageQueue, RequestMessage};
+use crate::queue::{MessageQueue, RequestMessage, ResponseMessage, ServiceDiagnostics, ServiceMetrics};
 use crate::services::embedding;
 
 // ============================================================================
@@ -66,11 +66,24 @@ impl EmbeddingServiceWorker {
         match self.queue.receive_request("embed", &self.backend, "run") {
             Ok((request, ack)) => {
                 tracing::debug!(seq = %request.sequence, agent = %request.agent_id, "embed worker: received request");
+                let model = self.extract_model_name(&request);
                 let start = std::time::Instant::now();
                 let response_payload = self.handle_embed(&request);
-                tracing::debug!(seq = %request.sequence, elapsed = ?start.elapsed(), "embed worker: handled, sending response");
-                // Use ExpectsReply to build properly-correlated ResponseMessage
-                let response = request.create_reply(response_payload);
+                let duration_ms = start.elapsed().as_millis() as u64;
+                tracing::debug!(seq = %request.sequence, duration_ms, "embed worker: handled, sending response");
+
+                let diag = ServiceDiagnostics {
+                    service: "embed".to_string(),
+                    backend: self.backend.clone(),
+                    duration_ms,
+                    metrics: ServiceMetrics::Embedding {
+                        dimensions: 0,
+                        model,
+                    },
+                };
+                let response = ResponseMessage::from_request_with_diagnostics(
+                    &request, response_payload, diag,
+                );
                 if let Err(e) = self.queue.send_response(response) {
                     tracing::error!(seq = %request.sequence, error = %e, "embed worker: failed to send response");
                 }
@@ -79,6 +92,13 @@ impl EmbeddingServiceWorker {
             }
             Err(_) => false,
         }
+    }
+
+    /// Best-effort extraction of model name from request payload.
+    fn extract_model_name(&self, request: &RequestMessage) -> String {
+        serde_json::from_slice::<EmbedRequest>(&request.payload)
+            .map(|r| r.model)
+            .unwrap_or_default()
     }
 
     fn handle_embed(&self, request: &RequestMessage) -> Vec<u8> {

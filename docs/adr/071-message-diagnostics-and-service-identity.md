@@ -13,6 +13,7 @@ Accepted
 - DagCaptureWorker extracts diagnostics from NATS headers
 - GitDagWorker writes `diagnostics.toml` and `stderr` blobs to commit trees
 - Service identity comes for free from `node.from` parsing — no new code needed
+- Real `ServiceDiagnostics` in all four service workers — timing, service/backend identity, model names, operation names, byte counts
 
 ## Context
 
@@ -367,17 +368,53 @@ When the agent calls `/delegate`, the bridge intercepts it and creates a `Delega
 
 ### Commit tree with diagnostics
 
+Each message becomes a timestamped directory in the accumulated commit tree. The directory name is `<YYYYMMDD>-<HHMMSS>.<millis>-<sender>-<message-type>`. Messages accumulate — later commits contain all earlier message directories plus the new one.
+
 ```
-tree
-├── payload              (message content — raw bytes)
-├── stderr               (agent stderr — raw bytes, Complete/Delegate only)
-├── diagnostics.toml     (typed diagnostics, serialized)
-├── agent.toml           (agent manifest from registry)
-├── models/
-│   ├── <model-name>.toml
-│   └── ...
-└── platform.toml        (vlinder version, registry host)
+tree (after a full invoke → request → response → complete cycle)
+├── 20260211-143052.000-cli-invoke/
+│   ├── payload
+│   └── diagnostics.toml          ← InvokeDiagnostics
+├── 20260211-143052.100-support-agent-request/
+│   ├── payload
+│   └── diagnostics.toml          ← RequestDiagnostics
+├── 20260211-143053.900-infer.ollama-response/
+│   ├── payload
+│   └── diagnostics.toml          ← ServiceDiagnostics
+├── 20260211-143055.200-support-agent-complete/
+│   ├── payload
+│   ├── stderr
+│   └── diagnostics.toml          ← ContainerDiagnostics
+├── agent.toml
+├── platform.toml
+└── models/
+    └── phi3.toml
 ```
+
+Each message directory contains:
+
+| File | Present | Contents |
+|------|---------|----------|
+| `payload` | Always | Message content — raw bytes |
+| `diagnostics.toml` | When diagnostics non-empty | Typed diagnostics, serialized as TOML |
+| `stderr` | Complete/Delegate only | Agent stderr stream — raw bytes |
+
+#### Inspecting diagnostics
+
+From a conversation repo under `~/.vlinder/conversations/`:
+
+```bash
+# See the full tree of the latest commit
+git show main --stat
+
+# Read a specific message's diagnostics
+git show main:20260211-143053.900-infer.ollama-response/diagnostics.toml
+
+# Read a storage response's diagnostics
+git show main:20260211-143052.500-kv.sqlite-response/diagnostics.toml
+```
+
+#### Example `diagnostics.toml` per message type
 
 `diagnostics.toml` for a Complete message:
 
@@ -396,15 +433,41 @@ container_id = "abc123def456"
 `diagnostics.toml` for an inference Response:
 
 ```toml
-[service]
 service = "infer"
 backend = "ollama"
 duration_ms = 1800
 
-[service.metrics.inference]
-tokens_input = 512
-tokens_output = 908
+[metrics]
+type = "Inference"
+tokens_input = 0
+tokens_output = 0
 model = "phi3:latest"
+```
+
+`diagnostics.toml` for a kv Response:
+
+```toml
+service = "kv"
+backend = "sqlite"
+duration_ms = 3
+
+[metrics]
+type = "Storage"
+operation = "put"
+bytes_transferred = 2
+```
+
+`diagnostics.toml` for a vector Response:
+
+```toml
+service = "vec"
+backend = "sqlite-vec"
+duration_ms = 12
+
+[metrics]
+type = "Storage"
+operation = "search"
+bytes_transferred = 256
 ```
 
 ## Consequences
@@ -424,7 +487,7 @@ model = "phi3:latest"
 
 ### Deferred
 
-1. **Real `ServiceDiagnostics` in workers** — Workers currently use `create_reply()` which produces placeholder diagnostics. Replace with `create_reply_with_diagnostics()` on concrete types so each worker (inference, embedding, object, vector) populates actual timing and metrics.
+1. ~~**Real `ServiceDiagnostics` in workers**~~ — Done. All four service workers (inference, embedding, object, vector) now use `ResponseMessage::from_request_with_diagnostics()` with real timing, service/backend identity, and service-specific metrics. Token counts (inference) and dimensions (embedding) remain zero pending backend response parsing.
 
 2. **Token extraction from Ollama/OpenRouter** — `ServiceMetrics::Inference` reports `tokens_input: 0, tokens_output: 0`. Parse token counts from Ollama and OpenRouter HTTP response bodies to populate real values.
 

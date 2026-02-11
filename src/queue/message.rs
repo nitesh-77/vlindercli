@@ -364,7 +364,7 @@ impl ResponseMessage {
     /// Uses placeholder diagnostics. Call `from_request_with_diagnostics()`
     /// when the service worker has real metrics.
     pub fn from_request(request: &RequestMessage, payload: Vec<u8>) -> Self {
-        let placeholder = ServiceDiagnostics::storage("unknown", "unknown", 0, 0);
+        let placeholder = ServiceDiagnostics::storage("unknown", "unknown", "unknown", 0, 0);
         Self::from_request_with_diagnostics(request, payload, placeholder)
     }
 

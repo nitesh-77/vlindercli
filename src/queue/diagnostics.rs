@@ -100,13 +100,14 @@ impl ServiceDiagnostics {
 
     /// Convenience constructor for storage service workers (kv, vec).
     pub fn storage(
+        service: impl Into<String>,
         backend: impl Into<String>,
         operation: impl Into<String>,
         bytes: u64,
         duration_ms: u64,
     ) -> Self {
         Self {
-            service: "kv".to_string(),
+            service: service.into(),
             backend: backend.into(),
             duration_ms,
             metrics: ServiceMetrics::Storage {
@@ -279,7 +280,7 @@ mod tests {
 
     #[test]
     fn service_diagnostics_storage_json_round_trip() {
-        let diag = ServiceDiagnostics::storage("sqlite", "put", 2048, 5);
+        let diag = ServiceDiagnostics::storage("kv", "sqlite", "put", 2048, 5);
         let json = serde_json::to_string(&diag).unwrap();
         let back: ServiceDiagnostics = serde_json::from_str(&json).unwrap();
         assert_eq!(diag, back);
@@ -287,7 +288,7 @@ mod tests {
 
     #[test]
     fn service_diagnostics_storage_toml_round_trip() {
-        let diag = ServiceDiagnostics::storage("sqlite", "get", 512, 2);
+        let diag = ServiceDiagnostics::storage("kv", "sqlite", "get", 512, 2);
         let toml_str = toml::to_string_pretty(&diag).unwrap();
         let back: ServiceDiagnostics = toml::from_str(&toml_str).unwrap();
         assert_eq!(diag, back);

@@ -18,7 +18,7 @@ use serde::Deserialize;
 
 use crate::domain::registry::Registry;
 use crate::domain::{ObjectStorage, ResourceId};
-use crate::queue::{ExpectsReply, MessageQueue, RequestMessage};
+use crate::queue::{MessageQueue, RequestMessage, ResponseMessage, ServiceDiagnostics};
 use crate::services::object_storage;
 use crate::storage::dispatch::open_object_storage_from_uri;
 use crate::storage::state_store::{
@@ -160,8 +160,15 @@ impl ObjectServiceWorker {
         // Receive typed RequestMessage (ADR 044)
         match self.queue.receive_request("kv", &self.backend, "get") {
             Ok((request, ack)) => {
+                let start = std::time::Instant::now();
                 let response_payload = self.handle_get(&request);
-                let response = request.create_reply(response_payload);
+                let duration_ms = start.elapsed().as_millis() as u64;
+                let diag = ServiceDiagnostics::storage(
+                    "kv", &self.backend, "get", response_payload.len() as u64, duration_ms,
+                );
+                let response = ResponseMessage::from_request_with_diagnostics(
+                    &request, response_payload, diag,
+                );
                 let _ = self.queue.send_response(response);
                 let _ = ack();
                 true
@@ -173,8 +180,15 @@ impl ObjectServiceWorker {
     fn try_put(&self) -> bool {
         match self.queue.receive_request("kv", &self.backend, "put") {
             Ok((request, ack)) => {
+                let start = std::time::Instant::now();
                 let response_payload = self.handle_put(&request);
-                let response = request.create_reply(response_payload);
+                let duration_ms = start.elapsed().as_millis() as u64;
+                let diag = ServiceDiagnostics::storage(
+                    "kv", &self.backend, "put", response_payload.len() as u64, duration_ms,
+                );
+                let response = ResponseMessage::from_request_with_diagnostics(
+                    &request, response_payload, diag,
+                );
                 let _ = self.queue.send_response(response);
                 let _ = ack();
                 true
@@ -186,8 +200,15 @@ impl ObjectServiceWorker {
     fn try_list(&self) -> bool {
         match self.queue.receive_request("kv", &self.backend, "list") {
             Ok((request, ack)) => {
+                let start = std::time::Instant::now();
                 let response_payload = self.handle_list(&request);
-                let response = request.create_reply(response_payload);
+                let duration_ms = start.elapsed().as_millis() as u64;
+                let diag = ServiceDiagnostics::storage(
+                    "kv", &self.backend, "list", response_payload.len() as u64, duration_ms,
+                );
+                let response = ResponseMessage::from_request_with_diagnostics(
+                    &request, response_payload, diag,
+                );
                 let _ = self.queue.send_response(response);
                 let _ = ack();
                 true
@@ -199,8 +220,15 @@ impl ObjectServiceWorker {
     fn try_delete(&self) -> bool {
         match self.queue.receive_request("kv", &self.backend, "delete") {
             Ok((request, ack)) => {
+                let start = std::time::Instant::now();
                 let response_payload = self.handle_delete(&request);
-                let response = request.create_reply(response_payload);
+                let duration_ms = start.elapsed().as_millis() as u64;
+                let diag = ServiceDiagnostics::storage(
+                    "kv", &self.backend, "delete", response_payload.len() as u64, duration_ms,
+                );
+                let response = ResponseMessage::from_request_with_diagnostics(
+                    &request, response_payload, diag,
+                );
                 let _ = self.queue.send_response(response);
                 let _ = ack();
                 true
@@ -216,12 +244,15 @@ impl ObjectServiceWorker {
         };
 
         // Versioned get (ADR 055): resolve through state commit → snapshot → value
+        // Empty state hash means "no state yet" — fall through to unversioned.
         if let Some(ref state_hash) = req.state {
-            return match self.versioned_get(request.agent_id.as_str(), state_hash, &req.path) {
-                Ok(Some(content)) => content,
-                Ok(None) => Vec::new(),
-                Err(e) => format!("[error] {}", e).into_bytes(),
-            };
+            if !state_hash.is_empty() {
+                return match self.versioned_get(request.agent_id.as_str(), state_hash, &req.path) {
+                    Ok(Some(content)) => content,
+                    Ok(None) => Vec::new(),
+                    Err(e) => format!("[error] {}", e).into_bytes(),
+                };
+            }
         }
 
         // Unversioned: existing behavior
