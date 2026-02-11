@@ -1,6 +1,6 @@
 # ADR 061: Runtime-Captured DAG
 
-**Status:** Proposed
+**Status:** Superseded by ADR 067
 
 **Supersedes:** ADR 055 (partially — the requirement that agents use platform storage for time travel to work)
 
