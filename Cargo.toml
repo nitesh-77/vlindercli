@@ -36,6 +36,7 @@ sha1 = "0.10"
 sha2 = "0.10"
 ureq = { version = "2", features = ["json"] }
 semver = "1"
+tiny_http = "0.12"
 
 
 # NATS messaging (async engine with sync facade)

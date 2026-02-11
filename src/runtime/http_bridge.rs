@@ -6,12 +6,7 @@
 //! The bridge is the JSON-to-typed boundary: it deserializes agent requests
 //! into SdkMessage variants, calls typed AgentBridge methods, and serializes
 //! the results back to HTTP responses.
-//!
-//! Zero external dependencies — uses `std::net::TcpListener` only.
 
-use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Read, Write};
-use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::JoinHandle;
@@ -55,16 +50,16 @@ impl HttpBridge {
     /// Binds to `0.0.0.0:0` (OS-assigned port). The container should
     /// connect to `http://host.containers.internal:{port}/`.
     pub(crate) fn start(send_data: Arc<ServiceRouter>) -> std::io::Result<Self> {
-        let listener = TcpListener::bind("0.0.0.0:0")?;
-        let port = listener.local_addr()?.port();
-        listener.set_nonblocking(true)?;
+        let server = tiny_http::Server::http("0.0.0.0:0")
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+        let port = server.server_addr().to_ip().unwrap().port();
 
         let stop_flag = Arc::new(AtomicBool::new(false));
         let stop = Arc::clone(&stop_flag);
 
         let bridge_data = Arc::clone(&send_data);
         let handle = std::thread::spawn(move || {
-            run_bridge(listener, bridge_data, stop);
+            run_bridge(server, bridge_data, stop);
         });
 
         Ok(Self {
@@ -111,9 +106,9 @@ impl Drop for HttpBridge {
     }
 }
 
-/// Main bridge loop. Accepts connections, handles one request per connection.
+/// Main bridge loop.
 fn run_bridge(
-    listener: TcpListener,
+    server: tiny_http::Server,
     send_data: Arc<ServiceRouter>,
     stop: Arc<AtomicBool>,
 ) {
@@ -122,80 +117,71 @@ fn run_bridge(
             break;
         }
 
-        match listener.accept() {
-            Ok((stream, _addr)) => {
-                let _ = stream.set_nonblocking(false);
-                handle_connection(stream, &send_data);
-            }
-            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                std::thread::sleep(std::time::Duration::from_millis(50));
-                continue;
-            }
+        // Non-blocking receive with timeout so we can check the stop flag
+        let request = match server.recv_timeout(std::time::Duration::from_millis(50)) {
+            Ok(Some(req)) => req,
+            Ok(None) => continue,    // timeout, check stop flag
             Err(_) => break,
-        }
+        };
+
+        handle_request(request, &*send_data);
     }
 }
 
-/// Handle a single HTTP connection.
-fn handle_connection(mut stream: TcpStream, send_data: &ServiceRouter) {
-    let result = parse_and_handle(&stream, send_data);
+/// Handle a single HTTP request.
+fn handle_request(mut request: tiny_http::Request, bridge: &dyn AgentBridge) {
+    let method = request.method().clone();
+    let path = request.url().to_string();
 
-    match result {
-        Ok(body) => write_response(&mut stream, 200, &body),
-        Err(msg) => write_response(&mut stream, 500, msg.as_bytes()),
-    }
-}
-
-/// Parse the HTTP request and delegate to dispatch.
-fn parse_and_handle(
-    stream: &TcpStream,
-    send_data: &ServiceRouter,
-) -> Result<Vec<u8>, String> {
-    let mut reader = BufReader::new(stream);
-
-    // Read request line: "POST /kv/get HTTP/1.1" or "GET /health HTTP/1.1"
-    let mut request_line = String::new();
-    reader.read_line(&mut request_line)
-        .map_err(|e| format!("read error: {}", e))?;
-
-    let parts: Vec<&str> = request_line.trim().split_whitespace().collect();
-    if parts.len() < 2 {
-        return Err("malformed request line".to_string());
-    }
-    let method = parts[0];
-    let path = parts[1];
-
-    // Health check — no body needed
-    if method == "GET" && path == "/health" {
-        // Read remaining headers to consume the request
-        drain_headers(&mut reader)?;
-        return Ok(b"ok".to_vec());
+    // Health check
+    if method == tiny_http::Method::Get && path == "/health" {
+        let response = tiny_http::Response::from_data(b"ok".to_vec());
+        let _ = request.respond(response);
+        return;
     }
 
-    if method != "POST" {
-        drain_headers(&mut reader)?;
-        return Err(format!("expected POST, got {}", method));
+    if method != tiny_http::Method::Post {
+        let body = format!("expected POST, got {}", method);
+        let response = tiny_http::Response::from_data(body.into_bytes())
+            .with_status_code(500);
+        let _ = request.respond(response);
+        return;
     }
 
     // Map path to op
-    let op = op_for_path(path)
-        .ok_or_else(|| format!("unknown endpoint: {}", path))?;
-
-    // Read headers, extract Content-Length
-    let content_length = read_content_length(&mut reader)?;
-
-    if content_length == 0 {
-        return Err("missing or zero Content-Length".to_string());
-    }
+    let op = match op_for_path(&path) {
+        Some(op) => op,
+        None => {
+            let body = format!("unknown endpoint: {}", path);
+            let response = tiny_http::Response::from_data(body.into_bytes())
+                .with_status_code(500);
+            let _ = request.respond(response);
+            return;
+        }
+    };
 
     // Read body
-    let mut body = vec![0u8; content_length];
-    reader.read_exact(&mut body)
-        .map_err(|e| format!("body read error: {}", e))?;
+    let mut body = Vec::new();
+    if let Err(e) = request.as_reader().read_to_end(&mut body) {
+        let msg = format!("body read error: {}", e);
+        let response = tiny_http::Response::from_data(msg.into_bytes())
+            .with_status_code(500);
+        let _ = request.respond(response);
+        return;
+    }
 
     // Merge op into body JSON, deserialize, and route to typed methods
-    let merged = merge_op(op, &body)?;
-    dispatch(send_data, merged)
+    match merge_op(op, &body).and_then(|merged| dispatch(bridge, merged)) {
+        Ok(result) => {
+            let response = tiny_http::Response::from_data(result);
+            let _ = request.respond(response);
+        }
+        Err(msg) => {
+            let response = tiny_http::Response::from_data(msg.into_bytes())
+                .with_status_code(500);
+            let _ = request.respond(response);
+        }
+    }
 }
 
 /// Deserialize an SdkMessage and route to typed AgentBridge methods.
@@ -258,47 +244,12 @@ fn dispatch(bridge: &dyn AgentBridge, payload: Vec<u8>) -> Result<Vec<u8>, Strin
     }
 }
 
-/// Read headers and extract Content-Length. Consumes all headers up to the blank line.
-fn read_content_length(reader: &mut BufReader<&TcpStream>) -> Result<usize, String> {
-    let mut content_length: usize = 0;
-    loop {
-        let mut line = String::new();
-        reader.read_line(&mut line)
-            .map_err(|e| format!("header read error: {}", e))?;
-
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            break;
-        }
-
-        let lower = trimmed.to_ascii_lowercase();
-        if let Some(value) = lower.strip_prefix("content-length:") {
-            content_length = value.trim().parse()
-                .map_err(|_| "invalid Content-Length".to_string())?;
-        }
-    }
-    Ok(content_length)
-}
-
-/// Read and discard headers until the blank line.
-fn drain_headers(reader: &mut BufReader<&TcpStream>) -> Result<(), String> {
-    loop {
-        let mut line = String::new();
-        reader.read_line(&mut line)
-            .map_err(|e| format!("header read error: {}", e))?;
-        if line.trim().is_empty() {
-            break;
-        }
-    }
-    Ok(())
-}
-
 /// Merge the `op` field into a JSON object body.
 ///
 /// Input: op = "kv-get", body = `{"path": "/foo"}`
 /// Output: `{"op": "kv-get", "path": "/foo"}`
 fn merge_op(op: &str, body: &[u8]) -> Result<Vec<u8>, String> {
-    let mut map: HashMap<String, serde_json::Value> = serde_json::from_slice(body)
+    let mut map: serde_json::Map<String, serde_json::Value> = serde_json::from_slice(body)
         .map_err(|e| format!("invalid JSON body: {}", e))?;
 
     map.insert("op".to_string(), serde_json::Value::String(op.to_string()));
@@ -307,29 +258,13 @@ fn merge_op(op: &str, body: &[u8]) -> Result<Vec<u8>, String> {
         .map_err(|e| format!("JSON serialization error: {}", e))
 }
 
-/// Write a minimal HTTP response.
-fn write_response(stream: &mut TcpStream, status: u16, body: &[u8]) {
-    let status_text = match status {
-        200 => "OK",
-        500 => "Internal Server Error",
-        _ => "Error",
-    };
-
-    let header = format!(
-        "HTTP/1.1 {} {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-        status, status_text, body.len()
-    );
-
-    let _ = stream.write_all(header.as_bytes());
-    let _ = stream.write_all(body);
-    let _ = stream.flush();
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::domain::{InMemoryRegistry, Registry, ResourceId, RuntimeType};
     use crate::queue::{HarnessType, InMemoryQueue, InvokeDiagnostics, InvokeMessage, MessageQueue, SequenceCounter, SessionId, SubmissionId};
+    use std::io::{Read, Write};
+    use std::net::TcpStream;
 
     fn test_send_data() -> Arc<ServiceRouter> {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
@@ -372,7 +307,7 @@ mod tests {
         let port = bridge.port();
 
         let mut stream = TcpStream::connect(format!("127.0.0.1:{}", port)).unwrap();
-        stream.write_all(b"GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n").unwrap();
+        stream.write_all(b"GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n").unwrap();
 
         let mut response = String::new();
         stream.read_to_string(&mut response).unwrap();
@@ -390,7 +325,7 @@ mod tests {
 
         let body = b"{}";
         let request = format!(
-            "POST /unknown HTTP/1.1\r\nContent-Length: {}\r\n\r\n{}",
+            "POST /unknown HTTP/1.1\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
             body.len(),
             std::str::from_utf8(body).unwrap()
         );
@@ -414,7 +349,7 @@ mod tests {
 
         let body = br#"{"path": "/test.txt"}"#;
         let request = format!(
-            "POST /kv/get HTTP/1.1\r\nContent-Length: {}\r\n\r\n{}",
+            "POST /kv/get HTTP/1.1\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
             body.len(),
             std::str::from_utf8(body).unwrap()
         );
@@ -451,7 +386,7 @@ mod tests {
     fn merge_op_adds_field() {
         let body = br#"{"path": "/foo"}"#;
         let merged = merge_op("kv-get", body).unwrap();
-        let map: HashMap<String, serde_json::Value> = serde_json::from_slice(&merged).unwrap();
+        let map: serde_json::Map<String, serde_json::Value> = serde_json::from_slice(&merged).unwrap();
         assert_eq!(map["op"], "kv-get");
         assert_eq!(map["path"], "/foo");
     }
