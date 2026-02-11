@@ -29,6 +29,7 @@ mod session_server;
 mod model_manifest;
 mod path;
 mod resource_id;
+mod route;
 mod sdk_message;
 mod storage;
 pub mod workers;
@@ -115,6 +116,7 @@ pub use harness::{Harness, CliHarness};
 pub use session::Session;
 pub use session_server::SessionServer;
 pub use conversation_store::{ConversationStore, StoreError};
+pub use route::{Route, Stop};
 
 // ============================================================================
 // Daemon & Registry
