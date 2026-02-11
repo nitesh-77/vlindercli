@@ -11,8 +11,6 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-use uuid::Uuid;
-
 use crate::domain::{AgentBridge, Hop, ObjectStorageType, Registry, VectorMatch, VectorStorageType};
 use crate::queue::{
     DelegateMessage, DelegateDiagnostics, ContainerDiagnostics, InvokeMessage,
@@ -282,10 +280,8 @@ impl AgentBridge for HttpBridge {
         let invoke = self.invoke.read().unwrap();
         let caller_agent = crate::queue::agent_routing_key(&invoke.agent_id);
         let sha = invoke.submission.to_string();
-        let short_uuid = &Uuid::new_v4().to_string()[..8];
-        let reply_subject = format!(
-            "vlinder.{}.delegate-reply.{}.{}.{}",
-            invoke.submission, caller_agent, target_agent, short_uuid,
+        let reply_subject = self.queue.create_reply_address(
+            &invoke.submission, &caller_agent, target_agent,
         );
 
         let delegate = DelegateMessage::new(

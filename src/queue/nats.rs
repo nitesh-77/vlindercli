@@ -487,6 +487,11 @@ impl MessageQueue for NatsQueue {
         })
     }
 
+    fn create_reply_address(&self, submission: &SubmissionId, caller: &str, target: &str) -> String {
+        let short_uuid = &uuid::Uuid::new_v4().to_string()[..8];
+        format!("vlinder.{}.delegate-reply.{}.{}.{}", submission, caller, target, short_uuid)
+    }
+
     fn send_delegate(&self, msg: DelegateMessage) -> Result<(), QueueError> {
         let subject = format!(
             "vlinder.{}.delegate.{}.{}",
