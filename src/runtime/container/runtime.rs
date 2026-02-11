@@ -102,31 +102,58 @@ impl ContainerRuntime {
             self.queue.send_complete(complete).unwrap();
         }
     }
-}
 
-impl Drop for ContainerRuntime {
-    fn drop(&mut self) {
-        self.shutdown();
+    /// Dispatch an invocation to a container and track it as a running task.
+    ///
+    /// Ensures the container is running, spawns the HTTP dispatch on a thread,
+    /// and inserts the RunningTask. On container-start failure, sends an error
+    /// reply and returns false.
+    fn dispatch(
+        &mut self,
+        name: &str,
+        agent: &Agent,
+        invoke: InvokeMessage,
+        reply_subject: Option<String>,
+        is_retry: bool,
+    ) -> bool {
+        let host_port = match self.ensure_container(agent, &invoke) {
+            Ok(port) => port,
+            Err(e) => {
+                tracing::error!(event = "dispatch.failed", agent = %name, error = %e, "Failed to start container");
+                let complete = invoke.create_reply(
+                    format!("[error] container start failed: {}", e).into_bytes()
+                );
+                self.send_reply(complete, &reply_subject);
+                return false;
+            }
+        };
+
+        let payload = invoke.payload.clone();
+        let session_id = invoke.session.as_str().to_string();
+        let handle = thread::spawn(move || {
+            dispatch_to_container(host_port, &payload, &session_id)
+        });
+
+        self.running.insert(name.to_string(), RunningTask {
+            handle, invoke, reply_subject, started_at: Instant::now(), is_retry,
+        });
+        true
     }
-}
 
-impl Runtime for ContainerRuntime {
-    fn id(&self) -> &ResourceId {
-        &self.id
-    }
+    // ========================================================================
+    // Tick phases
+    // ========================================================================
 
-    fn runtime_type(&self) -> RuntimeType {
-        RuntimeType::Container
-    }
-
-    fn tick(&mut self) -> bool {
-        let mut did_work = false;
-
-        // 1. Sweep completed tasks
+    /// Join finished dispatch threads, handle results, retry on container death (ADR 073).
+    fn sweep_completed(&mut self) -> bool {
         let finished: Vec<String> = self.running.iter()
             .filter(|(_, task)| task.handle.is_finished())
             .map(|(name, _)| name.clone())
             .collect();
+
+        if finished.is_empty() {
+            return false;
+        }
 
         for name in finished {
             let task = self.running.remove(&name).unwrap();
@@ -134,9 +161,7 @@ impl Runtime for ContainerRuntime {
 
             match result {
                 Ok(output) => {
-                    // Normal completion — build diagnostics and reply
                     let final_state = self.pool.final_state(&name);
-
                     let duration_ms = task.started_at.elapsed().as_millis() as u64;
                     let diagnostics = self.pool.diagnostics(&name, duration_ms);
                     let complete = task.invoke.create_reply_with_diagnostics(output, final_state, diagnostics);
@@ -152,55 +177,22 @@ impl Runtime for ContainerRuntime {
                     self.send_reply(complete, &task.reply_subject);
                 }
                 Err(DispatchError::ContainerDead(ref reason)) if !task.is_retry => {
-                    // First failure — evict stale container and retry once (ADR 073)
+                    // First failure — evict and retry once (ADR 073)
                     tracing::warn!(
                         event = "container.dead",
                         agent = %name,
                         reason = %reason,
                         "Dispatch failed — evicting and retrying"
                     );
-
                     self.pool.evict(&name);
 
-                    // Look up agent to restart container
                     let agent = self.registry.get_agents().into_iter()
                         .find(|a| a.name == name);
 
                     if let Some(agent) = agent {
-                        match self.ensure_container(&agent, &task.invoke) {
-                            Ok(host_port) => {
-                                let payload = task.invoke.payload.clone();
-                                let session_id = task.invoke.session.as_str().to_string();
-                                let handle = thread::spawn(move || {
-                                    dispatch_to_container(host_port, &payload, &session_id)
-                                });
-                                self.running.insert(name, RunningTask {
-                                    handle,
-                                    invoke: task.invoke,
-                                    reply_subject: task.reply_subject,
-                                    started_at: Instant::now(),
-                                    is_retry: true,
-                                });
-                            }
-                            Err(e) => {
-                                tracing::error!(
-                                    event = "dispatch.retry_failed",
-                                    agent = %name,
-                                    error = %e,
-                                    "Container restart failed after eviction"
-                                );
-                                let complete = task.invoke.create_reply(
-                                    format!("[error] container restart failed: {}", e).into_bytes()
-                                );
-                                self.send_reply(complete, &task.reply_subject);
-                            }
-                        }
+                        self.dispatch(&name, &agent, task.invoke, task.reply_subject, true);
                     } else {
-                        tracing::error!(
-                            event = "dispatch.agent_gone",
-                            agent = %name,
-                            "Agent not found in registry after eviction"
-                        );
+                        tracing::error!(event = "dispatch.agent_gone", agent = %name, "Agent not found after eviction");
                         let complete = task.invoke.create_reply(
                             format!("[error] agent {} not found after container eviction", name).into_bytes()
                         );
@@ -222,10 +214,14 @@ impl Runtime for ContainerRuntime {
                     self.send_reply(complete, &task.reply_subject);
                 }
             }
-            did_work = true;
         }
 
-        // 2. Dispatch new invoke work to idle agents
+        true
+    }
+
+    /// Poll invoke queues for idle container agents, dispatch work.
+    fn dispatch_invokes(&mut self) -> bool {
+        let mut did_work = false;
         let all_agents = self.registry.get_agents();
         let container_agents: Vec<_> = all_agents.iter()
             .filter(|a| self.registry.select_runtime(a) == Some(RuntimeType::Container))
@@ -233,12 +229,10 @@ impl Runtime for ContainerRuntime {
 
         for agent in &container_agents {
             if self.running.contains_key(&agent.name) {
-                continue; // agent already busy
+                continue;
             }
 
-            let routing_key = agent.name.clone();
-            if let Ok((invoke, ack)) = self.queue.receive_invoke(&routing_key) {
-                let payload = invoke.payload.clone();
+            if let Ok((invoke, ack)) = self.queue.receive_invoke(&agent.name) {
                 let _ = ack();
 
                 tracing::info!(
@@ -249,35 +243,25 @@ impl Runtime for ContainerRuntime {
                     "Dispatching to container"
                 );
 
-                let host_port = match self.ensure_container(agent, &invoke) {
-                    Ok(port) => port,
-                    Err(e) => {
-                        tracing::error!(event = "dispatch.failed", agent = %agent.name, error = %e, "Failed to start container");
-                        let complete = invoke.create_reply(
-                            format!("[error] container start failed: {}", e).into_bytes()
-                        );
-                        self.send_reply(complete, &None);
-                        did_work = true;
-                        continue;
-                    }
-                };
-
-                let session_id = invoke.session.as_str().to_string();
-                let handle = thread::spawn(move || {
-                    dispatch_to_container(host_port, &payload, &session_id)
-                });
-
-                self.running.insert(agent.name.clone(), RunningTask {
-                    handle, invoke, reply_subject: None, started_at: Instant::now(), is_retry: false,
-                });
+                self.dispatch(&agent.name, agent, invoke, None, false);
                 did_work = true;
             }
         }
 
-        // 3. Dispatch delegated work to idle agents (ADR 056)
+        did_work
+    }
+
+    /// Poll delegate queues for idle container agents, dispatch delegated work (ADR 056).
+    fn dispatch_delegates(&mut self) -> bool {
+        let mut did_work = false;
+        let all_agents = self.registry.get_agents();
+        let container_agents: Vec<_> = all_agents.iter()
+            .filter(|a| self.registry.select_runtime(a) == Some(RuntimeType::Container))
+            .collect();
+
         for agent in &container_agents {
             if self.running.contains_key(&agent.name) {
-                continue; // agent already busy
+                continue;
             }
 
             if let Ok((delegate, ack)) = self.queue.receive_delegate(&agent.name) {
@@ -307,34 +291,35 @@ impl Runtime for ContainerRuntime {
                     },
                 );
 
-                let reply_subject = Some(delegate.reply_subject.clone());
-                let host_port = match self.ensure_container(agent, &invoke) {
-                    Ok(port) => port,
-                    Err(e) => {
-                        tracing::error!(event = "dispatch.failed", agent = %agent.name, error = %e, "Failed to start container for delegation");
-                        let complete = invoke.create_reply(
-                            format!("[error] container start failed: {}", e).into_bytes()
-                        );
-                        self.send_reply(complete, &reply_subject);
-                        did_work = true;
-                        continue;
-                    }
-                };
-
-                let payload = delegate.payload;
-                let session_id = delegate.session.as_str().to_string();
-
-                let handle = thread::spawn(move || {
-                    dispatch_to_container(host_port, &payload, &session_id)
-                });
-
-                self.running.insert(agent.name.clone(), RunningTask {
-                    handle, invoke, reply_subject: reply_subject.clone(), started_at: Instant::now(), is_retry: false,
-                });
+                self.dispatch(&agent.name, agent, invoke, Some(delegate.reply_subject), false);
                 did_work = true;
             }
         }
 
+        did_work
+    }
+}
+
+impl Drop for ContainerRuntime {
+    fn drop(&mut self) {
+        self.shutdown();
+    }
+}
+
+impl Runtime for ContainerRuntime {
+    fn id(&self) -> &ResourceId {
+        &self.id
+    }
+
+    fn runtime_type(&self) -> RuntimeType {
+        RuntimeType::Container
+    }
+
+    fn tick(&mut self) -> bool {
+        let mut did_work = false;
+        did_work |= self.sweep_completed();
+        did_work |= self.dispatch_invokes();
+        did_work |= self.dispatch_delegates();
         did_work
     }
 
