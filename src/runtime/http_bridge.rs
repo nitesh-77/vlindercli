@@ -3,9 +3,9 @@
 //! Provides per-operation endpoints that map to SDK methods:
 //!   POST /kv/get, /kv/put, /infer, /embed, etc.
 //!
-//! The bridge merges the URL path into an `op` field in the request body,
-//! creating a full SdkMessage JSON that feeds into `ServiceRouter::dispatch`. This keeps
-//! SdkMessage as the single routing truth while giving agents a clean REST API.
+//! The bridge is the JSON-to-typed boundary: it deserializes agent requests
+//! into SdkMessage variants, calls typed AgentBridge methods, and serializes
+//! the results back to HTTP responses.
 //!
 //! Zero external dependencies — uses `std::net::TcpListener` only.
 
@@ -15,6 +15,8 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::JoinHandle;
+
+use crate::domain::{AgentBridge, SdkMessage};
 
 use super::service_router::ServiceRouter;
 
@@ -191,11 +193,69 @@ fn parse_and_handle(
     reader.read_exact(&mut body)
         .map_err(|e| format!("body read error: {}", e))?;
 
-    // Merge op into body JSON
+    // Merge op into body JSON, deserialize, and route to typed methods
     let merged = merge_op(op, &body)?;
+    dispatch(send_data, merged)
+}
 
-    // Delegate to the shared dispatch
-    send_data.dispatch(merged)
+/// Deserialize an SdkMessage and route to typed AgentBridge methods.
+///
+/// This is the JSON-to-typed boundary: serde on the way in, serde on the way out.
+/// Everything between is typed Rust calls on the AgentBridge trait.
+fn dispatch(bridge: &dyn AgentBridge, payload: Vec<u8>) -> Result<Vec<u8>, String> {
+    let msg: SdkMessage = serde_json::from_slice(&payload)
+        .map_err(|e| format!("invalid SDK message: {}", e))?;
+
+    match msg {
+        SdkMessage::KvGet { path } => {
+            bridge.kv_get(&path)
+        }
+        SdkMessage::KvPut { path, content } => {
+            bridge.kv_put(&path, &content)?;
+            Ok(b"ok".to_vec())
+        }
+        SdkMessage::KvList { path } => {
+            let paths = bridge.kv_list(&path)?;
+            serde_json::to_vec(&paths)
+                .map_err(|e| format!("serialize error: {}", e))
+        }
+        SdkMessage::KvDelete { path } => {
+            let existed = bridge.kv_delete(&path)?;
+            Ok(if existed { b"ok".to_vec() } else { b"not_found".to_vec() })
+        }
+        SdkMessage::VectorStore { key, vector, metadata } => {
+            bridge.vector_store(&key, &vector, &metadata)?;
+            Ok(b"ok".to_vec())
+        }
+        SdkMessage::VectorSearch { vector, limit } => {
+            let matches = bridge.vector_search(&vector, limit)?;
+            serde_json::to_vec(&matches)
+                .map_err(|e| format!("serialize error: {}", e))
+        }
+        SdkMessage::VectorDelete { key } => {
+            let existed = bridge.vector_delete(&key)?;
+            Ok(if existed { b"ok".to_vec() } else { b"not_found".to_vec() })
+        }
+        SdkMessage::Infer { model, prompt, max_tokens } => {
+            let text = bridge.infer(&model, &prompt, max_tokens)?;
+            Ok(text.into_bytes())
+        }
+        SdkMessage::Embed { model, text } => {
+            let vector = bridge.embed(&model, &text)?;
+            serde_json::to_vec(&vector)
+                .map_err(|e| format!("serialize error: {}", e))
+        }
+        SdkMessage::Delegate { agent, input } => {
+            let handle = bridge.delegate(&agent, &input)?;
+            serde_json::to_vec(&serde_json::json!({ "handle": handle }))
+                .map_err(|e| format!("serialize error: {}", e))
+        }
+        SdkMessage::Wait { handle } => {
+            let output = bridge.wait(&handle)?;
+            serde_json::to_vec(&serde_json::json!({ "output": String::from_utf8_lossy(&output) }))
+                .map_err(|e| format!("serialize error: {}", e))
+        }
+    }
 }
 
 /// Read headers and extract Content-Length. Consumes all headers up to the blank line.

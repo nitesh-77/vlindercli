@@ -1,20 +1,19 @@
-//! ServiceRouter — shared agent→service call handler.
+//! ServiceRouter — queue-backed implementation of AgentBridge (ADR 074).
 //!
-//! Used by ContainerRuntime (via HTTP bridge).
-//! Contains the core logic: parse SdkMessage, resolve hop, build RequestMessage,
-//! send to queue, poll for ResponseMessage, return payload.
+//! Routes typed platform service calls through the MessageQueue.
+//! Each trait method builds the appropriate request, sends it to the
+//! queue, and polls for a response.
 //!
-//! State tracking (ADR 055): The router maintains the current state hash for
-//! the active invocation. For kv-put/kv-get operations, it injects the state
-//! hash into the request payload. On kv-put responses, it extracts the new
-//! state hash. This makes the router the "state cursor" for each invocation.
+//! State tracking (ADR 055): For KV operations, injects the current
+//! state hash into requests and extracts the new hash from kv-put
+//! responses. This makes the router the "state cursor" for each invocation.
 
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use uuid::Uuid;
 
-use crate::domain::{ObjectStorageType, Registry, SdkMessage, VectorStorageType};
+use crate::domain::{AgentBridge, Hop, ObjectStorageType, Registry, VectorMatch, VectorStorageType};
 use crate::queue::{
     DelegateMessage, DelegateDiagnostics, ContainerDiagnostics, InvokeMessage,
     MessageQueue, RequestMessage, RequestDiagnostics, SequenceCounter,
@@ -60,47 +59,13 @@ impl ServiceRouter {
         self.current_state.read().unwrap().clone()
     }
 
-    /// Dispatch a service call from the agent.
-    ///
-    /// Validates the payload, resolves the next hop, builds a typed request,
-    /// sends it, and waits for the response. Returns the response payload.
-    ///
-    /// For delegate/wait operations (ADR 056), handles them directly without
-    /// hop routing. For kv-put and kv-get operations, injects the current state
-    /// hash into the payload so the ObjectServiceWorker can perform versioned operations.
-    pub(crate) fn dispatch(&self, payload: Vec<u8>) -> Result<Vec<u8>, String> {
-        let msg: SdkMessage = serde_json::from_slice(&payload)
-            .map_err(|e| format!("invalid SDK message: {}", e))?;
+    // ========================================================================
+    // Private helpers
+    // ========================================================================
 
-        // Delegation operations are handled here, not via hop routing (ADR 056)
-        match &msg {
-            SdkMessage::Delegate { agent, input } => {
-                let handle = self.delegate(agent, input)?;
-                let json = serde_json::json!({ "handle": handle });
-                return serde_json::to_vec(&json)
-                    .map_err(|e| format!("delegate serialize error: {}", e));
-            }
-            SdkMessage::Wait { handle } => {
-                let output = self.wait(handle)?;
-                let json = serde_json::json!({ "output": String::from_utf8_lossy(&output) });
-                return serde_json::to_vec(&json)
-                    .map_err(|e| format!("wait serialize error: {}", e));
-            }
-            _ => {}
-        }
-
-        let hop = msg.hop(self.kv_backend, self.vec_backend, &self.model_backends)?;
-        let is_kv = hop.service == "kv";
-        let is_put = is_kv && hop.operation == "put";
+    /// Send a service request through the queue and poll for the response.
+    fn send_service_request(&self, hop: Hop, payload: Vec<u8>) -> Result<Vec<u8>, String> {
         let seq = self.sequence.next();
-
-        // For KV operations, inject current state hash into payload (ADR 055)
-        let request_payload = if is_kv {
-            self.inject_state(payload)?
-        } else {
-            payload
-        };
-
         let invoke = self.invoke.read().unwrap();
         let sha = invoke.submission.to_string();
 
@@ -111,7 +76,7 @@ impl ServiceRouter {
         let request_diag = RequestDiagnostics {
             sequence: seq.as_u32(),
             endpoint: format!("/{}", hop.service),
-            request_bytes: request_payload.len() as u64,
+            request_bytes: payload.len() as u64,
             received_at_ms,
         };
 
@@ -123,17 +88,17 @@ impl ServiceRouter {
             hop.backend,
             hop.operation,
             seq,
-            request_payload,
+            payload,
             request_diag,
         );
         drop(invoke);
 
-        tracing::debug!(sha = %sha, event = "service.request", service = %request.service, backend = %request.backend, seq = %seq, "dispatch: sending request");
+        tracing::debug!(sha = %sha, event = "service.request", service = %request.service, backend = %request.backend, seq = %seq, "sending service request");
 
         self.queue.send_request(request.clone())
             .map_err(|e| format!("send error: {}", e))?;
 
-        tracing::debug!(sha = %sha, event = "service.polling", service = %request.service, seq = %seq, "dispatch: polling for response");
+        tracing::debug!(sha = %sha, event = "service.polling", service = %request.service, seq = %seq, "polling for response");
         let poll_start = std::time::Instant::now();
         let mut poll_count: u64 = 0;
 
@@ -146,14 +111,8 @@ impl ServiceRouter {
                         sha = %sha, event = "service.response",
                         service = %request.service, seq = %seq,
                         polls = poll_count, elapsed = ?poll_start.elapsed(),
-                        "dispatch: got response"
+                        "got response"
                     );
-
-                    // For kv-put responses, extract new state hash (ADR 055)
-                    if is_put {
-                        self.extract_state(&response_payload);
-                    }
-
                     return Ok(response_payload);
                 }
                 Err(e) => {
@@ -164,7 +123,7 @@ impl ServiceRouter {
                             service = %request.service, seq = %seq,
                             polls = poll_count, elapsed = ?poll_start.elapsed(),
                             error = %e,
-                            "dispatch: still waiting for response"
+                            "still waiting for response"
                         );
                     }
                 }
@@ -173,19 +132,17 @@ impl ServiceRouter {
         }
     }
 
-    /// Inject the current state hash into a KV request payload.
-    fn inject_state(&self, payload: Vec<u8>) -> Result<Vec<u8>, String> {
-        let state = self.current_state.read().unwrap().clone();
-        let Some(state_hash) = state else {
-            return Ok(payload);
+    /// Build a KV request payload with state injection (ADR 055).
+    fn build_kv_payload(&self, op: &str, fields: serde_json::Value) -> Result<Vec<u8>, String> {
+        let mut map = match fields {
+            serde_json::Value::Object(m) => m,
+            _ => return Err("build_kv_payload: expected JSON object".to_string()),
         };
-
-        tracing::debug!(state = %state_hash, "inject_state: injecting into KV payload");
-        let mut map: serde_json::Map<String, serde_json::Value> = serde_json::from_slice(&payload)
-            .map_err(|e| format!("inject_state: invalid JSON: {}", e))?;
-        map.insert("state".to_string(), serde_json::Value::String(state_hash));
-        serde_json::to_vec(&map)
-            .map_err(|e| format!("inject_state: serialize failed: {}", e))
+        map.insert("op".to_string(), serde_json::Value::String(op.to_string()));
+        if let Some(ref state) = *self.current_state.read().unwrap() {
+            map.insert("state".to_string(), serde_json::Value::String(state.clone()));
+        }
+        serde_json::to_vec(&map).map_err(|e| format!("serialize error: {}", e))
     }
 
     /// Extract the new state hash from a kv-put response and update current_state.
@@ -198,12 +155,127 @@ impl ServiceRouter {
         }
     }
 
-    /// Delegate work to another agent (ADR 056, ADR 074).
-    ///
-    /// Validates the target agent exists, builds a unique reply subject,
-    /// sends a DelegateMessage, and returns the handle string.
-    pub(crate) fn delegate(&self, target_agent: &str, input: &str) -> Result<String, String> {
-        // Verify target agent is registered
+    /// Check for `[error]` prefix in a worker response.
+    fn check_worker_error(response: &[u8]) -> Result<(), String> {
+        if response.starts_with(b"[error]") {
+            Err(String::from_utf8_lossy(response).to_string())
+        } else {
+            Ok(())
+        }
+    }
+}
+
+// ============================================================================
+// AgentBridge trait implementation
+// ============================================================================
+
+impl AgentBridge for ServiceRouter {
+    fn kv_get(&self, path: &str) -> Result<Vec<u8>, String> {
+        let backend = self.kv_backend
+            .ok_or("agent called kv-get but has no object_storage configured")?;
+        let hop = Hop { service: "kv", backend: backend.as_str().to_string(), operation: "get" };
+        let payload = self.build_kv_payload("kv-get", serde_json::json!({"path": path}))?;
+        let response = self.send_service_request(hop, payload)?;
+        Self::check_worker_error(&response)?;
+        Ok(response)
+    }
+
+    fn kv_put(&self, path: &str, content: &str) -> Result<(), String> {
+        let backend = self.kv_backend
+            .ok_or("agent called kv-put but has no object_storage configured")?;
+        let hop = Hop { service: "kv", backend: backend.as_str().to_string(), operation: "put" };
+        let payload = self.build_kv_payload("kv-put", serde_json::json!({"path": path, "content": content}))?;
+        let response = self.send_service_request(hop, payload)?;
+        Self::check_worker_error(&response)?;
+        self.extract_state(&response);
+        Ok(())
+    }
+
+    fn kv_list(&self, prefix: &str) -> Result<Vec<String>, String> {
+        let backend = self.kv_backend
+            .ok_or("agent called kv-list but has no object_storage configured")?;
+        let hop = Hop { service: "kv", backend: backend.as_str().to_string(), operation: "list" };
+        let payload = self.build_kv_payload("kv-list", serde_json::json!({"path": prefix}))?;
+        let response = self.send_service_request(hop, payload)?;
+        Self::check_worker_error(&response)?;
+        serde_json::from_slice(&response)
+            .map_err(|e| format!("kv-list response parse error: {}", e))
+    }
+
+    fn kv_delete(&self, path: &str) -> Result<bool, String> {
+        let backend = self.kv_backend
+            .ok_or("agent called kv-delete but has no object_storage configured")?;
+        let hop = Hop { service: "kv", backend: backend.as_str().to_string(), operation: "delete" };
+        let payload = self.build_kv_payload("kv-delete", serde_json::json!({"path": path}))?;
+        let response = self.send_service_request(hop, payload)?;
+        Self::check_worker_error(&response)?;
+        Ok(response == b"ok")
+    }
+
+    fn vector_store(&self, key: &str, vector: &[f32], metadata: &str) -> Result<(), String> {
+        let backend = self.vec_backend
+            .ok_or("agent called vector-store but has no vector_storage configured")?;
+        let hop = Hop { service: "vec", backend: backend.as_str().to_string(), operation: "store" };
+        let payload = serde_json::to_vec(&serde_json::json!({
+            "op": "vector-store", "key": key, "vector": vector, "metadata": metadata,
+        })).unwrap();
+        let response = self.send_service_request(hop, payload)?;
+        Self::check_worker_error(&response)?;
+        Ok(())
+    }
+
+    fn vector_search(&self, vector: &[f32], limit: u32) -> Result<Vec<VectorMatch>, String> {
+        let backend = self.vec_backend
+            .ok_or("agent called vector-search but has no vector_storage configured")?;
+        let hop = Hop { service: "vec", backend: backend.as_str().to_string(), operation: "search" };
+        let payload = serde_json::to_vec(&serde_json::json!({
+            "op": "vector-search", "vector": vector, "limit": limit,
+        })).unwrap();
+        let response = self.send_service_request(hop, payload)?;
+        Self::check_worker_error(&response)?;
+        serde_json::from_slice(&response)
+            .map_err(|e| format!("vector-search response parse error: {}", e))
+    }
+
+    fn vector_delete(&self, key: &str) -> Result<bool, String> {
+        let backend = self.vec_backend
+            .ok_or("agent called vector-delete but has no vector_storage configured")?;
+        let hop = Hop { service: "vec", backend: backend.as_str().to_string(), operation: "delete" };
+        let payload = serde_json::to_vec(&serde_json::json!({
+            "op": "vector-delete", "key": key,
+        })).unwrap();
+        let response = self.send_service_request(hop, payload)?;
+        Self::check_worker_error(&response)?;
+        Ok(response == b"ok")
+    }
+
+    fn infer(&self, model: &str, prompt: &str, max_tokens: u32) -> Result<String, String> {
+        let backend = self.model_backends.get(model)
+            .ok_or_else(|| format!("agent called infer with undeclared model '{}'", model))?;
+        let hop = Hop { service: "infer", backend: backend.clone(), operation: "run" };
+        let payload = serde_json::to_vec(&serde_json::json!({
+            "op": "infer", "model": model, "prompt": prompt, "max_tokens": max_tokens,
+        })).unwrap();
+        let response = self.send_service_request(hop, payload)?;
+        Self::check_worker_error(&response)?;
+        String::from_utf8(response)
+            .map_err(|e| format!("infer response not valid UTF-8: {}", e))
+    }
+
+    fn embed(&self, model: &str, text: &str) -> Result<Vec<f32>, String> {
+        let backend = self.model_backends.get(model)
+            .ok_or_else(|| format!("agent called embed with undeclared model '{}'", model))?;
+        let hop = Hop { service: "embed", backend: backend.clone(), operation: "run" };
+        let payload = serde_json::to_vec(&serde_json::json!({
+            "op": "embed", "model": model, "text": text,
+        })).unwrap();
+        let response = self.send_service_request(hop, payload)?;
+        Self::check_worker_error(&response)?;
+        serde_json::from_slice(&response)
+            .map_err(|e| format!("embed response parse error: {}", e))
+    }
+
+    fn delegate(&self, target_agent: &str, input: &str) -> Result<String, String> {
         let _agent = self.registry.get_agent_by_name(target_agent)
             .ok_or_else(|| format!("delegate: target agent '{}' not found", target_agent))?;
 
@@ -239,11 +311,7 @@ impl ServiceRouter {
         Ok(reply_subject)
     }
 
-    /// Wait for a delegated task to complete (ADR 056, ADR 074).
-    ///
-    /// Polls the reply subject until a CompleteMessage arrives, then returns
-    /// the raw result payload.
-    pub(crate) fn wait(&self, handle: &str) -> Result<Vec<u8>, String> {
+    fn wait(&self, handle: &str) -> Result<Vec<u8>, String> {
         let sha = self.invoke.read().unwrap().submission.to_string();
         tracing::debug!(sha = %sha, handle = %handle, "wait: polling for delegation result");
         let poll_start = std::time::Instant::now();

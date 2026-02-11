@@ -8,6 +8,7 @@
 //! is the authoritative source for the runtime's abstract protocol.
 
 mod agent;
+mod agent_bridge;
 mod agent_manifest;
 mod catalog;
 mod conversation_store;
@@ -40,6 +41,7 @@ pub mod workers;
 // ============================================================================
 
 pub use agent::{Agent, LoadError as AgentLoadError, Mount, Prompts, Requirements};
+pub use agent_bridge::{AgentBridge, VectorMatch};
 pub use path::{AbsolutePath, AbsoluteUri};
 pub use agent_manifest::AgentManifest;
 pub use fleet::{Fleet, LoadError as FleetLoadError};
