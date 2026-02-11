@@ -3,8 +3,9 @@ use std::sync::Arc;
 
 use clap::Subcommand;
 
-use vlindercli::config::{conversations_dir, Config};
-use vlindercli::domain::{CliHarness, ConversationStore, Daemon, Fleet, Harness, Registry};
+use vlindercli::config::Config;
+use vlindercli::domain::{CliHarness, Daemon, Fleet, Harness, Registry};
+use vlindercli::domain::harness::read_latest_state;
 use vlindercli::queue::{agent_routing_key, MessageQueue, NatsQueue};
 use vlindercli::registry_service::{GrpcRegistryClient, ping_registry};
 
@@ -138,8 +139,7 @@ fn run_local(path: Option<PathBuf>) {
     });
 
     let entry_agent_name = agent_routing_key(&entry_agent_id);
-    daemon.harness.start_session(&entry_agent_name, conversations_dir())
-        .expect("Failed to start session");
+    daemon.harness.start_session(&entry_agent_name);
 
     // Read state from the system timeline (current branch)
     apply_latest_state(&mut daemon.harness, &entry_agent_name);
@@ -241,8 +241,7 @@ fn run_distributed(path: Option<PathBuf>, config: &Config) {
     });
 
     let entry_agent_name = agent_routing_key(&entry_agent_id);
-    harness.start_session(&entry_agent_name, conversations_dir())
-        .expect("Failed to start session");
+    harness.start_session(&entry_agent_name);
 
     tracing::debug!(fleet = %fleet.name, entry = %fleet.entry, "Fleet deployed to distributed daemon");
 
@@ -270,21 +269,10 @@ fn run_distributed(path: Option<PathBuf>, config: &Config) {
     });
 }
 
-/// Read the latest state for an agent from the system timeline.
+/// Read the latest state for an agent from file-based persistence (ADR 070).
 fn apply_latest_state(harness: &mut CliHarness, agent_name: &str) {
-    let store = match ConversationStore::open(conversations_dir()) {
-        Ok(s) => s,
-        Err(_) => return,
-    };
-
-    match store.latest_state_for_agent(agent_name) {
-        Ok(Some(state)) => {
-            println!("Resuming from state {}…", &state[..8.min(state.len())]);
-            harness.set_initial_state(state);
-        }
-        Ok(None) => {}
-        Err(e) => {
-            eprintln!("Warning: failed to read state from timeline: {}", e);
-        }
+    if let Some(state) = read_latest_state(agent_name) {
+        println!("Resuming from state {}…", &state[..8.min(state.len())]);
+        harness.set_initial_state(state);
     }
 }

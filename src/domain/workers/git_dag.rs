@@ -1,8 +1,19 @@
-//! GitDagWorker — writes DAG nodes as git commits (ADR 064, 069).
+//! GitDagWorker — writes DAG nodes as git commits (ADR 064, 069, 070).
 //!
 //! Each DagNode becomes a commit. The author is the message sender (ADR 069).
-//! The commit tree holds the payload as a blob. Sessions are branches under
-//! `refs/heads/sessions/<session_id>`.
+//! The commit tree holds the payload and system state snapshot (ADR 070):
+//!
+//! ```text
+//! tree
+//! ├── payload              (message content — raw bytes)
+//! ├── agent.toml           (agent manifest from registry, serialized)
+//! ├── models/
+//! │   ├── <model>.toml     (each model the agent requires)
+//! │   └── ...
+//! └── platform.toml        (vlinder version, source commit SHA, registry host)
+//! ```
+//!
+//! Sessions are branches under `refs/heads/sessions/<session_id>`.
 //!
 //! Uses git plumbing commands (hash-object, mktree, commit-tree, update-ref)
 //! to work entirely in `.git/objects/` without touching the working directory.
@@ -11,7 +22,9 @@ use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Arc;
 
+use crate::domain::registry::Registry;
 use crate::storage::dag_store::DagNode;
 use super::dag::DagWorker;
 
@@ -19,13 +32,19 @@ use super::dag::DagWorker;
 pub struct GitDagWorker {
     repo_path: PathBuf,
     registry_host: String,
+    /// Registry access for looking up agent/model state at commit time.
+    registry: Option<Arc<dyn Registry>>,
     /// Last git commit hash per session — for commit chaining.
     last_commit: HashMap<String, String>,
 }
 
 impl GitDagWorker {
     /// Open (or create) a git repo for DAG commits.
-    pub fn open(repo_path: &Path, registry_host: &str) -> Result<Self, String> {
+    pub fn open(
+        repo_path: &Path,
+        registry_host: &str,
+        registry: Option<Arc<dyn Registry>>,
+    ) -> Result<Self, String> {
         std::fs::create_dir_all(repo_path)
             .map_err(|e| format!("failed to create repo directory: {}", e))?;
 
@@ -45,6 +64,7 @@ impl GitDagWorker {
         Ok(Self {
             repo_path: repo_path.to_path_buf(),
             registry_host: registry_host.to_string(),
+            registry,
             last_commit: HashMap::new(),
         })
     }
@@ -74,10 +94,8 @@ impl GitDagWorker {
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     }
 
-    /// Create a tree containing a single `payload` blob. Returns the tree hash.
-    fn make_tree(&self, blob_hash: &str) -> Result<String, String> {
-        let entry = format!("100644 blob {}\tpayload\n", blob_hash);
-
+    /// Create a tree from mktree-format entries. Returns the tree hash.
+    fn make_tree_from_entries(&self, entries: &str) -> Result<String, String> {
         let mut child = Command::new("git")
             .args(["mktree"])
             .current_dir(&self.repo_path)
@@ -87,7 +105,7 @@ impl GitDagWorker {
             .spawn()
             .map_err(|e| format!("git mktree spawn failed: {}", e))?;
 
-        child.stdin.take().unwrap().write_all(entry.as_bytes())
+        child.stdin.take().unwrap().write_all(entries.as_bytes())
             .map_err(|e| format!("git mktree write failed: {}", e))?;
 
         let output = child.wait_with_output()
@@ -99,6 +117,80 @@ impl GitDagWorker {
         }
 
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    }
+
+    /// Build a rich tree with payload + agent.toml + models/ + platform.toml.
+    ///
+    /// Falls back to payload-only if registry lookup fails.
+    fn build_rich_tree(&self, node: &DagNode) -> Result<String, String> {
+        let payload_blob = self.write_blob(&node.payload)?;
+
+        // Start with payload entry
+        let mut entries = format!("100644 blob {}\tpayload\n", payload_blob);
+
+        // Try to add agent.toml, models/, and platform.toml from registry
+        if let Some(ref registry) = self.registry {
+            // Determine agent name from node (sender for Complete/Response, receiver for Invoke/Request/Delegate)
+            let agent_name = match node.message_type.as_str() {
+                "response" | "complete" => &node.from,
+                _ => &node.to,
+            };
+
+            if let Some(agent) = registry.get_agent_by_name(agent_name) {
+                // Write agent.toml blob
+                if let Ok(agent_toml) = toml::to_string_pretty(&agent) {
+                    if let Ok(blob) = self.write_blob(agent_toml.as_bytes()) {
+                        entries.push_str(&format!("100644 blob {}\tagent.toml\n", blob));
+                    }
+                }
+
+                // Build models/ subtree if agent has model requirements
+                if !agent.requirements.models.is_empty() {
+                    if let Ok(models_tree) = self.build_models_subtree(registry, &agent.requirements.models) {
+                        entries.push_str(&format!("040000 tree {}\tmodels\n", models_tree));
+                    }
+                }
+            }
+
+            // Write platform.toml
+            let platform_toml = format!(
+                "version = \"{}\"\ncommit = \"{}\"\nregistry_host = \"{}\"\n",
+                env!("CARGO_PKG_VERSION"),
+                env!("VLINDER_GIT_SHA"),
+                self.registry_host,
+            );
+            if let Ok(blob) = self.write_blob(platform_toml.as_bytes()) {
+                entries.push_str(&format!("100644 blob {}\tplatform.toml\n", blob));
+            }
+        }
+
+        self.make_tree_from_entries(&entries)
+    }
+
+    /// Build a models/ subtree with one TOML file per model.
+    fn build_models_subtree(
+        &self,
+        registry: &Arc<dyn Registry>,
+        models: &std::collections::HashMap<String, crate::domain::ResourceId>,
+    ) -> Result<String, String> {
+        let mut entries = String::new();
+
+        for (alias, _uri) in models {
+            if let Some(model) = registry.get_model(alias) {
+                if let Ok(model_toml) = toml::to_string_pretty(&model) {
+                    let blob = self.write_blob(model_toml.as_bytes())?;
+                    // Sanitize alias for filename
+                    let filename = format!("{}.toml", alias.replace('/', "-"));
+                    entries.push_str(&format!("100644 blob {}\t{}\n", blob, filename));
+                }
+            }
+        }
+
+        if entries.is_empty() {
+            return Err("no models to write".to_string());
+        }
+
+        self.make_tree_from_entries(&entries)
     }
 
     /// Create a commit from a tree. Returns the commit hash.
@@ -179,16 +271,13 @@ impl GitDagWorker {
 impl DagWorker for GitDagWorker {
     fn on_message(&mut self, node: &DagNode) {
         let result = (|| -> Result<(), String> {
-            // 1. Write payload blob
-            let blob_hash = self.write_blob(&node.payload)?;
+            // 1. Build rich tree (payload + agent.toml + models/ + platform.toml)
+            let tree_hash = self.build_rich_tree(node)?;
 
-            // 2. Create tree with payload blob
-            let tree_hash = self.make_tree(&blob_hash)?;
-
-            // 3. Get parent commit for this session
+            // 2. Get parent commit for this session
             let parent = self.last_commit.get(&node.session_id).map(|s| s.as_str());
 
-            // 4. Build commit message
+            // 3. Build commit message
             let message = format!(
                 "{}: {} \u{2192} {}\n\nSession: {}\nSubmission: {}\nHash: {}",
                 node.message_type.as_str(),
@@ -199,10 +288,10 @@ impl DagWorker for GitDagWorker {
                 node.hash,
             );
 
-            // 5. Author = message sender (ADR 069)
+            // 4. Author = message sender (ADR 069)
             let author_email = format!("{}@{}", node.from, self.registry_host);
 
-            // 6. Create commit
+            // 5. Create commit
             let commit_hash = self.commit_tree(
                 &tree_hash,
                 parent,
@@ -212,11 +301,11 @@ impl DagWorker for GitDagWorker {
                 &node.created_at,
             )?;
 
-            // 7. Update session branch ref
+            // 6. Update session branch ref
             let refname = format!("refs/heads/sessions/{}", node.session_id);
             self.update_ref(&refname, &commit_hash)?;
 
-            // 8. Track last commit
+            // 7. Track last commit
             self.last_commit.insert(node.session_id.clone(), commit_hash);
 
             Ok(())
@@ -232,6 +321,7 @@ impl DagWorker for GitDagWorker {
 mod tests {
     use super::*;
     use crate::storage::dag_store::{MessageType, hash_dag_node};
+    use crate::domain::{InMemoryRegistry, RuntimeType, Agent};
 
     fn test_node(
         payload: &[u8],
@@ -255,8 +345,33 @@ mod tests {
 
     fn test_worker() -> (GitDagWorker, tempfile::TempDir) {
         let tmp = tempfile::TempDir::new().unwrap();
-        let worker = GitDagWorker::open(tmp.path(), "registry.local:9000").unwrap();
+        let worker = GitDagWorker::open(tmp.path(), "registry.local:9000", None).unwrap();
         (worker, tmp)
+    }
+
+    fn test_worker_with_registry() -> (GitDagWorker, tempfile::TempDir, Arc<InMemoryRegistry>) {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let registry = Arc::new(InMemoryRegistry::new());
+        registry.register_runtime(RuntimeType::Container);
+
+        // Register a test agent
+        let agent = Agent::from_toml(r#"
+            name = "support-agent"
+            description = "Support"
+            runtime = "container"
+            executable = "localhost/support-agent:latest"
+            [requirements]
+            services = []
+        "#).unwrap();
+        registry.register_agent(agent).unwrap();
+
+        let worker = GitDagWorker::open(
+            tmp.path(),
+            "registry.local:9000",
+            Some(Arc::clone(&registry) as Arc<dyn Registry>),
+        ).unwrap();
+
+        (worker, tmp, registry)
     }
 
     #[test]
@@ -268,8 +383,8 @@ mod tests {
     #[test]
     fn open_is_idempotent() {
         let tmp = tempfile::TempDir::new().unwrap();
-        GitDagWorker::open(tmp.path(), "host").unwrap();
-        GitDagWorker::open(tmp.path(), "host").unwrap();
+        GitDagWorker::open(tmp.path(), "host", None).unwrap();
+        GitDagWorker::open(tmp.path(), "host", None).unwrap();
         assert!(tmp.path().join(".git").exists());
     }
 
@@ -506,5 +621,65 @@ mod tests {
 
         let count = worker.git(&["rev-list", "--count", "sessions/sess-1"]).unwrap();
         assert_eq!(count, "5");
+    }
+
+    // --- Rich tree tests (ADR 070) ---
+
+    #[test]
+    fn commit_tree_contains_agent_toml_when_registry_available() {
+        let (mut worker, _tmp, _registry) = test_worker_with_registry();
+        let node = test_node(b"hello", "", MessageType::Invoke, "cli", "support-agent");
+
+        worker.on_message(&node);
+
+        let commit = worker.git(&["rev-parse", "sessions/sess-1"]).unwrap();
+        let content = worker.git(&["show", &format!("{}:agent.toml", commit)]).unwrap();
+        assert!(content.contains("support-agent"), "agent.toml: {}", content);
+    }
+
+    #[test]
+    fn commit_tree_contains_platform_toml() {
+        let (mut worker, _tmp, _registry) = test_worker_with_registry();
+        let node = test_node(b"hello", "", MessageType::Invoke, "cli", "support-agent");
+
+        worker.on_message(&node);
+
+        let commit = worker.git(&["rev-parse", "sessions/sess-1"]).unwrap();
+        let content = worker.git(&["show", &format!("{}:platform.toml", commit)]).unwrap();
+        assert!(content.contains("version"), "platform.toml: {}", content);
+        assert!(content.contains("registry_host"), "platform.toml: {}", content);
+    }
+
+    #[test]
+    fn commit_without_registry_still_has_payload() {
+        let (mut worker, _tmp) = test_worker();
+        let node = test_node(b"my-data", "", MessageType::Invoke, "cli", "unknown-agent");
+
+        worker.on_message(&node);
+
+        let commit = worker.git(&["rev-parse", "sessions/sess-1"]).unwrap();
+        let content = worker.git(&["show", &format!("{}:payload", commit)]).unwrap();
+        assert_eq!(content, "my-data");
+
+        // Should NOT have agent.toml (no registry)
+        let result = worker.git(&["show", &format!("{}:agent.toml", commit)]);
+        assert!(result.is_err(), "should not have agent.toml without registry");
+    }
+
+    #[test]
+    fn agent_not_found_in_registry_falls_back_to_payload_only() {
+        let (mut worker, _tmp, _registry) = test_worker_with_registry();
+        // Use an agent name that's NOT registered
+        let node = test_node(b"hello", "", MessageType::Invoke, "cli", "nonexistent-agent");
+
+        worker.on_message(&node);
+
+        let commit = worker.git(&["rev-parse", "sessions/sess-1"]).unwrap();
+        // Should still have payload
+        let content = worker.git(&["show", &format!("{}:payload", commit)]).unwrap();
+        assert_eq!(content, "hello");
+        // But should have platform.toml (registry is available, just no agent found)
+        let platform = worker.git(&["show", &format!("{}:platform.toml", commit)]).unwrap();
+        assert!(platform.contains("version"), "platform.toml: {}", platform);
     }
 }

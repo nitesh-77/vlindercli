@@ -297,24 +297,41 @@ fn run_storage_vector_memory_worker(config: &Config, shutdown: &AtomicBool) {
     }
 }
 
-fn run_dag_capture_worker(_config: &Config, shutdown: &AtomicBool) {
+fn run_dag_capture_worker(config: &Config, shutdown: &AtomicBool) {
     use std::collections::HashMap;
-    use crate::config::dag_db_path;
-    use crate::domain::workers::{DagCaptureWorker, SqliteDagWorker};
+    use crate::config::{dag_db_path, conversations_dir};
+    use crate::domain::workers::{DagCaptureWorker, SqliteDagWorker, GitDagWorker};
     use crate::storage::dag_store::SqliteDagStore;
     use crate::queue::NatsQueue;
+    use crate::registry_service::GrpcRegistryClient;
 
     let nats = NatsQueue::localhost()
         .expect("Failed to connect to NATS");
 
+    // SQLite DAG backend
     let db_path = dag_db_path();
     let store = SqliteDagStore::open(&db_path)
         .expect("Failed to open DAG store");
-
     let sqlite_worker = SqliteDagWorker::new(Box::new(store));
-    let mut worker = DagCaptureWorker::new(vec![Box::new(sqlite_worker)]);
 
-    tracing::info!(db = %db_path.display(), "DAG capture worker ready");
+    // Git DAG backend — connects to registry for rich commit trees
+    let registry_addr = grpc_registry_addr(config);
+    let registry: Arc<dyn Registry> = Arc::new(
+        GrpcRegistryClient::connect(&registry_addr)
+            .expect("Failed to connect to registry")
+    );
+    let git_worker = GitDagWorker::open(
+        &conversations_dir(),
+        &config.distributed.registry_addr,
+        Some(registry),
+    ).expect("Failed to open git DAG worker");
+
+    let mut worker = DagCaptureWorker::new(vec![
+        Box::new(sqlite_worker),
+        Box::new(git_worker),
+    ]);
+
+    tracing::info!(db = %db_path.display(), git = %conversations_dir().display(), "DAG capture worker ready");
 
     // Create a dedicated consumer for the DAG worker on vlinder.>
     let js = nats.jetstream().clone();

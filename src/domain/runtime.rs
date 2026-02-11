@@ -11,7 +11,7 @@ use super::ResourceId;
 /// Supported runtime types.
 ///
 /// This is a compile-time enum - adding a new runtime type requires code changes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize)]
 pub enum RuntimeType {
     /// OCI container runtime (Podman)
     Container,

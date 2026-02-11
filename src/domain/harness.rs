@@ -8,12 +8,13 @@
 //! - `CliHarness`: Command-line implementation with tick loop and local paths
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
+use std::time::SystemTime;
 
 use crate::domain::registry::{JobId, JobStatus, Registry};
 use crate::domain::{Agent, ResourceId};
-use crate::domain::conversation_store::ConversationStore;
+use crate::domain::git_hash::compute_submission_id;
 use crate::domain::session::Session;
 use crate::queue::{
     HarnessType, InvokeMessage, MessageQueue, SessionId, SubmissionId,
@@ -40,17 +41,20 @@ pub trait Harness {
 /// - `deploy_from_path()`: Load agent from local filesystem
 /// - `tick()`: Polling loop for reconciling completed jobs
 /// - `start_session()`: Begin a conversation session (ADR 054)
-/// - `record_response()`: Record agent response and commit to git
+/// - `record_response()`: Record agent response to in-memory session
 pub struct CliHarness {
     queue: Arc<dyn MessageQueue + Send + Sync>,
     registry: Arc<dyn Registry>,
     inflight: HashMap<SubmissionId, JobId>,
     session: Option<Session>,
-    store: Option<ConversationStore>,
+    /// Last computed submission hash — parent for commit chaining (ADR 070).
+    last_submission_hash: Option<String>,
     /// Final state hash from the last completed invocation (ADR 055).
     last_state: Option<String>,
     /// Pending state from a just-completed invocation, not yet committed.
     pending_state: Option<String>,
+    /// Agent name for this session (used in state file path).
+    agent_name: Option<String>,
 }
 
 impl CliHarness {
@@ -63,58 +67,44 @@ impl CliHarness {
             registry,
             inflight: HashMap::new(),
             session: None,
-            store: None,
+            last_submission_hash: None,
             last_state: None,
             pending_state: None,
+            agent_name: None,
         }
     }
 
-    /// Start a conversation session for an agent (ADR 054).
+    /// Start a conversation session for an agent (ADR 054, ADR 070).
     ///
-    /// Creates a SessionId, Session, and opens the ConversationStore.
-    /// Must be called before invoke() to enable session support.
-    pub fn start_session(&mut self, agent_name: &str, conversations_dir: PathBuf) -> Result<(), String> {
+    /// Creates a SessionId and Session. No ConversationStore — the harness
+    /// computes SubmissionIds in-process and the GitDagWorker writes to git.
+    pub fn start_session(&mut self, agent_name: &str) {
         let session_id = SessionId::new();
         let session = Session::new(session_id, agent_name);
-        let store = ConversationStore::open(conversations_dir)
-            .map_err(|e| format!("failed to open conversation store: {}", e))?;
 
         self.session = Some(session);
-        self.store = Some(store);
-        Ok(())
+        self.agent_name = Some(agent_name.to_string());
     }
 
-    /// Record an agent response and commit to the conversation store.
+    /// Record an agent response to the in-memory session.
     ///
     /// Clears the pending question and appends the completed turn to history.
-    /// If state tracking is active (ADR 055), includes the State trailer.
+    /// If state tracking is active (ADR 055), promotes pending_state to last_state
+    /// and persists it to a state file for cross-session continuity.
     pub fn record_response(&mut self, response: &str) {
-        if let (Some(session), Some(store)) = (self.session.as_mut(), self.store.as_ref()) {
-            // Find the submission ID for the current open question
-            let submission_id = session.history.iter().rev()
-                .find_map(|entry| {
-                    if let crate::domain::session::HistoryEntry::User { submission, .. } = entry {
-                        Some(submission.as_str().to_string())
-                    } else {
-                        None
-                    }
-                })
-                .unwrap_or_default();
-
-            // Take pending_state and promote it to last_state after commit
+        if let Some(session) = self.session.as_mut() {
+            // Take pending_state and promote it to last_state
             let state = self.pending_state.take();
 
             session.record_agent_response(response);
-            if let Err(e) = store.commit_agent_response(
-                session,
-                &submission_id,
-                state.as_deref(),
-            ) {
-                tracing::warn!(error = %e, "failed to commit agent response");
-            }
 
-            // Update last_state for next invocation
-            if state.is_some() {
+            // Persist state to file for cross-session continuity
+            if let Some(ref state_hash) = state {
+                if let Some(ref agent_name) = self.agent_name {
+                    if let Err(e) = persist_state(agent_name, state_hash) {
+                        tracing::warn!(error = %e, "failed to persist state file");
+                    }
+                }
                 self.last_state = state;
             }
         }
@@ -221,6 +211,27 @@ fn compare_agents(new: &Agent, existing: &Agent) -> Vec<String> {
     diffs
 }
 
+/// Persist state hash to file for cross-session continuity (ADR 070).
+///
+/// Writes `{state_hash}` to `~/.vlinder/state/{agent_name}.latest`.
+fn persist_state(agent_name: &str, state_hash: &str) -> Result<(), String> {
+    let state_dir = crate::config::vlinder_dir().join("state");
+    std::fs::create_dir_all(&state_dir)
+        .map_err(|e| format!("failed to create state dir: {}", e))?;
+    let path = state_dir.join(format!("{}.latest", agent_name));
+    std::fs::write(&path, state_hash)
+        .map_err(|e| format!("failed to write state file: {}", e))
+}
+
+/// Read the latest persisted state for an agent (ADR 070).
+///
+/// Returns the state hash from `~/.vlinder/state/{agent_name}.latest`,
+/// or None if no state file exists.
+pub fn read_latest_state(agent_name: &str) -> Option<String> {
+    let path = crate::config::vlinder_dir().join("state").join(format!("{}.latest", agent_name));
+    std::fs::read_to_string(&path).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+}
+
 impl Harness for CliHarness {
     fn harness_type(&self) -> HarnessType {
         HarnessType::Cli
@@ -240,20 +251,31 @@ impl Harness for CliHarness {
         let runtime = self.registry.select_runtime(&agent)
             .ok_or_else(|| format!("no runtime available for agent: {}", agent_id))?;
 
-        // Derive submission and payload from session state (ADR 054)
-        let (submission, session_id, payload) = if let (Some(session), Some(store)) = (self.session.as_mut(), self.store.as_ref()) {
-            // Session mode: commit user input to git, SHA becomes SubmissionId
+        // Derive submission and payload from session state (ADR 054, ADR 070)
+        let (submission, session_id, payload) = if let Some(session) = self.session.as_mut() {
+            // Session mode: compute SubmissionId in-process (ADR 070)
             let enriched_payload = session.build_payload(input);
-            session.record_user_input(input, SubmissionId::from("pending".to_string()));
-            let sha = store.commit_user_input(session)
-                .map_err(|e| format!("failed to commit user input: {}", e))?;
-            // Fix the submission in history — replace placeholder with actual SHA
-            if let Some(last) = session.history.last_mut() {
-                if let crate::domain::session::HistoryEntry::User { submission, .. } = last {
-                    *submission = SubmissionId::from(sha.clone());
-                }
-            }
-            (SubmissionId::from(sha), session.session.clone(), enriched_payload)
+            let parent = self.last_submission_hash.as_deref().unwrap_or("");
+            let author = format!("cli <cli@localhost>");
+            let timestamp = SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as i64;
+            let message = format!("user\n\n{}\n\nSession: {}", input, session.session.as_str());
+
+            let sha = compute_submission_id(
+                enriched_payload.as_bytes(),
+                parent,
+                &author,
+                timestamp,
+                &message,
+            );
+
+            let submission = SubmissionId::from(sha.clone());
+            session.record_user_input(input, submission.clone());
+            self.last_submission_hash = Some(sha);
+
+            (submission, session.session.clone(), enriched_payload)
         } else {
             // No session: fallback to UUID-based submission
             (SubmissionId::new(), SessionId::new(), input.to_string())
@@ -489,7 +511,7 @@ mod tests {
         assert!(result.unwrap_err().contains("failed to load agent"));
     }
 
-    // --- Session integration tests ---
+    // --- Session integration tests (ADR 070) ---
 
     #[test]
     fn invoke_with_session_creates_sha_derived_submission() {
@@ -499,9 +521,7 @@ mod tests {
 
         let agent_id = deploy_test_agent(&harness);
 
-        // Start session in a temp dir
-        let tmp = tempfile::TempDir::new().unwrap();
-        harness.start_session("test-agent", tmp.path().to_path_buf()).unwrap();
+        harness.start_session("test-agent");
 
         let job_id = harness.invoke(&agent_id, "hello").unwrap();
 
@@ -521,8 +541,7 @@ mod tests {
 
         let agent_id = deploy_test_agent(&harness);
 
-        let tmp = tempfile::TempDir::new().unwrap();
-        harness.start_session("test-agent", tmp.path().to_path_buf()).unwrap();
+        harness.start_session("test-agent");
 
         harness.invoke(&agent_id, "first message").unwrap();
 
@@ -544,8 +563,7 @@ mod tests {
 
         let agent_id = deploy_test_agent(&harness);
 
-        let tmp = tempfile::TempDir::new().unwrap();
-        harness.start_session("test-agent", tmp.path().to_path_buf()).unwrap();
+        harness.start_session("test-agent");
 
         // First turn
         harness.invoke(&agent_id, "hello").unwrap();
@@ -568,29 +586,21 @@ mod tests {
     }
 
     #[test]
-    fn record_response_commits_to_git() {
+    fn second_invoke_has_different_submission_id() {
         let queue = Arc::new(InMemoryQueue::new());
         let registry = test_registry();
         let mut harness = CliHarness::new(queue.clone(), registry.clone());
 
         let agent_id = deploy_test_agent(&harness);
+        harness.start_session("test-agent");
 
-        let tmp = tempfile::TempDir::new().unwrap();
-        harness.start_session("test-agent", tmp.path().to_path_buf()).unwrap();
+        let job1 = harness.invoke(&agent_id, "first").unwrap();
+        harness.record_response("reply");
 
-        harness.invoke(&agent_id, "hello").unwrap();
-        harness.record_response("world");
+        let job2 = harness.invoke(&agent_id, "second").unwrap();
 
-        // Verify git log has 2 commits (user + agent)
-        let output = std::process::Command::new("git")
-            .args(["log", "--oneline"])
-            .current_dir(tmp.path())
-            .output()
-            .unwrap();
-        let log = String::from_utf8_lossy(&output.stdout);
-        let lines: Vec<&str> = log.lines().collect();
-        assert_eq!(lines.len(), 2, "git log: {}", log);
-        assert!(lines[0].contains("agent"));
-        assert!(lines[1].contains("user"));
+        let sub1 = registry.get_job(&job1).unwrap().submission_id;
+        let sub2 = registry.get_job(&job2).unwrap().submission_id;
+        assert_ne!(sub1, sub2, "second invoke should have different submission");
     }
 }

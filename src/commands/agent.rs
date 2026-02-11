@@ -3,8 +3,9 @@ use std::sync::Arc;
 
 use clap::{Subcommand, ValueEnum};
 
-use vlindercli::config::{conversations_dir, registry_db_path, Config};
+use vlindercli::config::{registry_db_path, Config};
 use vlindercli::domain::{CliHarness, Daemon, Harness, PersistentRegistry, Registry};
+use vlindercli::domain::harness::read_latest_state;
 use vlindercli::queue::{agent_routing_key, MessageQueue, NatsQueue};
 use vlindercli::registry_service::{GrpcRegistryClient, ping_registry};
 
@@ -100,12 +101,11 @@ fn run_local(path: Option<PathBuf>) {
     let agent_id = daemon.harness.deploy_from_path(&absolute_path)
         .expect("Failed to deploy agent");
 
-    // Start conversation session (ADR 054)
+    // Start conversation session (ADR 054, ADR 070)
     let agent_name = agent_routing_key(&agent_id);
-    daemon.harness.start_session(&agent_name, conversations_dir())
-        .expect("Failed to start session");
+    daemon.harness.start_session(&agent_name);
 
-    // Read state from the system timeline (current branch)
+    // Read state from file-based persistence (ADR 070)
     apply_latest_state(&mut daemon.harness, &agent_name);
 
     // Run REPL
@@ -176,12 +176,11 @@ fn run_distributed(path: Option<PathBuf>, config: &Config) {
 
     tracing::info!(agent = %agent_id, "Agent deployed to distributed daemon");
 
-    // Start conversation session (ADR 054)
+    // Start conversation session (ADR 054, ADR 070)
     let agent_name = agent_routing_key(&agent_id);
-    harness.start_session(&agent_name, conversations_dir())
-        .expect("Failed to start session");
+    harness.start_session(&agent_name);
 
-    // Read state from the system timeline (current branch)
+    // Read state from file-based persistence (ADR 070)
     apply_latest_state(&mut harness, &agent_name);
 
     // Run REPL - harness ticks to process responses
@@ -202,23 +201,12 @@ fn run_distributed(path: Option<PathBuf>, config: &Config) {
     });
 }
 
-/// Read the latest state for an agent from the system timeline and initialize
-/// the harness with it (state continuity across sessions).
+/// Read the latest state for an agent from file-based persistence (ADR 070)
+/// and initialize the harness with it (state continuity across sessions).
 fn apply_latest_state(harness: &mut CliHarness, agent_name: &str) {
-    let store = match vlindercli::domain::ConversationStore::open(conversations_dir()) {
-        Ok(s) => s,
-        Err(_) => return, // No conversation store yet — first run
-    };
-
-    match store.latest_state_for_agent(agent_name) {
-        Ok(Some(state)) => {
-            println!("Resuming from state {}…", &state[..8.min(state.len())]);
-            harness.set_initial_state(state);
-        }
-        Ok(None) => {} // No prior state — starting fresh
-        Err(e) => {
-            eprintln!("Warning: failed to read state from timeline: {}", e);
-        }
+    if let Some(state) = read_latest_state(agent_name) {
+        println!("Resuming from state {}…", &state[..8.min(state.len())]);
+        harness.set_initial_state(state);
     }
 }
 

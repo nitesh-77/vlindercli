@@ -109,7 +109,7 @@ mod tests {
     #[test]
     fn route_shows_session_commits() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let mut worker = GitDagWorker::open(tmp.path(), "registry.local:9000").unwrap();
+        let mut worker = GitDagWorker::open(tmp.path(), "registry.local:9000", None).unwrap();
 
         let n1 = test_node(b"q", "", MessageType::Invoke, "cli", "agent-a", "sess-1");
         worker.on_message(&n1);

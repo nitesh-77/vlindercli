@@ -2,11 +2,13 @@
 
 use std::path::Path;
 
+use serde::Serialize;
+
 use super::model_manifest::{ModelManifest, ModelTypeConfig, ModelEngineConfig, ParseError};
 use super::resource_id::ResourceId;
 
 /// A model with resolved paths, ready for use.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct Model {
     /// Registry-assigned identity: `<registry_id>/models/<name>`.
     /// Set by the registry during registration.
@@ -21,7 +23,7 @@ pub struct Model {
     pub digest: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub enum ModelType {
     Inference,
     Embedding,
@@ -31,7 +33,7 @@ pub enum ModelType {
 ///
 /// Used by both model manifests (what the model requires) and
 /// the registry (what implementations are available).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
 pub enum EngineType {
     /// Ollama HTTP API.
     Ollama,

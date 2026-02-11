@@ -12,11 +12,12 @@ mod agent_manifest;
 mod catalog;
 mod conversation_store;
 mod daemon;
+pub(crate) mod git_hash;
 mod embedding;
 mod supervisor;
 mod fleet;
 mod fleet_manifest;
-mod harness;
+pub mod harness;
 mod inference;
 mod model;
 mod provider;
@@ -115,7 +116,6 @@ pub use sdk_message::{Hop, SdkMessage};
 pub use harness::{Harness, CliHarness};
 pub use session::Session;
 pub use session_server::SessionServer;
-pub use conversation_store::{ConversationStore, StoreError};
 pub use route::{Route, Stop};
 
 // ============================================================================

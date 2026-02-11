@@ -62,7 +62,7 @@ impl AsRef<str> for AbsoluteUri {
 }
 
 /// An absolute filesystem path. Can only be created through resolution.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct AbsolutePath(PathBuf);
 
 impl AbsolutePath {

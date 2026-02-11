@@ -3,7 +3,7 @@
 //! ResourceId is a URI that identifies any resource in the registry:
 //! storage, models, runtimes, queues, etc.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// A URI that identifies a resource in the registry.
 ///
@@ -14,7 +14,7 @@ use serde::Deserialize;
 /// - `memory://name` → in-memory (testing)
 /// - `ollama://phi3` → Ollama model
 /// - `file:///path/to/model.gguf` → local model file
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct ResourceId(String);
 

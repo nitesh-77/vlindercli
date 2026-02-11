@@ -12,7 +12,7 @@ use super::runtime::RuntimeType;
 ///
 /// All paths (executable, mounts, model URIs) are resolved to absolute paths at load time.
 /// See ADR 020 for the manifest format, ADR 048 for identity model.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct Agent {
     pub name: String,
     pub description: String,
@@ -135,7 +135,7 @@ impl From<ParseError> for LoadError {
 }
 
 /// Agent runtime requirements (validated)
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct Requirements {
     /// Model name → ResourceId mapping
     pub models: HashMap<String, ResourceId>,
@@ -183,7 +183,7 @@ impl From<PromptsConfig> for Prompts {
 }
 
 /// Resolved filesystem mount for WASI access
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct Mount {
     pub host_path: AbsolutePath,
     pub guest_path: PathBuf,
