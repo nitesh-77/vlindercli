@@ -199,9 +199,13 @@ impl VectorServiceWorker {
 mod tests {
     use super::*;
     use crate::domain::{Agent, InMemoryRegistry, Registry};
-    use crate::queue::{InMemoryQueue, Sequence, SubmissionId};
+    use crate::queue::{InMemoryQueue, RequestDiagnostics, Sequence, SessionId, SubmissionId};
 
     const TEST_AGENT_ID: &str = "http://127.0.0.1:9000/agents/test-agent";
+
+    fn test_request_diag() -> RequestDiagnostics {
+        RequestDiagnostics { sequence: 0, endpoint: String::new(), request_bytes: 0, received_at_ms: 0 }
+    }
 
     fn test_agent_id() -> ResourceId {
         ResourceId::new(TEST_AGENT_ID)
@@ -247,12 +251,14 @@ mod tests {
         });
         let store_request = RequestMessage::new(
             test_submission(),
+            SessionId::new(),
             test_agent_id(),
             "vec",
             "memory",
             "store",
             Sequence::first(),
             serde_json::to_vec(&store_payload).unwrap(),
+            test_request_diag(),
         );
 
         queue.send_request(store_request.clone()).unwrap();
@@ -269,12 +275,14 @@ mod tests {
         });
         let search_request = RequestMessage::new(
             test_submission(),
+            SessionId::new(),
             test_agent_id(),
             "vec",
             "memory",
             "search",
             Sequence::from(2),
             serde_json::to_vec(&search_payload).unwrap(),
+            test_request_diag(),
         );
 
         queue.send_request(search_request.clone()).unwrap();

@@ -82,7 +82,7 @@ impl Provider {
 mod tests {
     use super::*;
     use crate::domain::{Agent, InMemoryRegistry, ResourceId};
-    use crate::queue::{InMemoryQueue, RequestMessage, Sequence, SubmissionId};
+    use crate::queue::{InMemoryQueue, RequestDiagnostics, RequestMessage, Sequence, SessionId, SubmissionId};
 
     fn test_agent(name: &str) -> Agent {
         let manifest = format!(r#"
@@ -124,12 +124,14 @@ mod tests {
         });
         let request_a = RequestMessage::new(
             test_submission(),
+            SessionId::new(),
             ResourceId::new("http://127.0.0.1:9000/agents/agent-a"),
             "kv",
             "memory",
             "put",
             Sequence::first(),
             serde_json::to_vec(&put_a).unwrap(),
+            RequestDiagnostics { sequence: 0, endpoint: String::new(), request_bytes: 0, received_at_ms: 0 },
         );
         queue.send_request(request_a.clone()).unwrap();
         provider.tick();
@@ -144,12 +146,14 @@ mod tests {
         });
         let request_b = RequestMessage::new(
             test_submission(),
+            SessionId::new(),
             ResourceId::new("http://127.0.0.1:9000/agents/agent-b"),
             "kv",
             "memory",
             "put",
             Sequence::from(2),
             serde_json::to_vec(&put_b).unwrap(),
+            RequestDiagnostics { sequence: 0, endpoint: String::new(), request_bytes: 0, received_at_ms: 0 },
         );
         queue.send_request(request_b.clone()).unwrap();
         provider.tick();
@@ -161,12 +165,14 @@ mod tests {
         let get_a = serde_json::json!({ "path": "/data.txt" });
         let request_get_a = RequestMessage::new(
             test_submission(),
+            SessionId::new(),
             ResourceId::new("http://127.0.0.1:9000/agents/agent-a"),
             "kv",
             "memory",
             "get",
             Sequence::from(3),
             serde_json::to_vec(&get_a).unwrap(),
+            RequestDiagnostics { sequence: 0, endpoint: String::new(), request_bytes: 0, received_at_ms: 0 },
         );
         queue.send_request(request_get_a.clone()).unwrap();
         provider.tick();
@@ -178,12 +184,14 @@ mod tests {
         let get_b = serde_json::json!({ "path": "/data.txt" });
         let request_get_b = RequestMessage::new(
             test_submission(),
+            SessionId::new(),
             ResourceId::new("http://127.0.0.1:9000/agents/agent-b"),
             "kv",
             "memory",
             "get",
             Sequence::from(4),
             serde_json::to_vec(&get_b).unwrap(),
+            RequestDiagnostics { sequence: 0, endpoint: String::new(), request_bytes: 0, received_at_ms: 0 },
         );
         queue.send_request(request_get_b.clone()).unwrap();
         provider.tick();

@@ -14,6 +14,7 @@ mod message;
 mod traits;
 mod in_memory;
 mod nats;
+pub mod diagnostics;
 
 use std::sync::Arc;
 use crate::config::Config;
@@ -27,6 +28,10 @@ pub use message::{
 pub use traits::{MessageQueue, QueueError};
 pub use in_memory::InMemoryQueue;
 pub use nats::NatsQueue;
+pub use diagnostics::{
+    InvokeDiagnostics, RequestDiagnostics, ServiceDiagnostics, ServiceMetrics,
+    ContainerDiagnostics, ContainerRuntimeInfo, DelegateDiagnostics,
+};
 
 /// Extract the agent name from a registry-assigned ResourceId.
 ///

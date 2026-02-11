@@ -383,7 +383,7 @@ impl ObjectServiceWorker {
 mod tests {
     use super::*;
     use crate::domain::{Agent, InMemoryRegistry};
-    use crate::queue::{InMemoryQueue, Sequence, SubmissionId};
+    use crate::queue::{InMemoryQueue, RequestDiagnostics, Sequence, SessionId, SubmissionId};
 
     const TEST_AGENT_ID: &str = "http://127.0.0.1:9000/agents/test-agent";
 
@@ -393,6 +393,14 @@ mod tests {
 
     fn test_submission() -> SubmissionId {
         SubmissionId::from("sub-test-123".to_string())
+    }
+
+    fn test_session() -> SessionId {
+        SessionId::new()
+    }
+
+    fn test_request_diag() -> RequestDiagnostics {
+        RequestDiagnostics { sequence: 0, endpoint: String::new(), request_bytes: 0, received_at_ms: 0 }
     }
 
     fn test_agent_with_object_storage() -> Agent {
@@ -429,12 +437,14 @@ mod tests {
         });
         let put_request = RequestMessage::new(
             test_submission(),
+            test_session(),
             test_agent_id(),
             "kv",
             "memory",
             "put",
             Sequence::first(),
             serde_json::to_vec(&put_payload).unwrap(),
+            test_request_diag(),
         );
 
         queue.send_request(put_request.clone()).unwrap();
@@ -451,12 +461,14 @@ mod tests {
         });
         let get_request = RequestMessage::new(
             test_submission(),
+            test_session(),
             test_agent_id(),
             "kv",
             "memory",
             "get",
             Sequence::from(2),
             serde_json::to_vec(&get_payload).unwrap(),
+            test_request_diag(),
         );
 
         queue.send_request(get_request.clone()).unwrap();
@@ -485,9 +497,10 @@ mod tests {
             "state": ""  // root state
         });
         let put_request = RequestMessage::new(
-            test_submission(), test_agent_id(),
+            test_submission(), test_session(), test_agent_id(),
             "kv", "memory", "put", Sequence::first(),
             serde_json::to_vec(&put_payload).unwrap(),
+            test_request_diag(),
         );
 
         queue.send_request(put_request.clone()).unwrap();
@@ -522,9 +535,10 @@ mod tests {
             "state": ""
         });
         let put_request = RequestMessage::new(
-            test_submission(), test_agent_id(),
+            test_submission(), test_session(), test_agent_id(),
             "kv", "memory", "put", Sequence::first(),
             serde_json::to_vec(&put_payload).unwrap(),
+            test_request_diag(),
         );
         queue.send_request(put_request.clone()).unwrap();
         assert!(handler.tick());
@@ -539,9 +553,10 @@ mod tests {
             "state": state_hash
         });
         let get_request = RequestMessage::new(
-            test_submission(), test_agent_id(),
+            test_submission(), test_session(), test_agent_id(),
             "kv", "memory", "get", Sequence::from(2),
             serde_json::to_vec(&get_payload).unwrap(),
+            test_request_diag(),
         );
         queue.send_request(get_request.clone()).unwrap();
         assert!(handler.tick());
@@ -569,9 +584,10 @@ mod tests {
             "state": ""
         });
         let req1 = RequestMessage::new(
-            test_submission(), test_agent_id(),
+            test_submission(), test_session(), test_agent_id(),
             "kv", "memory", "put", Sequence::first(),
             serde_json::to_vec(&put1).unwrap(),
+            test_request_diag(),
         );
         queue.send_request(req1.clone()).unwrap();
         handler.tick();
@@ -587,9 +603,10 @@ mod tests {
             "state": hash1
         });
         let req2 = RequestMessage::new(
-            test_submission(), test_agent_id(),
+            test_submission(), test_session(), test_agent_id(),
             "kv", "memory", "put", Sequence::from(2),
             serde_json::to_vec(&put2).unwrap(),
+            test_request_diag(),
         );
         queue.send_request(req2.clone()).unwrap();
         handler.tick();
@@ -604,9 +621,10 @@ mod tests {
         // Reading /a.txt from state2 should still work (inherited from snapshot)
         let get = serde_json::json!({"path": "/a.txt", "state": hash2});
         let get_req = RequestMessage::new(
-            test_submission(), test_agent_id(),
+            test_submission(), test_session(), test_agent_id(),
             "kv", "memory", "get", Sequence::from(3),
             serde_json::to_vec(&get).unwrap(),
+            test_request_diag(),
         );
         queue.send_request(get_req.clone()).unwrap();
         handler.tick();
@@ -633,9 +651,10 @@ mod tests {
             "state": ""
         });
         let put_req = RequestMessage::new(
-            test_submission(), test_agent_id(),
+            test_submission(), test_session(), test_agent_id(),
             "kv", "memory", "put", Sequence::first(),
             serde_json::to_vec(&put).unwrap(),
+            test_request_diag(),
         );
         queue.send_request(put_req.clone()).unwrap();
         handler.tick();
@@ -647,9 +666,10 @@ mod tests {
         // Get non-existent path from that state
         let get = serde_json::json!({"path": "/nope.txt", "state": state_hash});
         let get_req = RequestMessage::new(
-            test_submission(), test_agent_id(),
+            test_submission(), test_session(), test_agent_id(),
             "kv", "memory", "get", Sequence::from(2),
             serde_json::to_vec(&get).unwrap(),
+            test_request_diag(),
         );
         queue.send_request(get_req.clone()).unwrap();
         handler.tick();
@@ -675,9 +695,10 @@ mod tests {
             "content": base64::engine::general_purpose::STANDARD.encode(b"plain data")
         });
         let put_req = RequestMessage::new(
-            test_submission(), test_agent_id(),
+            test_submission(), test_session(), test_agent_id(),
             "kv", "memory", "put", Sequence::first(),
             serde_json::to_vec(&put_payload).unwrap(),
+            test_request_diag(),
         );
         queue.send_request(put_req.clone()).unwrap();
         handler.tick();
@@ -687,9 +708,10 @@ mod tests {
 
         let get_payload = serde_json::json!({"path": "/test.txt"});
         let get_req = RequestMessage::new(
-            test_submission(), test_agent_id(),
+            test_submission(), test_session(), test_agent_id(),
             "kv", "memory", "get", Sequence::from(2),
             serde_json::to_vec(&get_payload).unwrap(),
+            test_request_diag(),
         );
         queue.send_request(get_req.clone()).unwrap();
         handler.tick();

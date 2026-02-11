@@ -12,6 +12,10 @@ use uuid::Uuid;
 use serde::{Deserialize, Serialize};
 
 use crate::domain::{ResourceId, RuntimeType};
+use super::diagnostics::{
+    InvokeDiagnostics, RequestDiagnostics, ServiceDiagnostics,
+    ContainerDiagnostics, DelegateDiagnostics,
+};
 
 // --- Supporting types ---
 
@@ -260,6 +264,8 @@ pub struct InvokeMessage {
     /// Initial state hash from the previous turn's State trailer (ADR 055).
     /// None for the first invocation or when state tracking is not active.
     pub state: Option<String>,
+    /// Diagnostics from the harness (ADR 071).
+    pub diagnostics: InvokeDiagnostics,
 }
 
 impl InvokeMessage {
@@ -271,6 +277,7 @@ impl InvokeMessage {
         agent_id: ResourceId,
         payload: Vec<u8>,
         state: Option<String>,
+        diagnostics: InvokeDiagnostics,
     ) -> Self {
         Self {
             id: MessageId::new(),
@@ -281,6 +288,7 @@ impl InvokeMessage {
             agent_id,
             payload,
             state,
+            diagnostics,
         }
     }
 }
@@ -293,33 +301,40 @@ impl InvokeMessage {
 pub struct RequestMessage {
     pub id: MessageId,
     pub submission: SubmissionId,
+    pub session: SessionId,
     pub agent_id: ResourceId,
     pub service: String,
     pub backend: String,
     pub operation: String,
     pub sequence: Sequence,
     pub payload: Vec<u8>,
+    /// Diagnostics from the bridge (ADR 071).
+    pub diagnostics: RequestDiagnostics,
 }
 
 impl RequestMessage {
     pub fn new(
         submission: SubmissionId,
+        session: SessionId,
         agent_id: ResourceId,
         service: impl Into<String>,
         backend: impl Into<String>,
         operation: impl Into<String>,
         sequence: Sequence,
         payload: Vec<u8>,
+        diagnostics: RequestDiagnostics,
     ) -> Self {
         Self {
             id: MessageId::new(),
             submission,
+            session,
             agent_id,
             service: service.into(),
             backend: backend.into(),
             operation: operation.into(),
             sequence,
             payload,
+            diagnostics,
         }
     }
 }
@@ -331,6 +346,7 @@ impl RequestMessage {
 pub struct ResponseMessage {
     pub id: MessageId,
     pub submission: SubmissionId,
+    pub session: SessionId,
     pub agent_id: ResourceId,
     pub service: String,
     pub backend: String,
@@ -338,14 +354,30 @@ pub struct ResponseMessage {
     pub sequence: Sequence,
     pub payload: Vec<u8>,
     pub correlation_id: MessageId,
+    /// Diagnostics from the service worker (ADR 071).
+    pub diagnostics: ServiceDiagnostics,
 }
 
 impl ResponseMessage {
     /// Create a response from a request, echoing all dimensions.
+    ///
+    /// Uses placeholder diagnostics. Call `from_request_with_diagnostics()`
+    /// when the service worker has real metrics.
     pub fn from_request(request: &RequestMessage, payload: Vec<u8>) -> Self {
+        let placeholder = ServiceDiagnostics::storage("unknown", "unknown", 0, 0);
+        Self::from_request_with_diagnostics(request, payload, placeholder)
+    }
+
+    /// Create a response with real diagnostics from the service worker.
+    pub fn from_request_with_diagnostics(
+        request: &RequestMessage,
+        payload: Vec<u8>,
+        diagnostics: ServiceDiagnostics,
+    ) -> Self {
         Self {
             id: MessageId::new(),
             submission: request.submission.clone(),
+            session: request.session.clone(),
             agent_id: request.agent_id.clone(),
             service: request.service.clone(),
             backend: request.backend.clone(),
@@ -353,6 +385,7 @@ impl ResponseMessage {
             sequence: request.sequence,
             payload,
             correlation_id: request.id.clone(),
+            diagnostics,
         }
     }
 }
@@ -373,6 +406,8 @@ pub struct DelegateMessage {
     pub payload: Vec<u8>,
     /// The "handle" — caller polls this for result.
     pub reply_subject: String,
+    /// Diagnostics from the container runtime (ADR 071).
+    pub diagnostics: DelegateDiagnostics,
 }
 
 impl DelegateMessage {
@@ -383,6 +418,7 @@ impl DelegateMessage {
         target_agent: impl Into<String>,
         payload: Vec<u8>,
         reply_subject: impl Into<String>,
+        diagnostics: DelegateDiagnostics,
     ) -> Self {
         Self {
             id: MessageId::new(),
@@ -392,6 +428,7 @@ impl DelegateMessage {
             target_agent: target_agent.into(),
             payload,
             reply_subject: reply_subject.into(),
+            diagnostics,
         }
     }
 }
@@ -403,29 +440,36 @@ impl DelegateMessage {
 pub struct CompleteMessage {
     pub id: MessageId,
     pub submission: SubmissionId,
+    pub session: SessionId,
     pub agent_id: ResourceId,
     pub harness: HarnessType,
     pub payload: Vec<u8>,
     /// Final state hash after this invocation (ADR 055).
     /// None when state tracking is not active.
     pub state: Option<String>,
+    /// Diagnostics from the container runtime (ADR 071).
+    pub diagnostics: ContainerDiagnostics,
 }
 
 impl CompleteMessage {
     pub fn new(
         submission: SubmissionId,
+        session: SessionId,
         agent_id: ResourceId,
         harness: HarnessType,
         payload: Vec<u8>,
         state: Option<String>,
+        diagnostics: ContainerDiagnostics,
     ) -> Self {
         Self {
             id: MessageId::new(),
             submission,
+            session,
             agent_id,
             harness,
             payload,
             state,
+            diagnostics,
         }
     }
 }
@@ -438,16 +482,19 @@ impl CompleteMessage {
 ///
 /// Note: `create_reply()` does NOT carry state — the runtime sets state
 /// separately via `create_reply_with_state()` after reading from ServiceRouter.
+/// Uses placeholder ContainerDiagnostics — the runtime replaces with real diagnostics.
 impl ExpectsReply for InvokeMessage {
     type Reply = CompleteMessage;
 
     fn create_reply(&self, payload: Vec<u8>) -> CompleteMessage {
         CompleteMessage::new(
             self.submission.clone(),
+            self.session.clone(),
             self.agent_id.clone(),
             self.harness,
             payload,
             None,
+            ContainerDiagnostics::placeholder(0),
         )
     }
 }
@@ -460,10 +507,12 @@ impl InvokeMessage {
     pub fn create_reply_with_state(&self, payload: Vec<u8>, state: Option<String>) -> CompleteMessage {
         CompleteMessage::new(
             self.submission.clone(),
+            self.session.clone(),
             self.agent_id.clone(),
             self.harness,
             payload,
             state,
+            ContainerDiagnostics::placeholder(0),
         )
     }
 }
@@ -521,6 +570,17 @@ impl ObservableMessage {
         }
     }
 
+    /// Get the session ID (ADR 071: all 5 types carry session).
+    pub fn session(&self) -> &SessionId {
+        match self {
+            ObservableMessage::Invoke(m) => &m.session,
+            ObservableMessage::Request(m) => &m.session,
+            ObservableMessage::Response(m) => &m.session,
+            ObservableMessage::Complete(m) => &m.session,
+            ObservableMessage::Delegate(m) => &m.session,
+        }
+    }
+
     /// Get the payload.
     pub fn payload(&self) -> &[u8] {
         match self {
@@ -570,6 +630,22 @@ mod tests {
 
     fn test_submission() -> SubmissionId {
         SubmissionId::from("a1b2c3d".to_string())
+    }
+
+    fn test_invoke_diag() -> InvokeDiagnostics {
+        InvokeDiagnostics {
+            harness_version: "0.1.0".to_string(),
+            history_turns: 0,
+        }
+    }
+
+    fn test_request_diag() -> RequestDiagnostics {
+        RequestDiagnostics {
+            sequence: 1,
+            endpoint: "/test".to_string(),
+            request_bytes: 0,
+            received_at_ms: 0,
+        }
     }
 
     // --- SubmissionId tests ---
@@ -746,6 +822,7 @@ mod tests {
             agent_id.clone(),
             b"hello".to_vec(),
             None,
+            test_invoke_diag(),
         );
 
         assert_eq!(msg.submission, submission);
@@ -760,18 +837,22 @@ mod tests {
     #[test]
     fn request_message_creation() {
         let submission = test_submission();
+        let session = SessionId::new();
         let agent_id = test_agent_id();
         let msg = RequestMessage::new(
             submission.clone(),
+            session.clone(),
             agent_id.clone(),
             "kv",
             "sqlite",
             "get",
             Sequence::first(),
             b"key".to_vec(),
+            test_request_diag(),
         );
 
         assert_eq!(msg.submission, submission);
+        assert_eq!(msg.session, session);
         assert_eq!(msg.agent_id, agent_id);
         assert_eq!(msg.service, "kv");
         assert_eq!(msg.backend, "sqlite");
@@ -783,21 +864,25 @@ mod tests {
     #[test]
     fn response_from_request_echoes_dimensions() {
         let submission = test_submission();
+        let session = SessionId::new();
         let agent_id = test_agent_id();
         let request = RequestMessage::new(
             submission.clone(),
+            session.clone(),
             agent_id.clone(),
             "kv",
             "sqlite",
             "get",
             Sequence::from(3),
             b"key".to_vec(),
+            test_request_diag(),
         );
 
         let response = ResponseMessage::from_request(&request, b"value".to_vec());
 
         // Response echoes all request dimensions
         assert_eq!(response.submission, request.submission);
+        assert_eq!(response.session, request.session);
         assert_eq!(response.agent_id, request.agent_id);
         assert_eq!(response.service, request.service);
         assert_eq!(response.backend, request.backend);
@@ -815,16 +900,20 @@ mod tests {
     #[test]
     fn complete_message_creation() {
         let submission = test_submission();
+        let session = SessionId::new();
         let agent_id = test_agent_id();
         let msg = CompleteMessage::new(
             submission.clone(),
+            session.clone(),
             agent_id.clone(),
             HarnessType::Cli,
             b"result".to_vec(),
             None,
+            ContainerDiagnostics::placeholder(0),
         );
 
         assert_eq!(msg.submission, submission);
+        assert_eq!(msg.session, session);
         assert_eq!(msg.agent_id, agent_id);
         assert_eq!(msg.harness, HarnessType::Cli);
         assert_eq!(msg.payload, b"result");
@@ -843,6 +932,7 @@ mod tests {
             test_agent_id(),
             b"input".to_vec(),
             None,
+            test_invoke_diag(),
         );
 
         // create_reply returns CompleteMessage (compiler enforced)
@@ -850,6 +940,7 @@ mod tests {
 
         // Dimensions are echoed from invoke
         assert_eq!(complete.submission, invoke.submission);
+        assert_eq!(complete.session, invoke.session);
         assert_eq!(complete.agent_id, invoke.agent_id);
         assert_eq!(complete.harness, invoke.harness);
         // Payload is the reply payload
@@ -860,12 +951,14 @@ mod tests {
     fn request_create_reply_returns_response() {
         let request = RequestMessage::new(
             test_submission(),
+            SessionId::new(),
             test_agent_id(),
             "kv",
             "sqlite",
             "get",
             Sequence::first(),
             b"key".to_vec(),
+            test_request_diag(),
         );
 
         // create_reply returns ResponseMessage (compiler enforced)
@@ -873,6 +966,7 @@ mod tests {
 
         // Dimensions are echoed from request
         assert_eq!(response.submission, request.submission);
+        assert_eq!(response.session, request.session);
         assert_eq!(response.agent_id, request.agent_id);
         assert_eq!(response.service, request.service);
         assert_eq!(response.backend, request.backend);
@@ -903,6 +997,7 @@ mod tests {
             test_agent_id(),
             b"test".to_vec(),
             None,
+            test_invoke_diag(),
         );
         let id = invoke.id.clone();
         let submission = invoke.submission.clone();
@@ -918,12 +1013,14 @@ mod tests {
     fn observable_message_from_request() {
         let request = RequestMessage::new(
             test_submission(),
+            SessionId::new(),
             test_agent_id(),
             "kv",
             "sqlite",
             "get",
             Sequence::first(),
             b"test".to_vec(),
+            test_request_diag(),
         );
         let id = request.id.clone();
 
@@ -936,21 +1033,24 @@ mod tests {
     #[test]
     fn observable_message_common_accessors() {
         let submission = test_submission();
+        let session = SessionId::new();
         let agent_id = test_agent_id();
         let invoke = InvokeMessage::new(
             submission.clone(),
-            SessionId::new(),
+            session.clone(),
             HarnessType::Cli,
             RuntimeType::Container,
             agent_id.clone(),
             b"payload".to_vec(),
             None,
+            test_invoke_diag(),
         );
 
         let observable: ObservableMessage = invoke.into();
 
         // All common fields accessible through enum
         assert_eq!(observable.submission(), &submission);
+        assert_eq!(observable.session(), &session);
         assert_eq!(observable.payload(), b"payload");
     }
 
@@ -967,6 +1067,7 @@ mod tests {
             "summarizer",
             b"summarize this".to_vec(),
             "vlinder.sub.delegate-reply.coordinator.summarizer.abc123",
+            DelegateDiagnostics { container: ContainerDiagnostics::placeholder(0) },
         );
 
         assert_eq!(msg.submission, submission);
@@ -987,6 +1088,7 @@ mod tests {
             "summarizer",
             b"test".to_vec(),
             "reply.subject",
+            DelegateDiagnostics { container: ContainerDiagnostics::placeholder(0) },
         );
         let id = delegate.id.clone();
 

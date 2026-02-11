@@ -2,7 +2,17 @@
 
 ## Status
 
-Proposed
+Accepted
+
+### What's implemented
+
+- Strongly-typed diagnostics per message type (one struct per emitter)
+- Session-id propagation to all five message types (Request, Response, Complete were missing)
+- NATS header serialization for diagnostics + session-id (send and receive)
+- DagNode expanded with `diagnostics` and `stderr` fields, SQLite migration
+- DagCaptureWorker extracts diagnostics from NATS headers
+- GitDagWorker writes `diagnostics.toml` and `stderr` blobs to commit trees
+- Service identity comes for free from `node.from` parsing — no new code needed
 
 ## Context
 
@@ -411,3 +421,13 @@ model = "phi3:latest"
 - Service workers populate metrics from data they already compute — Ollama doesn't know about our diagnostics model
 - No new identity system — service identity is `<service>.<backend>` derived from existing NATS subjects
 - Combined with commit signing (ADR 069), every diagnostic claim is cryptographically attributable to the platform component that made it
+
+### Deferred
+
+1. **Real `ServiceDiagnostics` in workers** — Workers currently use `create_reply()` which produces placeholder diagnostics. Replace with `create_reply_with_diagnostics()` on concrete types so each worker (inference, embedding, object, vector) populates actual timing and metrics.
+
+2. **Token extraction from Ollama/OpenRouter** — `ServiceMetrics::Inference` reports `tokens_input: 0, tokens_output: 0`. Parse token counts from Ollama and OpenRouter HTTP response bodies to populate real values.
+
+3. **Podman metadata caching** — `ContainerRuntimeInfo` uses `"unknown"` for `engine_version`, `image_ref`, `image_digest`, and `container_id`. Query Podman for real values at container start and cache them.
+
+4. **Agent contract evolution** — Agents return raw bytes from `/invoke`. To capture stderr, the contract needs to evolve to a JSON envelope (`{ "payload": ..., "stderr": "..." }`). This affects the SDK and all existing agents — needs its own ADR.

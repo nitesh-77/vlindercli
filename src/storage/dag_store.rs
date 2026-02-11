@@ -68,20 +68,27 @@ pub struct DagNode {
     pub session_id: String,
     pub submission_id: String,
     pub payload: Vec<u8>,
+    /// JSON-serialized diagnostics for the message (ADR 071).
+    /// Empty for messages captured before ADR 071.
+    pub diagnostics: Vec<u8>,
+    /// Raw stderr from container execution (Complete/Delegate only, ADR 071).
+    /// Empty for non-container messages or messages captured before ADR 071.
+    pub stderr: Vec<u8>,
     pub created_at: String,
 }
 
 /// Compute the content-addressed hash for a DAG node.
 ///
-/// `sha256(payload || parent_hash || message_type)` — the parent hash
+/// `sha256(payload || parent_hash || message_type || diagnostics)` — the parent hash
 /// makes this a Merkle chain: changing any ancestor invalidates all descendants.
 /// The message type is included so identical payloads with different types
-/// produce different hashes.
-pub fn hash_dag_node(payload: &[u8], parent_hash: &str, message_type: &MessageType) -> String {
+/// produce different hashes. Diagnostics are included for integrity (ADR 071).
+pub fn hash_dag_node(payload: &[u8], parent_hash: &str, message_type: &MessageType, diagnostics: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(payload);
     hasher.update(parent_hash.as_bytes());
     hasher.update(message_type.as_str().as_bytes());
+    hasher.update(diagnostics);
     format!("{:x}", hasher.finalize())
 }
 
@@ -127,6 +134,8 @@ impl SqliteDagStore {
                  session_id TEXT NOT NULL,
                  submission_id TEXT NOT NULL,
                  payload BLOB NOT NULL,
+                 diagnostics BLOB NOT NULL DEFAULT x'',
+                 stderr BLOB NOT NULL DEFAULT x'',
                  created_at TEXT NOT NULL
              );
              CREATE INDEX IF NOT EXISTS idx_dag_nodes_session
@@ -135,18 +144,73 @@ impl SqliteDagStore {
                  ON dag_nodes (parent_hash);"
         ).map_err(|e| format!("failed to initialize dag store: {}", e))?;
 
+        // Migrate existing databases: add diagnostics and stderr columns (ADR 071).
+        // ALTER TABLE ADD COLUMN is idempotent-safe: we check PRAGMA table_info first.
+        Self::migrate_071(&conn)?;
+
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })
     }
+
+    /// Migrate existing databases to include diagnostics and stderr columns (ADR 071).
+    fn migrate_071(conn: &Connection) -> Result<(), String> {
+        let has_diagnostics = conn
+            .prepare("PRAGMA table_info(dag_nodes)")
+            .and_then(|mut stmt| {
+                let mut found = false;
+                let mut rows = stmt.query([])?;
+                while let Some(row) = rows.next()? {
+                    let name: String = row.get(1)?;
+                    if name == "diagnostics" {
+                        found = true;
+                        break;
+                    }
+                }
+                Ok(found)
+            })
+            .map_err(|e| format!("migration check failed: {}", e))?;
+
+        if !has_diagnostics {
+            conn.execute_batch(
+                "ALTER TABLE dag_nodes ADD COLUMN diagnostics BLOB NOT NULL DEFAULT x'';
+                 ALTER TABLE dag_nodes ADD COLUMN stderr BLOB NOT NULL DEFAULT x'';"
+            ).map_err(|e| format!("ADR 071 migration failed: {}", e))?;
+        }
+
+        Ok(())
+    }
+}
+
+/// Construct a DagNode from a SQLite row.
+///
+/// Expects columns in order: hash, parent_hash, message_type, sender, receiver,
+/// session_id, submission_id, payload, diagnostics, stderr, created_at.
+fn row_to_dag_node(row: &rusqlite::Row) -> Result<DagNode, rusqlite::Error> {
+    let mt_str: String = row.get(2)?;
+    let message_type = MessageType::from_str(&mt_str)
+        .unwrap_or(MessageType::Invoke);
+    Ok(DagNode {
+        hash: row.get(0)?,
+        parent_hash: row.get(1)?,
+        message_type,
+        from: row.get(3)?,
+        to: row.get(4)?,
+        session_id: row.get(5)?,
+        submission_id: row.get(6)?,
+        payload: row.get(7)?,
+        diagnostics: row.get(8)?,
+        stderr: row.get(9)?,
+        created_at: row.get(10)?,
+    })
 }
 
 impl DagStore for SqliteDagStore {
     fn insert_node(&self, node: &DagNode) -> Result<(), String> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT OR IGNORE INTO dag_nodes (hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            "INSERT OR IGNORE INTO dag_nodes (hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             rusqlite::params![
                 node.hash,
                 node.parent_hash,
@@ -156,6 +220,8 @@ impl DagStore for SqliteDagStore {
                 node.session_id,
                 node.submission_id,
                 node.payload,
+                node.diagnostics,
+                node.stderr,
                 node.created_at,
             ],
         ).map_err(|e| format!("insert_node failed: {}", e))?;
@@ -165,25 +231,12 @@ impl DagStore for SqliteDagStore {
     fn get_node(&self, hash: &str) -> Result<Option<DagNode>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, created_at
+            "SELECT hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at
              FROM dag_nodes WHERE hash = ?1"
         ).map_err(|e| format!("get_node prepare failed: {}", e))?;
 
         let result = stmt.query_row(rusqlite::params![hash], |row| {
-            let mt_str: String = row.get(2)?;
-            let message_type = MessageType::from_str(&mt_str)
-                .unwrap_or(MessageType::Invoke);
-            Ok(DagNode {
-                hash: row.get(0)?,
-                parent_hash: row.get(1)?,
-                message_type,
-                from: row.get(3)?,
-                to: row.get(4)?,
-                session_id: row.get(5)?,
-                submission_id: row.get(6)?,
-                payload: row.get(7)?,
-                created_at: row.get(8)?,
-            })
+            row_to_dag_node(row)
         })
         .optional()
         .map_err(|e| format!("get_node query failed: {}", e))?;
@@ -194,25 +247,12 @@ impl DagStore for SqliteDagStore {
     fn get_session_nodes(&self, session_id: &str) -> Result<Vec<DagNode>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, created_at
+            "SELECT hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at
              FROM dag_nodes WHERE session_id = ?1 ORDER BY created_at"
         ).map_err(|e| format!("get_session_nodes prepare failed: {}", e))?;
 
         let rows = stmt.query_map(rusqlite::params![session_id], |row| {
-            let mt_str: String = row.get(2)?;
-            let message_type = MessageType::from_str(&mt_str)
-                .unwrap_or(MessageType::Invoke);
-            Ok(DagNode {
-                hash: row.get(0)?,
-                parent_hash: row.get(1)?,
-                message_type,
-                from: row.get(3)?,
-                to: row.get(4)?,
-                session_id: row.get(5)?,
-                submission_id: row.get(6)?,
-                payload: row.get(7)?,
-                created_at: row.get(8)?,
-            })
+            row_to_dag_node(row)
         }).map_err(|e| format!("get_session_nodes query failed: {}", e))?;
 
         let mut nodes = Vec::new();
@@ -225,25 +265,12 @@ impl DagStore for SqliteDagStore {
     fn get_children(&self, parent_hash: &str) -> Result<Vec<DagNode>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, created_at
+            "SELECT hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at
              FROM dag_nodes WHERE parent_hash = ?1"
         ).map_err(|e| format!("get_children prepare failed: {}", e))?;
 
         let rows = stmt.query_map(rusqlite::params![parent_hash], |row| {
-            let mt_str: String = row.get(2)?;
-            let message_type = MessageType::from_str(&mt_str)
-                .unwrap_or(MessageType::Invoke);
-            Ok(DagNode {
-                hash: row.get(0)?,
-                parent_hash: row.get(1)?,
-                message_type,
-                from: row.get(3)?,
-                to: row.get(4)?,
-                session_id: row.get(5)?,
-                submission_id: row.get(6)?,
-                payload: row.get(7)?,
-                created_at: row.get(8)?,
-            })
+            row_to_dag_node(row)
         }).map_err(|e| format!("get_children query failed: {}", e))?;
 
         let mut nodes = Vec::new();
@@ -279,8 +306,9 @@ mod tests {
     }
 
     fn test_node(payload: &[u8], parent_hash: &str, message_type: MessageType) -> DagNode {
+        let diagnostics = Vec::new();
         DagNode {
-            hash: hash_dag_node(payload, parent_hash, &message_type),
+            hash: hash_dag_node(payload, parent_hash, &message_type, &diagnostics),
             parent_hash: parent_hash.to_string(),
             message_type,
             from: "cli".to_string(),
@@ -288,6 +316,8 @@ mod tests {
             session_id: "sess-1".to_string(),
             submission_id: "sub-1".to_string(),
             payload: payload.to_vec(),
+            diagnostics,
+            stderr: Vec::new(),
             created_at: "2025-01-01T00:00:00Z".to_string(),
         }
     }
@@ -316,36 +346,43 @@ mod tests {
 
     #[test]
     fn hash_is_valid_sha256() {
-        let hash = hash_dag_node(b"hello", "", &MessageType::Invoke);
+        let hash = hash_dag_node(b"hello", "", &MessageType::Invoke, b"");
         assert_eq!(hash.len(), 64);
         assert!(hash.chars().all(|c| c.is_ascii_hexdigit()));
     }
 
     #[test]
     fn hash_changes_with_parent() {
-        let h1 = hash_dag_node(b"payload", "", &MessageType::Invoke);
-        let h2 = hash_dag_node(b"payload", "parent-abc", &MessageType::Invoke);
+        let h1 = hash_dag_node(b"payload", "", &MessageType::Invoke, b"");
+        let h2 = hash_dag_node(b"payload", "parent-abc", &MessageType::Invoke, b"");
         assert_ne!(h1, h2, "Merkle property: different parent → different hash");
     }
 
     #[test]
     fn hash_changes_with_payload() {
-        let h1 = hash_dag_node(b"payload-a", "", &MessageType::Invoke);
-        let h2 = hash_dag_node(b"payload-b", "", &MessageType::Invoke);
+        let h1 = hash_dag_node(b"payload-a", "", &MessageType::Invoke, b"");
+        let h2 = hash_dag_node(b"payload-b", "", &MessageType::Invoke, b"");
         assert_ne!(h1, h2);
     }
 
     #[test]
     fn hash_changes_with_message_type() {
-        let h1 = hash_dag_node(b"payload", "", &MessageType::Invoke);
-        let h2 = hash_dag_node(b"payload", "", &MessageType::Complete);
+        let h1 = hash_dag_node(b"payload", "", &MessageType::Invoke, b"");
+        let h2 = hash_dag_node(b"payload", "", &MessageType::Complete, b"");
         assert_ne!(h1, h2, "same payload, different type → different hash");
     }
 
     #[test]
+    fn hash_changes_with_diagnostics() {
+        let h1 = hash_dag_node(b"payload", "", &MessageType::Invoke, b"");
+        let h2 = hash_dag_node(b"payload", "", &MessageType::Invoke, b"{\"duration_ms\":100}");
+        assert_ne!(h1, h2, "different diagnostics → different hash");
+    }
+
+    #[test]
     fn hash_is_deterministic() {
-        let h1 = hash_dag_node(b"same", "p", &MessageType::Request);
-        let h2 = hash_dag_node(b"same", "p", &MessageType::Request);
+        let h1 = hash_dag_node(b"same", "p", &MessageType::Request, b"diag");
+        let h2 = hash_dag_node(b"same", "p", &MessageType::Request, b"diag");
         assert_eq!(h1, h2);
     }
 
@@ -365,8 +402,10 @@ mod tests {
     #[test]
     fn round_trip_preserves_all_fields() {
         let store = test_store();
+        let diagnostics = b"{\"container\":{\"duration_ms\":50}}".to_vec();
+        let stderr = b"WARN: something".to_vec();
         let node = DagNode {
-            hash: hash_dag_node(b"pay", "", &MessageType::Delegate),
+            hash: hash_dag_node(b"pay", "", &MessageType::Delegate, &diagnostics),
             parent_hash: "".to_string(),
             message_type: MessageType::Delegate,
             from: "coordinator".to_string(),
@@ -374,6 +413,8 @@ mod tests {
             session_id: "sess-99".to_string(),
             submission_id: "sub-42".to_string(),
             payload: b"delegate this".to_vec(),
+            diagnostics,
+            stderr,
             created_at: "2025-06-15T12:00:00Z".to_string(),
         };
 

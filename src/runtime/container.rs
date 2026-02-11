@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
 use crate::domain::{Agent, ObjectStorageType, Registry, ResourceId, Runtime, RuntimeType, VectorStorageType};
-use crate::queue::{ExpectsReply, HarnessType, InvokeMessage, MessageQueue, SequenceCounter};
+use crate::queue::{ExpectsReply, HarnessType, InvokeDiagnostics, InvokeMessage, MessageQueue, SequenceCounter};
 
 use super::http_bridge::HttpBridge;
 use super::service_router::ServiceRouter;
@@ -287,6 +287,10 @@ impl Runtime for ContainerRuntime {
                     agent.id.clone(),
                     delegate.payload.clone(),
                     None,
+                    InvokeDiagnostics {
+                        harness_version: env!("CARGO_PKG_VERSION").to_string(),
+                        history_turns: 0,
+                    },
                 );
 
                 let host_port = match self.ensure_container(agent, &invoke) {

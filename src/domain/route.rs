@@ -104,7 +104,7 @@ mod tests {
         created_at: &str,
     ) -> DagNode {
         DagNode {
-            hash: hash_dag_node(payload, parent_hash, &message_type),
+            hash: hash_dag_node(payload, parent_hash, &message_type, b""),
             parent_hash: parent_hash.to_string(),
             message_type,
             from: from.to_string(),
@@ -112,6 +112,8 @@ mod tests {
             session_id: "sess-1".to_string(),
             submission_id: "sub-1".to_string(),
             payload: payload.to_vec(),
+            diagnostics: Vec::new(),
+            stderr: Vec::new(),
             created_at: created_at.to_string(),
         }
     }

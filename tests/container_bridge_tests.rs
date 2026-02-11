@@ -9,7 +9,7 @@ use vlindercli::domain::{
     Agent, InMemoryRegistry, ObjectStorageType, Provider, Registry,
     ResourceId, Runtime, RuntimeType,
 };
-use vlindercli::queue::{InMemoryQueue, InvokeMessage, MessageQueue, HarnessType, SessionId, SubmissionId};
+use vlindercli::queue::{InMemoryQueue, InvokeDiagnostics, InvokeMessage, MessageQueue, HarnessType, SessionId, SubmissionId};
 use vlindercli::runtime::ContainerRuntime;
 
 #[test]
@@ -53,6 +53,7 @@ fn container_bridge_kv_round_trip() {
         agent_id,
         b"bridge test data".to_vec(),
         None,
+        InvokeDiagnostics { harness_version: String::new(), history_turns: 0 },
     );
     queue.send_invoke(invoke).unwrap();
 

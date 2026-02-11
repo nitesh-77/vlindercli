@@ -17,7 +17,7 @@ use crate::domain::{Agent, ResourceId};
 use crate::domain::git_hash::compute_submission_id;
 use crate::domain::session::Session;
 use crate::queue::{
-    HarnessType, InvokeMessage, MessageQueue, SessionId, SubmissionId,
+    HarnessType, InvokeDiagnostics, InvokeMessage, MessageQueue, SessionId, SubmissionId,
 };
 
 /// Common harness operations shared across all harness types.
@@ -293,6 +293,15 @@ impl Harness for CliHarness {
         // Create job in registry with submission tracking
         let job_id = self.registry.create_job(submission.clone(), agent_id.clone(), input.to_string());
 
+        // Build diagnostics (ADR 071)
+        let history_turns = self.session.as_ref()
+            .map(|s| s.history.len() as u32)
+            .unwrap_or(0);
+        let invoke_diag = InvokeDiagnostics {
+            harness_version: env!("CARGO_PKG_VERSION").to_string(),
+            history_turns,
+        };
+
         // Build and send typed InvokeMessage (ADR 044, ADR 054, ADR 055)
         let invoke = InvokeMessage::new(
             submission.clone(),
@@ -302,6 +311,7 @@ impl Harness for CliHarness {
             agent_id.clone(),
             payload.as_bytes().to_vec(),
             self.last_state.clone(),
+            invoke_diag,
         );
 
         self.queue

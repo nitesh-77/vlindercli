@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use vlindercli::domain::{Agent, InMemoryRegistry, Registry, ResourceId, Runtime, RuntimeType};
-use vlindercli::queue::{InMemoryQueue, InvokeMessage, MessageQueue, HarnessType, SessionId, SubmissionId};
+use vlindercli::queue::{InMemoryQueue, InvokeDiagnostics, InvokeMessage, MessageQueue, HarnessType, SessionId, SubmissionId};
 use vlindercli::runtime::ContainerRuntime;
 
 #[test]
@@ -44,6 +44,7 @@ fn container_runtime_executes_echo_agent() {
         agent_id,
         b"hello from container".to_vec(),
         None,
+        InvokeDiagnostics { harness_version: String::new(), history_turns: 0 },
     );
     queue.send_invoke(invoke).unwrap();
 

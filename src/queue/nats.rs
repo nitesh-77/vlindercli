@@ -16,8 +16,10 @@ use futures::StreamExt;
 use tokio::runtime::Runtime;
 
 use super::{
-    CompleteMessage, DelegateMessage, HarnessType, InvokeMessage, MessageId, MessageQueue,
-    QueueError, RequestMessage, ResponseMessage, Sequence, SessionId, SubmissionId,
+    CompleteMessage, ContainerDiagnostics, DelegateMessage, DelegateDiagnostics,
+    HarnessType, InvokeDiagnostics, InvokeMessage, MessageId, MessageQueue,
+    QueueError, RequestDiagnostics, RequestMessage, ResponseMessage, Sequence,
+    ServiceDiagnostics, SessionId, SubmissionId,
 };
 use crate::domain::{ResourceId, RuntimeType};
 
@@ -236,6 +238,9 @@ impl MessageQueue for NatsQueue {
             if let Some(ref state) = msg.state {
                 headers.insert("state", state.as_str());
             }
+            if let Ok(diag_json) = serde_json::to_string(&msg.diagnostics) {
+                headers.insert("diagnostics", diag_json.as_str());
+            }
 
             self.inner
                 .jetstream
@@ -264,11 +269,15 @@ impl MessageQueue for NatsQueue {
             let mut headers = async_nats::HeaderMap::new();
             headers.insert("msg-id", msg.id.as_str());
             headers.insert("submission-id", msg.submission.as_str());
+            headers.insert("session-id", msg.session.as_str());
             headers.insert("agent-id", msg.agent_id.as_str());
             headers.insert("service", msg.service.as_str());
             headers.insert("backend", msg.backend.as_str());
             headers.insert("operation", msg.operation.as_str());
             headers.insert("sequence", msg.sequence.to_string());
+            if let Ok(diag_json) = serde_json::to_string(&msg.diagnostics) {
+                headers.insert("diagnostics", diag_json.as_str());
+            }
 
             self.inner
                 .jetstream
@@ -297,12 +306,16 @@ impl MessageQueue for NatsQueue {
             let mut headers = async_nats::HeaderMap::new();
             headers.insert("msg-id", msg.id.as_str());
             headers.insert("submission-id", msg.submission.as_str());
+            headers.insert("session-id", msg.session.as_str());
             headers.insert("agent-id", msg.agent_id.as_str());
             headers.insert("service", msg.service.as_str());
             headers.insert("backend", msg.backend.as_str());
             headers.insert("operation", msg.operation.as_str());
             headers.insert("sequence", msg.sequence.to_string());
             headers.insert("correlation-id", msg.correlation_id.as_str());
+            if let Ok(diag_json) = serde_json::to_string(&msg.diagnostics) {
+                headers.insert("diagnostics", diag_json.as_str());
+            }
 
             self.inner
                 .jetstream
@@ -328,10 +341,14 @@ impl MessageQueue for NatsQueue {
             let mut headers = async_nats::HeaderMap::new();
             headers.insert("msg-id", msg.id.as_str());
             headers.insert("submission-id", msg.submission.as_str());
+            headers.insert("session-id", msg.session.as_str());
             headers.insert("agent-id", msg.agent_id.as_str());
             headers.insert("harness", msg.harness.as_str());
             if let Some(ref state) = msg.state {
                 headers.insert("state", state.as_str());
+            }
+            if let Ok(diag_json) = serde_json::to_string(&msg.diagnostics) {
+                headers.insert("diagnostics", diag_json.as_str());
             }
 
             self.inner
@@ -357,6 +374,10 @@ impl MessageQueue for NatsQueue {
             let headers = js_msg.headers.as_ref()
                 .ok_or_else(|| QueueError::ReceiveFailed("missing headers".to_string()))?;
 
+            let diagnostics = get_header(headers, "diagnostics").ok()
+                .and_then(|s| serde_json::from_str(&s).ok())
+                .unwrap_or_else(|| InvokeDiagnostics { harness_version: String::new(), history_turns: 0 });
+
             let msg = InvokeMessage {
                 id: MessageId::from(get_header(headers, "msg-id")?),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
@@ -366,6 +387,7 @@ impl MessageQueue for NatsQueue {
                 agent_id: ResourceId::new(&get_header(headers, "agent-id")?),
                 payload: js_msg.payload.to_vec(),
                 state: get_header(headers, "state").ok(),
+                diagnostics,
             };
 
             Ok((msg, ack_fn))
@@ -382,15 +404,21 @@ impl MessageQueue for NatsQueue {
             let headers = js_msg.headers.as_ref()
                 .ok_or_else(|| QueueError::ReceiveFailed("missing headers".to_string()))?;
 
+            let diagnostics = get_header(headers, "diagnostics").ok()
+                .and_then(|s| serde_json::from_str(&s).ok())
+                .unwrap_or_else(|| RequestDiagnostics { sequence: 0, endpoint: String::new(), request_bytes: 0, received_at_ms: 0 });
+
             let msg = RequestMessage {
                 id: MessageId::from(get_header(headers, "msg-id")?),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
+                session: SessionId::from(get_header(headers, "session-id")?),
                 agent_id: ResourceId::new(&get_header(headers, "agent-id")?),
                 service: get_header(headers, "service")?,
                 backend: get_header(headers, "backend")?,
                 operation: get_header(headers, "operation")?,
                 sequence: Sequence::from(get_header(headers, "sequence")?.parse::<u32>().unwrap_or(1)),
                 payload: js_msg.payload.to_vec(),
+                diagnostics,
             };
 
             Ok((msg, ack_fn))
@@ -408,9 +436,14 @@ impl MessageQueue for NatsQueue {
             let headers = js_msg.headers.as_ref()
                 .ok_or_else(|| QueueError::ReceiveFailed("missing headers".to_string()))?;
 
+            let diagnostics = get_header(headers, "diagnostics").ok()
+                .and_then(|s| serde_json::from_str(&s).ok())
+                .unwrap_or_else(ServiceDiagnostics::placeholder);
+
             let msg = ResponseMessage {
                 id: MessageId::from(get_header(headers, "msg-id")?),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
+                session: SessionId::from(get_header(headers, "session-id")?),
                 agent_id: ResourceId::new(&get_header(headers, "agent-id")?),
                 service: get_header(headers, "service")?,
                 backend: get_header(headers, "backend")?,
@@ -418,6 +451,7 @@ impl MessageQueue for NatsQueue {
                 sequence: Sequence::from(get_header(headers, "sequence")?.parse::<u32>().unwrap_or(1)),
                 payload: js_msg.payload.to_vec(),
                 correlation_id: MessageId::from(get_header(headers, "correlation-id")?),
+                diagnostics,
             };
 
             Ok((msg, ack_fn))
@@ -434,13 +468,19 @@ impl MessageQueue for NatsQueue {
             let headers = js_msg.headers.as_ref()
                 .ok_or_else(|| QueueError::ReceiveFailed("missing headers".to_string()))?;
 
+            let diagnostics = get_header(headers, "diagnostics").ok()
+                .and_then(|s| serde_json::from_str(&s).ok())
+                .unwrap_or_else(|| ContainerDiagnostics::placeholder(0));
+
             let msg = CompleteMessage {
                 id: MessageId::from(get_header(headers, "msg-id")?),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
+                session: SessionId::from(get_header(headers, "session-id")?),
                 agent_id: ResourceId::new(&get_header(headers, "agent-id")?),
                 harness: parse_harness_type(&get_header(headers, "harness")?)?,
                 payload: js_msg.payload.to_vec(),
                 state: get_header(headers, "state").ok(),
+                diagnostics,
             };
 
             Ok((msg, ack_fn))
@@ -461,6 +501,9 @@ impl MessageQueue for NatsQueue {
             headers.insert("caller-agent", msg.caller_agent.as_str());
             headers.insert("target-agent", msg.target_agent.as_str());
             headers.insert("reply-subject", msg.reply_subject.as_str());
+            if let Ok(diag_json) = serde_json::to_string(&msg.diagnostics) {
+                headers.insert("diagnostics", diag_json.as_str());
+            }
 
             self.inner
                 .jetstream
@@ -483,6 +526,10 @@ impl MessageQueue for NatsQueue {
             let headers = js_msg.headers.as_ref()
                 .ok_or_else(|| QueueError::ReceiveFailed("missing headers".to_string()))?;
 
+            let diagnostics = get_header(headers, "diagnostics").ok()
+                .and_then(|s| serde_json::from_str(&s).ok())
+                .unwrap_or_else(|| DelegateDiagnostics { container: ContainerDiagnostics::placeholder(0) });
+
             let msg = DelegateMessage {
                 id: MessageId::from(get_header(headers, "msg-id")?),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
@@ -491,6 +538,7 @@ impl MessageQueue for NatsQueue {
                 target_agent: get_header(headers, "target-agent")?,
                 payload: js_msg.payload.to_vec(),
                 reply_subject: get_header(headers, "reply-subject")?,
+                diagnostics,
             };
 
             Ok((msg, ack_fn))
@@ -504,10 +552,14 @@ impl MessageQueue for NatsQueue {
             let mut headers = async_nats::HeaderMap::new();
             headers.insert("msg-id", msg.id.as_str());
             headers.insert("submission-id", msg.submission.as_str());
+            headers.insert("session-id", msg.session.as_str());
             headers.insert("agent-id", msg.agent_id.as_str());
             headers.insert("harness", msg.harness.as_str());
             if let Some(ref state) = msg.state {
                 headers.insert("state", state.as_str());
+            }
+            if let Ok(diag_json) = serde_json::to_string(&msg.diagnostics) {
+                headers.insert("diagnostics", diag_json.as_str());
             }
 
             self.inner
@@ -531,13 +583,19 @@ impl MessageQueue for NatsQueue {
             let headers = js_msg.headers.as_ref()
                 .ok_or_else(|| QueueError::ReceiveFailed("missing headers".to_string()))?;
 
+            let diagnostics = get_header(headers, "diagnostics").ok()
+                .and_then(|s| serde_json::from_str(&s).ok())
+                .unwrap_or_else(|| ContainerDiagnostics::placeholder(0));
+
             let msg = CompleteMessage {
                 id: MessageId::from(get_header(headers, "msg-id")?),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
+                session: SessionId::from(get_header(headers, "session-id")?),
                 agent_id: ResourceId::new(&get_header(headers, "agent-id")?),
                 harness: parse_harness_type(&get_header(headers, "harness")?)?,
                 payload: js_msg.payload.to_vec(),
                 state: get_header(headers, "state").ok(),
+                diagnostics,
             };
 
             Ok((msg, ack_fn))

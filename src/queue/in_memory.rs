@@ -1,8 +1,12 @@
 //! In-memory queue implementation.
 
 use super::{
-    CompleteMessage, DelegateMessage, InvokeMessage, MessageQueue, ObservableMessage,
-    QueueError, RequestMessage, ResponseMessage, SubmissionId,
+    CompleteMessage, DelegateMessage, InvokeMessage, MessageQueue,
+    ObservableMessage, QueueError, RequestMessage, ResponseMessage, SubmissionId,
+};
+#[cfg(test)]
+use super::{
+    ContainerDiagnostics, DelegateDiagnostics, InvokeDiagnostics, RequestDiagnostics,
 };
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
@@ -290,6 +294,7 @@ mod tests {
             test_agent_id(),
             b"input".to_vec(),
             None,
+            InvokeDiagnostics { harness_version: String::new(), history_turns: 0 },
         );
 
         queue.send_invoke(invoke).unwrap();
@@ -310,12 +315,14 @@ mod tests {
 
         let request = RequestMessage::new(
             test_submission(),
+            SessionId::new(),
             test_agent_id(),
             "kv",
             "sqlite",
             "get",
             Sequence::first(),
             b"key".to_vec(),
+            RequestDiagnostics { sequence: 0, endpoint: String::new(), request_bytes: 0, received_at_ms: 0 },
         );
 
         queue.send_request(request).unwrap();
@@ -333,12 +340,14 @@ mod tests {
 
         let request = RequestMessage::new(
             test_submission(),
+            SessionId::new(),
             test_agent_id(),
             "kv",
             "sqlite",
             "get",
             Sequence::from(3),
             b"key".to_vec(),
+            RequestDiagnostics { sequence: 0, endpoint: String::new(), request_bytes: 0, received_at_ms: 0 },
         );
         let response = request.create_reply(b"value".to_vec());
 
@@ -363,6 +372,7 @@ mod tests {
             test_agent_id(),
             b"input".to_vec(),
             None,
+            InvokeDiagnostics { harness_version: String::new(), history_turns: 0 },
         );
         let complete = invoke.create_reply(b"output".to_vec());
 
@@ -402,6 +412,7 @@ mod tests {
             test_agent_id(),
             b"hello".to_vec(),
             None,
+            InvokeDiagnostics { harness_version: String::new(), history_turns: 0 },
         );
         let original_id = invoke.id.clone();
 
@@ -433,6 +444,7 @@ mod tests {
             agent_id.clone(),
             b"input".to_vec(),
             None,
+            InvokeDiagnostics { harness_version: String::new(), history_turns: 0 },
         );
 
         queue.send_invoke(invoke).unwrap();
@@ -451,12 +463,14 @@ mod tests {
 
         let request = RequestMessage::new(
             test_submission(),
+            SessionId::new(),
             test_agent_id(),
             "kv",
             "sqlite",
             "get",
             Sequence::first(),
             b"key".to_vec(),
+            RequestDiagnostics { sequence: 0, endpoint: String::new(), request_bytes: 0, received_at_ms: 0 },
         );
         let original_id = request.id.clone();
 
@@ -483,12 +497,14 @@ mod tests {
 
         let request = RequestMessage::new(
             submission.clone(),
+            SessionId::new(),
             agent_id.clone(),
             "vec",
             "sqlite-vec",
             "search",
             Sequence::from(3),
             b"query".to_vec(),
+            RequestDiagnostics { sequence: 0, endpoint: String::new(), request_bytes: 0, received_at_ms: 0 },
         );
 
         queue.send_request(request).unwrap();
@@ -508,12 +524,14 @@ mod tests {
         // For inference, operation is empty
         let request = RequestMessage::new(
             test_submission(),
+            SessionId::new(),
             test_agent_id(),
             "infer",
             "ollama",
             "",
             Sequence::first(),
             b"prompt".to_vec(),
+            RequestDiagnostics { sequence: 0, endpoint: String::new(), request_bytes: 0, received_at_ms: 0 },
         );
 
         queue.send_request(request).unwrap();
@@ -541,6 +559,7 @@ mod tests {
             "summarizer",
             b"summarize this".to_vec(),
             "vlinder.sub.reply.coordinator.summarizer.abc",
+            DelegateDiagnostics { container: ContainerDiagnostics::placeholder(0) },
         );
 
         queue.send_delegate(delegate).unwrap();
@@ -562,6 +581,7 @@ mod tests {
             "summarizer",
             b"payload".to_vec(),
             "reply.subject",
+            DelegateDiagnostics { container: ContainerDiagnostics::placeholder(0) },
         );
         let original_id = delegate.id.clone();
 
@@ -589,6 +609,7 @@ mod tests {
             "summarizer",
             b"payload".to_vec(),
             "reply.subject",
+            DelegateDiagnostics { container: ContainerDiagnostics::placeholder(0) },
         );
 
         queue.send_delegate(delegate).unwrap();
@@ -603,10 +624,12 @@ mod tests {
 
         let complete = CompleteMessage::new(
             test_submission(),
+            SessionId::new(),
             test_agent_id(),
             HarnessType::Cli,
             b"result".to_vec(),
             None,
+            ContainerDiagnostics::placeholder(0),
         );
 
         let subject = "vlinder.sub.delegate-reply.coordinator.summarizer.abc123";
@@ -623,10 +646,12 @@ mod tests {
 
         let complete = CompleteMessage::new(
             test_submission(),
+            SessionId::new(),
             test_agent_id(),
             HarnessType::Cli,
             b"result".to_vec(),
             None,
+            ContainerDiagnostics::placeholder(0),
         );
 
         queue.send_complete_to_subject(complete, "subject.a").unwrap();

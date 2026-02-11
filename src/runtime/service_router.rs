@@ -15,7 +15,10 @@ use std::sync::{Arc, RwLock};
 use uuid::Uuid;
 
 use crate::domain::{ObjectStorageType, Registry, SdkMessage, VectorStorageType};
-use crate::queue::{DelegateMessage, InvokeMessage, MessageQueue, RequestMessage, SequenceCounter};
+use crate::queue::{
+    DelegateMessage, DelegateDiagnostics, ContainerDiagnostics, InvokeMessage,
+    MessageQueue, RequestMessage, RequestDiagnostics, SequenceCounter,
+};
 
 /// Routes agent SDK calls to the appropriate backend service.
 ///
@@ -90,14 +93,28 @@ impl ServiceRouter {
 
         let invoke = self.invoke.read().unwrap();
         let sha = invoke.submission.to_string();
+
+        let received_at_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        let request_diag = RequestDiagnostics {
+            sequence: seq.as_u32(),
+            endpoint: format!("/{}", hop.service),
+            request_bytes: request_payload.len() as u64,
+            received_at_ms,
+        };
+
         let request = RequestMessage::new(
             invoke.submission.clone(),
+            invoke.session.clone(),
             invoke.agent_id.clone(),
             hop.service,
             hop.backend,
             hop.operation,
             seq,
             request_payload,
+            request_diag,
         );
         drop(invoke);
 
@@ -196,6 +213,7 @@ impl ServiceRouter {
             target_agent,
             input.as_bytes().to_vec(),
             &reply_subject,
+            DelegateDiagnostics { container: ContainerDiagnostics::placeholder(0) },
         );
         drop(invoke);
 

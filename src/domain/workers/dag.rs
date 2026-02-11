@@ -103,7 +103,15 @@ impl DagCaptureWorker {
             .cloned()
             .unwrap_or_default();
 
-        let hash = hash_dag_node(payload, &parent_hash, &message_type);
+        // Extract diagnostics from NATS headers (ADR 071).
+        let diagnostics = headers.get("diagnostics")
+            .map(|s| s.as_bytes().to_vec())
+            .unwrap_or_default();
+
+        // Extract stderr from container diagnostics (Complete/Delegate only, ADR 071).
+        let stderr = extract_stderr(&diagnostics);
+
+        let hash = hash_dag_node(payload, &parent_hash, &message_type, &diagnostics);
 
         let now = chrono_now();
         let node = DagNode {
@@ -115,6 +123,8 @@ impl DagCaptureWorker {
             session_id: session_id.clone(),
             submission_id: submission_id.to_string(),
             payload: payload.to_vec(),
+            diagnostics,
+            stderr,
             created_at: now,
         };
 
@@ -169,6 +179,34 @@ fn parse_from_to(message_type: MessageType, rest: &[&str]) -> (String, String) {
             (from.to_string(), to.to_string())
         }
     }
+}
+
+/// Extract stderr bytes from the diagnostics JSON (ADR 071).
+///
+/// ContainerDiagnostics and DelegateDiagnostics both carry a `stderr` field
+/// (as a byte array serialized to JSON). For other message types, returns empty.
+fn extract_stderr(diagnostics: &[u8]) -> Vec<u8> {
+    if diagnostics.is_empty() {
+        return Vec::new();
+    }
+    // Try parsing as ContainerDiagnostics or DelegateDiagnostics
+    if let Ok(map) = serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(diagnostics) {
+        // Direct stderr field (ContainerDiagnostics)
+        if let Some(serde_json::Value::Array(arr)) = map.get("stderr") {
+            return arr.iter()
+                .filter_map(|v| v.as_u64().map(|b| b as u8))
+                .collect();
+        }
+        // Nested in container field (DelegateDiagnostics)
+        if let Some(serde_json::Value::Object(container)) = map.get("container") {
+            if let Some(serde_json::Value::Array(arr)) = container.get("stderr") {
+                return arr.iter()
+                    .filter_map(|v| v.as_u64().map(|b| b as u8))
+                    .collect();
+            }
+        }
+    }
+    Vec::new()
 }
 
 /// Simple timestamp without pulling in chrono.

@@ -119,7 +119,7 @@ impl GitDagWorker {
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     }
 
-    /// Build a rich tree with payload + agent.toml + models/ + platform.toml.
+    /// Build a rich tree with payload + diagnostics.toml + stderr + agent.toml + models/ + platform.toml.
     ///
     /// Falls back to payload-only if registry lookup fails.
     fn build_rich_tree(&self, node: &DagNode) -> Result<String, String> {
@@ -127,6 +127,22 @@ impl GitDagWorker {
 
         // Start with payload entry
         let mut entries = format!("100644 blob {}\tpayload\n", payload_blob);
+
+        // Write diagnostics.toml if diagnostics are present (ADR 071)
+        if !node.diagnostics.is_empty() {
+            if let Ok(diag_toml) = diagnostics_json_to_toml(&node.diagnostics) {
+                if let Ok(blob) = self.write_blob(diag_toml.as_bytes()) {
+                    entries.push_str(&format!("100644 blob {}\tdiagnostics.toml\n", blob));
+                }
+            }
+        }
+
+        // Write stderr blob if non-empty (Complete/Delegate only, ADR 071)
+        if !node.stderr.is_empty() {
+            if let Ok(blob) = self.write_blob(&node.stderr) {
+                entries.push_str(&format!("100644 blob {}\tstderr\n", blob));
+            }
+        }
 
         // Try to add agent.toml, models/, and platform.toml from registry
         if let Some(ref registry) = self.registry {
@@ -317,6 +333,51 @@ impl DagWorker for GitDagWorker {
     }
 }
 
+/// Convert diagnostics from JSON (as stored in DagNode) to TOML for the git tree.
+///
+/// The diagnostics are stored as JSON in NATS headers and DagNode, but we want
+/// human-readable TOML in the git tree for `git show <commit>:diagnostics.toml`.
+fn diagnostics_json_to_toml(json_bytes: &[u8]) -> Result<String, String> {
+    let value: toml::Value = serde_json::from_slice::<serde_json::Value>(json_bytes)
+        .map_err(|e| format!("diagnostics JSON parse failed: {}", e))
+        .and_then(|v| json_value_to_toml_value(&v))?;
+
+    toml::to_string_pretty(&value)
+        .map_err(|e| format!("diagnostics TOML serialize failed: {}", e))
+}
+
+/// Convert a serde_json::Value to a toml::Value.
+///
+/// TOML and JSON have slightly different type systems. This handles the
+/// common cases: objects → tables, arrays → arrays, strings/numbers/bools.
+fn json_value_to_toml_value(json: &serde_json::Value) -> Result<toml::Value, String> {
+    match json {
+        serde_json::Value::Object(map) => {
+            let mut table = toml::map::Map::new();
+            for (k, v) in map {
+                table.insert(k.clone(), json_value_to_toml_value(v)?);
+            }
+            Ok(toml::Value::Table(table))
+        }
+        serde_json::Value::Array(arr) => {
+            let values: Result<Vec<_>, _> = arr.iter().map(json_value_to_toml_value).collect();
+            Ok(toml::Value::Array(values?))
+        }
+        serde_json::Value::String(s) => Ok(toml::Value::String(s.clone())),
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                Ok(toml::Value::Integer(i))
+            } else if let Some(f) = n.as_f64() {
+                Ok(toml::Value::Float(f))
+            } else {
+                Err(format!("unsupported number: {}", n))
+            }
+        }
+        serde_json::Value::Bool(b) => Ok(toml::Value::Boolean(*b)),
+        serde_json::Value::Null => Ok(toml::Value::String("null".to_string())),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -331,7 +392,7 @@ mod tests {
         to: &str,
     ) -> DagNode {
         DagNode {
-            hash: hash_dag_node(payload, parent_hash, &message_type),
+            hash: hash_dag_node(payload, parent_hash, &message_type, b""),
             parent_hash: parent_hash.to_string(),
             message_type,
             from: from.to_string(),
@@ -339,6 +400,8 @@ mod tests {
             session_id: "sess-1".to_string(),
             submission_id: "sub-1".to_string(),
             payload: payload.to_vec(),
+            diagnostics: Vec::new(),
+            stderr: Vec::new(),
             created_at: "1000".to_string(),
         }
     }
@@ -664,6 +727,66 @@ mod tests {
         // Should NOT have agent.toml (no registry)
         let result = worker.git(&["show", &format!("{}:agent.toml", commit)]);
         assert!(result.is_err(), "should not have agent.toml without registry");
+    }
+
+    // --- Diagnostics tests (ADR 071) ---
+
+    #[test]
+    fn commit_tree_contains_diagnostics_toml() {
+        let (mut worker, _tmp) = test_worker();
+        let diag_json = serde_json::json!({
+            "harness_version": "0.1.0",
+            "history_turns": 3
+        });
+        let mut node = test_node(b"hello", "", MessageType::Invoke, "cli", "agent-a");
+        node.diagnostics = serde_json::to_vec(&diag_json).unwrap();
+        // Re-hash with diagnostics
+        node.hash = hash_dag_node(b"hello", "", &MessageType::Invoke, &node.diagnostics);
+
+        worker.on_message(&node);
+
+        let commit = worker.git(&["rev-parse", "sessions/sess-1"]).unwrap();
+        let content = worker.git(&["show", &format!("{}:diagnostics.toml", commit)]).unwrap();
+        assert!(content.contains("harness_version"), "diagnostics.toml: {}", content);
+        assert!(content.contains("0.1.0"), "diagnostics.toml: {}", content);
+        assert!(content.contains("history_turns"), "diagnostics.toml: {}", content);
+    }
+
+    #[test]
+    fn commit_tree_contains_stderr_blob() {
+        let (mut worker, _tmp) = test_worker();
+        let mut node = test_node(b"done", "", MessageType::Complete, "agent-a", "cli");
+        node.stderr = b"WARN: something happened".to_vec();
+
+        worker.on_message(&node);
+
+        let commit = worker.git(&["rev-parse", "sessions/sess-1"]).unwrap();
+        let content = worker.git(&["show", &format!("{}:stderr", commit)]).unwrap();
+        assert_eq!(content, "WARN: something happened");
+    }
+
+    #[test]
+    fn commit_tree_omits_diagnostics_when_empty() {
+        let (mut worker, _tmp) = test_worker();
+        let node = test_node(b"hello", "", MessageType::Invoke, "cli", "agent-a");
+
+        worker.on_message(&node);
+
+        let commit = worker.git(&["rev-parse", "sessions/sess-1"]).unwrap();
+        let result = worker.git(&["show", &format!("{}:diagnostics.toml", commit)]);
+        assert!(result.is_err(), "should not have diagnostics.toml when empty");
+    }
+
+    #[test]
+    fn commit_tree_omits_stderr_when_empty() {
+        let (mut worker, _tmp) = test_worker();
+        let node = test_node(b"hello", "", MessageType::Invoke, "cli", "agent-a");
+
+        worker.on_message(&node);
+
+        let commit = worker.git(&["rev-parse", "sessions/sess-1"]).unwrap();
+        let result = worker.git(&["show", &format!("{}:stderr", commit)]);
+        assert!(result.is_err(), "should not have stderr when empty");
     }
 
     #[test]

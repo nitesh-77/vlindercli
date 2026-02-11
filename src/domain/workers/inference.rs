@@ -153,10 +153,14 @@ impl InferenceServiceWorker {
 mod tests {
     use super::*;
     use crate::domain::{Agent, EngineType, InMemoryRegistry, Model, ModelType, ResourceId};
-    use crate::queue::{InMemoryQueue, Sequence, SubmissionId};
+    use crate::queue::{InMemoryQueue, RequestDiagnostics, Sequence, SessionId, SubmissionId};
     use crate::inference::InMemoryInference;
 
     const TEST_AGENT_ID: &str = "http://127.0.0.1:9000/agents/test-agent";
+
+    fn test_request_diag() -> RequestDiagnostics {
+        RequestDiagnostics { sequence: 0, endpoint: String::new(), request_bytes: 0, received_at_ms: 0 }
+    }
 
     fn test_agent_id() -> ResourceId {
         ResourceId::new(TEST_AGENT_ID)
@@ -219,12 +223,14 @@ mod tests {
         });
         let request = RequestMessage::new(
             test_submission(),
+            SessionId::new(),
             test_agent_id(),
             "infer",
             "memory",
             "run",
             Sequence::first(),
             serde_json::to_vec(&payload).unwrap(),
+            test_request_diag(),
         );
 
         queue.send_request(request.clone()).unwrap();
@@ -255,12 +261,14 @@ mod tests {
         });
         let request = RequestMessage::new(
             test_submission(),
+            SessionId::new(),
             test_agent_id(),
             "infer",
             "memory",
             "run",
             Sequence::first(),
             serde_json::to_vec(&payload).unwrap(),
+            test_request_diag(),
         );
 
         queue.send_request(request.clone()).unwrap();
@@ -290,12 +298,14 @@ mod tests {
         });
         let request = RequestMessage::new(
             test_submission(),
+            SessionId::new(),
             ResourceId::new("http://127.0.0.1:9000/agents/unknown-agent"),
             "infer",
             "memory",
             "run",
             Sequence::first(),
             serde_json::to_vec(&payload).unwrap(),
+            test_request_diag(),
         );
 
         queue.send_request(request.clone()).unwrap();
