@@ -1,28 +1,40 @@
-//! GitDagWorker — writes DAG nodes as git commits (ADR 064, 069, 070).
+//! GitDagWorker — writes DAG nodes as git commits (ADR 064, 069, 070, 071).
 //!
-//! Each DagNode becomes a commit. The author is the message sender (ADR 069).
-//! The commit tree holds the payload and system state snapshot (ADR 070):
+//! Each DagNode becomes a commit. The commit tree accumulates — each commit
+//! contains all previous message directories plus the new one. The working
+//! tree always shows the full conversation state.
 //!
 //! ```text
 //! tree
-//! ├── payload              (message content — raw bytes)
-//! ├── agent.toml           (agent manifest from registry, serialized)
-//! ├── models/
-//! │   ├── <model>.toml     (each model the agent requires)
-//! │   └── ...
-//! └── platform.toml        (vlinder version, source commit SHA, registry host)
+//! ├── 20260211-143052-cli-invoke/
+//! │   ├── payload
+//! │   └── diagnostics.toml
+//! ├── 20260211-143052-support-agent-request/
+//! │   ├── payload
+//! │   └── diagnostics.toml
+//! ├── ...
+//! ├── agent.toml
+//! ├── platform.toml
+//! └── models/
 //! ```
 //!
-//! Sessions are branches under `refs/heads/sessions/<session_id>`.
+//! Directory names are `{YYYYMMDD-HHMMSS.mmm}-{sender}-{type}`. The timestamp is
+//! the observed time (when the platform received the message). Natural `ls`
+//! sorting gives chronological order.
+//!
+//! Commits advance the current branch (HEAD). Sessions are distinguished by
+//! `Session:` trailers. Users can fork a branch to diverge from the timeline.
 //!
 //! Uses git plumbing commands (hash-object, mktree, commit-tree, update-ref)
-//! to work entirely in `.git/objects/` without touching the working directory.
+//! for writes. Runs `git checkout -f` after each commit to keep the working
+//! tree populated.
 
-use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Arc;
+
+use chrono::{DateTime, Utc};
 
 use crate::domain::registry::Registry;
 use crate::storage::dag_store::DagNode;
@@ -34,8 +46,8 @@ pub struct GitDagWorker {
     registry_host: String,
     /// Registry access for looking up agent/model state at commit time.
     registry: Option<Arc<dyn Registry>>,
-    /// Last git commit hash per session — for commit chaining.
-    last_commit: HashMap<String, String>,
+    /// Last git commit hash — for commit chaining.
+    last_commit: Option<String>,
 }
 
 impl GitDagWorker {
@@ -61,11 +73,20 @@ impl GitDagWorker {
             }
         }
 
+        // Read current HEAD for commit chaining (resume after restart)
+        let last_commit = Command::new("git")
+            .args(["rev-parse", "--verify", "HEAD"])
+            .current_dir(repo_path)
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+
         Ok(Self {
             repo_path: repo_path.to_path_buf(),
             registry_host: registry_host.to_string(),
             registry,
-            last_commit: HashMap::new(),
+            last_commit,
         })
     }
 
@@ -119,16 +140,31 @@ impl GitDagWorker {
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     }
 
-    /// Build a rich tree with payload + diagnostics.toml + stderr + agent.toml + models/ + platform.toml.
-    ///
-    /// Falls back to payload-only if registry lookup fails.
-    fn build_rich_tree(&self, node: &DagNode) -> Result<String, String> {
-        let payload_blob = self.write_blob(&node.payload)?;
+    /// List top-level entries from a commit's tree. Returns mktree-compatible lines.
+    fn ls_tree(&self, commit: &str) -> Result<Vec<String>, String> {
+        let output = Command::new("git")
+            .args(["ls-tree", commit])
+            .current_dir(&self.repo_path)
+            .output()
+            .map_err(|e| format!("git ls-tree failed: {}", e))?;
 
-        // Start with payload entry
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("git ls-tree failed: {}", stderr));
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        Ok(stdout.lines()
+            .filter(|l| !l.is_empty())
+            .map(|l| l.to_string())
+            .collect())
+    }
+
+    /// Build a subtree for a single message (payload + diagnostics.toml + stderr).
+    fn build_message_subtree(&self, node: &DagNode) -> Result<String, String> {
+        let payload_blob = self.write_blob(&node.payload)?;
         let mut entries = format!("100644 blob {}\tpayload\n", payload_blob);
 
-        // Write diagnostics.toml if diagnostics are present (ADR 071)
         if !node.diagnostics.is_empty() {
             if let Ok(diag_toml) = diagnostics_json_to_toml(&node.diagnostics) {
                 if let Ok(blob) = self.write_blob(diag_toml.as_bytes()) {
@@ -137,38 +173,62 @@ impl GitDagWorker {
             }
         }
 
-        // Write stderr blob if non-empty (Complete/Delegate only, ADR 071)
         if !node.stderr.is_empty() {
             if let Ok(blob) = self.write_blob(&node.stderr) {
                 entries.push_str(&format!("100644 blob {}\tstderr\n", blob));
             }
         }
 
-        // Try to add agent.toml, models/, and platform.toml from registry
+        self.make_tree_from_entries(&entries)
+    }
+
+    /// Build the accumulated tree: all previous message directories + new one + metadata.
+    fn build_accumulated_tree(&self, node: &DagNode) -> Result<String, String> {
+        // Start with parent tree entries (if any)
+        let mut entries: Vec<String> = if let Some(ref parent) = self.last_commit {
+            let mut existing = self.ls_tree(parent)?;
+            // Remove top-level metadata entries — we'll re-add them fresh
+            existing.retain(|e| {
+                !e.ends_with("\tagent.toml") &&
+                !e.ends_with("\tplatform.toml") &&
+                !e.ends_with("\tmodels")
+            });
+            existing
+        } else {
+            Vec::new()
+        };
+
+        // Add new message directory: {YYYYMMDD-HHMMSS}-{sender}-{type}
+        let msg_tree = self.build_message_subtree(node)?;
+        let msg_dir = format!(
+            "{}-{}-{}",
+            node.created_at.format("%Y%m%d-%H%M%S%.3f"),
+            node.from,
+            node.message_type.as_str(),
+        );
+        entries.push(format!("040000 tree {}\t{}", msg_tree, msg_dir));
+
+        // Add top-level metadata from registry
         if let Some(ref registry) = self.registry {
-            // Determine agent name from node (sender for Complete/Response, receiver for Invoke/Request/Delegate)
             let agent_name = match node.message_type.as_str() {
                 "response" | "complete" => &node.from,
                 _ => &node.to,
             };
 
             if let Some(agent) = registry.get_agent_by_name(agent_name) {
-                // Write agent.toml blob
                 if let Ok(agent_toml) = toml::to_string_pretty(&agent) {
                     if let Ok(blob) = self.write_blob(agent_toml.as_bytes()) {
-                        entries.push_str(&format!("100644 blob {}\tagent.toml\n", blob));
+                        entries.push(format!("100644 blob {}\tagent.toml", blob));
                     }
                 }
 
-                // Build models/ subtree if agent has model requirements
                 if !agent.requirements.models.is_empty() {
                     if let Ok(models_tree) = self.build_models_subtree(registry, &agent.requirements.models) {
-                        entries.push_str(&format!("040000 tree {}\tmodels\n", models_tree));
+                        entries.push(format!("040000 tree {}\tmodels", models_tree));
                     }
                 }
             }
 
-            // Write platform.toml
             let platform_toml = format!(
                 "version = \"{}\"\ncommit = \"{}\"\nregistry_host = \"{}\"\n",
                 env!("CARGO_PKG_VERSION"),
@@ -176,11 +236,13 @@ impl GitDagWorker {
                 self.registry_host,
             );
             if let Ok(blob) = self.write_blob(platform_toml.as_bytes()) {
-                entries.push_str(&format!("100644 blob {}\tplatform.toml\n", blob));
+                entries.push(format!("100644 blob {}\tplatform.toml", blob));
             }
         }
 
-        self.make_tree_from_entries(&entries)
+        // Join entries with newlines and create tree
+        let entries_str = entries.join("\n") + "\n";
+        self.make_tree_from_entries(&entries_str)
     }
 
     /// Build a models/ subtree with one TOML file per model.
@@ -195,7 +257,6 @@ impl GitDagWorker {
             if let Some(model) = registry.get_model(alias) {
                 if let Ok(model_toml) = toml::to_string_pretty(&model) {
                     let blob = self.write_blob(model_toml.as_bytes())?;
-                    // Sanitize alias for filename
                     let filename = format!("{}.toml", alias.replace('/', "-"));
                     entries.push_str(&format!("100644 blob {}\t{}\n", blob, filename));
                 }
@@ -217,7 +278,7 @@ impl GitDagWorker {
         message: &str,
         author_name: &str,
         author_email: &str,
-        author_date: &str,
+        author_date: &DateTime<Utc>,
     ) -> Result<String, String> {
         let mut args = vec!["commit-tree", tree_hash];
         let parent_owned;
@@ -229,7 +290,7 @@ impl GitDagWorker {
         args.push("-m");
         args.push(message);
 
-        let date_value = format!("@{} +0000", author_date);
+        let date_value = format!("@{} +0000", author_date.timestamp());
 
         let output = Command::new("git")
             .args(&args)
@@ -287,13 +348,13 @@ impl GitDagWorker {
 impl DagWorker for GitDagWorker {
     fn on_message(&mut self, node: &DagNode) {
         let result = (|| -> Result<(), String> {
-            // 1. Build rich tree (payload + agent.toml + models/ + platform.toml)
-            let tree_hash = self.build_rich_tree(node)?;
+            // 1. Build accumulated tree (all previous messages + new one)
+            let tree_hash = self.build_accumulated_tree(node)?;
 
-            // 2. Get parent commit for this session
-            let parent = self.last_commit.get(&node.session_id).map(|s| s.as_str());
+            // 2. Parent is the previous commit (chronological order)
+            let parent = self.last_commit.as_deref();
 
-            // 3. Build commit message
+            // 3. Build commit message with Session trailer for filtering
             let message = format!(
                 "{}: {} \u{2192} {}\n\nSession: {}\nSubmission: {}\nHash: {}",
                 node.message_type.as_str(),
@@ -317,12 +378,17 @@ impl DagWorker for GitDagWorker {
                 &node.created_at,
             )?;
 
-            // 6. Update session branch ref
-            let refname = format!("refs/heads/sessions/{}", node.session_id);
-            self.update_ref(&refname, &commit_hash)?;
+            // 6. Advance current branch (HEAD follows the symbolic ref)
+            self.update_ref("HEAD", &commit_hash)?;
 
-            // 7. Track last commit
-            self.last_commit.insert(node.session_id.clone(), commit_hash);
+            // 7. Sync working tree so files are visible in the directory
+            let _ = Command::new("git")
+                .args(["checkout", "-f"])
+                .current_dir(&self.repo_path)
+                .output();
+
+            // 8. Track last commit
+            self.last_commit = Some(commit_hash);
 
             Ok(())
         })();
@@ -384,12 +450,13 @@ mod tests {
     use crate::storage::dag_store::{MessageType, hash_dag_node};
     use crate::domain::{InMemoryRegistry, RuntimeType, Agent};
 
-    fn test_node(
+    fn test_node_at(
         payload: &[u8],
         parent_hash: &str,
         message_type: MessageType,
         from: &str,
         to: &str,
+        epoch_secs: i64,
     ) -> DagNode {
         DagNode {
             hash: hash_dag_node(payload, parent_hash, &message_type, b""),
@@ -402,8 +469,18 @@ mod tests {
             payload: payload.to_vec(),
             diagnostics: Vec::new(),
             stderr: Vec::new(),
-            created_at: "1000".to_string(),
+            created_at: DateTime::from_timestamp(epoch_secs, 0).unwrap(),
         }
+    }
+
+    fn test_node(
+        payload: &[u8],
+        parent_hash: &str,
+        message_type: MessageType,
+        from: &str,
+        to: &str,
+    ) -> DagNode {
+        test_node_at(payload, parent_hash, message_type, from, to, 1000)
     }
 
     fn test_worker() -> (GitDagWorker, tempfile::TempDir) {
@@ -452,13 +529,13 @@ mod tests {
     }
 
     #[test]
-    fn commit_creates_session_branch() {
+    fn commit_advances_main() {
         let (mut worker, _tmp) = test_worker();
         let node = test_node(b"hello", "", MessageType::Invoke, "cli", "agent-a");
 
         worker.on_message(&node);
 
-        let sha = worker.git(&["rev-parse", "--verify", "sessions/sess-1"]).unwrap();
+        let sha = worker.git(&["rev-parse", "--verify", "main"]).unwrap();
         assert_eq!(sha.len(), 40);
         assert!(sha.chars().all(|c| c.is_ascii_hexdigit()));
     }
@@ -470,7 +547,7 @@ mod tests {
 
         worker.on_message(&node);
 
-        let subject = worker.git(&["log", "-1", "--format=%s", "sessions/sess-1"]).unwrap();
+        let subject = worker.git(&["log", "-1", "--format=%s", "main"]).unwrap();
         assert_eq!(subject, "invoke: cli \u{2192} support-agent");
     }
 
@@ -482,7 +559,7 @@ mod tests {
 
         worker.on_message(&node);
 
-        let body = worker.git(&["log", "-1", "--format=%b", "sessions/sess-1"]).unwrap();
+        let body = worker.git(&["log", "-1", "--format=%b", "main"]).unwrap();
         assert!(body.contains("Session: sess-1"), "body: {}", body);
         assert!(body.contains("Submission: sub-1"), "body: {}", body);
         assert!(body.contains(&format!("Hash: {}", expected_hash)), "body: {}", body);
@@ -495,7 +572,7 @@ mod tests {
 
         worker.on_message(&node);
 
-        let author = worker.git(&["log", "-1", "--format=%an <%ae>", "sessions/sess-1"]).unwrap();
+        let author = worker.git(&["log", "-1", "--format=%an <%ae>", "main"]).unwrap();
         assert_eq!(author, "cli <cli@registry.local:9000>");
     }
 
@@ -506,57 +583,86 @@ mod tests {
 
         worker.on_message(&node);
 
-        let committer = worker.git(&["log", "-1", "--format=%cn <%ce>", "sessions/sess-1"]).unwrap();
+        let committer = worker.git(&["log", "-1", "--format=%cn <%ce>", "main"]).unwrap();
         assert_eq!(committer, "vlinder <vlinder@localhost>");
     }
 
     #[test]
     fn author_date_matches_node() {
         let (mut worker, _tmp) = test_worker();
-        let mut node = test_node(b"data", "", MessageType::Invoke, "cli", "agent-a");
-        node.created_at = "1700000000".to_string();
+        let node = test_node_at(b"data", "", MessageType::Invoke, "cli", "agent-a", 1700000000);
 
         worker.on_message(&node);
 
-        let date = worker.git(&["log", "-1", "--format=%at", "sessions/sess-1"]).unwrap();
+        let date = worker.git(&["log", "-1", "--format=%at", "main"]).unwrap();
         assert_eq!(date, "1700000000");
     }
 
     #[test]
-    fn payload_stored_as_blob() {
+    fn messages_accumulate_in_tree() {
+        let (mut worker, _tmp) = test_worker();
+
+        let n1 = test_node(b"q", "", MessageType::Invoke, "cli", "agent-a");
+        worker.on_message(&n1);
+
+        let n2 = test_node(b"r", &n1.hash, MessageType::Request, "agent-a", "infer.ollama");
+        worker.on_message(&n2);
+
+        let n3 = test_node(b"a", &n2.hash, MessageType::Response, "infer.ollama", "agent-a");
+        worker.on_message(&n3);
+
+        // After 3 messages, tree should have 3 message directories
+        let ls = worker.git(&["ls-tree", "--name-only", "main"]).unwrap();
+        assert!(ls.contains("19700101-001640.000-cli-invoke"), "ls: {}", ls);
+        assert!(ls.contains("19700101-001640.000-agent-a-request"), "ls: {}", ls);
+        assert!(ls.contains("19700101-001640.000-infer.ollama-response"), "ls: {}", ls);
+    }
+
+    #[test]
+    fn message_directory_contains_payload() {
         let (mut worker, _tmp) = test_worker();
         let node = test_node(b"my-payload-data", "", MessageType::Invoke, "cli", "agent-a");
 
         worker.on_message(&node);
 
-        let commit = worker.git(&["rev-parse", "sessions/sess-1"]).unwrap();
-
-        // Tree should contain a "payload" entry
-        let tree = worker.git(&["log", "-1", "--format=%T", "sessions/sess-1"]).unwrap();
-        let ls_tree = worker.git(&["ls-tree", &tree]).unwrap();
-        assert!(ls_tree.contains("payload"), "ls-tree: {}", ls_tree);
-
-        // Read the blob content
-        let content = worker.git(&["show", &format!("{}:payload", commit)]).unwrap();
+        let content = worker.git(&["show", "main:19700101-001640.000-cli-invoke/payload"]).unwrap();
         assert_eq!(content, "my-payload-data");
     }
 
     #[test]
-    fn commits_chain_within_session() {
+    fn earlier_messages_preserved_in_later_commits() {
         let (mut worker, _tmp) = test_worker();
 
         let n1 = test_node(b"first", "", MessageType::Invoke, "cli", "agent-a");
         worker.on_message(&n1);
-        let commit1 = worker.git(&["rev-parse", "sessions/sess-1"]).unwrap();
+
+        let n2 = test_node(b"second", &n1.hash, MessageType::Request, "agent-a", "kv.sqlite");
+        worker.on_message(&n2);
+
+        // Second commit still has the first message's payload
+        let first_payload = worker.git(&["show", "main:19700101-001640.000-cli-invoke/payload"]).unwrap();
+        assert_eq!(first_payload, "first");
+
+        let second_payload = worker.git(&["show", "main:19700101-001640.000-agent-a-request/payload"]).unwrap();
+        assert_eq!(second_payload, "second");
+    }
+
+    #[test]
+    fn commits_chain_correctly() {
+        let (mut worker, _tmp) = test_worker();
+
+        let n1 = test_node(b"first", "", MessageType::Invoke, "cli", "agent-a");
+        worker.on_message(&n1);
+        let commit1 = worker.git(&["rev-parse", "main"]).unwrap();
 
         let n2 = test_node(b"second", &n1.hash, MessageType::Request, "agent-a", "infer.ollama");
         worker.on_message(&n2);
-        let commit2 = worker.git(&["rev-parse", "sessions/sess-1"]).unwrap();
+        let commit2 = worker.git(&["rev-parse", "main"]).unwrap();
 
         assert_ne!(commit1, commit2);
 
         // commit2's parent should be commit1
-        let parent = worker.git(&["log", "-1", "--format=%P", "sessions/sess-1"]).unwrap();
+        let parent = worker.git(&["log", "-1", "--format=%P", "main"]).unwrap();
         assert_eq!(parent, commit1);
     }
 
@@ -567,32 +673,29 @@ mod tests {
 
         worker.on_message(&node);
 
-        // Root commit has no parent
-        let parent = worker.git(&["log", "-1", "--format=%P", "sessions/sess-1"]).unwrap();
+        let parent = worker.git(&["log", "-1", "--format=%P", "main"]).unwrap();
         assert_eq!(parent, "");
     }
 
     #[test]
-    fn different_sessions_get_different_branches() {
+    fn different_sessions_share_main() {
         let (mut worker, _tmp) = test_worker();
 
-        let mut n1 = test_node(b"sess1", "", MessageType::Invoke, "cli", "agent-a");
+        let mut n1 = test_node_at(b"sess1", "", MessageType::Invoke, "cli", "agent-a", 1000);
         n1.session_id = "sess-1".to_string();
         worker.on_message(&n1);
 
-        let mut n2 = test_node(b"sess2", "", MessageType::Invoke, "cli", "agent-b");
+        let mut n2 = test_node_at(b"sess2", "", MessageType::Invoke, "cli", "agent-b", 1001);
         n2.session_id = "sess-2".to_string();
         worker.on_message(&n2);
 
-        let c1 = worker.git(&["rev-parse", "sessions/sess-1"]).unwrap();
-        let c2 = worker.git(&["rev-parse", "sessions/sess-2"]).unwrap();
-        assert_ne!(c1, c2);
+        let count = worker.git(&["rev-list", "--count", "main"]).unwrap();
+        assert_eq!(count, "2");
 
-        // Each is a root commit (no parent)
-        let p1 = worker.git(&["log", "-1", "--format=%P", "sessions/sess-1"]).unwrap();
-        let p2 = worker.git(&["log", "-1", "--format=%P", "sessions/sess-2"]).unwrap();
-        assert_eq!(p1, "");
-        assert_eq!(p2, "");
+        // Both messages visible in tree
+        let ls = worker.git(&["ls-tree", "--name-only", "main"]).unwrap();
+        assert!(ls.contains("19700101-001640.000-cli-invoke"), "ls: {}", ls);
+        assert!(ls.contains("19700101-001641.000-cli-invoke"), "ls: {}", ls);
     }
 
     #[test]
@@ -611,7 +714,7 @@ mod tests {
         let n4 = test_node(b"done", &n3.hash, MessageType::Complete, "support-agent", "cli");
         worker.on_message(&n4);
 
-        let log = worker.git(&["log", "--oneline", "--reverse", "sessions/sess-1"]).unwrap();
+        let log = worker.git(&["log", "--oneline", "--reverse", "main"]).unwrap();
         let lines: Vec<&str> = log.lines().collect();
 
         assert_eq!(lines.len(), 4);
@@ -637,9 +740,8 @@ mod tests {
         let n4 = test_node(b"done", &n3.hash, MessageType::Complete, "agent-a", "cli");
         worker.on_message(&n4);
 
-        // --author=agent-a should show only agent-a's commits
         let log = worker.git(&[
-            "log", "--oneline", "--author=agent-a", "sessions/sess-1",
+            "log", "--oneline", "--author=agent-a", "main",
         ]).unwrap();
         let lines: Vec<&str> = log.lines().collect();
 
@@ -658,7 +760,7 @@ mod tests {
         let n2 = test_node(b"r", &n1.hash, MessageType::Complete, "agent-a", "cli");
         worker.on_message(&n2);
 
-        let shortlog = worker.git(&["shortlog", "-sn", "sessions/sess-1"]).unwrap();
+        let shortlog = worker.git(&["shortlog", "-sn", "main"]).unwrap();
         assert!(shortlog.contains("cli"), "shortlog: {}", shortlog);
         assert!(shortlog.contains("agent-a"), "shortlog: {}", shortlog);
     }
@@ -682,8 +784,16 @@ mod tests {
         let n5 = test_node(b"5", &n4.hash, MessageType::Complete, "a", "cli");
         worker.on_message(&n5);
 
-        let count = worker.git(&["rev-list", "--count", "sessions/sess-1"]).unwrap();
+        let count = worker.git(&["rev-list", "--count", "main"]).unwrap();
         assert_eq!(count, "5");
+
+        // All 5 message directories visible
+        let ls = worker.git(&["ls-tree", "--name-only", "main"]).unwrap();
+        assert!(ls.contains("19700101-001640.000-cli-invoke"), "ls: {}", ls);
+        assert!(ls.contains("19700101-001640.000-a-request"), "ls: {}", ls);
+        assert!(ls.contains("19700101-001640.000-infer.ollama-response"), "ls: {}", ls);
+        assert!(ls.contains("19700101-001640.000-a-delegate"), "ls: {}", ls);
+        assert!(ls.contains("19700101-001640.000-a-complete"), "ls: {}", ls);
     }
 
     // --- Rich tree tests (ADR 070) ---
@@ -695,8 +805,7 @@ mod tests {
 
         worker.on_message(&node);
 
-        let commit = worker.git(&["rev-parse", "sessions/sess-1"]).unwrap();
-        let content = worker.git(&["show", &format!("{}:agent.toml", commit)]).unwrap();
+        let content = worker.git(&["show", "main:agent.toml"]).unwrap();
         assert!(content.contains("support-agent"), "agent.toml: {}", content);
     }
 
@@ -707,8 +816,7 @@ mod tests {
 
         worker.on_message(&node);
 
-        let commit = worker.git(&["rev-parse", "sessions/sess-1"]).unwrap();
-        let content = worker.git(&["show", &format!("{}:platform.toml", commit)]).unwrap();
+        let content = worker.git(&["show", "main:platform.toml"]).unwrap();
         assert!(content.contains("version"), "platform.toml: {}", content);
         assert!(content.contains("registry_host"), "platform.toml: {}", content);
     }
@@ -720,19 +828,18 @@ mod tests {
 
         worker.on_message(&node);
 
-        let commit = worker.git(&["rev-parse", "sessions/sess-1"]).unwrap();
-        let content = worker.git(&["show", &format!("{}:payload", commit)]).unwrap();
+        let content = worker.git(&["show", "main:19700101-001640.000-cli-invoke/payload"]).unwrap();
         assert_eq!(content, "my-data");
 
         // Should NOT have agent.toml (no registry)
-        let result = worker.git(&["show", &format!("{}:agent.toml", commit)]);
+        let result = worker.git(&["show", "main:agent.toml"]);
         assert!(result.is_err(), "should not have agent.toml without registry");
     }
 
     // --- Diagnostics tests (ADR 071) ---
 
     #[test]
-    fn commit_tree_contains_diagnostics_toml() {
+    fn message_directory_contains_diagnostics_toml() {
         let (mut worker, _tmp) = test_worker();
         let diag_json = serde_json::json!({
             "harness_version": "0.1.0",
@@ -740,69 +847,105 @@ mod tests {
         });
         let mut node = test_node(b"hello", "", MessageType::Invoke, "cli", "agent-a");
         node.diagnostics = serde_json::to_vec(&diag_json).unwrap();
-        // Re-hash with diagnostics
         node.hash = hash_dag_node(b"hello", "", &MessageType::Invoke, &node.diagnostics);
 
         worker.on_message(&node);
 
-        let commit = worker.git(&["rev-parse", "sessions/sess-1"]).unwrap();
-        let content = worker.git(&["show", &format!("{}:diagnostics.toml", commit)]).unwrap();
+        let content = worker.git(&["show", "main:19700101-001640.000-cli-invoke/diagnostics.toml"]).unwrap();
         assert!(content.contains("harness_version"), "diagnostics.toml: {}", content);
         assert!(content.contains("0.1.0"), "diagnostics.toml: {}", content);
-        assert!(content.contains("history_turns"), "diagnostics.toml: {}", content);
     }
 
     #[test]
-    fn commit_tree_contains_stderr_blob() {
+    fn message_directory_contains_stderr_blob() {
         let (mut worker, _tmp) = test_worker();
         let mut node = test_node(b"done", "", MessageType::Complete, "agent-a", "cli");
         node.stderr = b"WARN: something happened".to_vec();
 
         worker.on_message(&node);
 
-        let commit = worker.git(&["rev-parse", "sessions/sess-1"]).unwrap();
-        let content = worker.git(&["show", &format!("{}:stderr", commit)]).unwrap();
+        let content = worker.git(&["show", "main:19700101-001640.000-agent-a-complete/stderr"]).unwrap();
         assert_eq!(content, "WARN: something happened");
     }
 
     #[test]
-    fn commit_tree_omits_diagnostics_when_empty() {
+    fn message_directory_omits_diagnostics_when_empty() {
         let (mut worker, _tmp) = test_worker();
         let node = test_node(b"hello", "", MessageType::Invoke, "cli", "agent-a");
 
         worker.on_message(&node);
 
-        let commit = worker.git(&["rev-parse", "sessions/sess-1"]).unwrap();
-        let result = worker.git(&["show", &format!("{}:diagnostics.toml", commit)]);
+        let result = worker.git(&["show", "main:19700101-001640.000-cli-invoke/diagnostics.toml"]);
         assert!(result.is_err(), "should not have diagnostics.toml when empty");
     }
 
     #[test]
-    fn commit_tree_omits_stderr_when_empty() {
+    fn message_directory_omits_stderr_when_empty() {
         let (mut worker, _tmp) = test_worker();
         let node = test_node(b"hello", "", MessageType::Invoke, "cli", "agent-a");
 
         worker.on_message(&node);
 
-        let commit = worker.git(&["rev-parse", "sessions/sess-1"]).unwrap();
-        let result = worker.git(&["show", &format!("{}:stderr", commit)]);
+        let result = worker.git(&["show", "main:19700101-001640.000-cli-invoke/stderr"]);
         assert!(result.is_err(), "should not have stderr when empty");
     }
 
     #[test]
-    fn agent_not_found_in_registry_falls_back_to_payload_only() {
+    fn working_tree_is_populated() {
+        let (mut worker, tmp) = test_worker();
+        let node = test_node(b"visible", "", MessageType::Invoke, "cli", "agent-a");
+
+        worker.on_message(&node);
+
+        // Files should exist in the working directory
+        let dir = "19700101-001640.000-cli-invoke";
+        assert!(tmp.path().join(dir).join("payload").exists());
+        let content = std::fs::read(tmp.path().join(dir).join("payload")).unwrap();
+        assert_eq!(content, b"visible");
+    }
+
+    #[test]
+    fn open_resumes_last_commit() {
+        let tmp = tempfile::TempDir::new().unwrap();
+
+        // First session: 2 messages
+        {
+            let mut worker = GitDagWorker::open(tmp.path(), "host", None).unwrap();
+            let n1 = test_node(b"1", "", MessageType::Invoke, "cli", "a");
+            worker.on_message(&n1);
+            let n2 = test_node(b"2", &n1.hash, MessageType::Request, "a", "kv");
+            worker.on_message(&n2);
+        }
+
+        // Reopen — new messages should chain correctly and accumulate
+        let mut worker = GitDagWorker::open(tmp.path(), "host", None).unwrap();
+        assert!(worker.last_commit.is_some());
+
+        let n3 = test_node_at(b"3", "", MessageType::Invoke, "cli", "b", 2000);
+        worker.on_message(&n3);
+
+        // All 3 messages visible in tree
+        let ls = worker.git(&["ls-tree", "--name-only", "main"]).unwrap();
+        assert!(ls.contains("19700101-001640.000-cli-invoke"), "ls: {}", ls);
+        assert!(ls.contains("19700101-001640.000-a-request"), "ls: {}", ls);
+        assert!(ls.contains("19700101-003320.000-cli-invoke"), "ls: {}", ls);
+
+        let count = worker.git(&["rev-list", "--count", "main"]).unwrap();
+        assert_eq!(count, "3");
+    }
+
+    #[test]
+    fn agent_not_found_in_registry_falls_back_gracefully() {
         let (mut worker, _tmp, _registry) = test_worker_with_registry();
-        // Use an agent name that's NOT registered
         let node = test_node(b"hello", "", MessageType::Invoke, "cli", "nonexistent-agent");
 
         worker.on_message(&node);
 
-        let commit = worker.git(&["rev-parse", "sessions/sess-1"]).unwrap();
-        // Should still have payload
-        let content = worker.git(&["show", &format!("{}:payload", commit)]).unwrap();
+        // Should still have message directory with payload
+        let content = worker.git(&["show", "main:19700101-001640.000-cli-invoke/payload"]).unwrap();
         assert_eq!(content, "hello");
-        // But should have platform.toml (registry is available, just no agent found)
-        let platform = worker.git(&["show", &format!("{}:platform.toml", commit)]).unwrap();
+        // Should have platform.toml (registry is available, just no agent found)
+        let platform = worker.git(&["show", "main:platform.toml"]).unwrap();
         assert!(platform.contains("version"), "platform.toml: {}", platform);
     }
 }

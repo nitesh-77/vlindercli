@@ -39,14 +39,14 @@ pub fn execute(cmd: TimelineCommand) {
     }
 }
 
-/// Show the route for a session — all commits on its branch.
+/// Show the route for a session — all commits matching the session trailer.
 fn route(dir: &Path, session_id: &str) {
-    let branch = format!("sessions/{}", session_id);
+    let grep_pattern = format!("Session: {}", session_id);
     let status = Command::new("git")
         .arg("-C")
         .arg(dir)
-        .args(["log", "--oneline", "--reverse"])
-        .arg(&branch)
+        .args(["log", "--oneline", "--reverse", "--grep"])
+        .arg(&grep_pattern)
         .status();
 
     match status {
@@ -82,6 +82,7 @@ fn passthrough(dir: &Path, args: &[String]) {
 
 #[cfg(test)]
 mod tests {
+    use chrono::DateTime;
     use vlindercli::domain::workers::{DagWorker, GitDagWorker};
     use vlindercli::storage::dag_store::{DagNode, MessageType, hash_dag_node};
 
@@ -104,7 +105,7 @@ mod tests {
             payload: payload.to_vec(),
             diagnostics: Vec::new(),
             stderr: Vec::new(),
-            created_at: "1000".to_string(),
+            created_at: DateTime::from_timestamp(1000, 0).unwrap(),
         }
     }
 
@@ -118,15 +119,16 @@ mod tests {
         let n2 = test_node(b"a", &n1.hash, MessageType::Complete, "agent-a", "cli", "sess-1");
         worker.on_message(&n2);
 
-        // Verify the session branch exists and has 2 commits
+        // Both commits are on main, filterable by Session trailer
         let output = std::process::Command::new("git")
             .arg("-C")
             .arg(tmp.path())
-            .args(["rev-list", "--count", "sessions/sess-1"])
+            .args(["log", "--oneline", "--grep", "Session: sess-1", "main"])
             .output()
             .unwrap();
 
-        let count = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        assert_eq!(count, "2");
+        let log = String::from_utf8_lossy(&output.stdout);
+        let lines: Vec<&str> = log.trim().lines().collect();
+        assert_eq!(lines.len(), 2);
     }
 }

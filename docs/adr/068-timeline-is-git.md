@@ -46,6 +46,54 @@ Everything else is passthrough.
 - `vlinder timeline fork <commit>` becomes `vlinder timeline checkout -b fork-<short> <commit>`
 - Any future timeline feature is evaluated against: "can git already do this?"
 
+### Commits advance the current branch
+
+The GitDagWorker advances HEAD — whatever branch it points to. By default that's `main`. Sessions are distinguished by the `Session:` trailer in the commit message. Filtering by session is `git log --grep="Session: <id>"`. Filtering by entity is `git log --author=<name>`.
+
+Forking a timeline is a git checkout:
+
+```
+cd ~/.vlinder/conversations
+git checkout -b experiment <commit>
+vlinder agent run todoapp      # new commits go to 'experiment'
+```
+
+The user now has two divergent timelines from the same point. `git diff main experiment` shows exactly how the agent behaved differently. Switching back to `main` and running again continues the original timeline. This is time travel — fork, explore, compare, return.
+
+### Messages accumulate in the tree
+
+Each commit's tree is a superset of the previous one. Every message gets its own directory. The tree grows — it never shrinks.
+
+```
+~/.vlinder/conversations/
+├── 20260211-143052-cli-invoke/
+│   ├── payload
+│   └── diagnostics.toml
+├── 20260211-143052-support-agent-request/
+│   ├── payload
+│   └── diagnostics.toml
+├── 20260211-143053-infer.ollama-response/
+│   ├── payload
+│   ├── diagnostics.toml
+│   └── stderr              (if non-empty)
+├── 20260211-143054-support-agent-complete/
+│   ├── payload
+│   └── diagnostics.toml
+├── agent.toml               (agent manifest)
+├── platform.toml            (vlinder version, registry host)
+└── models/                  (model manifests)
+```
+
+Directory names are `{YYYYMMDD-HHMMSS}-{sender}-{message_type}/`. The timestamp is the observed time — when the platform received the message. Natural `ls` sorting gives chronological order. The sender tells you who emitted this message.
+
+Looking at the directory gives cumulative state — every message that was ever sent. The commit history gives the event log — `git log` shows when each message arrived, and `git diff HEAD~1 HEAD` shows exactly what the last message added.
+
+### Working tree is always populated
+
+The GitDagWorker uses git plumbing commands (`hash-object`, `mktree`, `commit-tree`, `update-ref`) for writes — no staging area, no merge conflicts. After each commit, it runs `git checkout -f` to sync the working tree to match the latest commit.
+
+Users can `ls`, `cat`, or open files in an editor — no git knowledge required. Full history is still available via `git log` and `git show <commit>:path`.
+
 ### What doesn't change
 
 - Route (ADR 063) stays as a domain model — it provides the `route` subcommand that groups messages into stops
@@ -59,3 +107,7 @@ Everything else is passthrough.
 - The `route` subcommand is the only domain-specific addition
 - Custom parsing and formatting code in `timeline.rs` is removed
 - The platform's value is in the commit format, not the viewer
+- The conversations directory is browsable — `ls` shows all messages, `cat` reads any payload
+- The directory is cumulative state, the commit log is the event log
+- `git diff HEAD~1 HEAD` shows exactly what the last message added
+- Forking a timeline is `git checkout -b` — true time travel with zero application code

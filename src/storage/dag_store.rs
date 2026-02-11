@@ -16,6 +16,7 @@
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
+use chrono::{DateTime, Utc};
 use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 
@@ -74,7 +75,7 @@ pub struct DagNode {
     /// Raw stderr from container execution (Complete/Delegate only, ADR 071).
     /// Empty for non-container messages or messages captured before ADR 071.
     pub stderr: Vec<u8>,
-    pub created_at: String,
+    pub created_at: DateTime<Utc>,
 }
 
 /// Compute the content-addressed hash for a DAG node.
@@ -190,6 +191,10 @@ fn row_to_dag_node(row: &rusqlite::Row) -> Result<DagNode, rusqlite::Error> {
     let mt_str: String = row.get(2)?;
     let message_type = MessageType::from_str(&mt_str)
         .unwrap_or(MessageType::Invoke);
+    let created_at_str: String = row.get(10)?;
+    let created_at = DateTime::parse_from_rfc3339(&created_at_str)
+        .map(|dt| dt.with_timezone(&Utc))
+        .unwrap_or_default();
     Ok(DagNode {
         hash: row.get(0)?,
         parent_hash: row.get(1)?,
@@ -201,7 +206,7 @@ fn row_to_dag_node(row: &rusqlite::Row) -> Result<DagNode, rusqlite::Error> {
         payload: row.get(7)?,
         diagnostics: row.get(8)?,
         stderr: row.get(9)?,
-        created_at: row.get(10)?,
+        created_at,
     })
 }
 
@@ -222,7 +227,7 @@ impl DagStore for SqliteDagStore {
                 node.payload,
                 node.diagnostics,
                 node.stderr,
-                node.created_at,
+                node.created_at.to_rfc3339(),
             ],
         ).map_err(|e| format!("insert_node failed: {}", e))?;
         Ok(())
@@ -299,6 +304,7 @@ impl<T> OptionalExt<T> for Result<T, rusqlite::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::TimeZone;
 
     fn test_store() -> SqliteDagStore {
         let tmp = tempfile::NamedTempFile::new().unwrap();
@@ -318,7 +324,7 @@ mod tests {
             payload: payload.to_vec(),
             diagnostics,
             stderr: Vec::new(),
-            created_at: "2025-01-01T00:00:00Z".to_string(),
+            created_at: Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap(),
         }
     }
 
@@ -415,7 +421,7 @@ mod tests {
             payload: b"delegate this".to_vec(),
             diagnostics,
             stderr,
-            created_at: "2025-06-15T12:00:00Z".to_string(),
+            created_at: Utc.with_ymd_and_hms(2025, 6, 15, 12, 0, 0).unwrap(),
         };
 
         store.insert_node(&node).unwrap();
@@ -450,10 +456,10 @@ mod tests {
         let store = test_store();
 
         let mut node1 = test_node(b"first", "", MessageType::Invoke);
-        node1.created_at = "2025-01-01T00:00:00Z".to_string();
+        node1.created_at = Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
 
         let mut node2 = test_node(b"second", &node1.hash, MessageType::Request);
-        node2.created_at = "2025-01-01T00:01:00Z".to_string();
+        node2.created_at = Utc.with_ymd_and_hms(2025, 1, 1, 0, 1, 0).unwrap();
 
         // Insert out of order
         store.insert_node(&node2).unwrap();
@@ -472,7 +478,7 @@ mod tests {
         let parent = test_node(b"parent", "", MessageType::Invoke);
 
         let mut child = test_node(b"child", &parent.hash, MessageType::Complete);
-        child.created_at = "2025-01-01T00:01:00Z".to_string();
+        child.created_at = Utc.with_ymd_and_hms(2025, 1, 1, 0, 1, 0).unwrap();
 
         store.insert_node(&parent).unwrap();
         store.insert_node(&child).unwrap();
@@ -527,7 +533,7 @@ mod tests {
         for (i, mt) in types.iter().enumerate() {
             let payload = format!("msg-{}", i);
             let mut node = test_node(payload.as_bytes(), &parent_hash, *mt);
-            node.created_at = format!("2025-01-01T00:0{}:00Z", i);
+            node.created_at = Utc.with_ymd_and_hms(2025, 1, 1, 0, i as u32, 0).unwrap();
             store.insert_node(&node).unwrap();
             parent_hash = node.hash;
         }

@@ -12,6 +12,8 @@
 
 use std::collections::HashMap;
 
+use chrono::Utc;
+
 use crate::storage::dag_store::{DagNode, DagStore, MessageType, hash_dag_node};
 
 /// A projection that receives DAG nodes (ADR 065).
@@ -113,7 +115,7 @@ impl DagCaptureWorker {
 
         let hash = hash_dag_node(payload, &parent_hash, &message_type, &diagnostics);
 
-        let now = chrono_now();
+        let now = Utc::now();
         let node = DagNode {
             hash: hash.clone(),
             parent_hash,
@@ -207,14 +209,6 @@ fn extract_stderr(diagnostics: &[u8]) -> Vec<u8> {
         }
     }
     Vec::new()
-}
-
-/// Simple timestamp without pulling in chrono.
-fn chrono_now() -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    format!("{}", now.as_secs())
 }
 
 #[cfg(test)]

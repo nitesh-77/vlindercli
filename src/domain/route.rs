@@ -7,6 +7,8 @@
 //! Route is a domain type, not a presentation concern. Consumers format;
 //! they don't interpret.
 
+use chrono::{DateTime, Utc};
+
 use crate::storage::dag_store::{DagNode, MessageType};
 
 /// The full chain of conversations in a session.
@@ -27,7 +29,7 @@ pub struct Stop {
     pub from: String,
     pub to: String,
     pub payload: Vec<u8>,
-    pub created_at: String,
+    pub created_at: DateTime<Utc>,
 }
 
 impl Route {
@@ -84,9 +86,9 @@ impl Route {
         if self.stops.len() < 2 {
             return None;
         }
-        let first: f64 = self.stops.first()?.created_at.parse().ok()?;
-        let last: f64 = self.stops.last()?.created_at.parse().ok()?;
-        Some(last - first)
+        let first = self.stops.first()?.created_at;
+        let last = self.stops.last()?.created_at;
+        Some((last - first).num_seconds() as f64)
     }
 }
 
@@ -101,7 +103,7 @@ mod tests {
         message_type: MessageType,
         from: &str,
         to: &str,
-        created_at: &str,
+        epoch_secs: i64,
     ) -> DagNode {
         DagNode {
             hash: hash_dag_node(payload, parent_hash, &message_type, b""),
@@ -114,7 +116,7 @@ mod tests {
             payload: payload.to_vec(),
             diagnostics: Vec::new(),
             stderr: Vec::new(),
-            created_at: created_at.to_string(),
+            created_at: DateTime::from_timestamp(epoch_secs, 0).unwrap(),
         }
     }
 
@@ -128,7 +130,7 @@ mod tests {
 
     #[test]
     fn single_message_route() {
-        let node = make_node(b"hello", "", MessageType::Invoke, "cli", "agent-a", "1000");
+        let node = make_node(b"hello", "", MessageType::Invoke, "cli", "agent-a", 1000);
         let route = Route::from_dag_nodes("sess-1".to_string(), vec![node]);
 
         assert_eq!(route.stop_count(), 1);
@@ -140,7 +142,7 @@ mod tests {
 
     #[test]
     fn strips_merkle_chain_details() {
-        let node = make_node(b"data", "parent-abc", MessageType::Request, "a", "b", "1000");
+        let node = make_node(b"data", "parent-abc", MessageType::Request, "a", "b", 1000);
         let route = Route::from_dag_nodes("sess-1".to_string(), vec![node.clone()]);
 
         // Stop has the hash but NOT parent_hash or submission_id
@@ -150,11 +152,11 @@ mod tests {
 
     #[test]
     fn agents_in_invocation_order() {
-        let n1 = make_node(b"1", "", MessageType::Invoke, "cli", "support-agent", "1000");
-        let n2 = make_node(b"2", &n1.hash, MessageType::Request, "support-agent", "infer.ollama", "1001");
-        let n3 = make_node(b"3", &n2.hash, MessageType::Response, "infer.ollama", "support-agent", "1002");
-        let n4 = make_node(b"4", &n3.hash, MessageType::Delegate, "support-agent", "log-analyst", "1003");
-        let n5 = make_node(b"5", &n4.hash, MessageType::Complete, "support-agent", "cli", "1004");
+        let n1 = make_node(b"1", "", MessageType::Invoke, "cli", "support-agent", 1000);
+        let n2 = make_node(b"2", &n1.hash, MessageType::Request, "support-agent", "infer.ollama", 1001);
+        let n3 = make_node(b"3", &n2.hash, MessageType::Response, "infer.ollama", "support-agent", 1002);
+        let n4 = make_node(b"4", &n3.hash, MessageType::Delegate, "support-agent", "log-analyst", 1003);
+        let n5 = make_node(b"5", &n4.hash, MessageType::Complete, "support-agent", "cli", 1004);
 
         let route = Route::from_dag_nodes("sess-1".to_string(), vec![n1, n2, n3, n4, n5]);
 
@@ -164,8 +166,8 @@ mod tests {
 
     #[test]
     fn agents_deduplicates() {
-        let n1 = make_node(b"1", "", MessageType::Invoke, "cli", "agent-a", "1000");
-        let n2 = make_node(b"2", &n1.hash, MessageType::Complete, "agent-a", "cli", "1001");
+        let n1 = make_node(b"1", "", MessageType::Invoke, "cli", "agent-a", 1000);
+        let n2 = make_node(b"2", &n1.hash, MessageType::Complete, "agent-a", "cli", 1001);
 
         let route = Route::from_dag_nodes("sess-1".to_string(), vec![n1, n2]);
 
@@ -176,9 +178,9 @@ mod tests {
 
     #[test]
     fn duration_secs() {
-        let n1 = make_node(b"1", "", MessageType::Invoke, "cli", "a", "1000");
-        let n2 = make_node(b"2", &n1.hash, MessageType::Request, "a", "b", "1002");
-        let n3 = make_node(b"3", &n2.hash, MessageType::Complete, "a", "cli", "1005");
+        let n1 = make_node(b"1", "", MessageType::Invoke, "cli", "a", 1000);
+        let n2 = make_node(b"2", &n1.hash, MessageType::Request, "a", "b", 1002);
+        let n3 = make_node(b"3", &n2.hash, MessageType::Complete, "a", "cli", 1005);
 
         let route = Route::from_dag_nodes("sess-1".to_string(), vec![n1, n2, n3]);
         assert_eq!(route.duration_secs(), Some(5.0));
@@ -187,15 +189,15 @@ mod tests {
     #[test]
     fn fleet_route_shows_all_stops() {
         // Simulate: user → support-agent → (infer) → delegate to log-analyst → (infer) → complete
-        let n1 = make_node(b"q",  "",       MessageType::Invoke,   "cli",           "support-agent", "100");
-        let n2 = make_node(b"r1", &n1.hash, MessageType::Request,  "support-agent", "infer.ollama",  "101");
-        let n3 = make_node(b"r2", &n2.hash, MessageType::Response, "infer.ollama",  "support-agent", "102");
-        let n4 = make_node(b"d",  &n3.hash, MessageType::Delegate, "support-agent", "log-analyst",   "103");
-        let n5 = make_node(b"i2", &n4.hash, MessageType::Invoke,   "support-agent", "log-analyst",   "104");
-        let n6 = make_node(b"r3", &n5.hash, MessageType::Request,  "log-analyst",   "infer.ollama",  "105");
-        let n7 = make_node(b"r4", &n6.hash, MessageType::Response, "infer.ollama",  "log-analyst",   "106");
-        let n8 = make_node(b"c2", &n7.hash, MessageType::Complete, "log-analyst",   "support-agent", "107");
-        let n9 = make_node(b"c1", &n8.hash, MessageType::Complete, "support-agent", "cli",           "108");
+        let n1 = make_node(b"q",  "",       MessageType::Invoke,   "cli",           "support-agent", 100);
+        let n2 = make_node(b"r1", &n1.hash, MessageType::Request,  "support-agent", "infer.ollama",  101);
+        let n3 = make_node(b"r2", &n2.hash, MessageType::Response, "infer.ollama",  "support-agent", 102);
+        let n4 = make_node(b"d",  &n3.hash, MessageType::Delegate, "support-agent", "log-analyst",   103);
+        let n5 = make_node(b"i2", &n4.hash, MessageType::Invoke,   "support-agent", "log-analyst",   104);
+        let n6 = make_node(b"r3", &n5.hash, MessageType::Request,  "log-analyst",   "infer.ollama",  105);
+        let n7 = make_node(b"r4", &n6.hash, MessageType::Response, "infer.ollama",  "log-analyst",   106);
+        let n8 = make_node(b"c2", &n7.hash, MessageType::Complete, "log-analyst",   "support-agent", 107);
+        let n9 = make_node(b"c1", &n8.hash, MessageType::Complete, "support-agent", "cli",           108);
 
         let route = Route::from_dag_nodes("sess-1".to_string(),
             vec![n1, n2, n3, n4, n5, n6, n7, n8, n9]);
