@@ -17,7 +17,7 @@ use crate::domain::{ObjectStorageType, PersistentRegistry, Provider, Runtime, Ru
 use crate::domain::harness::CliHarness;
 use crate::domain::registry::Registry;
 use crate::queue;
-use crate::runtime::ContainerRuntime;
+use crate::runtime::{ContainerRuntime, ImagePolicy};
 
 /// The daemon - owns all system components for local (single-process) mode.
 pub struct Daemon {
@@ -58,7 +58,12 @@ impl Daemon {
 
         Self {
             harness: CliHarness::new(queue.clone(), Arc::clone(&registry)),
-            runtime: Box::new(ContainerRuntime::new(&registry_id, queue.clone(), Arc::clone(&registry))),
+            runtime: Box::new(ContainerRuntime::new(
+                &registry_id,
+                queue.clone(),
+                Arc::clone(&registry),
+                ImagePolicy::from_config(&config.runtime.image_policy),
+            )),
             registry: Arc::clone(&registry),
             provider: Provider::new(queue, registry),
         }

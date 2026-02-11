@@ -2970,6 +2970,7 @@ dependencies = [
  "prost",
  "reedline",
  "rusqlite",
+ "semver",
  "serde",
  "serde_json",
  "sha1",

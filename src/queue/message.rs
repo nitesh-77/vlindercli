@@ -515,6 +515,27 @@ impl InvokeMessage {
             ContainerDiagnostics::placeholder(0),
         )
     }
+
+    /// Create a reply with state and real container diagnostics (ADR 073).
+    ///
+    /// Used by the runtime when it has both the final state from ServiceRouter
+    /// and real container metadata from Podman.
+    pub fn create_reply_with_diagnostics(
+        &self,
+        payload: Vec<u8>,
+        state: Option<String>,
+        diagnostics: ContainerDiagnostics,
+    ) -> CompleteMessage {
+        CompleteMessage::new(
+            self.submission.clone(),
+            self.session.clone(),
+            self.agent_id.clone(),
+            self.harness,
+            payload,
+            state,
+            diagnostics,
+        )
+    }
 }
 
 /// RequestMessage expects ResponseMessage as its reply.

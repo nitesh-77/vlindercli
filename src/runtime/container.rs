@@ -12,9 +12,13 @@ use std::io::Read;
 use std::process::Command;
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
+use std::time::Instant;
 
 use crate::domain::{Agent, ObjectStorageType, Registry, ResourceId, Runtime, RuntimeType, VectorStorageType};
-use crate::queue::{ExpectsReply, HarnessType, InvokeDiagnostics, InvokeMessage, MessageQueue, SequenceCounter};
+use crate::queue::{
+    ContainerDiagnostics, ContainerRuntimeInfo,
+    ExpectsReply, HarnessType, InvokeDiagnostics, InvokeMessage, MessageQueue, SequenceCounter,
+};
 
 use super::http_bridge::HttpBridge;
 use super::service_router::ServiceRouter;
@@ -24,15 +28,54 @@ struct ManagedContainer {
     container_id: String,
     host_port: u16,
     bridge: HttpBridge,
+    /// What was passed to `podman run` (tag in mutable mode, digest in pinned mode).
+    image_ref: String,
+    /// Content-addressed digest from `podman image inspect` at container start.
+    /// None if the inspect failed.
+    image_digest: Option<String>,
 }
 
 /// Tracks an in-flight invocation dispatched to a container.
 struct RunningTask {
-    handle: JoinHandle<Vec<u8>>,
+    handle: JoinHandle<Result<Vec<u8>, DispatchError>>,
     invoke: InvokeMessage,
     /// For delegated work: the subject to send the result to.
     /// None for harness-invoked work (uses normal send_complete).
     reply_subject: Option<String>,
+    /// Wall-clock start time for duration measurement.
+    started_at: Instant,
+    /// True if this is a retry after dispatch-failure eviction (ADR 073).
+    /// Prevents infinite retry loops — at most one retry per invocation.
+    is_retry: bool,
+}
+
+/// Dispatch failure classification (ADR 073).
+///
+/// Transport errors (connection refused, timeout) indicate the container is dead.
+/// HTTP status errors mean the container is alive — treated as successful dispatch.
+enum DispatchError {
+    /// The container is unreachable (connection refused, DNS failure, timeout).
+    ContainerDead(String),
+}
+
+/// Image resolution policy for container agents (ADR 073).
+///
+/// Controls which OCI reference is passed to `podman run`:
+/// - `Mutable`: Uses the tag from `agent.executable` — rebuilt images picked up automatically.
+/// - `Pinned`: Uses the content-addressed digest from `agent.image_digest` — deterministic.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ImagePolicy {
+    Mutable,
+    Pinned,
+}
+
+impl ImagePolicy {
+    pub fn from_config(s: &str) -> Self {
+        match s {
+            "pinned" => Self::Pinned,
+            _ => Self::Mutable,
+        }
+    }
 }
 
 pub struct ContainerRuntime {
@@ -42,6 +85,10 @@ pub struct ContainerRuntime {
     running: HashMap<String, RunningTask>,
     /// Long-running containers keyed by agent name.
     containers: HashMap<String, ManagedContainer>,
+    /// Podman engine version, captured once at startup. None if Podman is unavailable.
+    engine_version: Option<semver::Version>,
+    /// Image resolution policy (ADR 073).
+    image_policy: ImagePolicy,
 }
 
 impl ContainerRuntime {
@@ -49,18 +96,28 @@ impl ContainerRuntime {
         registry_id: &ResourceId,
         queue: Arc<dyn MessageQueue + Send + Sync>,
         registry: Arc<dyn Registry>,
+        image_policy: ImagePolicy,
     ) -> Self {
         let id = ResourceId::new(format!(
             "{}/runtimes/{}",
             registry_id.as_str(),
             RuntimeType::Container.as_str()
         ));
+        let engine_version = detect_engine_version();
+        if let Some(ref v) = engine_version {
+            tracing::info!(event = "podman.detected", version = %v, "Podman engine detected");
+        } else {
+            tracing::warn!(event = "podman.not_found", "Podman not detected — container runtime degraded");
+        }
+        tracing::info!(event = "runtime.image_policy", policy = ?image_policy, "Container image policy");
         Self {
             id,
             queue,
             registry,
             running: HashMap::new(),
             containers: HashMap::new(),
+            engine_version,
+            image_policy,
         }
     }
 
@@ -105,8 +162,12 @@ impl ContainerRuntime {
             .map_err(|e| format!("failed to start bridge: {}", e))?;
         let bridge_url = bridge.container_url();
 
-        // Use the agent's executable directly — it's a native OCI image ref
-        let image = &agent.executable;
+        // Select image reference based on policy (ADR 073)
+        let image = match self.image_policy {
+            ImagePolicy::Mutable => agent.executable.clone(),
+            ImagePolicy::Pinned => agent.image_digest.clone()
+                .unwrap_or_else(|| agent.executable.clone()),
+        };
 
         // Start container in detached mode with port mapping, bridge URL, and mounts
         let bridge_env = format!("VLINDER_BRIDGE_URL={}", bridge_url);
@@ -127,7 +188,7 @@ impl ContainerRuntime {
             podman_args.push(flag);
         }
 
-        podman_args.push(image);
+        podman_args.push(&image);
 
         let output = Command::new("podman")
             .args(&podman_args)
@@ -142,23 +203,89 @@ impl ContainerRuntime {
 
         let container_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
 
+        // Capture image metadata for diagnostics (ADR 073)
+        let image_digest = resolve_image_digest(&image);
+        let image_ref = image;
+
         // Discover the mapped host port
         let host_port = discover_host_port(&container_id)?;
 
         // Wait for container to be ready
         wait_for_ready(host_port)?;
 
-        tracing::info!(event = "container.started", agent = %agent.name, container = %container_id, port = host_port, "Container started");
+        tracing::info!(
+            event = "container.started",
+            agent = %agent.name,
+            container = %container_id,
+            port = host_port,
+            image_ref = %image_ref,
+            image_digest = image_digest.as_deref().unwrap_or("unknown"),
+            "Container started"
+        );
 
         self.containers.insert(agent.name.clone(), ManagedContainer {
             container_id,
             host_port,
             bridge,
+            image_ref,
+            image_digest,
         });
 
         Ok(host_port)
     }
 
+}
+
+impl ContainerRuntime {
+    /// Evict a stale container entry — stop, remove, and drop the bridge (ADR 073).
+    ///
+    /// Called when dispatch detects a transport error (container dead).
+    fn evict_container(&mut self, agent_name: &str) {
+        if let Some(mc) = self.containers.remove(agent_name) {
+            tracing::warn!(
+                event = "container.evicted",
+                agent = %agent_name,
+                container = %mc.container_id,
+                "Evicting stale container"
+            );
+            let _ = Command::new("podman")
+                .args(["stop", "-t", "2", &mc.container_id])
+                .output();
+            let _ = Command::new("podman")
+                .args(["rm", "-f", &mc.container_id])
+                .output();
+            mc.bridge.stop();
+        }
+    }
+
+    /// Route a CompleteMessage to the correct destination (harness or delegating agent).
+    fn send_reply(&self, complete: crate::queue::CompleteMessage, reply_subject: &Option<String>) {
+        if let Some(ref subject) = reply_subject {
+            self.queue.send_complete_to_subject(complete, subject).unwrap();
+        } else {
+            self.queue.send_complete(complete).unwrap();
+        }
+    }
+
+    /// Build ContainerDiagnostics from cached metadata (ADR 073).
+    fn build_diagnostics(&self, agent_name: &str, duration_ms: u64) -> ContainerDiagnostics {
+        match self.containers.get(agent_name) {
+            Some(mc) => ContainerDiagnostics {
+                stderr: Vec::new(),
+                runtime: ContainerRuntimeInfo {
+                    engine_version: self.engine_version.as_ref()
+                        .map(|v| v.to_string())
+                        .unwrap_or_else(|| "unknown".to_string()),
+                    image_ref: mc.image_ref.clone(),
+                    image_digest: mc.image_digest.clone()
+                        .unwrap_or_else(|| "unknown".to_string()),
+                    container_id: mc.container_id.clone(),
+                },
+                duration_ms,
+            },
+            None => ContainerDiagnostics::placeholder(duration_ms),
+        }
+    }
 }
 
 impl Drop for ContainerRuntime {
@@ -187,26 +314,98 @@ impl Runtime for ContainerRuntime {
 
         for name in finished {
             let task = self.running.remove(&name).unwrap();
-            let output = task.handle.join().unwrap();
+            let result = task.handle.join().unwrap();
 
-            // Read final state from the ServiceRouter (ADR 055)
-            let final_state = self.containers.get(&name)
-                .and_then(|mc| mc.bridge.final_state());
+            match result {
+                Ok(output) => {
+                    // Normal completion — build diagnostics and reply
+                    let final_state = self.containers.get(&name)
+                        .and_then(|mc| mc.bridge.final_state());
 
-            let complete = task.invoke.create_reply_with_state(output, final_state);
+                    let duration_ms = task.started_at.elapsed().as_millis() as u64;
+                    let diagnostics = self.build_diagnostics(&name, duration_ms);
+                    let complete = task.invoke.create_reply_with_diagnostics(output, final_state, diagnostics);
 
-            tracing::info!(
-                event = "dispatch.completed",
-                agent = %name,
-                delegated = task.reply_subject.is_some(),
-                "Task completed"
-            );
+                    tracing::info!(
+                        event = "dispatch.completed",
+                        agent = %name,
+                        delegated = task.reply_subject.is_some(),
+                        duration_ms = duration_ms,
+                        "Task completed"
+                    );
 
-            // Delegated work replies to the reply subject; invoked work replies to harness
-            if let Some(ref reply_subject) = task.reply_subject {
-                self.queue.send_complete_to_subject(complete, reply_subject).unwrap();
-            } else {
-                self.queue.send_complete(complete).unwrap();
+                    self.send_reply(complete, &task.reply_subject);
+                }
+                Err(DispatchError::ContainerDead(ref reason)) if !task.is_retry => {
+                    // First failure — evict stale container and retry once (ADR 073)
+                    tracing::warn!(
+                        event = "container.dead",
+                        agent = %name,
+                        reason = %reason,
+                        "Dispatch failed — evicting and retrying"
+                    );
+
+                    self.evict_container(&name);
+
+                    // Look up agent to restart container
+                    let agent = self.registry.get_agents().into_iter()
+                        .find(|a| a.name == name);
+
+                    if let Some(agent) = agent {
+                        match self.ensure_container(&agent, &task.invoke) {
+                            Ok(host_port) => {
+                                let payload = task.invoke.payload.clone();
+                                let session_id = task.invoke.session.as_str().to_string();
+                                let handle = thread::spawn(move || {
+                                    dispatch_to_container(host_port, &payload, &session_id)
+                                });
+                                self.running.insert(name, RunningTask {
+                                    handle,
+                                    invoke: task.invoke,
+                                    reply_subject: task.reply_subject,
+                                    started_at: Instant::now(),
+                                    is_retry: true,
+                                });
+                            }
+                            Err(e) => {
+                                tracing::error!(
+                                    event = "dispatch.retry_failed",
+                                    agent = %name,
+                                    error = %e,
+                                    "Container restart failed after eviction"
+                                );
+                                let complete = task.invoke.create_reply(
+                                    format!("[error] container restart failed: {}", e).into_bytes()
+                                );
+                                self.send_reply(complete, &task.reply_subject);
+                            }
+                        }
+                    } else {
+                        tracing::error!(
+                            event = "dispatch.agent_gone",
+                            agent = %name,
+                            "Agent not found in registry after eviction"
+                        );
+                        let complete = task.invoke.create_reply(
+                            format!("[error] agent {} not found after container eviction", name).into_bytes()
+                        );
+                        self.send_reply(complete, &task.reply_subject);
+                    }
+                }
+                Err(DispatchError::ContainerDead(reason)) => {
+                    // Retry also failed — give up (ADR 073)
+                    tracing::error!(
+                        event = "dispatch.retry_exhausted",
+                        agent = %name,
+                        reason = %reason,
+                        "Retry dispatch also failed — giving up"
+                    );
+                    self.evict_container(&name);
+                    let complete = task.invoke.create_reply(
+                        format!("[error] container dead after retry: {}", reason).into_bytes()
+                    );
+                    self.send_reply(complete, &task.reply_subject);
+                }
             }
             did_work = true;
         }
@@ -242,7 +441,7 @@ impl Runtime for ContainerRuntime {
                         let complete = invoke.create_reply(
                             format!("[error] container start failed: {}", e).into_bytes()
                         );
-                        self.queue.send_complete(complete).unwrap();
+                        self.send_reply(complete, &None);
                         did_work = true;
                         continue;
                     }
@@ -254,7 +453,7 @@ impl Runtime for ContainerRuntime {
                 });
 
                 self.running.insert(agent.name.clone(), RunningTask {
-                    handle, invoke, reply_subject: None,
+                    handle, invoke, reply_subject: None, started_at: Instant::now(), is_retry: false,
                 });
                 did_work = true;
             }
@@ -293,15 +492,15 @@ impl Runtime for ContainerRuntime {
                     },
                 );
 
+                let reply_subject = Some(delegate.reply_subject.clone());
                 let host_port = match self.ensure_container(agent, &invoke) {
                     Ok(port) => port,
                     Err(e) => {
                         tracing::error!(event = "dispatch.failed", agent = %agent.name, error = %e, "Failed to start container for delegation");
-                        // Send error back to reply subject so the waiting agent unblocks
                         let complete = invoke.create_reply(
                             format!("[error] container start failed: {}", e).into_bytes()
                         );
-                        self.queue.send_complete_to_subject(complete, &delegate.reply_subject).unwrap();
+                        self.send_reply(complete, &reply_subject);
                         did_work = true;
                         continue;
                     }
@@ -309,14 +508,13 @@ impl Runtime for ContainerRuntime {
 
                 let payload = delegate.payload;
                 let session_id = delegate.session.as_str().to_string();
-                let reply_subject = delegate.reply_subject;
 
                 let handle = thread::spawn(move || {
                     dispatch_to_container(host_port, &payload, &session_id)
                 });
 
                 self.running.insert(agent.name.clone(), RunningTask {
-                    handle, invoke, reply_subject: Some(reply_subject),
+                    handle, invoke, reply_subject: reply_subject.clone(), started_at: Instant::now(), is_retry: false,
                 });
                 did_work = true;
             }
@@ -342,7 +540,11 @@ impl Runtime for ContainerRuntime {
 /// Dispatch payload to a container's /invoke endpoint via HTTP POST.
 ///
 /// Passes the session ID as X-Vlinder-Session header (ADR 054).
-fn dispatch_to_container(host_port: u16, payload: &[u8], session_id: &str) -> Vec<u8> {
+///
+/// Returns `Ok(body)` if the container responded (any HTTP status — the agent
+/// is alive). Returns `Err(ContainerDead)` on transport errors (connection
+/// refused, timeout) — the container is gone (ADR 073).
+fn dispatch_to_container(host_port: u16, payload: &[u8], session_id: &str) -> Result<Vec<u8>, DispatchError> {
     let url = format!("http://127.0.0.1:{}/invoke", host_port);
 
     match ureq::post(&url)
@@ -352,13 +554,56 @@ fn dispatch_to_container(host_port: u16, payload: &[u8], session_id: &str) -> Ve
         Ok(response) => {
             let mut body = Vec::new();
             response.into_reader().read_to_end(&mut body).unwrap_or_default();
-            body
+            Ok(body)
         }
-        Err(e) => {
-            tracing::error!(event = "dispatch.failed", port = host_port, error = %e, "Failed to dispatch to container");
-            format!("[error] dispatch failed: {}", e).into_bytes()
+        Err(ureq::Error::Status(code, response)) => {
+            // Container is alive but returned an error status — pass the body through
+            let mut body = Vec::new();
+            response.into_reader().read_to_end(&mut body).unwrap_or_default();
+            if body.is_empty() {
+                body = format!("[error] agent returned HTTP {}", code).into_bytes();
+            }
+            Ok(body)
+        }
+        Err(ureq::Error::Transport(t)) => {
+            // Container is dead — connection refused, DNS failure, timeout
+            tracing::warn!(
+                event = "dispatch.transport_error",
+                port = host_port,
+                error = %t,
+                "Transport error — container likely dead"
+            );
+            Err(DispatchError::ContainerDead(t.to_string()))
         }
     }
+}
+
+/// Detect the Podman engine version. Returns None if Podman is unavailable.
+///
+/// Captured once at `ContainerRuntime::new()` — a Podman upgrade requires
+/// a service restart, so the version cannot change mid-process.
+fn detect_engine_version() -> Option<semver::Version> {
+    Command::new("podman")
+        .args(["version", "--format", "{{.Client.Version}}"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| {
+            let raw = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            semver::Version::parse(&raw).ok()
+        })
+}
+
+/// Resolve the content-addressed digest for an image via `podman image inspect`.
+/// Returns None if the inspect fails (image not found, Podman unavailable, etc.).
+pub(crate) fn resolve_image_digest(image_ref: &str) -> Option<String> {
+    Command::new("podman")
+        .args(["image", "inspect", image_ref, "--format", "{{.Digest}}"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty())
 }
 
 /// Discover the host port mapped to container port 8080.
@@ -424,7 +669,7 @@ mod tests {
     #[test]
     fn runtime_id_format() {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
-        let runtime = ContainerRuntime::new(&test_registry_id(), queue, test_registry());
+        let runtime = ContainerRuntime::new(&test_registry_id(), queue, test_registry(), ImagePolicy::Mutable);
 
         assert_eq!(runtime.id().as_str(), "http://test:9000/runtimes/container");
         assert_eq!(runtime.runtime_type(), RuntimeType::Container);
@@ -433,7 +678,7 @@ mod tests {
     #[test]
     fn tick_returns_false_when_no_agents() {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
-        let mut runtime = ContainerRuntime::new(&test_registry_id(), queue, test_registry());
+        let mut runtime = ContainerRuntime::new(&test_registry_id(), queue, test_registry(), ImagePolicy::Mutable);
 
         assert!(!runtime.tick());
     }

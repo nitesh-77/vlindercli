@@ -123,7 +123,8 @@ fn run_agent_container_worker(config: &Config, shutdown: &AtomicBool) {
     );
 
     let registry_id = ResourceId::new(&config.distributed.registry_addr);
-    let mut runtime = ContainerRuntime::new(&registry_id, queue, Arc::clone(&registry));
+    let image_policy = crate::runtime::ImagePolicy::from_config(&config.runtime.image_policy);
+    let mut runtime = ContainerRuntime::new(&registry_id, queue, Arc::clone(&registry), image_policy);
 
     tracing::info!(registry = %registry_addr, "Container agent worker ready");
 

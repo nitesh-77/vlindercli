@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use crate::domain::registry::{JobId, JobStatus, Registry};
-use crate::domain::{Agent, ResourceId};
+use crate::domain::{Agent, ResourceId, RuntimeType};
 use crate::domain::git_hash::compute_submission_id;
 use crate::domain::session::Session;
 use crate::queue::{
@@ -133,7 +133,13 @@ impl CliHarness {
     /// Idempotent: if an agent with the same name is already registered and
     /// the configuration matches, returns the existing ID. If the configuration
     /// differs, returns an error listing the differences.
-    fn register_agent(&self, agent: Agent) -> Result<ResourceId, String> {
+    fn register_agent(&self, mut agent: Agent) -> Result<ResourceId, String> {
+        // Resolve image digest for container agents at registration time (ADR 073).
+        // Both forms (tag + digest) are stored — the runtime switches based on ImagePolicy.
+        if agent.runtime == RuntimeType::Container && agent.image_digest.is_none() {
+            agent.image_digest = crate::runtime::resolve_image_digest(&agent.executable);
+        }
+
         let name = agent.name.clone();
 
         if let Some(existing) = self.registry.get_agent_by_name(&name) {
