@@ -1,28 +1,18 @@
-//! DagCaptureWorker — pairs invoke/complete messages and writes DAG nodes (ADR 062).
+//! DagCaptureWorker — stateless NATS observer that writes one DAG node per message (ADR 067).
 //!
-//! Subscribes to `vlinder.>` via its own JetStream consumer and passively
-//! observes all traffic. When it sees an invoke followed by its matching
-//! complete, it computes a content hash, chains to the previous node in
-//! that session, and writes a DAG node.
+//! Subscribes to `vlinder.>` via its own JetStream consumer and captures
+//! every message as an independent DAG node. No pairing, no buffering.
 //!
-//! No agent cooperation required — the platform captures everything.
+//! Message arrives → parse subject → build node → write. Done.
+//! The only state is `last_node` for Merkle chaining per session.
 
 use std::collections::HashMap;
 
-use crate::storage::dag_store::{DagNode, DagStore, hash_dag_node};
+use crate::storage::dag_store::{DagNode, DagStore, MessageType, hash_dag_node};
 
-/// Holds the invoke payload while waiting for the matching complete.
-struct PendingInvoke {
-    session_id: String,
-    agent: String,
-    payload_in: Vec<u8>,
-}
-
-/// Worker that captures invoke/complete pairs and writes DAG nodes.
+/// Worker that captures NATS messages and writes DAG nodes.
 pub struct DagCaptureWorker {
     store: Box<dyn DagStore>,
-    /// Pending invokes keyed by (submission_id, agent_name).
-    pending: HashMap<(String, String), PendingInvoke>,
     /// Last node hash per session_id — for Merkle chaining.
     last_node: HashMap<String, String>,
 }
@@ -31,7 +21,6 @@ impl DagCaptureWorker {
     pub fn new(store: Box<dyn DagStore>) -> Self {
         Self {
             store,
-            pending: HashMap::new(),
             last_node: HashMap::new(),
         }
     }
@@ -55,70 +44,44 @@ impl DagCaptureWorker {
         }
 
         let submission_id = segments[1];
-        let msg_type = segments[2];
+        let msg_type_str = segments[2];
 
-        match msg_type {
-            "invoke" => self.handle_invoke(submission_id, headers, payload),
-            "complete" => self.handle_complete(submission_id, headers, payload),
-            _ => {} // ignore req/res/delegate — not agent boundary messages
-        }
-    }
+        let message_type = match MessageType::from_str(msg_type_str) {
+            Some(mt) => mt,
+            None => return, // Unknown message type — skip
+        };
 
-    fn handle_invoke(
-        &mut self,
-        submission_id: &str,
-        headers: &HashMap<String, String>,
-        payload: &[u8],
-    ) {
         let session_id = match headers.get("session-id") {
             Some(s) => s.clone(),
             None => return,
         };
-        let agent = match headers.get("agent-id") {
-            Some(s) => s.clone(),
-            None => return,
-        };
 
-        let key = (submission_id.to_string(), agent.clone());
-        self.pending.insert(key, PendingInvoke {
-            session_id,
-            agent,
-            payload_in: payload.to_vec(),
-        });
-    }
-
-    fn handle_complete(
-        &mut self,
-        submission_id: &str,
-        headers: &HashMap<String, String>,
-        payload: &[u8],
-    ) {
-        let agent = match headers.get("agent-id") {
-            Some(s) => s.clone(),
-            None => return,
-        };
-
-        let key = (submission_id.to_string(), agent);
-        let pending = match self.pending.remove(&key) {
-            Some(p) => p,
-            None => return, // unmatched complete — no crash, just skip
-        };
+        // Parse from/to from the remaining subject segments.
+        // Actual NATS subject patterns (from queue/nats.rs):
+        //   invoke:   vlinder.<sub>.invoke.<harness>.<runtime>.<agent>
+        //   complete: vlinder.<sub>.complete.<agent>.<harness>
+        //   req:      vlinder.<sub>.req.<agent>.<service>.<backend>.<op>.<seq>
+        //   res:      vlinder.<sub>.res.<service>.<backend>.<agent>.<op>.<seq>
+        //   delegate: vlinder.<sub>.delegate.<caller>.<target>
+        let (from, to) = parse_from_to(message_type, &segments[3..]);
 
         let parent_hash = self.last_node
-            .get(&pending.session_id)
+            .get(&session_id)
             .cloned()
             .unwrap_or_default();
 
-        let hash = hash_dag_node(&pending.payload_in, payload, &parent_hash);
+        let hash = hash_dag_node(payload, &parent_hash, &message_type);
 
         let now = chrono_now();
         let node = DagNode {
             hash: hash.clone(),
             parent_hash,
-            agent: pending.agent,
-            session_id: pending.session_id.clone(),
-            payload_in: pending.payload_in,
-            payload_out: payload.to_vec(),
+            message_type,
+            from,
+            to,
+            session_id: session_id.clone(),
+            submission_id: submission_id.to_string(),
+            payload: payload.to_vec(),
             created_at: now,
         };
 
@@ -128,212 +91,265 @@ impl DagCaptureWorker {
         }
 
         // Update chain pointer for this session
-        self.last_node.insert(pending.session_id, hash);
+        self.last_node.insert(session_id, hash);
     }
 }
 
-/// Simple ISO-8601 timestamp without pulling in chrono.
+/// Parse from/to from subject segments after the message type.
+fn parse_from_to(message_type: MessageType, rest: &[&str]) -> (String, String) {
+    match message_type {
+        // invoke: <harness>.<runtime>.<agent>
+        MessageType::Invoke => {
+            let from = rest.first().copied().unwrap_or("unknown");
+            let to = rest.last().copied().unwrap_or("unknown");
+            (from.to_string(), to.to_string())
+        }
+        // complete: <agent>.<harness>
+        MessageType::Complete => {
+            let from = rest.first().copied().unwrap_or("unknown");
+            let to = rest.last().copied().unwrap_or("unknown");
+            (from.to_string(), to.to_string())
+        }
+        // req: <agent>.<service>.<backend>.<op>.<seq>
+        MessageType::Request => {
+            let from = rest.first().copied().unwrap_or("unknown");
+            let to = if rest.len() >= 2 {
+                format!("{}.{}", rest[1], rest.get(2).copied().unwrap_or(""))
+            } else {
+                "unknown".to_string()
+            };
+            (from.to_string(), to)
+        }
+        // res: <service>.<backend>.<agent>.<op>.<seq>
+        MessageType::Response => {
+            let from = if rest.len() >= 2 {
+                format!("{}.{}", rest[0], rest[1])
+            } else {
+                rest.first().copied().unwrap_or("unknown").to_string()
+            };
+            let to = rest.get(2).copied().unwrap_or("unknown");
+            (from, to.to_string())
+        }
+        // delegate: <caller>.<target>
+        MessageType::Delegate => {
+            let from = rest.first().copied().unwrap_or("unknown");
+            let to = rest.get(1).copied().unwrap_or("unknown");
+            (from.to_string(), to.to_string())
+        }
+    }
+}
+
+/// Simple timestamp without pulling in chrono.
 fn chrono_now() -> String {
-    // Use std::time for a simple UTC timestamp
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default();
-    // Format as seconds — good enough for ordering. Full ISO-8601 would need chrono.
     format!("{}", now.as_secs())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::dag_store::{SqliteDagStore, hash_dag_node};
+    use crate::storage::dag_store::SqliteDagStore;
 
-    fn test_store() -> Box<SqliteDagStore> {
+    fn test_store_pair() -> (Box<SqliteDagStore>, SqliteDagStore) {
         let tmp = tempfile::NamedTempFile::new().unwrap();
-        Box::new(SqliteDagStore::open(tmp.path()).unwrap())
+        let worker_store = Box::new(SqliteDagStore::open(tmp.path()).unwrap());
+        let query_store = SqliteDagStore::open(tmp.path()).unwrap();
+        (worker_store, query_store)
     }
 
-    fn invoke_headers(session_id: &str, agent_id: &str) -> HashMap<String, String> {
+    fn headers(session_id: &str) -> HashMap<String, String> {
         let mut h = HashMap::new();
         h.insert("session-id".to_string(), session_id.to_string());
-        h.insert("agent-id".to_string(), agent_id.to_string());
-        h
-    }
-
-    fn complete_headers(agent_id: &str) -> HashMap<String, String> {
-        let mut h = HashMap::new();
-        h.insert("agent-id".to_string(), agent_id.to_string());
         h
     }
 
     #[test]
-    fn invoke_then_complete_writes_dag_node() {
-        let store = test_store();
-        // Keep a reference for querying
-        let store_ref = SqliteDagStore::open(std::path::Path::new("/dev/null")).ok();
-        let tmp = tempfile::NamedTempFile::new().unwrap();
-        let query_store = SqliteDagStore::open(tmp.path()).unwrap();
-        let worker_store = Box::new(SqliteDagStore::open(tmp.path()).unwrap());
-
+    fn invoke_writes_dag_node() {
+        let (worker_store, query_store) = test_store_pair();
         let mut worker = DagCaptureWorker::new(worker_store);
 
-        let invoke_subject = "vlinder.sub-1.invoke.cli.container.myagent";
-        let complete_subject = "vlinder.sub-1.complete.myagent.cli";
-
         worker.process_message(
-            invoke_subject,
-            &invoke_headers("sess-1", "agent-a"),
+            "vlinder.sub-1.invoke.cli.container.myagent",
+            &headers("sess-1"),
             b"invoke-payload",
         );
+
+        let nodes = query_store.get_session_nodes("sess-1").unwrap();
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].message_type, MessageType::Invoke);
+        assert_eq!(nodes[0].from, "cli");
+        assert_eq!(nodes[0].to, "myagent");
+        assert_eq!(nodes[0].submission_id, "sub-1");
+        assert_eq!(nodes[0].payload, b"invoke-payload");
+        assert_eq!(nodes[0].parent_hash, "");
+    }
+
+    #[test]
+    fn complete_writes_dag_node() {
+        let (worker_store, query_store) = test_store_pair();
+        let mut worker = DagCaptureWorker::new(worker_store);
+
         worker.process_message(
-            complete_subject,
-            &complete_headers("agent-a"),
+            "vlinder.sub-1.complete.myagent.cli",
+            &headers("sess-1"),
             b"complete-payload",
         );
 
         let nodes = query_store.get_session_nodes("sess-1").unwrap();
         assert_eq!(nodes.len(), 1);
-        assert_eq!(nodes[0].agent, "agent-a");
-        assert_eq!(nodes[0].session_id, "sess-1");
-        assert_eq!(nodes[0].payload_in, b"invoke-payload");
-        assert_eq!(nodes[0].payload_out, b"complete-payload");
-        assert_eq!(nodes[0].parent_hash, "");
-        assert_eq!(
-            nodes[0].hash,
-            hash_dag_node(b"invoke-payload", b"complete-payload", "")
-        );
-        drop(store_ref);
-        drop(store);
+        assert_eq!(nodes[0].message_type, MessageType::Complete);
+        assert_eq!(nodes[0].from, "myagent");
+        assert_eq!(nodes[0].to, "cli");
     }
 
     #[test]
-    fn second_node_chains_to_first() {
-        let tmp = tempfile::NamedTempFile::new().unwrap();
-        let query_store = SqliteDagStore::open(tmp.path()).unwrap();
-        let worker_store = Box::new(SqliteDagStore::open(tmp.path()).unwrap());
-
+    fn request_writes_dag_node() {
+        let (worker_store, query_store) = test_store_pair();
         let mut worker = DagCaptureWorker::new(worker_store);
 
-        // First invoke/complete
         worker.process_message(
-            "vlinder.sub-1.invoke.cli.container.a",
-            &invoke_headers("sess-1", "agent-a"),
-            b"in-1",
-        );
-        worker.process_message(
-            "vlinder.sub-1.complete.a.cli",
-            &complete_headers("agent-a"),
-            b"out-1",
-        );
-
-        // Second invoke/complete in same session
-        worker.process_message(
-            "vlinder.sub-2.invoke.cli.container.a",
-            &invoke_headers("sess-1", "agent-a"),
-            b"in-2",
-        );
-        worker.process_message(
-            "vlinder.sub-2.complete.a.cli",
-            &complete_headers("agent-a"),
-            b"out-2",
-        );
-
-        let nodes = query_store.get_session_nodes("sess-1").unwrap();
-        assert_eq!(nodes.len(), 2);
-
-        // Second node's parent is first node's hash
-        let first_hash = hash_dag_node(b"in-1", b"out-1", "");
-        assert_eq!(nodes[1].parent_hash, first_hash);
-
-        // Second node's hash includes parent
-        let second_hash = hash_dag_node(b"in-2", b"out-2", &first_hash);
-        assert_eq!(nodes[1].hash, second_hash);
-    }
-
-    #[test]
-    fn unmatched_complete_does_not_crash() {
-        let tmp = tempfile::NamedTempFile::new().unwrap();
-        let query_store = SqliteDagStore::open(tmp.path()).unwrap();
-        let worker_store = Box::new(SqliteDagStore::open(tmp.path()).unwrap());
-
-        let mut worker = DagCaptureWorker::new(worker_store);
-
-        // Complete without prior invoke — should be silently ignored
-        worker.process_message(
-            "vlinder.sub-1.complete.a.cli",
-            &complete_headers("agent-a"),
-            b"orphan-output",
-        );
-
-        let nodes = query_store.get_session_nodes("sess-1").unwrap();
-        assert!(nodes.is_empty());
-    }
-
-    #[test]
-    fn multiple_agents_in_same_session() {
-        let tmp = tempfile::NamedTempFile::new().unwrap();
-        let query_store = SqliteDagStore::open(tmp.path()).unwrap();
-        let worker_store = Box::new(SqliteDagStore::open(tmp.path()).unwrap());
-
-        let mut worker = DagCaptureWorker::new(worker_store);
-
-        // Agent A invoke/complete
-        worker.process_message(
-            "vlinder.sub-1.invoke.cli.container.a",
-            &invoke_headers("sess-1", "agent-a"),
-            b"a-in",
-        );
-        worker.process_message(
-            "vlinder.sub-1.complete.a.cli",
-            &complete_headers("agent-a"),
-            b"a-out",
-        );
-
-        // Agent B invoke/complete in same session (different submission)
-        worker.process_message(
-            "vlinder.sub-2.invoke.cli.container.b",
-            &invoke_headers("sess-1", "agent-b"),
-            b"b-in",
-        );
-        worker.process_message(
-            "vlinder.sub-2.complete.b.cli",
-            &complete_headers("agent-b"),
-            b"b-out",
-        );
-
-        let nodes = query_store.get_session_nodes("sess-1").unwrap();
-        assert_eq!(nodes.len(), 2);
-
-        // Both should be present with different agents
-        let agents: Vec<&str> = nodes.iter().map(|n| n.agent.as_str()).collect();
-        assert!(agents.contains(&"agent-a"));
-        assert!(agents.contains(&"agent-b"));
-
-        // Second node chains to first (same session)
-        assert_eq!(nodes[1].parent_hash, nodes[0].hash);
-    }
-
-    #[test]
-    fn ignores_non_boundary_messages() {
-        let tmp = tempfile::NamedTempFile::new().unwrap();
-        let query_store = SqliteDagStore::open(tmp.path()).unwrap();
-        let worker_store = Box::new(SqliteDagStore::open(tmp.path()).unwrap());
-
-        let mut worker = DagCaptureWorker::new(worker_store);
-
-        // Request and response messages should be ignored
-        worker.process_message(
-            "vlinder.sub-1.req.agent.infer.ollama.run.1",
-            &HashMap::new(),
+            "vlinder.sub-1.req.myagent.infer.ollama.run.1",
+            &headers("sess-1"),
             b"request-payload",
         );
+
+        let nodes = query_store.get_session_nodes("sess-1").unwrap();
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].message_type, MessageType::Request);
+        assert_eq!(nodes[0].from, "myagent");
+        assert_eq!(nodes[0].to, "infer.ollama");
+    }
+
+    #[test]
+    fn response_writes_dag_node() {
+        let (worker_store, query_store) = test_store_pair();
+        let mut worker = DagCaptureWorker::new(worker_store);
+
         worker.process_message(
-            "vlinder.sub-1.res.infer.ollama.agent.run.1",
-            &HashMap::new(),
+            "vlinder.sub-1.res.infer.ollama.myagent.run.1",
+            &headers("sess-1"),
             b"response-payload",
         );
 
-        // No nodes should be written
+        let nodes = query_store.get_session_nodes("sess-1").unwrap();
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].message_type, MessageType::Response);
+        assert_eq!(nodes[0].from, "infer.ollama");
+        assert_eq!(nodes[0].to, "myagent");
+    }
+
+    #[test]
+    fn delegate_writes_dag_node() {
+        let (worker_store, query_store) = test_store_pair();
+        let mut worker = DagCaptureWorker::new(worker_store);
+
+        worker.process_message(
+            "vlinder.sub-1.delegate.coordinator.summarizer",
+            &headers("sess-1"),
+            b"delegate-payload",
+        );
+
+        let nodes = query_store.get_session_nodes("sess-1").unwrap();
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].message_type, MessageType::Delegate);
+        assert_eq!(nodes[0].from, "coordinator");
+        assert_eq!(nodes[0].to, "summarizer");
+    }
+
+    #[test]
+    fn messages_chain_in_session() {
+        let (worker_store, query_store) = test_store_pair();
+        let mut worker = DagCaptureWorker::new(worker_store);
+
+        worker.process_message(
+            "vlinder.sub-1.invoke.cli.container.agent-a",
+            &headers("sess-1"),
+            b"first",
+        );
+        worker.process_message(
+            "vlinder.sub-1.req.agent-a.infer.ollama.run.1",
+            &headers("sess-1"),
+            b"second",
+        );
+        worker.process_message(
+            "vlinder.sub-1.res.infer.ollama.agent-a.run.1",
+            &headers("sess-1"),
+            b"third",
+        );
+
+        let nodes = query_store.get_session_nodes("sess-1").unwrap();
+        assert_eq!(nodes.len(), 3);
+
+        // First node has empty parent
+        assert_eq!(nodes[0].parent_hash, "");
+        // Second chains to first
+        assert_eq!(nodes[1].parent_hash, nodes[0].hash);
+        // Third chains to second
+        assert_eq!(nodes[2].parent_hash, nodes[1].hash);
+    }
+
+    #[test]
+    fn unknown_message_type_is_ignored() {
+        let (worker_store, query_store) = test_store_pair();
+        let mut worker = DagCaptureWorker::new(worker_store);
+
+        worker.process_message(
+            "vlinder.sub-1.foobar.something",
+            &headers("sess-1"),
+            b"payload",
+        );
+
         let nodes = query_store.get_session_nodes("sess-1").unwrap();
         assert!(nodes.is_empty());
+    }
+
+    #[test]
+    fn missing_session_header_is_ignored() {
+        let (worker_store, query_store) = test_store_pair();
+        let mut worker = DagCaptureWorker::new(worker_store);
+
+        worker.process_message(
+            "vlinder.sub-1.invoke.cli.container.agent",
+            &HashMap::new(),
+            b"payload",
+        );
+
+        let nodes = query_store.get_session_nodes("sess-1").unwrap();
+        assert!(nodes.is_empty());
+    }
+
+    #[test]
+    fn different_sessions_chain_independently() {
+        let (worker_store, query_store) = test_store_pair();
+        let mut worker = DagCaptureWorker::new(worker_store);
+
+        worker.process_message(
+            "vlinder.sub-1.invoke.cli.container.a",
+            &headers("sess-1"),
+            b"sess1-first",
+        );
+        worker.process_message(
+            "vlinder.sub-2.invoke.cli.container.b",
+            &headers("sess-2"),
+            b"sess2-first",
+        );
+        worker.process_message(
+            "vlinder.sub-1.complete.a.cli",
+            &headers("sess-1"),
+            b"sess1-second",
+        );
+
+        let sess1 = query_store.get_session_nodes("sess-1").unwrap();
+        let sess2 = query_store.get_session_nodes("sess-2").unwrap();
+
+        assert_eq!(sess1.len(), 2);
+        assert_eq!(sess2.len(), 1);
+
+        // sess-1's second node chains to sess-1's first, not sess-2's
+        assert_eq!(sess1[1].parent_hash, sess1[0].hash);
+        // sess-2's first node has empty parent
+        assert_eq!(sess2[0].parent_hash, "");
     }
 }

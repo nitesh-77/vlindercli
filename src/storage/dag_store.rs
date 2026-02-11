@@ -1,15 +1,16 @@
-//! DagStore — content-addressed SQLite storage for runtime-captured DAG (ADR 062).
+//! DagStore — content-addressed SQLite storage for runtime-captured DAG (ADR 067).
 //!
-//! The platform observes invoke/complete pairs at agent boundaries and builds
-//! a Merkle DAG. No agent cooperation required — diff, bisect, replay, and
-//! audit come for free.
+//! The platform observes every NATS message and writes one DAG node per message.
+//! No pairing, no buffering — each message is independently meaningful.
 //!
-//! Each `DagNode` captures one invoke/complete pair:
-//! - `hash`: SHA-256(payload_in || payload_out || parent_hash) — Merkle chain
+//! Each `DagNode` captures one message:
+//! - `hash`: SHA-256(payload || parent_hash || message_type) — Merkle chain
 //! - `parent_hash`: previous node in the same session (empty string for root)
-//! - `agent`: which agent was invoked
+//! - `message_type`: Invoke, Request, Response, Complete, or Delegate
+//! - `from` / `to`: sender and receiver (parsed from NATS subject)
 //! - `session_id`: groups nodes into a linear chain per session
-//! - `payload_in` / `payload_out`: raw invoke and complete payloads
+//! - `submission_id`: groups all messages for one user request
+//! - `payload`: raw message payload
 //! - `created_at`: ISO-8601 timestamp
 
 use std::path::Path;
@@ -18,27 +19,69 @@ use std::sync::{Arc, Mutex};
 use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 
+/// The five message types in the Vlinder protocol (ADR 044).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MessageType {
+    Invoke,
+    Request,
+    Response,
+    Complete,
+    Delegate,
+}
+
+impl MessageType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            MessageType::Invoke => "invoke",
+            MessageType::Request => "request",
+            MessageType::Response => "response",
+            MessageType::Complete => "complete",
+            MessageType::Delegate => "delegate",
+        }
+    }
+
+    /// Parse from string. Accepts both canonical names and NATS subject
+    /// abbreviations (`req` → Request, `res` → Response).
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "invoke" => Some(MessageType::Invoke),
+            "req" | "request" => Some(MessageType::Request),
+            "res" | "response" => Some(MessageType::Response),
+            "complete" => Some(MessageType::Complete),
+            "delegate" => Some(MessageType::Delegate),
+            _ => None,
+        }
+    }
+}
+
 /// A single node in the runtime-captured DAG.
+///
+/// One node per NATS message. No pairing — each message is independently
+/// meaningful in the protocol trace.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DagNode {
     pub hash: String,
     pub parent_hash: String,
-    pub agent: String,
+    pub message_type: MessageType,
+    pub from: String,
+    pub to: String,
     pub session_id: String,
-    pub payload_in: Vec<u8>,
-    pub payload_out: Vec<u8>,
+    pub submission_id: String,
+    pub payload: Vec<u8>,
     pub created_at: String,
 }
 
 /// Compute the content-addressed hash for a DAG node.
 ///
-/// `sha256(payload_in || payload_out || parent_hash)` — the parent hash
+/// `sha256(payload || parent_hash || message_type)` — the parent hash
 /// makes this a Merkle chain: changing any ancestor invalidates all descendants.
-pub fn hash_dag_node(payload_in: &[u8], payload_out: &[u8], parent_hash: &str) -> String {
+/// The message type is included so identical payloads with different types
+/// produce different hashes.
+pub fn hash_dag_node(payload: &[u8], parent_hash: &str, message_type: &MessageType) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(payload_in);
-    hasher.update(payload_out);
+    hasher.update(payload);
     hasher.update(parent_hash.as_bytes());
+    hasher.update(message_type.as_str().as_bytes());
     format!("{:x}", hasher.finalize())
 }
 
@@ -78,10 +121,12 @@ impl SqliteDagStore {
              CREATE TABLE IF NOT EXISTS dag_nodes (
                  hash TEXT PRIMARY KEY,
                  parent_hash TEXT NOT NULL,
-                 agent TEXT NOT NULL,
+                 message_type TEXT NOT NULL,
+                 sender TEXT NOT NULL,
+                 receiver TEXT NOT NULL,
                  session_id TEXT NOT NULL,
-                 payload_in BLOB NOT NULL,
-                 payload_out BLOB NOT NULL,
+                 submission_id TEXT NOT NULL,
+                 payload BLOB NOT NULL,
                  created_at TEXT NOT NULL
              );
              CREATE INDEX IF NOT EXISTS idx_dag_nodes_session
@@ -100,15 +145,17 @@ impl DagStore for SqliteDagStore {
     fn insert_node(&self, node: &DagNode) -> Result<(), String> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT OR IGNORE INTO dag_nodes (hash, parent_hash, agent, session_id, payload_in, payload_out, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT OR IGNORE INTO dag_nodes (hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             rusqlite::params![
                 node.hash,
                 node.parent_hash,
-                node.agent,
+                node.message_type.as_str(),
+                node.from,
+                node.to,
                 node.session_id,
-                node.payload_in,
-                node.payload_out,
+                node.submission_id,
+                node.payload,
                 node.created_at,
             ],
         ).map_err(|e| format!("insert_node failed: {}", e))?;
@@ -118,19 +165,24 @@ impl DagStore for SqliteDagStore {
     fn get_node(&self, hash: &str) -> Result<Option<DagNode>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT hash, parent_hash, agent, session_id, payload_in, payload_out, created_at
+            "SELECT hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, created_at
              FROM dag_nodes WHERE hash = ?1"
         ).map_err(|e| format!("get_node prepare failed: {}", e))?;
 
         let result = stmt.query_row(rusqlite::params![hash], |row| {
+            let mt_str: String = row.get(2)?;
+            let message_type = MessageType::from_str(&mt_str)
+                .unwrap_or(MessageType::Invoke);
             Ok(DagNode {
                 hash: row.get(0)?,
                 parent_hash: row.get(1)?,
-                agent: row.get(2)?,
-                session_id: row.get(3)?,
-                payload_in: row.get(4)?,
-                payload_out: row.get(5)?,
-                created_at: row.get(6)?,
+                message_type,
+                from: row.get(3)?,
+                to: row.get(4)?,
+                session_id: row.get(5)?,
+                submission_id: row.get(6)?,
+                payload: row.get(7)?,
+                created_at: row.get(8)?,
             })
         })
         .optional()
@@ -142,19 +194,24 @@ impl DagStore for SqliteDagStore {
     fn get_session_nodes(&self, session_id: &str) -> Result<Vec<DagNode>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT hash, parent_hash, agent, session_id, payload_in, payload_out, created_at
+            "SELECT hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, created_at
              FROM dag_nodes WHERE session_id = ?1 ORDER BY created_at"
         ).map_err(|e| format!("get_session_nodes prepare failed: {}", e))?;
 
         let rows = stmt.query_map(rusqlite::params![session_id], |row| {
+            let mt_str: String = row.get(2)?;
+            let message_type = MessageType::from_str(&mt_str)
+                .unwrap_or(MessageType::Invoke);
             Ok(DagNode {
                 hash: row.get(0)?,
                 parent_hash: row.get(1)?,
-                agent: row.get(2)?,
-                session_id: row.get(3)?,
-                payload_in: row.get(4)?,
-                payload_out: row.get(5)?,
-                created_at: row.get(6)?,
+                message_type,
+                from: row.get(3)?,
+                to: row.get(4)?,
+                session_id: row.get(5)?,
+                submission_id: row.get(6)?,
+                payload: row.get(7)?,
+                created_at: row.get(8)?,
             })
         }).map_err(|e| format!("get_session_nodes query failed: {}", e))?;
 
@@ -168,19 +225,24 @@ impl DagStore for SqliteDagStore {
     fn get_children(&self, parent_hash: &str) -> Result<Vec<DagNode>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT hash, parent_hash, agent, session_id, payload_in, payload_out, created_at
+            "SELECT hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, created_at
              FROM dag_nodes WHERE parent_hash = ?1"
         ).map_err(|e| format!("get_children prepare failed: {}", e))?;
 
         let rows = stmt.query_map(rusqlite::params![parent_hash], |row| {
+            let mt_str: String = row.get(2)?;
+            let message_type = MessageType::from_str(&mt_str)
+                .unwrap_or(MessageType::Invoke);
             Ok(DagNode {
                 hash: row.get(0)?,
                 parent_hash: row.get(1)?,
-                agent: row.get(2)?,
-                session_id: row.get(3)?,
-                payload_in: row.get(4)?,
-                payload_out: row.get(5)?,
-                created_at: row.get(6)?,
+                message_type,
+                from: row.get(3)?,
+                to: row.get(4)?,
+                session_id: row.get(5)?,
+                submission_id: row.get(6)?,
+                payload: row.get(7)?,
+                created_at: row.get(8)?,
             })
         }).map_err(|e| format!("get_children query failed: {}", e))?;
 
@@ -216,35 +278,74 @@ mod tests {
         SqliteDagStore::open(tmp.path()).unwrap()
     }
 
+    fn test_node(payload: &[u8], parent_hash: &str, message_type: MessageType) -> DagNode {
+        DagNode {
+            hash: hash_dag_node(payload, parent_hash, &message_type),
+            parent_hash: parent_hash.to_string(),
+            message_type,
+            from: "cli".to_string(),
+            to: "agent-a".to_string(),
+            session_id: "sess-1".to_string(),
+            submission_id: "sub-1".to_string(),
+            payload: payload.to_vec(),
+            created_at: "2025-01-01T00:00:00Z".to_string(),
+        }
+    }
+
+    // --- MessageType tests ---
+
+    #[test]
+    fn message_type_round_trips() {
+        for mt in [
+            MessageType::Invoke,
+            MessageType::Request,
+            MessageType::Response,
+            MessageType::Complete,
+            MessageType::Delegate,
+        ] {
+            assert_eq!(MessageType::from_str(mt.as_str()), Some(mt));
+        }
+    }
+
+    #[test]
+    fn message_type_from_unknown_returns_none() {
+        assert_eq!(MessageType::from_str("unknown"), None);
+    }
+
     // --- hash_dag_node tests ---
 
     #[test]
-    fn hash_is_known_sha256() {
-        // SHA-256 of "helloworld" (empty parent)
-        let hash = hash_dag_node(b"hello", b"world", "");
-        // Verify it's a valid 64-char hex string
+    fn hash_is_valid_sha256() {
+        let hash = hash_dag_node(b"hello", "", &MessageType::Invoke);
         assert_eq!(hash.len(), 64);
         assert!(hash.chars().all(|c| c.is_ascii_hexdigit()));
     }
 
     #[test]
     fn hash_changes_with_parent() {
-        let h1 = hash_dag_node(b"in", b"out", "");
-        let h2 = hash_dag_node(b"in", b"out", "parent-abc");
+        let h1 = hash_dag_node(b"payload", "", &MessageType::Invoke);
+        let h2 = hash_dag_node(b"payload", "parent-abc", &MessageType::Invoke);
         assert_ne!(h1, h2, "Merkle property: different parent → different hash");
     }
 
     #[test]
     fn hash_changes_with_payload() {
-        let h1 = hash_dag_node(b"input-a", b"output", "");
-        let h2 = hash_dag_node(b"input-b", b"output", "");
+        let h1 = hash_dag_node(b"payload-a", "", &MessageType::Invoke);
+        let h2 = hash_dag_node(b"payload-b", "", &MessageType::Invoke);
         assert_ne!(h1, h2);
     }
 
     #[test]
+    fn hash_changes_with_message_type() {
+        let h1 = hash_dag_node(b"payload", "", &MessageType::Invoke);
+        let h2 = hash_dag_node(b"payload", "", &MessageType::Complete);
+        assert_ne!(h1, h2, "same payload, different type → different hash");
+    }
+
+    #[test]
     fn hash_is_deterministic() {
-        let h1 = hash_dag_node(b"same", b"data", "p");
-        let h2 = hash_dag_node(b"same", b"data", "p");
+        let h1 = hash_dag_node(b"same", "p", &MessageType::Request);
+        let h2 = hash_dag_node(b"same", "p", &MessageType::Request);
         assert_eq!(h1, h2);
     }
 
@@ -253,20 +354,36 @@ mod tests {
     #[test]
     fn round_trip_insert_get() {
         let store = test_store();
-        let node = DagNode {
-            hash: hash_dag_node(b"in", b"out", ""),
-            parent_hash: "".to_string(),
-            agent: "agent-a".to_string(),
-            session_id: "sess-1".to_string(),
-            payload_in: b"in".to_vec(),
-            payload_out: b"out".to_vec(),
-            created_at: "2025-01-01T00:00:00Z".to_string(),
-        };
+        let node = test_node(b"hello", "", MessageType::Invoke);
 
         store.insert_node(&node).unwrap();
         let retrieved = store.get_node(&node.hash).unwrap().unwrap();
 
         assert_eq!(retrieved, node);
+    }
+
+    #[test]
+    fn round_trip_preserves_all_fields() {
+        let store = test_store();
+        let node = DagNode {
+            hash: hash_dag_node(b"pay", "", &MessageType::Delegate),
+            parent_hash: "".to_string(),
+            message_type: MessageType::Delegate,
+            from: "coordinator".to_string(),
+            to: "summarizer".to_string(),
+            session_id: "sess-99".to_string(),
+            submission_id: "sub-42".to_string(),
+            payload: b"delegate this".to_vec(),
+            created_at: "2025-06-15T12:00:00Z".to_string(),
+        };
+
+        store.insert_node(&node).unwrap();
+        let retrieved = store.get_node(&node.hash).unwrap().unwrap();
+
+        assert_eq!(retrieved.message_type, MessageType::Delegate);
+        assert_eq!(retrieved.from, "coordinator");
+        assert_eq!(retrieved.to, "summarizer");
+        assert_eq!(retrieved.submission_id, "sub-42");
     }
 
     #[test]
@@ -278,15 +395,7 @@ mod tests {
     #[test]
     fn idempotent_insert() {
         let store = test_store();
-        let node = DagNode {
-            hash: hash_dag_node(b"in", b"out", ""),
-            parent_hash: "".to_string(),
-            agent: "agent-a".to_string(),
-            session_id: "sess-1".to_string(),
-            payload_in: b"in".to_vec(),
-            payload_out: b"out".to_vec(),
-            created_at: "2025-01-01T00:00:00Z".to_string(),
-        };
+        let node = test_node(b"data", "", MessageType::Invoke);
 
         store.insert_node(&node).unwrap();
         store.insert_node(&node).unwrap(); // No error
@@ -299,24 +408,11 @@ mod tests {
     fn session_nodes_ordered_by_created_at() {
         let store = test_store();
 
-        let node1 = DagNode {
-            hash: hash_dag_node(b"in1", b"out1", ""),
-            parent_hash: "".to_string(),
-            agent: "agent-a".to_string(),
-            session_id: "sess-1".to_string(),
-            payload_in: b"in1".to_vec(),
-            payload_out: b"out1".to_vec(),
-            created_at: "2025-01-01T00:00:00Z".to_string(),
-        };
-        let node2 = DagNode {
-            hash: hash_dag_node(b"in2", b"out2", &node1.hash),
-            parent_hash: node1.hash.clone(),
-            agent: "agent-a".to_string(),
-            session_id: "sess-1".to_string(),
-            payload_in: b"in2".to_vec(),
-            payload_out: b"out2".to_vec(),
-            created_at: "2025-01-01T00:01:00Z".to_string(),
-        };
+        let mut node1 = test_node(b"first", "", MessageType::Invoke);
+        node1.created_at = "2025-01-01T00:00:00Z".to_string();
+
+        let mut node2 = test_node(b"second", &node1.hash, MessageType::Request);
+        node2.created_at = "2025-01-01T00:01:00Z".to_string();
 
         // Insert out of order
         store.insert_node(&node2).unwrap();
@@ -332,24 +428,10 @@ mod tests {
     fn get_children() {
         let store = test_store();
 
-        let parent = DagNode {
-            hash: hash_dag_node(b"in", b"out", ""),
-            parent_hash: "".to_string(),
-            agent: "agent-a".to_string(),
-            session_id: "sess-1".to_string(),
-            payload_in: b"in".to_vec(),
-            payload_out: b"out".to_vec(),
-            created_at: "2025-01-01T00:00:00Z".to_string(),
-        };
-        let child = DagNode {
-            hash: hash_dag_node(b"in2", b"out2", &parent.hash),
-            parent_hash: parent.hash.clone(),
-            agent: "agent-a".to_string(),
-            session_id: "sess-1".to_string(),
-            payload_in: b"in2".to_vec(),
-            payload_out: b"out2".to_vec(),
-            created_at: "2025-01-01T00:01:00Z".to_string(),
-        };
+        let parent = test_node(b"parent", "", MessageType::Invoke);
+
+        let mut child = test_node(b"child", &parent.hash, MessageType::Complete);
+        child.created_at = "2025-01-01T00:01:00Z".to_string();
 
         store.insert_node(&parent).unwrap();
         store.insert_node(&child).unwrap();
@@ -358,7 +440,7 @@ mod tests {
         assert_eq!(children.len(), 1);
         assert_eq!(children[0].hash, child.hash);
 
-        // Root has no children with empty parent (only the parent node itself)
+        // Root has one child (the parent node, whose parent_hash is "")
         let root_children = store.get_children("").unwrap();
         assert_eq!(root_children.len(), 1);
         assert_eq!(root_children[0].hash, parent.hash);
@@ -368,24 +450,13 @@ mod tests {
     fn different_sessions_are_isolated() {
         let store = test_store();
 
-        let node_a = DagNode {
-            hash: hash_dag_node(b"a", b"a", ""),
-            parent_hash: "".to_string(),
-            agent: "agent-a".to_string(),
-            session_id: "sess-1".to_string(),
-            payload_in: b"a".to_vec(),
-            payload_out: b"a".to_vec(),
-            created_at: "2025-01-01T00:00:00Z".to_string(),
-        };
-        let node_b = DagNode {
-            hash: hash_dag_node(b"b", b"b", ""),
-            parent_hash: "".to_string(),
-            agent: "agent-b".to_string(),
-            session_id: "sess-2".to_string(),
-            payload_in: b"b".to_vec(),
-            payload_out: b"b".to_vec(),
-            created_at: "2025-01-01T00:00:00Z".to_string(),
-        };
+        let mut node_a = test_node(b"a", "", MessageType::Invoke);
+        node_a.session_id = "sess-1".to_string();
+
+        let mut node_b = test_node(b"b", "", MessageType::Invoke);
+        node_b.session_id = "sess-2".to_string();
+        node_b.from = "cli".to_string();
+        node_b.to = "agent-b".to_string();
 
         store.insert_node(&node_a).unwrap();
         store.insert_node(&node_b).unwrap();
@@ -397,5 +468,35 @@ mod tests {
         let sess2 = store.get_session_nodes("sess-2").unwrap();
         assert_eq!(sess2.len(), 1);
         assert_eq!(sess2[0].session_id, "sess-2");
+    }
+
+    #[test]
+    fn all_five_message_types_stored() {
+        let store = test_store();
+
+        let types = [
+            MessageType::Invoke,
+            MessageType::Request,
+            MessageType::Response,
+            MessageType::Complete,
+            MessageType::Delegate,
+        ];
+
+        let mut parent_hash = String::new();
+        for (i, mt) in types.iter().enumerate() {
+            let payload = format!("msg-{}", i);
+            let mut node = test_node(payload.as_bytes(), &parent_hash, *mt);
+            node.created_at = format!("2025-01-01T00:0{}:00Z", i);
+            store.insert_node(&node).unwrap();
+            parent_hash = node.hash;
+        }
+
+        let nodes = store.get_session_nodes("sess-1").unwrap();
+        assert_eq!(nodes.len(), 5);
+        assert_eq!(nodes[0].message_type, MessageType::Invoke);
+        assert_eq!(nodes[1].message_type, MessageType::Request);
+        assert_eq!(nodes[2].message_type, MessageType::Response);
+        assert_eq!(nodes[3].message_type, MessageType::Complete);
+        assert_eq!(nodes[4].message_type, MessageType::Delegate);
     }
 }
