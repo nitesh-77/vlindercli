@@ -23,7 +23,7 @@ No agent could have faked another agent's commit. No one could have inserted a m
 **The agent's identity is the git commit author.** When a DAG worker writes a commit for a message, the `--author` field is the agent (or harness, or service) that sent it.
 
 ```
-Author: support-agent <support-agent@vlinder>
+Author: support-agent <support-agent@registry.local:9000>
 
 invoke: cli → container.support-agent
 
@@ -31,10 +31,12 @@ Session: ses-abc123
 Submission: sub-1
 ```
 
-For user-originated messages (invoke from harness), the author is the harness type:
+The email domain is the agent's registry host — the authority that issued the identity. An agent registered at `http://registry.local:9000/agents/support-agent` gets `support-agent@registry.local:9000`.
+
+For user-originated messages (invoke from harness), the author is the harness:
 
 ```
-Author: cli <cli@vlinder>
+Author: cli <cli@localhost>
 
 invoke: cli → container.support-agent
 ```
@@ -42,7 +44,7 @@ invoke: cli → container.support-agent
 For service responses (inference, storage), the author is the service:
 
 ```
-Author: infer.ollama <infer.ollama@vlinder>
+Author: infer.ollama <infer.ollama@localhost>
 
 response: infer.ollama → support-agent
 ```
@@ -62,10 +64,12 @@ response: infer.ollama → support-agent
 ### Author format
 
 ```
-<agent-name> <agent-name@vlinder>
+<agent-name> <agent-name@registry-host>
 ```
 
-The email portion uses `@vlinder` as the domain — simple, recognizable, no real email needed. Git requires the email field; this satisfies it without pretending agents have email addresses.
+The email domain is the registry host from the agent's `ResourceId`. An agent at `http://10.0.1.5:9000/agents/log-analyst` becomes `log-analyst <log-analyst@10.0.1.5:9000>`. The registry IS the identity authority — the domain in the email field reflects that.
+
+In distributed mode with multiple registries, agents from different registries are naturally distinguished by their domain. `git log --author=@registry-a.internal` shows everything from one registry.
 
 ### Signing
 
