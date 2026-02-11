@@ -5,6 +5,10 @@ edition = "2021"
 license = "Apache-2.0"
 publish = false
 
+[[bin]]
+name = "vlinder"
+path = "src/main.rs"
+
 [features]
 default = []
 
