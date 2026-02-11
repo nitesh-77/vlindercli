@@ -128,6 +128,12 @@ impl Podman for PodmanCli {
     }
 }
 
+/// Resolve the content-addressed digest for an image via `podman image inspect`.
+/// Returns None if the inspect fails (image not found, Podman unavailable, etc.).
+pub(crate) fn resolve_image_digest(image_ref: &str) -> Option<String> {
+    PodmanCli.image_digest(image_ref)
+}
+
 // ── Pure parsing helpers (unit-testable without Podman) ──────────────
 
 /// Parse a semver version string. Returns None on invalid input.
