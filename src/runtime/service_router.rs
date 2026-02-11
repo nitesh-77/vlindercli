@@ -74,8 +74,18 @@ impl ServiceRouter {
 
         // Delegation operations are handled here, not via hop routing (ADR 056)
         match &msg {
-            SdkMessage::Delegate { agent, input } => return self.handle_delegate(agent, input),
-            SdkMessage::Wait { handle } => return self.handle_wait(handle),
+            SdkMessage::Delegate { agent, input } => {
+                let handle = self.delegate(agent, input)?;
+                let json = serde_json::json!({ "handle": handle });
+                return serde_json::to_vec(&json)
+                    .map_err(|e| format!("delegate serialize error: {}", e));
+            }
+            SdkMessage::Wait { handle } => {
+                let output = self.wait(handle)?;
+                let json = serde_json::json!({ "output": String::from_utf8_lossy(&output) });
+                return serde_json::to_vec(&json)
+                    .map_err(|e| format!("wait serialize error: {}", e));
+            }
             _ => {}
         }
 
@@ -188,11 +198,11 @@ impl ServiceRouter {
         }
     }
 
-    /// Handle a delegate request from the agent (ADR 056).
+    /// Delegate work to another agent (ADR 056, ADR 074).
     ///
     /// Validates the target agent exists, builds a unique reply subject,
-    /// sends a DelegateMessage, and returns the handle.
-    fn handle_delegate(&self, target_agent: &str, input: &str) -> Result<Vec<u8>, String> {
+    /// sends a DelegateMessage, and returns the handle string.
+    pub(crate) fn delegate(&self, target_agent: &str, input: &str) -> Result<String, String> {
         // Verify target agent is registered
         let _agent = self.registry.get_agent_by_name(target_agent)
             .ok_or_else(|| format!("delegate: target agent '{}' not found", target_agent))?;
@@ -226,18 +236,16 @@ impl ServiceRouter {
         self.queue.send_delegate(delegate)
             .map_err(|e| format!("delegate send error: {}", e))?;
 
-        let result = serde_json::json!({ "handle": reply_subject });
-        serde_json::to_vec(&result)
-            .map_err(|e| format!("delegate serialize error: {}", e))
+        Ok(reply_subject)
     }
 
-    /// Handle a wait request from the agent (ADR 056).
+    /// Wait for a delegated task to complete (ADR 056, ADR 074).
     ///
     /// Polls the reply subject until a CompleteMessage arrives, then returns
-    /// the result payload.
-    fn handle_wait(&self, handle: &str) -> Result<Vec<u8>, String> {
+    /// the raw result payload.
+    pub(crate) fn wait(&self, handle: &str) -> Result<Vec<u8>, String> {
         let sha = self.invoke.read().unwrap().submission.to_string();
-        tracing::debug!(sha = %sha, handle = %handle, "handle_wait: polling for delegation result");
+        tracing::debug!(sha = %sha, handle = %handle, "wait: polling for delegation result");
         let poll_start = std::time::Instant::now();
         let mut poll_count: u64 = 0;
 
@@ -252,9 +260,7 @@ impl ServiceRouter {
                         elapsed = ?poll_start.elapsed(),
                         "Delegation result received"
                     );
-                    let result = serde_json::json!({ "output": String::from_utf8_lossy(&payload) });
-                    return serde_json::to_vec(&result)
-                        .map_err(|e| format!("wait serialize error: {}", e));
+                    return Ok(payload);
                 }
                 Err(_) => {
                     poll_count += 1;
@@ -263,7 +269,7 @@ impl ServiceRouter {
                             sha = %sha,
                             handle = %handle, polls = poll_count,
                             elapsed = ?poll_start.elapsed(),
-                            "handle_wait: still waiting for delegation result"
+                            "wait: still waiting for delegation result"
                         );
                     }
                 }
