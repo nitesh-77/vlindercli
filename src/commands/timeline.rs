@@ -83,43 +83,45 @@ fn passthrough(dir: &Path, args: &[String]) {
 #[cfg(test)]
 mod tests {
     use chrono::DateTime;
-    use vlindercli::domain::workers::{DagWorker, GitDagWorker};
-    use vlindercli::domain::{DagNode, MessageType, hash_dag_node};
-
-    fn test_node(
-        payload: &[u8],
-        parent_hash: &str,
-        message_type: MessageType,
-        from: &str,
-        to: &str,
-        session_id: &str,
-    ) -> DagNode {
-        DagNode {
-            hash: hash_dag_node(payload, parent_hash, &message_type, b""),
-            parent_hash: parent_hash.to_string(),
-            message_type,
-            from: from.to_string(),
-            to: to.to_string(),
-            session_id: session_id.to_string(),
-            submission_id: "sub-1".to_string(),
-            payload: payload.to_vec(),
-            diagnostics: Vec::new(),
-            stderr: Vec::new(),
-            created_at: DateTime::from_timestamp(1000, 0).unwrap(),
-            state: None,
-            protocol_version: String::new(),
-        }
-    }
+    use vlindercli::domain::workers::GitDagWorker;
+    use vlindercli::domain::{
+        InvokeMessage, CompleteMessage, ObservableMessage,
+        SubmissionId, SessionId, HarnessType,
+        InvokeDiagnostics, ContainerDiagnostics,
+        RuntimeType, ResourceId,
+    };
 
     #[test]
     fn route_shows_session_commits() {
         let tmp = tempfile::TempDir::new().unwrap();
         let mut worker = GitDagWorker::open(tmp.path(), "registry.local:9000", None).unwrap();
 
-        let n1 = test_node(b"q", "", MessageType::Invoke, "cli", "agent-a", "sess-1");
-        worker.on_message(&n1);
-        let n2 = test_node(b"a", &n1.hash, MessageType::Complete, "agent-a", "cli", "sess-1");
-        worker.on_message(&n2);
+        let agent_id = ResourceId::new("http://127.0.0.1:9000/agents/agent-a");
+
+        let invoke = InvokeMessage::new(
+            SubmissionId::from("sub-1".to_string()),
+            SessionId::from("sess-1".to_string()),
+            HarnessType::Cli,
+            RuntimeType::Container,
+            agent_id.clone(),
+            b"q".to_vec(),
+            None,
+            InvokeDiagnostics { harness_version: "0.1.0".to_string(), history_turns: 0 },
+        );
+        let ts1 = DateTime::from_timestamp(1000, 0).unwrap();
+        worker.on_observable_message(&ObservableMessage::Invoke(invoke), ts1);
+
+        let complete = CompleteMessage::new(
+            SubmissionId::from("sub-1".to_string()),
+            SessionId::from("sess-1".to_string()),
+            agent_id,
+            HarnessType::Cli,
+            b"a".to_vec(),
+            None,
+            ContainerDiagnostics::placeholder(100),
+        );
+        let ts2 = DateTime::from_timestamp(1001, 0).unwrap();
+        worker.on_observable_message(&ObservableMessage::Complete(complete), ts2);
 
         // Both commits are on main, filterable by Session trailer
         let output = std::process::Command::new("git")
