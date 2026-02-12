@@ -84,7 +84,7 @@ fn passthrough(dir: &Path, args: &[String]) {
 mod tests {
     use chrono::DateTime;
     use vlindercli::domain::workers::{DagWorker, GitDagWorker};
-    use vlindercli::storage::dag_store::{DagNode, MessageType, hash_dag_node};
+    use vlindercli::domain::{DagNode, MessageType, hash_dag_node};
 
     fn test_node(
         payload: &[u8],

@@ -37,7 +37,7 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 
 use crate::domain::registry::Registry;
-use crate::storage::dag_store::DagNode;
+use crate::domain::DagNode;
 use super::dag::DagWorker;
 
 /// DAG worker that writes commits to a git repository.
@@ -450,7 +450,7 @@ fn json_value_to_toml_value(json: &serde_json::Value) -> Result<toml::Value, Str
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::dag_store::{MessageType, hash_dag_node};
+    use crate::domain::{MessageType, hash_dag_node};
     use crate::domain::{InMemoryRegistry, RuntimeType, Agent};
 
     fn test_node_at(

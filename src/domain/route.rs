@@ -9,7 +9,7 @@
 
 use chrono::{DateTime, Utc};
 
-use crate::storage::dag_store::{DagNode, MessageType};
+use super::{DagNode, MessageType};
 
 /// The full chain of conversations in a session.
 #[derive(Debug, Clone, PartialEq)]
@@ -95,7 +95,7 @@ impl Route {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::dag_store::hash_dag_node;
+    use crate::domain::hash_dag_node;
 
     fn make_node(
         payload: &[u8],

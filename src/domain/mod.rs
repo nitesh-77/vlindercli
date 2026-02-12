@@ -10,6 +10,8 @@
 mod agent;
 mod sdk;
 mod queue_bridge;
+mod dag;
+mod state;
 mod diagnostics;
 mod message;
 mod message_queue;
@@ -61,6 +63,19 @@ pub use diagnostics::{
     InvokeDiagnostics, RequestDiagnostics, ServiceDiagnostics, ServiceMetrics,
     ContainerDiagnostics, ContainerRuntimeInfo, DelegateDiagnostics,
 };
+
+// ============================================================================
+// DAG (content-addressed Merkle DAG)
+// ============================================================================
+
+pub use dag::{DagStore, DagNode, MessageType, hash_dag_node};
+
+// ============================================================================
+// State (versioned agent state)
+// ============================================================================
+
+pub use state::{StateCommit, hash_value, hash_snapshot, hash_state_commit};
+pub(crate) use state::sorted_entries_json;
 
 // ============================================================================
 // Paths

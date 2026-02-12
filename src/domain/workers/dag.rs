@@ -14,7 +14,7 @@ use std::collections::HashMap;
 
 use chrono::Utc;
 
-use crate::storage::dag_store::{DagNode, DagStore, MessageType, hash_dag_node};
+use crate::domain::{DagNode, DagStore, MessageType, hash_dag_node};
 
 /// A projection that receives DAG nodes (ADR 065).
 ///

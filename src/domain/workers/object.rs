@@ -21,9 +21,8 @@ use crate::domain::{ObjectStorage, ResourceId};
 use crate::domain::{MessageQueue, RequestMessage, ResponseMessage, ServiceDiagnostics};
 use crate::services::object_storage;
 use crate::storage::dispatch::open_object_storage_from_uri;
-use crate::storage::state_store::{
-    hash_snapshot, hash_state_commit, hash_value, StateStore,
-};
+use crate::domain::{hash_snapshot, hash_state_commit, hash_value};
+use crate::storage::state_store::StateStore;
 
 // ============================================================================
 // Request Types (queue protocol)

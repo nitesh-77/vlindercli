@@ -16,6 +16,8 @@ mod vector;
 
 // Re-export traits from domain for convenience
 pub use crate::domain::{ObjectStorage, VectorStorage};
+pub use crate::domain::{DagStore, DagNode, MessageType, hash_dag_node};
+pub use crate::domain::{StateCommit, hash_value, hash_snapshot, hash_state_commit};
 
 // Re-export concrete implementations
 pub use object::{InMemoryObjectStorage, SqliteObjectStorage};
