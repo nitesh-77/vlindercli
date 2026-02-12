@@ -15,8 +15,7 @@ use crate::queue::{
 
 use super::dispatch::{DispatchError, RunningTask, dispatch_to_container};
 use super::pool::{ContainerPool, ImagePolicy};
-use crate::runtime::http_bridge::HttpBridge;
-use crate::runtime::http_bridge_server::HttpBridgeServer;
+use crate::bridge::{HttpBridge, HttpBridgeServer};
 
 pub struct ContainerRuntime {
     id: ResourceId,

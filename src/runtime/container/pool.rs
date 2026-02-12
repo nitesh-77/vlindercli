@@ -10,7 +10,7 @@ use crate::domain::Agent;
 use crate::queue::{ContainerDiagnostics, ContainerRuntimeInfo, InvokeMessage};
 
 use super::podman::{Podman, PodmanCli};
-use crate::runtime::http_bridge_server::HttpBridgeServer;
+use crate::bridge::HttpBridgeServer;
 
 /// A long-running container managed by the pool.
 pub(super) struct ManagedContainer {
