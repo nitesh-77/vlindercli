@@ -8,23 +8,12 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-use serde::Deserialize;
-
 use crate::domain::EmbeddingEngine;
 use crate::domain::registry::Registry;
+use crate::domain::service_payloads::EmbedRequest;
 use crate::embedding::open_embedding_engine;
 use crate::domain::{MessageQueue, RequestMessage, ResponseMessage, ServiceDiagnostics, ServiceMetrics};
 use crate::services::embedding;
-
-// ============================================================================
-// Request Types (queue protocol)
-// ============================================================================
-
-#[derive(Debug, Deserialize)]
-struct EmbedRequest {
-    model: String,
-    text: String,
-}
 
 // ============================================================================
 // Handler

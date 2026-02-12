@@ -8,35 +8,12 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-use serde::Deserialize;
-
 use crate::domain::registry::Registry;
+use crate::domain::service_payloads::{VectorStoreRequest, VectorSearchRequest, VectorDeleteRequest};
 use crate::domain::{VectorStorage, ResourceId};
 use crate::domain::{MessageQueue, RequestMessage, ResponseMessage, ServiceDiagnostics};
 use crate::services::vector_storage;
 use crate::storage::dispatch::open_vector_storage_from_uri;
-
-// ============================================================================
-// Request Types (queue protocol)
-// ============================================================================
-
-#[derive(Debug, Deserialize)]
-struct StoreRequest {
-    key: String,
-    vector: Vec<f32>,
-    metadata: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct SearchRequest {
-    vector: Vec<f32>,
-    limit: u32,
-}
-
-#[derive(Debug, Deserialize)]
-struct DeleteRequest {
-    key: String,
-}
 
 // ============================================================================
 // Handler
@@ -161,7 +138,7 @@ impl VectorServiceWorker {
     }
 
     fn handle_store(&self, request: &RequestMessage) -> Vec<u8> {
-        let req: StoreRequest = match serde_json::from_slice(&request.payload) {
+        let req: VectorStoreRequest = match serde_json::from_slice(&request.payload) {
             Ok(r) => r,
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
@@ -179,7 +156,7 @@ impl VectorServiceWorker {
     }
 
     fn handle_search(&self, request: &RequestMessage) -> Vec<u8> {
-        let req: SearchRequest = match serde_json::from_slice(&request.payload) {
+        let req: VectorSearchRequest = match serde_json::from_slice(&request.payload) {
             Ok(r) => r,
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
@@ -197,7 +174,7 @@ impl VectorServiceWorker {
     }
 
     fn handle_delete(&self, request: &RequestMessage) -> Vec<u8> {
-        let req: DeleteRequest = match serde_json::from_slice(&request.payload) {
+        let req: VectorDeleteRequest = match serde_json::from_slice(&request.payload) {
             Ok(r) => r,
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };

@@ -14,44 +14,15 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use base64::Engine as _;
-use serde::Deserialize;
 
 use crate::domain::registry::Registry;
+use crate::domain::service_payloads::{KvGetRequest, KvPutRequest, KvListRequest, KvDeleteRequest};
 use crate::domain::{ObjectStorage, ResourceId};
 use crate::domain::{MessageQueue, RequestMessage, ResponseMessage, ServiceDiagnostics};
 use crate::services::object_storage;
 use crate::storage::dispatch::open_object_storage_from_uri;
 use crate::domain::{hash_snapshot, hash_state_commit, hash_value};
 use crate::storage::state_store::StateStore;
-
-// ============================================================================
-// Request Types (queue protocol)
-// ============================================================================
-
-#[derive(Debug, Deserialize)]
-struct GetRequest {
-    path: String,
-    #[serde(default)]
-    state: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct PutRequest {
-    path: String,
-    content: String, // base64 encoded
-    #[serde(default)]
-    state: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ListRequest {
-    path: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct DeleteRequest {
-    path: String,
-}
 
 // ============================================================================
 // Handler
@@ -239,7 +210,7 @@ impl ObjectServiceWorker {
     }
 
     fn handle_get(&self, request: &RequestMessage) -> Vec<u8> {
-        let req: GetRequest = match serde_json::from_slice(&request.payload) {
+        let req: KvGetRequest = match serde_json::from_slice(&request.payload) {
             Ok(r) => r,
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
@@ -270,7 +241,7 @@ impl ObjectServiceWorker {
     }
 
     fn handle_put(&self, request: &RequestMessage) -> Vec<u8> {
-        let req: PutRequest = match serde_json::from_slice(&request.payload) {
+        let req: KvPutRequest = match serde_json::from_slice(&request.payload) {
             Ok(r) => r,
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
@@ -307,7 +278,7 @@ impl ObjectServiceWorker {
     }
 
     fn handle_list(&self, request: &RequestMessage) -> Vec<u8> {
-        let req: ListRequest = match serde_json::from_slice(&request.payload) {
+        let req: KvListRequest = match serde_json::from_slice(&request.payload) {
             Ok(r) => r,
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
@@ -325,7 +296,7 @@ impl ObjectServiceWorker {
     }
 
     fn handle_delete(&self, request: &RequestMessage) -> Vec<u8> {
-        let req: DeleteRequest = match serde_json::from_slice(&request.payload) {
+        let req: KvDeleteRequest = match serde_json::from_slice(&request.payload) {
             Ok(r) => r,
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
