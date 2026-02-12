@@ -7,8 +7,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::bridge::HttpBridge;
-use crate::domain::Agent;
+use crate::domain::{Agent, QueueBridge};
 use crate::queue::{ContainerDiagnostics, ContainerRuntimeInfo, InvokeMessage};
 
 use super::podman::{Podman, PodmanCli};
@@ -17,7 +16,7 @@ use super::podman::{Podman, PodmanCli};
 pub(super) struct ManagedContainer {
     container_id: String,
     host_port: u16,
-    pub(super) bridge: Arc<HttpBridge>,
+    pub(super) bridge: Arc<QueueBridge>,
     /// What was passed to `podman run` (tag in mutable mode, digest in pinned mode).
     image_ref: String,
     /// Content-addressed digest from `podman image inspect` at container start.
@@ -77,7 +76,7 @@ impl ContainerPool {
 
     /// If a container is already running for `name`, update its bridge with the
     /// new invoke context and return the host port and bridge.
-    pub(crate) fn get_port(&self, name: &str, invoke: &InvokeMessage) -> Option<(u16, Arc<HttpBridge>)> {
+    pub(crate) fn get_port(&self, name: &str, invoke: &InvokeMessage) -> Option<(u16, Arc<QueueBridge>)> {
         self.containers.get(name).map(|mc| {
             mc.bridge.update_invoke(invoke.clone());
             (mc.host_port, Arc::clone(&mc.bridge))
@@ -92,8 +91,8 @@ impl ContainerPool {
         &mut self,
         name: &str,
         agent: &Agent,
-        bridge: Arc<HttpBridge>,
-    ) -> Result<(u16, Arc<HttpBridge>), String> {
+        bridge: Arc<QueueBridge>,
+    ) -> Result<(u16, Arc<QueueBridge>), String> {
         // Select image reference based on policy (ADR 073)
         let image = match self.image_policy {
             ImagePolicy::Mutable => agent.executable.clone(),

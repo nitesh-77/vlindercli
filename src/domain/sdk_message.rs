@@ -70,8 +70,8 @@ impl SdkMessage {
             SdkMessage::VectorDelete { .. } => vec_hop("delete", vec_backend),
             SdkMessage::Infer { model, .. } => infer_hop(model, model_backends),
             SdkMessage::Embed { model, .. } => embed_hop(model, model_backends),
-            SdkMessage::Delegate { .. } => Err("delegate is handled by HttpBridge, not hop routing".to_string()),
-            SdkMessage::Wait { .. } => Err("wait is handled by HttpBridge, not hop routing".to_string()),
+            SdkMessage::Delegate { .. } => Err("delegate is handled by QueueBridge, not hop routing".to_string()),
+            SdkMessage::Wait { .. } => Err("wait is handled by QueueBridge, not hop routing".to_string()),
         }
     }
 }

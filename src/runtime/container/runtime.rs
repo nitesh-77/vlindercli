@@ -9,14 +9,13 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Instant;
 
-use crate::domain::{Agent, ObjectStorageType, Registry, ResourceId, Runtime, RuntimeType, VectorStorageType};
+use crate::domain::{Agent, ObjectStorageType, QueueBridge, Registry, ResourceId, Runtime, RuntimeType, VectorStorageType};
 use crate::queue::{
     ExpectsReply, HarnessType, InvokeDiagnostics, InvokeMessage, MessageQueue, SequenceCounter,
 };
 
 use super::dispatch::{DispatchError, RunningTask, dispatch_state_machine};
 use super::pool::{ContainerPool, ImagePolicy};
-use crate::bridge::HttpBridge;
 
 pub struct ContainerRuntime {
     id: ResourceId,
@@ -49,7 +48,7 @@ impl ContainerRuntime {
 
     /// Ensure a container is running for this agent. Starts one lazily if needed.
     /// Returns the host port and bridge for dispatch.
-    fn ensure_container(&mut self, agent: &Agent, invoke: &InvokeMessage) -> Result<(u16, Arc<HttpBridge>), String> {
+    fn ensure_container(&mut self, agent: &Agent, invoke: &InvokeMessage) -> Result<(u16, Arc<QueueBridge>), String> {
         if let Some(result) = self.pool.get_port(&agent.name, invoke) {
             return Ok(result);
         }
@@ -57,11 +56,11 @@ impl ContainerRuntime {
         self.pool.start(&agent.name, agent, bridge)
     }
 
-    /// Build the HttpBridge for a new container.
+    /// Build the QueueBridge for a new container.
     ///
-    /// Needs `queue` + `registry` to construct the HttpBridge, which is why
+    /// Needs `queue` + `registry` to construct the QueueBridge, which is why
     /// this lives on ContainerRuntime rather than ContainerPool.
-    fn build_bridge(&self, agent: &Agent, invoke: &InvokeMessage) -> Arc<HttpBridge> {
+    fn build_bridge(&self, agent: &Agent, invoke: &InvokeMessage) -> Arc<QueueBridge> {
         // Extract storage backends from agent config
         let kv_backend = agent.object_storage.as_ref()
             .and_then(|uri| ObjectStorageType::from_scheme(uri.scheme()));
@@ -76,11 +75,11 @@ impl ContainerRuntime {
             }
         }
 
-        // Create HttpBridge.
+        // Create QueueBridge.
         // Bootstrap state to root ("") if agent uses KV but no prior state exists (ADR 055).
         let initial_state = invoke.state.clone()
             .or_else(|| kv_backend.as_ref().map(|_| String::new()));
-        Arc::new(HttpBridge {
+        Arc::new(QueueBridge {
             queue: Arc::clone(&self.queue),
             registry: Arc::clone(&self.registry),
             current_state: std::sync::RwLock::new(initial_state),

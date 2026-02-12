@@ -1,4 +1,4 @@
-//! HttpBridge — queue-backed implementation of AgentBridge (ADR 074).
+//! QueueBridge — queue-backed implementation of AgentBridge (ADR 074, 076).
 //!
 //! Routes typed platform service calls through the MessageQueue.
 //! Each trait method builds the appropriate request, sends it to the
@@ -11,7 +11,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-use crate::domain::{AgentBridge, Hop, ObjectStorageType, Registry, VectorMatch, VectorStorageType};
+use super::{AgentBridge, Hop, ObjectStorageType, Registry, VectorMatch, VectorStorageType};
 use crate::queue::{
     DelegateMessage, DelegateDiagnostics, ContainerDiagnostics, InvokeMessage,
     MessageQueue, RequestMessage, RequestDiagnostics, SequenceCounter,
@@ -21,7 +21,7 @@ use crate::queue::{
 ///
 /// Constructed once per container, shared across all service calls.
 /// The invoke context is updated per invocation via `update_invoke()`.
-pub(crate) struct HttpBridge {
+pub struct QueueBridge {
     pub(crate) queue: Arc<dyn MessageQueue + Send + Sync>,
     pub(crate) registry: Arc<dyn Registry>,
     /// The invoke that triggered this execution — carries submission + agent_id.
@@ -39,7 +39,7 @@ pub(crate) struct HttpBridge {
     pub(crate) current_state: RwLock<Option<String>>,
 }
 
-impl HttpBridge {
+impl QueueBridge {
     /// Update the invoke context for a new invocation and reset the sequence counter.
     ///
     /// If the invoke carries no state but the agent has KV storage, bootstraps
@@ -169,7 +169,7 @@ impl HttpBridge {
 // AgentBridge trait implementation
 // ============================================================================
 
-impl AgentBridge for HttpBridge {
+impl AgentBridge for QueueBridge {
     fn kv_get(&self, path: &str) -> Result<Vec<u8>, String> {
         let backend = self.kv_backend
             .ok_or("agent called kv-get but has no object_storage configured")?;

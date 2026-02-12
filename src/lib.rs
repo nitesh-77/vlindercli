@@ -1,4 +1,3 @@
-pub mod bridge;
 pub mod catalog;
 pub mod cli;
 pub mod config;

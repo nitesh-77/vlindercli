@@ -10,6 +10,7 @@
 mod agent;
 mod agent_bridge;
 mod agent_contract;
+mod queue_bridge;
 mod agent_manifest;
 mod catalog;
 mod daemon;
@@ -43,6 +44,7 @@ pub mod workers;
 pub use agent::{Agent, LoadError as AgentLoadError, Mount, Prompts, Requirements};
 pub use agent_bridge::{AgentBridge, VectorMatch};
 pub use agent_contract::{AgentAction, AgentEvent};
+pub use queue_bridge::QueueBridge;
 pub use path::{AbsolutePath, AbsoluteUri};
 pub use agent_manifest::AgentManifest;
 pub use fleet::{Fleet, LoadError as FleetLoadError};
