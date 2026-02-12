@@ -5,18 +5,19 @@
 //! lifecycle operations here: lazy start, eviction, shutdown, diagnostics.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
+use crate::bridge::HttpBridge;
 use crate::domain::Agent;
 use crate::queue::{ContainerDiagnostics, ContainerRuntimeInfo, InvokeMessage};
 
 use super::podman::{Podman, PodmanCli};
-use crate::bridge::HttpBridgeServer;
 
 /// A long-running container managed by the pool.
 pub(super) struct ManagedContainer {
     container_id: String,
     host_port: u16,
-    pub(super) bridge: HttpBridgeServer,
+    pub(super) bridge: Arc<HttpBridge>,
     /// What was passed to `podman run` (tag in mutable mode, digest in pinned mode).
     image_ref: String,
     /// Content-addressed digest from `podman image inspect` at container start.
@@ -75,11 +76,11 @@ impl ContainerPool {
     }
 
     /// If a container is already running for `name`, update its bridge with the
-    /// new invoke context and return the host port.
-    pub(crate) fn get_port(&self, name: &str, invoke: &InvokeMessage) -> Option<u16> {
+    /// new invoke context and return the host port and bridge.
+    pub(crate) fn get_port(&self, name: &str, invoke: &InvokeMessage) -> Option<(u16, Arc<HttpBridge>)> {
         self.containers.get(name).map(|mc| {
             mc.bridge.update_invoke(invoke.clone());
-            mc.host_port
+            (mc.host_port, Arc::clone(&mc.bridge))
         })
     }
 
@@ -91,10 +92,8 @@ impl ContainerPool {
         &mut self,
         name: &str,
         agent: &Agent,
-        bridge: HttpBridgeServer,
-    ) -> Result<u16, String> {
-        let bridge_url = bridge.container_url();
-
+        bridge: Arc<HttpBridge>,
+    ) -> Result<(u16, Arc<HttpBridge>), String> {
         // Select image reference based on policy (ADR 073)
         let image = match self.image_policy {
             ImagePolicy::Mutable => agent.executable.clone(),
@@ -102,22 +101,13 @@ impl ContainerPool {
                 .unwrap_or_else(|| agent.executable.clone()),
         };
 
-        // Start container in detached mode with port mapping, bridge URL, and mounts
-        let bridge_env = format!("VLINDER_BRIDGE_URL={}", bridge_url);
-
         // Build volume mount flags from agent manifest (ADR 057)
         let mount_flags: Vec<String> = agent.mounts.iter().map(|m| {
             let mode = if m.readonly { "ro" } else { "rw" };
             format!("{}:{}:{}", m.host_path, m.guest_path.display(), mode)
         }).collect();
 
-        let container_id = match self.podman.run(&image, &bridge_env, &mount_flags) {
-            Ok(id) => id,
-            Err(e) => {
-                bridge.stop();
-                return Err(e);
-            }
-        };
+        let container_id = self.podman.run(&image, &mount_flags)?;
 
         // Capture image metadata for diagnostics (ADR 073)
         let image_digest = self.podman.image_digest(&image);
@@ -139,6 +129,7 @@ impl ContainerPool {
             "Container started"
         );
 
+        let bridge_clone = Arc::clone(&bridge);
         self.containers.insert(name.to_string(), ManagedContainer {
             container_id,
             host_port,
@@ -147,7 +138,7 @@ impl ContainerPool {
             image_digest,
         });
 
-        Ok(host_port)
+        Ok((host_port, bridge_clone))
     }
 
     /// Evict a stale container — stop, remove, and drop the bridge (ADR 073).
@@ -162,7 +153,6 @@ impl ContainerPool {
                 "Evicting stale container"
             );
             self.podman.stop_and_remove(&mc.container_id, 2);
-            mc.bridge.stop();
         }
     }
 
@@ -171,7 +161,6 @@ impl ContainerPool {
         for (name, mc) in self.containers.drain() {
             tracing::info!(event = "container.stopped", agent = %name, container = %mc.container_id, "Stopping container");
             self.podman.stop_and_remove(&mc.container_id, 5);
-            mc.bridge.stop();
         }
     }
 

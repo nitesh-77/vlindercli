@@ -15,7 +15,7 @@ pub(crate) trait Podman: Send {
     fn engine_version(&self) -> Option<semver::Version>;
 
     /// `podman run -d` — start a detached container and return its ID.
-    fn run(&self, image: &str, bridge_env: &str, mounts: &[String]) -> Result<String, String>;
+    fn run(&self, image: &str, mounts: &[String]) -> Result<String, String>;
 
     /// `podman image inspect` — return the content-addressed digest.
     fn image_digest(&self, image_ref: &str) -> Option<String>;
@@ -46,12 +46,11 @@ impl Podman for PodmanCli {
             })
     }
 
-    fn run(&self, image: &str, bridge_env: &str, mounts: &[String]) -> Result<String, String> {
+    fn run(&self, image: &str, mounts: &[String]) -> Result<String, String> {
         let mut podman_args = vec![
             "run", "-d",
             "--pull=never",
             "-p", ":8080",
-            "-e", bridge_env,
         ];
 
         for flag in mounts {

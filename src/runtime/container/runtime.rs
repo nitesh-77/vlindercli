@@ -2,6 +2,7 @@
 //!
 //! Polls queues for invoke and delegate work, dispatches to containers,
 //! sweeps completed tasks, and handles retry on container death (ADR 073).
+//! Agents are state machines driven by POST /handle (ADR 075).
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -13,9 +14,9 @@ use crate::queue::{
     ExpectsReply, HarnessType, InvokeDiagnostics, InvokeMessage, MessageQueue, SequenceCounter,
 };
 
-use super::dispatch::{DispatchError, RunningTask, dispatch_to_container};
+use super::dispatch::{DispatchError, RunningTask, dispatch_state_machine};
 use super::pool::{ContainerPool, ImagePolicy};
-use crate::bridge::{HttpBridge, HttpBridgeServer};
+use crate::bridge::HttpBridge;
 
 pub struct ContainerRuntime {
     id: ResourceId,
@@ -47,19 +48,20 @@ impl ContainerRuntime {
     }
 
     /// Ensure a container is running for this agent. Starts one lazily if needed.
-    fn ensure_container(&mut self, agent: &Agent, invoke: &InvokeMessage) -> Result<u16, String> {
-        if let Some(port) = self.pool.get_port(&agent.name, invoke) {
-            return Ok(port);
+    /// Returns the host port and bridge for dispatch.
+    fn ensure_container(&mut self, agent: &Agent, invoke: &InvokeMessage) -> Result<(u16, Arc<HttpBridge>), String> {
+        if let Some(result) = self.pool.get_port(&agent.name, invoke) {
+            return Ok(result);
         }
-        let bridge = self.build_bridge(agent, invoke)?;
+        let bridge = self.build_bridge(agent, invoke);
         self.pool.start(&agent.name, agent, bridge)
     }
 
-    /// Build the HTTP bridge server for a new container.
+    /// Build the HttpBridge for a new container.
     ///
     /// Needs `queue` + `registry` to construct the HttpBridge, which is why
     /// this lives on ContainerRuntime rather than ContainerPool.
-    fn build_bridge(&self, agent: &Agent, invoke: &InvokeMessage) -> Result<HttpBridgeServer, String> {
+    fn build_bridge(&self, agent: &Agent, invoke: &InvokeMessage) -> Arc<HttpBridge> {
         // Extract storage backends from agent config
         let kv_backend = agent.object_storage.as_ref()
             .and_then(|uri| ObjectStorageType::from_scheme(uri.scheme()));
@@ -74,11 +76,11 @@ impl ContainerRuntime {
             }
         }
 
-        // Create HttpBridge for the server.
+        // Create HttpBridge.
         // Bootstrap state to root ("") if agent uses KV but no prior state exists (ADR 055).
         let initial_state = invoke.state.clone()
             .or_else(|| kv_backend.as_ref().map(|_| String::new()));
-        let send_data = Arc::new(HttpBridge {
+        Arc::new(HttpBridge {
             queue: Arc::clone(&self.queue),
             registry: Arc::clone(&self.registry),
             current_state: std::sync::RwLock::new(initial_state),
@@ -87,10 +89,7 @@ impl ContainerRuntime {
             vec_backend,
             model_backends,
             sequence: SequenceCounter::new(),
-        });
-
-        HttpBridgeServer::start(send_data)
-            .map_err(|e| format!("failed to start bridge: {}", e))
+        })
     }
 
     /// Route a CompleteMessage to the correct destination (harness or delegating agent).
@@ -104,9 +103,9 @@ impl ContainerRuntime {
 
     /// Dispatch an invocation to a container and track it as a running task.
     ///
-    /// Ensures the container is running, spawns the HTTP dispatch on a thread,
-    /// and inserts the RunningTask. On container-start failure, sends an error
-    /// reply and returns false.
+    /// Ensures the container is running, spawns the state machine dispatch on a
+    /// thread, and inserts the RunningTask. On container-start failure, sends an
+    /// error reply and returns false.
     fn dispatch(
         &mut self,
         name: &str,
@@ -115,8 +114,8 @@ impl ContainerRuntime {
         reply_subject: Option<String>,
         is_retry: bool,
     ) -> bool {
-        let host_port = match self.ensure_container(agent, &invoke) {
-            Ok(port) => port,
+        let (host_port, bridge) = match self.ensure_container(agent, &invoke) {
+            Ok(result) => result,
             Err(e) => {
                 tracing::error!(event = "dispatch.failed", agent = %name, error = %e, "Failed to start container");
                 let complete = invoke.create_reply(
@@ -130,7 +129,7 @@ impl ContainerRuntime {
         let payload = invoke.payload.clone();
         let session_id = invoke.session.as_str().to_string();
         let handle = thread::spawn(move || {
-            dispatch_to_container(host_port, &payload, &session_id)
+            dispatch_state_machine(host_port, &payload, &session_id, bridge)
         });
 
         self.running.insert(name.to_string(), RunningTask {
@@ -275,7 +274,7 @@ impl ContainerRuntime {
                     "Dispatching delegated work"
                 );
 
-                // Build a synthetic InvokeMessage so the container sees a normal /invoke
+                // Build a synthetic InvokeMessage so the container sees a normal invocation
                 let invoke = InvokeMessage::new(
                     delegate.submission.clone(),
                     delegate.session.clone(),
