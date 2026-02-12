@@ -1,20 +1,55 @@
-//! State machine agent contract types (ADR 075).
+//! Agent SDK specification (ADR 074, 075).
 //!
-//! Strongly typed enums for the two directions of communication:
-//! - `AgentAction`: agent -> platform (POST /handle response body)
-//! - `AgentEvent`: platform -> agent (POST /handle request body)
+//! The complete contract between agents and the platform, expressed at three levels:
 //!
-//! Every variant mirrors an `AgentBridge` method signature. The platform
-//! passes `state` through untouched — it's agent-defined working memory.
+//! - `SdkContract` trait: the 11 operations agents can request (kv, vector, infer, embed, delegate)
+//! - `AgentAction` enum: agent → platform wire format (POST /handle response body)
+//! - `AgentEvent` enum: platform → agent wire format (POST /handle request body)
+//!
+//! Agent SDKs in any language implement this spec as `ctx.kv_get()`, `ctx.infer()`, etc.
+//! The platform fulfills it via `QueueBridge`.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::VectorMatch;
+// ============================================================================
+// SdkContract — the operations
+// ============================================================================
+
+/// The agent SDK contract — what operations agents can request.
+///
+/// Each method maps to one `AgentAction` variant and one `AgentEvent` variant.
+/// The platform fulfills these via `QueueBridge` (or any other implementation).
+pub trait SdkContract: Send + Sync {
+    // -- Object storage --
+    fn kv_get(&self, path: &str) -> Result<Vec<u8>, String>;
+    fn kv_put(&self, path: &str, content: &str) -> Result<(), String>;
+    fn kv_list(&self, prefix: &str) -> Result<Vec<String>, String>;
+    fn kv_delete(&self, path: &str) -> Result<bool, String>;
+
+    // -- Vector storage --
+    fn vector_store(&self, key: &str, vector: &[f32], metadata: &str) -> Result<(), String>;
+    fn vector_search(&self, vector: &[f32], limit: u32) -> Result<Vec<VectorMatch>, String>;
+    fn vector_delete(&self, key: &str) -> Result<bool, String>;
+
+    // -- Inference --
+    fn infer(&self, model: &str, prompt: &str, max_tokens: u32) -> Result<String, String>;
+
+    // -- Embedding --
+    fn embed(&self, model: &str, text: &str) -> Result<Vec<f32>, String>;
+
+    // -- Delegation (ADR 056) --
+    fn delegate(&self, target_agent: &str, input: &str) -> Result<String, String>;
+    fn wait(&self, handle: &str) -> Result<Vec<u8>, String>;
+}
+
+// ============================================================================
+// AgentAction — agent → platform (POST /handle response)
+// ============================================================================
 
 /// Agent -> Platform (POST /handle response body).
 ///
-/// Each variant maps 1:1 to an AgentBridge trait method.
+/// Each variant maps 1:1 to an `SdkContract` trait method.
 /// The `state` field is opaque agent working memory — the platform
 /// round-trips it without interpretation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -32,6 +67,10 @@ pub enum AgentAction {
     Delegate { agent: String, input: String, state: Value },
     Complete { payload: String, state: Value },
 }
+
+// ============================================================================
+// AgentEvent — platform → agent (POST /handle request)
+// ============================================================================
 
 /// Platform -> Agent (POST /handle request body).
 ///
@@ -53,6 +92,22 @@ pub enum AgentEvent {
     Delegate { output: String, state: Value },
     Error { message: String, state: Value },
 }
+
+// ============================================================================
+// Shared types
+// ============================================================================
+
+/// A single vector search result.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VectorMatch {
+    pub key: String,
+    pub metadata: String,
+    pub distance: f32,
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
 
 #[cfg(test)]
 mod tests {

@@ -2,7 +2,7 @@
 //!
 //! The platform drives the agent by calling POST /handle in a loop.
 //! The agent returns an `AgentAction` (what service it needs), the platform
-//! executes it via `AgentBridge`, and sends the result back as an `AgentEvent`.
+//! executes it via `SdkContract`, and sends the result back as an `AgentEvent`.
 //! The loop continues until the agent returns `Complete`.
 
 use std::io::Read;
@@ -12,7 +12,7 @@ use std::time::Instant;
 
 use serde_json::json;
 
-use crate::domain::{AgentAction, AgentBridge, AgentEvent};
+use crate::domain::{AgentAction, SdkContract, AgentEvent};
 use crate::queue::InvokeMessage;
 
 /// Tracks an in-flight invocation dispatched to a container.
@@ -86,14 +86,14 @@ fn post_handle(host_port: u16, event: &AgentEvent, session_id: &str) -> Result<A
 ///
 /// 1. Send `AgentEvent::Invoke` with the input payload and empty state
 /// 2. Receive `AgentAction` from the agent
-/// 3. Execute the requested service call via `AgentBridge`
+/// 3. Execute the requested service call via `SdkContract`
 /// 4. Send the result back as an `AgentEvent`
 /// 5. Repeat until `AgentAction::Complete`
 pub(crate) fn dispatch_state_machine(
     host_port: u16,
     payload: &[u8],
     session_id: &str,
-    bridge: Arc<dyn AgentBridge>,
+    bridge: Arc<dyn SdkContract>,
 ) -> Result<Vec<u8>, DispatchError> {
     let input = String::from_utf8_lossy(payload).to_string();
     let mut event = AgentEvent::Invoke {

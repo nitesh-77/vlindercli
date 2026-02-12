@@ -42,11 +42,17 @@ Keep in `crate::queue` (implementations):
 - `NatsQueue` — distributed implementation
 - `from_config()` — factory/wiring function
 
-### 2. `src/bridge/` → move to domain
+### 2. `src/bridge/` → move to domain, extract SDK contract
 
-`HttpBridge` implements `AgentBridge` by routing through `MessageQueue` using the five message types. Every dependency is a domain entity. It's domain composition, not infrastructure.
+`HttpBridge` implements the `AgentBridge` trait by routing through `MessageQueue` using the five message types. Every dependency is a domain entity. It's domain composition, not infrastructure.
 
-The name changes too — it does no HTTP. It becomes `QueueBridge` (or just `Bridge`): the standard composition of `AgentBridge` over `MessageQueue`.
+Moving it forced three naming discoveries:
+
+1. **`HttpBridge` does no HTTP.** It routes through the queue. Renamed to `QueueBridge`.
+2. **`AgentBridge` is not a bridge.** It's the SDK specification — the 11 operations agents can request from the platform. The Python SDK (`vlinder.py`) is a direct transliteration of this trait: `ctx.kv_get()`, `ctx.infer()`, `ctx.embed()`. An SDK in any language implements these same methods. Renamed to `SdkContract`.
+3. **`AgentBridge`, `AgentAction`, and `AgentEvent` are one spec.** They were split across two files because they were created at different times (ADR 074 vs 075). But they define the same contract at three levels: `SdkContract` (the operations), `AgentAction` (agent → platform wire format), `AgentEvent` (platform → agent wire format). Merged into a single `sdk.rs`.
+
+The result: `src/domain/sdk.rs` contains the complete agent SDK specification. `src/domain/queue_bridge.rs` is the platform's fulfillment of that contract over the message queue.
 
 ### 3. `crate::storage` → extract domain types
 
@@ -92,8 +98,9 @@ These modules are already clean — pure implementations of domain traits:
 ## Consequences
 
 - `src/domain/` becomes the single source of truth for the platform's abstract protocol — all traits, all message types, all identity types, all content-addressing
+- `src/domain/sdk.rs` is the agent SDK specification — hand this file to a code generator and it produces a Python, Go, or TypeScript SDK
 - Implementation modules (`queue`, `storage`, `runtime`, `catalog`, etc.) contain only concrete code that implements domain traits
 - Cross-module imports become clean: everything depends on `crate::domain`, never on `crate::queue::message` or `crate::storage::dag_store` for protocol types
-- The `HttpBridge` → `QueueBridge` rename makes the architecture legible — the bridge routes through the queue, not through HTTP
+- Names match reality: `SdkContract` (not "bridge"), `QueueBridge` (not "HTTP"), `sdk.rs` (not split across two files)
 - Existing tests move with their types — no behavioral changes
 - This is a large mechanical refactor with no behavioral changes — every type keeps its exact shape, only its module path changes

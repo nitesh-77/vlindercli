@@ -8,8 +8,7 @@
 //! is the authoritative source for the runtime's abstract protocol.
 
 mod agent;
-mod agent_bridge;
-mod agent_contract;
+mod sdk;
 mod queue_bridge;
 mod agent_manifest;
 mod catalog;
@@ -42,8 +41,7 @@ pub mod workers;
 // ============================================================================
 
 pub use agent::{Agent, LoadError as AgentLoadError, Mount, Prompts, Requirements};
-pub use agent_bridge::{AgentBridge, VectorMatch};
-pub use agent_contract::{AgentAction, AgentEvent};
+pub use sdk::{SdkContract, AgentAction, AgentEvent, VectorMatch};
 pub use queue_bridge::QueueBridge;
 pub use path::{AbsolutePath, AbsoluteUri};
 pub use agent_manifest::AgentManifest;

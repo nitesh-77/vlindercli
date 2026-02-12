@@ -1,4 +1,4 @@
-//! QueueBridge — queue-backed implementation of AgentBridge (ADR 074, 076).
+//! QueueBridge — queue-backed implementation of SdkContract (ADR 074, 076).
 //!
 //! Routes typed platform service calls through the MessageQueue.
 //! Each trait method builds the appropriate request, sends it to the
@@ -11,7 +11,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-use super::{AgentBridge, Hop, ObjectStorageType, Registry, VectorMatch, VectorStorageType};
+use super::{SdkContract, Hop, ObjectStorageType, Registry, VectorMatch, VectorStorageType};
 use crate::queue::{
     DelegateMessage, DelegateDiagnostics, ContainerDiagnostics, InvokeMessage,
     MessageQueue, RequestMessage, RequestDiagnostics, SequenceCounter,
@@ -166,10 +166,10 @@ impl QueueBridge {
 }
 
 // ============================================================================
-// AgentBridge trait implementation
+// SdkContract trait implementation
 // ============================================================================
 
-impl AgentBridge for QueueBridge {
+impl SdkContract for QueueBridge {
     fn kv_get(&self, path: &str) -> Result<Vec<u8>, String> {
         let backend = self.kv_backend
             .ok_or("agent called kv-get but has no object_storage configured")?;
