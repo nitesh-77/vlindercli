@@ -346,3 +346,212 @@ impl SdkContract for QueueBridge {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::queue::InMemoryQueue;
+    use crate::registry::InMemoryRegistry;
+    use crate::domain::{
+        HarnessType, InvokeDiagnostics, RuntimeType, ResourceId, SessionId, SubmissionId,
+    };
+
+    /// Build a QueueBridge wired to in-memory backends for unit testing.
+    fn test_bridge(kv: Option<ObjectStorageType>) -> QueueBridge {
+        let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
+        let registry: Arc<dyn Registry> = Arc::new(InMemoryRegistry::new());
+        let invoke = InvokeMessage::new(
+            SubmissionId::new(),
+            SessionId::new(),
+            HarnessType::Cli,
+            RuntimeType::Container,
+            ResourceId::new("http://test/agents/echo"),
+            b"hello".to_vec(),
+            None,
+            InvokeDiagnostics { harness_version: String::new(), history_turns: 0 },
+        );
+        QueueBridge {
+            queue,
+            registry,
+            invoke: RwLock::new(invoke),
+            kv_backend: kv,
+            vec_backend: None,
+            model_backends: HashMap::new(),
+            sequence: SequenceCounter::new(),
+            current_state: RwLock::new(None),
+        }
+    }
+
+    // ========================================================================
+    // check_worker_error
+    // ========================================================================
+
+    #[test]
+    fn check_worker_error_passes_normal_response() {
+        assert!(QueueBridge::check_worker_error(b"some normal data").is_ok());
+    }
+
+    #[test]
+    fn check_worker_error_detects_error_prefix() {
+        let result = QueueBridge::check_worker_error(b"[error] something went wrong");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("something went wrong"));
+    }
+
+    #[test]
+    fn check_worker_error_passes_empty() {
+        assert!(QueueBridge::check_worker_error(b"").is_ok());
+    }
+
+    // ========================================================================
+    // extract_state
+    // ========================================================================
+
+    #[test]
+    fn extract_state_updates_current_state() {
+        let bridge = test_bridge(Some(ObjectStorageType::Sqlite));
+        assert!(bridge.current_state.read().unwrap().is_none());
+
+        let response = serde_json::to_vec(&serde_json::json!({
+            "state": "sha256:abc123",
+            "ok": true,
+        })).unwrap();
+
+        bridge.extract_state(&response);
+        assert_eq!(
+            *bridge.current_state.read().unwrap(),
+            Some("sha256:abc123".to_string()),
+        );
+    }
+
+    #[test]
+    fn extract_state_ignores_missing_state_field() {
+        let bridge = test_bridge(None);
+        *bridge.current_state.write().unwrap() = Some("old-state".to_string());
+
+        let response = serde_json::to_vec(&serde_json::json!({"ok": true})).unwrap();
+        bridge.extract_state(&response);
+
+        // State unchanged — no "state" key in response
+        assert_eq!(
+            *bridge.current_state.read().unwrap(),
+            Some("old-state".to_string()),
+        );
+    }
+
+    #[test]
+    fn extract_state_ignores_non_json() {
+        let bridge = test_bridge(None);
+        bridge.extract_state(b"not json");
+        assert!(bridge.current_state.read().unwrap().is_none());
+    }
+
+    // ========================================================================
+    // build_kv_payload
+    // ========================================================================
+
+    #[test]
+    fn build_kv_payload_injects_state() {
+        let bridge = test_bridge(Some(ObjectStorageType::Sqlite));
+        *bridge.current_state.write().unwrap() = Some("sha256:prev".to_string());
+
+        let payload = bridge.build_kv_payload("kv-get", serde_json::json!({"path": "/notes"})).unwrap();
+        let parsed: serde_json::Value = serde_json::from_slice(&payload).unwrap();
+
+        assert_eq!(parsed["op"], "kv-get");
+        assert_eq!(parsed["path"], "/notes");
+        assert_eq!(parsed["state"], "sha256:prev");
+    }
+
+    #[test]
+    fn build_kv_payload_omits_state_when_none() {
+        let bridge = test_bridge(None);
+
+        let payload = bridge.build_kv_payload("kv-get", serde_json::json!({"path": "/x"})).unwrap();
+        let parsed: serde_json::Value = serde_json::from_slice(&payload).unwrap();
+
+        assert_eq!(parsed["op"], "kv-get");
+        assert!(parsed.get("state").is_none());
+    }
+
+    // ========================================================================
+    // update_invoke
+    // ========================================================================
+
+    #[test]
+    fn update_invoke_with_state_sets_current_state() {
+        let bridge = test_bridge(Some(ObjectStorageType::Sqlite));
+
+        let invoke = InvokeMessage::new(
+            SubmissionId::new(),
+            SessionId::new(),
+            HarnessType::Cli,
+            RuntimeType::Container,
+            ResourceId::new("http://test/agents/echo"),
+            b"new input".to_vec(),
+            Some("sha256:explicit".to_string()),
+            InvokeDiagnostics { harness_version: String::new(), history_turns: 0 },
+        );
+
+        bridge.update_invoke(invoke);
+        assert_eq!(
+            *bridge.current_state.read().unwrap(),
+            Some("sha256:explicit".to_string()),
+        );
+    }
+
+    #[test]
+    fn update_invoke_bootstraps_empty_state_for_kv_agents() {
+        let bridge = test_bridge(Some(ObjectStorageType::Sqlite));
+
+        let invoke = InvokeMessage::new(
+            SubmissionId::new(),
+            SessionId::new(),
+            HarnessType::Cli,
+            RuntimeType::Container,
+            ResourceId::new("http://test/agents/echo"),
+            b"input".to_vec(),
+            None, // No state in invoke
+            InvokeDiagnostics { harness_version: String::new(), history_turns: 0 },
+        );
+
+        bridge.update_invoke(invoke);
+        // Agent has KV storage, so state bootstraps to empty string
+        assert_eq!(
+            *bridge.current_state.read().unwrap(),
+            Some(String::new()),
+        );
+    }
+
+    #[test]
+    fn update_invoke_no_kv_no_state() {
+        let bridge = test_bridge(None); // No KV backend
+
+        let invoke = InvokeMessage::new(
+            SubmissionId::new(),
+            SessionId::new(),
+            HarnessType::Cli,
+            RuntimeType::Container,
+            ResourceId::new("http://test/agents/echo"),
+            b"input".to_vec(),
+            None,
+            InvokeDiagnostics { harness_version: String::new(), history_turns: 0 },
+        );
+
+        bridge.update_invoke(invoke);
+        assert!(bridge.current_state.read().unwrap().is_none());
+    }
+
+    // ========================================================================
+    // final_state
+    // ========================================================================
+
+    #[test]
+    fn final_state_reads_current_state() {
+        let bridge = test_bridge(None);
+        assert!(bridge.final_state().is_none());
+
+        *bridge.current_state.write().unwrap() = Some("sha256:final".to_string());
+        assert_eq!(bridge.final_state(), Some("sha256:final".to_string()));
+    }
+}

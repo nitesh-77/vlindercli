@@ -236,3 +236,110 @@ pub trait Registry: Send + Sync {
     fn has_inference_engine(&self, engine_type: EngineType) -> bool;
     fn has_embedding_engine(&self, engine_type: EngineType) -> bool;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ========================================================================
+    // model_add_hint
+    // ========================================================================
+
+    #[test]
+    fn hint_for_ollama_strips_host_and_tag() {
+        let hint = model_add_hint("ollama://localhost:11434/nomic-embed-text:latest");
+        assert_eq!(hint, "vlinder model add nomic-embed-text");
+    }
+
+    #[test]
+    fn hint_for_openrouter_includes_catalog_flag() {
+        let hint = model_add_hint("openrouter://anthropic/claude-sonnet-4");
+        assert_eq!(hint, "vlinder model add anthropic/claude-sonnet-4 --catalog openrouter");
+    }
+
+    #[test]
+    fn hint_for_unknown_scheme_uses_last_segment() {
+        let hint = model_add_hint("custom://host/path/model-name");
+        assert_eq!(hint, "vlinder model add model-name");
+    }
+
+    #[test]
+    fn hint_for_bare_string_uses_whole_string() {
+        let hint = model_add_hint("phi3");
+        assert_eq!(hint, "vlinder model add phi3");
+    }
+
+    // ========================================================================
+    // JobId
+    // ========================================================================
+
+    #[test]
+    fn job_id_from_string_round_trip() {
+        let id = JobId::from_string("http://localhost:9000/jobs/abc-123".to_string());
+        assert_eq!(id.as_str(), "http://localhost:9000/jobs/abc-123");
+    }
+
+    #[test]
+    fn job_id_new_contains_registry_prefix() {
+        let registry_id = ResourceId::new("http://127.0.0.1:9000");
+        let id = JobId::new(&registry_id);
+        assert!(id.as_str().starts_with("http://127.0.0.1:9000/jobs/"));
+    }
+
+    #[test]
+    fn job_id_new_generates_unique_ids() {
+        let registry_id = ResourceId::new("http://127.0.0.1:9000");
+        let id1 = JobId::new(&registry_id);
+        let id2 = JobId::new(&registry_id);
+        assert_ne!(id1.as_str(), id2.as_str());
+    }
+
+    // ========================================================================
+    // JobStatus
+    // ========================================================================
+
+    #[test]
+    fn job_status_equality() {
+        assert_eq!(JobStatus::Pending, JobStatus::Pending);
+        assert_eq!(JobStatus::Running, JobStatus::Running);
+        assert_ne!(JobStatus::Pending, JobStatus::Running);
+    }
+
+    // ========================================================================
+    // RegistrationError Display
+    // ========================================================================
+
+    #[test]
+    fn display_duplicate_name() {
+        let err = RegistrationError::DuplicateName("my-agent".into());
+        assert_eq!(format!("{}", err), "agent already registered: my-agent");
+    }
+
+    #[test]
+    fn display_model_not_registered_includes_hint() {
+        let err = RegistrationError::ModelNotRegistered(
+            "phi3".into(),
+            ResourceId::new("ollama://localhost:11434/phi3:latest"),
+        );
+        let msg = format!("{}", err);
+        assert!(msg.contains("phi3"));
+        assert!(msg.contains("vlinder model add"));
+    }
+
+    #[test]
+    fn display_model_in_use_lists_agents() {
+        let err = RegistrationError::ModelInUse(
+            "phi3".into(),
+            vec!["agent-a".into(), "agent-b".into()],
+        );
+        let msg = format!("{}", err);
+        assert!(msg.contains("agent-a"));
+        assert!(msg.contains("agent-b"));
+    }
+
+    #[test]
+    fn display_remote_passes_through() {
+        let err = RegistrationError::Remote("server said no".into());
+        assert_eq!(format!("{}", err), "server said no");
+    }
+}

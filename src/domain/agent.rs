@@ -215,3 +215,126 @@ impl Mount {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_agent(toml: &str) -> Result<Agent, LoadError> {
+        Agent::from_toml(toml)
+    }
+
+    #[test]
+    fn from_toml_minimal_container_agent() {
+        let agent = make_agent(r#"
+            name = "echo"
+            description = "Echoes input"
+            runtime = "container"
+            executable = "localhost/echo:latest"
+
+            [requirements]
+            services = []
+        "#).unwrap();
+
+        assert_eq!(agent.name, "echo");
+        assert_eq!(agent.description, "Echoes input");
+        assert_eq!(agent.runtime, RuntimeType::Container);
+        assert_eq!(agent.executable, "localhost/echo:latest");
+        assert!(agent.mounts.is_empty());
+        assert!(agent.prompts.is_none());
+        assert!(agent.object_storage.is_none());
+        assert!(agent.vector_storage.is_none());
+        assert!(agent.image_digest.is_none());
+    }
+
+    #[test]
+    fn from_toml_with_models() {
+        let agent = make_agent(r#"
+            name = "thinker"
+            description = "Thinks"
+            runtime = "container"
+            executable = "localhost/thinker:latest"
+
+            [requirements]
+            services = ["inference"]
+
+            [requirements.models]
+            phi3 = "ollama://localhost:11434/phi3:latest"
+            nomic = "ollama://localhost:11434/nomic-embed-text:latest"
+        "#).unwrap();
+
+        assert!(agent.has_model("phi3"));
+        assert!(agent.has_model("nomic"));
+        assert!(!agent.has_model("gpt4"));
+        assert_eq!(
+            agent.model_uri("phi3").map(|r| r.as_str()),
+            Some("ollama://localhost:11434/phi3:latest"),
+        );
+    }
+
+    #[test]
+    fn from_toml_with_storage() {
+        let agent = make_agent(r#"
+            name = "noter"
+            description = "Takes notes"
+            runtime = "container"
+            executable = "localhost/noter:latest"
+            object_storage = "sqlite:///data/objects.db"
+            vector_storage = "sqlite:///data/vectors.db"
+
+            [requirements]
+            services = []
+        "#).unwrap();
+
+        assert_eq!(
+            agent.object_storage.as_ref().map(|r| r.as_str()),
+            Some("sqlite:///data/objects.db"),
+        );
+        assert_eq!(
+            agent.vector_storage.as_ref().map(|r| r.as_str()),
+            Some("sqlite:///data/vectors.db"),
+        );
+    }
+
+    #[test]
+    fn from_toml_unknown_runtime_fails() {
+        let result = make_agent(r#"
+            name = "bad"
+            description = "Bad runtime"
+            runtime = "wasm"
+            executable = "agent.wasm"
+
+            [requirements]
+            services = []
+        "#);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn from_toml_invalid_toml_fails() {
+        let result = make_agent("not valid toml {{{}}}");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn placeholder_id_has_pending_scheme() {
+        let id = Agent::placeholder_id("my-agent");
+        assert_eq!(id.as_str(), "pending-registration://agents/my-agent");
+    }
+
+    #[test]
+    fn model_uri_returns_none_for_undeclared() {
+        let agent = make_agent(r#"
+            name = "simple"
+            description = "No models"
+            runtime = "container"
+            executable = "localhost/simple:latest"
+
+            [requirements]
+            services = []
+        "#).unwrap();
+
+        assert!(agent.model_uri("nonexistent").is_none());
+    }
+}

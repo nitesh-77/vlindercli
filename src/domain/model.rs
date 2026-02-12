@@ -158,3 +158,122 @@ impl std::fmt::Display for LoadError {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::model_manifest::{ModelManifest, ModelTypeConfig, ModelEngineConfig};
+
+    // ========================================================================
+    // name_from_model_path
+    // ========================================================================
+
+    #[test]
+    fn name_from_ollama_uri_strips_authority() {
+        let name = name_from_model_path(
+            "ollama://localhost:11434/nomic-embed-text:latest",
+            EngineType::Ollama,
+        );
+        assert_eq!(name, "nomic-embed-text:latest");
+    }
+
+    #[test]
+    fn name_from_openrouter_uri_keeps_full_path() {
+        let name = name_from_model_path(
+            "openrouter://anthropic/claude-sonnet-4",
+            EngineType::OpenRouter,
+        );
+        assert_eq!(name, "anthropic/claude-sonnet-4");
+    }
+
+    #[test]
+    fn name_from_memory_uri_strips_authority() {
+        let name = name_from_model_path(
+            "memory://test/my-model",
+            EngineType::InMemory,
+        );
+        assert_eq!(name, "my-model");
+    }
+
+    #[test]
+    fn name_from_bare_string_returns_as_is() {
+        let name = name_from_model_path("phi3", EngineType::Ollama);
+        assert_eq!(name, "phi3");
+    }
+
+    #[test]
+    fn name_from_ollama_uri_without_path_falls_back() {
+        let name = name_from_model_path("ollama://localhost:11434", EngineType::Ollama);
+        assert_eq!(name, "ollama://localhost:11434");
+    }
+
+    // ========================================================================
+    // EngineType::as_backend_str
+    // ========================================================================
+
+    #[test]
+    fn engine_backend_strings() {
+        assert_eq!(EngineType::Ollama.as_backend_str(), "ollama");
+        assert_eq!(EngineType::OpenRouter.as_backend_str(), "openrouter");
+        assert_eq!(EngineType::InMemory.as_backend_str(), "memory");
+    }
+
+    // ========================================================================
+    // Model::from_manifest
+    // ========================================================================
+
+    #[test]
+    fn model_from_manifest_ollama() {
+        let manifest = ModelManifest {
+            name: None,
+            model_type: ModelTypeConfig::Inference,
+            engine: ModelEngineConfig::Ollama,
+            model_path: "ollama://localhost:11434/phi3:latest".to_string(),
+        };
+        let model = Model::from_manifest(manifest, "sha256:abc123".to_string());
+
+        assert_eq!(model.name, "phi3:latest");
+        assert_eq!(model.engine, EngineType::Ollama);
+        assert_eq!(model.model_type, ModelType::Inference);
+        assert_eq!(model.digest, "sha256:abc123");
+        assert_eq!(model.model_path.as_str(), "ollama://localhost:11434/phi3:latest");
+    }
+
+    #[test]
+    fn model_from_manifest_openrouter() {
+        let manifest = ModelManifest {
+            name: None,
+            model_type: ModelTypeConfig::Inference,
+            engine: ModelEngineConfig::OpenRouter,
+            model_path: "openrouter://anthropic/claude-sonnet-4".to_string(),
+        };
+        let model = Model::from_manifest(manifest, String::new());
+
+        assert_eq!(model.name, "anthropic/claude-sonnet-4");
+        assert_eq!(model.engine, EngineType::OpenRouter);
+    }
+
+    #[test]
+    fn model_from_manifest_embedding() {
+        let manifest = ModelManifest {
+            name: None,
+            model_type: ModelTypeConfig::Embedding,
+            engine: ModelEngineConfig::Ollama,
+            model_path: "ollama://localhost:11434/nomic-embed-text:latest".to_string(),
+        };
+        let model = Model::from_manifest(manifest, String::new());
+
+        assert_eq!(model.model_type, ModelType::Embedding);
+        assert_eq!(model.name, "nomic-embed-text:latest");
+    }
+
+    // ========================================================================
+    // Model::placeholder_id
+    // ========================================================================
+
+    #[test]
+    fn placeholder_id_has_pending_scheme() {
+        let id = Model::placeholder_id("phi3");
+        assert_eq!(id.as_str(), "pending-registration://models/phi3");
+    }
+}

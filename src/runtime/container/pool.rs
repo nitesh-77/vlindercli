@@ -186,5 +186,25 @@ impl ContainerPool {
     pub(crate) fn final_state(&self, name: &str) -> Option<String> {
         self.containers.get(name).and_then(|mc| mc.bridge.final_state())
     }
+}
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn image_policy_from_config_pinned() {
+        assert_eq!(ImagePolicy::from_config("pinned"), ImagePolicy::Pinned);
+    }
+
+    #[test]
+    fn image_policy_from_config_mutable() {
+        assert_eq!(ImagePolicy::from_config("mutable"), ImagePolicy::Mutable);
+    }
+
+    #[test]
+    fn image_policy_from_config_default_is_mutable() {
+        assert_eq!(ImagePolicy::from_config(""), ImagePolicy::Mutable);
+        assert_eq!(ImagePolicy::from_config("unknown"), ImagePolicy::Mutable);
+    }
 }
