@@ -15,6 +15,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::image_digest::ImageDigest;
+use super::image_ref::ImageRef;
 
 // ============================================================================
 // InvokeDiagnostics — Harness
@@ -141,7 +142,7 @@ pub struct ContainerRuntimeInfo {
     /// Podman engine version (e.g., "5.3.1").
     pub engine_version: String,
     /// OCI image reference (e.g., "localhost/echo-agent:latest").
-    pub image_ref: String,
+    pub image_ref: Option<ImageRef>,
     /// Image digest (e.g., "sha256:a80c4f17..."), if resolved.
     pub image_digest: Option<ImageDigest>,
     /// Container ID for this execution.
@@ -158,7 +159,7 @@ impl ContainerDiagnostics {
             stderr: Vec::new(),
             runtime: ContainerRuntimeInfo {
                 engine_version: "unknown".to_string(),
-                image_ref: "unknown".to_string(),
+                image_ref: None,
                 image_digest: None,
                 container_id: "unknown".to_string(),
             },
@@ -302,7 +303,7 @@ mod tests {
             stderr: b"INFO: loaded model".to_vec(),
             runtime: ContainerRuntimeInfo {
                 engine_version: "5.3.1".to_string(),
-                image_ref: "localhost/echo-agent:latest".to_string(),
+                image_ref: Some(ImageRef::parse("localhost/echo-agent:latest").unwrap()),
                 image_digest: Some(ImageDigest::parse("sha256:abc123").unwrap()),
                 container_id: "def456".to_string(),
             },
@@ -319,7 +320,7 @@ mod tests {
             stderr: b"WARN: truncated".to_vec(),
             runtime: ContainerRuntimeInfo {
                 engine_version: "5.3.1".to_string(),
-                image_ref: "localhost/support-agent:latest".to_string(),
+                image_ref: Some(ImageRef::parse("localhost/support-agent:latest").unwrap()),
                 image_digest: Some(ImageDigest::parse("sha256:a80c4f17").unwrap()),
                 container_id: "abc123def456".to_string(),
             },

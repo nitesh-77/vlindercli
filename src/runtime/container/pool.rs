@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::domain::{Agent, ImageDigest, QueueBridge, ContainerDiagnostics, ContainerRuntimeInfo, InvokeMessage};
+use crate::domain::{Agent, ImageDigest, ImageRef, QueueBridge, ContainerDiagnostics, ContainerRuntimeInfo, InvokeMessage};
 
 use super::podman::{Podman, PodmanCli};
 
@@ -16,8 +16,8 @@ pub(super) struct ManagedContainer {
     container_id: String,
     host_port: u16,
     pub(super) bridge: Arc<QueueBridge>,
-    /// What was passed to `podman run` (tag in mutable mode, digest in pinned mode).
-    image_ref: String,
+    /// The OCI image reference (always `agent.executable` — identifies *which* image).
+    image_ref: ImageRef,
     /// Content-addressed digest from `podman image inspect` at container start.
     /// None if the inspect failed.
     image_digest: Option<ImageDigest>,
@@ -92,13 +92,17 @@ impl ContainerPool {
         agent: &Agent,
         bridge: Arc<QueueBridge>,
     ) -> Result<(u16, Arc<QueueBridge>), String> {
-        // Select image reference based on policy (ADR 073)
-        let image = match self.image_policy {
+        // Select what to pass to `podman run` based on policy (ADR 073)
+        let run_image = match self.image_policy {
             ImagePolicy::Mutable => agent.executable.clone(),
             ImagePolicy::Pinned => agent.image_digest.as_ref()
                 .map(|d| d.as_str().to_string())
                 .unwrap_or_else(|| agent.executable.clone()),
         };
+
+        // image_ref always records *which* image, not *which bytes*
+        let image_ref = ImageRef::parse(&agent.executable)
+            .unwrap_or_else(|_| ImageRef::parse("unknown/unknown").unwrap());
 
         // Build volume mount flags from agent manifest (ADR 057)
         let mount_flags: Vec<String> = agent.mounts.iter().map(|m| {
@@ -106,11 +110,10 @@ impl ContainerPool {
             format!("{}:{}:{}", m.host_path, m.guest_path.display(), mode)
         }).collect();
 
-        let container_id = self.podman.run(&image, &mount_flags)?;
+        let container_id = self.podman.run(&run_image, &mount_flags)?;
 
         // Capture image metadata for diagnostics (ADR 073)
-        let image_digest = self.podman.image_digest(&image);
-        let image_ref = image;
+        let image_digest = self.podman.image_digest(&run_image);
 
         // Discover the mapped host port
         let host_port = self.podman.port(&container_id)?;
@@ -124,6 +127,7 @@ impl ContainerPool {
             container = %container_id,
             port = host_port,
             image_ref = %image_ref,
+            run_image = %run_image,
             image_digest = image_digest.as_ref().map(|d| d.as_str()).unwrap_or("unknown"),
             "Container started"
         );
@@ -172,7 +176,7 @@ impl ContainerPool {
                     engine_version: self.engine_version.as_ref()
                         .map(|v| v.to_string())
                         .unwrap_or_else(|| "unknown".to_string()),
-                    image_ref: mc.image_ref.clone(),
+                    image_ref: Some(mc.image_ref.clone()),
                     image_digest: mc.image_digest.clone(),
                     container_id: mc.container_id.clone(),
                 },
