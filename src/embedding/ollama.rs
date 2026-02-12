@@ -32,12 +32,13 @@ impl EmbeddingEngine for OllamaEmbeddingEngine {
             input: text,
         };
 
-        let response = ureq::post(&url)
+        let mut response = ureq::post(&url)
             .send_json(&request)
             .map_err(|e| format!("ollama request failed: {}", e))?;
 
         let body: EmbedResponse = response
-            .into_json()
+            .body_mut()
+            .read_json()
             .map_err(|e| format!("failed to parse ollama response: {}", e))?;
 
         body.embeddings

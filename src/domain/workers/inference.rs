@@ -9,29 +9,12 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
 
-use serde::Deserialize;
-
 use crate::domain::{InferenceEngine, InferenceResult};
 use crate::domain::registry::Registry;
+use crate::domain::service_payloads::InferRequest;
 use crate::inference::open_inference_engine;
 use crate::domain::{MessageQueue, RequestMessage, ResponseMessage, ServiceDiagnostics, ServiceMetrics};
 use crate::services::inference;
-
-// ============================================================================
-// Request Types (queue protocol)
-// ============================================================================
-
-#[derive(Debug, Deserialize)]
-struct InferRequest {
-    model: String,
-    prompt: String,
-    #[serde(default = "default_max_tokens")]
-    max_tokens: u32,
-}
-
-fn default_max_tokens() -> u32 {
-    256
-}
 
 // ============================================================================
 // Handler

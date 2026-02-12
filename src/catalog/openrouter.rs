@@ -61,15 +61,16 @@ impl ModelCatalog for OpenRouterCatalog {
 
         let mut request = ureq::get(&url);
         if !self.api_key.is_empty() {
-            request = request.set("Authorization", &format!("Bearer {}", self.api_key));
+            request = request.header("Authorization", &format!("Bearer {}", self.api_key));
         }
 
-        let response = request
+        let mut response = request
             .call()
             .map_err(|e| CatalogError::Network(e.to_string()))?;
 
         let body: ModelsResponse = response
-            .into_json()
+            .body_mut()
+            .read_json()
             .map_err(|e| CatalogError::Parse(e.to_string()))?;
 
         Ok(body

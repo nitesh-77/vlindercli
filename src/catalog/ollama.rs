@@ -61,12 +61,13 @@ impl ModelCatalog for OllamaCatalog {
     fn list(&self) -> Result<Vec<ModelInfo>, CatalogError> {
         let url = format!("{}/api/tags", self.endpoint);
 
-        let response = ureq::get(&url)
+        let mut response = ureq::get(&url)
             .call()
             .map_err(|e| CatalogError::Network(e.to_string()))?;
 
         let body: TagsResponse = response
-            .into_json()
+            .body_mut()
+            .read_json()
             .map_err(|e| CatalogError::Parse(e.to_string()))?;
 
         Ok(body

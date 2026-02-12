@@ -31,6 +31,7 @@ impl ContainerRuntime {
         queue: Arc<dyn MessageQueue + Send + Sync>,
         registry: Arc<dyn Registry>,
         image_policy: ImagePolicy,
+        podman_socket: &str,
     ) -> Self {
         let id = ResourceId::new(format!(
             "{}/runtimes/{}",
@@ -42,7 +43,7 @@ impl ContainerRuntime {
             queue,
             registry,
             running: HashMap::new(),
-            pool: ContainerPool::new(image_policy),
+            pool: ContainerPool::new(image_policy, podman_socket),
         }
     }
 
@@ -342,7 +343,7 @@ mod tests {
     #[test]
     fn runtime_id_format() {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
-        let runtime = ContainerRuntime::new(&test_registry_id(), queue, test_registry(), ImagePolicy::Mutable);
+        let runtime = ContainerRuntime::new(&test_registry_id(), queue, test_registry(), ImagePolicy::Mutable, "disabled");
 
         assert_eq!(runtime.id().as_str(), "http://test:9000/runtimes/container");
         assert_eq!(runtime.runtime_type(), RuntimeType::Container);
@@ -351,7 +352,7 @@ mod tests {
     #[test]
     fn tick_returns_false_when_no_agents() {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
-        let mut runtime = ContainerRuntime::new(&test_registry_id(), queue, test_registry(), ImagePolicy::Mutable);
+        let mut runtime = ContainerRuntime::new(&test_registry_id(), queue, test_registry(), ImagePolicy::Mutable, "disabled");
 
         assert!(!runtime.tick());
     }

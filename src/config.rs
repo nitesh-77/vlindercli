@@ -202,7 +202,7 @@ pub struct DagWorkerCounts {
 
 /// Container runtime configuration.
 ///
-/// Controls how the container runtime resolves OCI images.
+/// Controls how the container runtime resolves OCI images and connects to Podman.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct RuntimeConfig {
@@ -213,6 +213,10 @@ pub struct RuntimeConfig {
     /// - `pinned`: Uses the content-addressed digest from `agent.image_digest` —
     ///   deterministic execution with the exact image from registration time.
     pub image_policy: String,
+
+    /// Podman socket path: "auto" (probe filesystem), "disabled" (CLI only),
+    /// or an absolute path to the socket file.
+    pub podman_socket: String,
 }
 
 // ============================================================================
@@ -338,6 +342,7 @@ impl Default for RuntimeConfig {
     fn default() -> Self {
         Self {
             image_policy: "mutable".to_string(),
+            podman_socket: "auto".to_string(),
         }
     }
 }
@@ -431,9 +436,12 @@ impl Config {
             self.distributed.workers.dag.capture = v.parse().unwrap_or(1);
         }
 
-        // Runtime (ADR 073)
+        // Runtime (ADR 073, ADR 077)
         if let Ok(v) = std::env::var("VLINDER_RUNTIME_IMAGE_POLICY") {
             self.runtime.image_policy = v;
+        }
+        if let Ok(v) = std::env::var("VLINDER_RUNTIME_PODMAN_SOCKET") {
+            self.runtime.podman_socket = v;
         }
     }
 

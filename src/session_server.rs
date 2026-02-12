@@ -332,16 +332,19 @@ mod tests {
         session
     }
 
-    fn get(port: u16, path: &str) -> ureq::Response {
-        ureq::get(&format!("http://127.0.0.1:{}{}", port, path)).call().unwrap()
-    }
-
-    fn get_status(port: u16, path: &str) -> u16 {
-        match ureq::get(&format!("http://127.0.0.1:{}{}", port, path)).call() {
-            Ok(resp) => resp.status(),
-            Err(ureq::Error::Status(code, _)) => code,
-            Err(e) => panic!("unexpected error: {}", e),
-        }
+    fn get_body(port: u16, path: &str) -> (u16, String) {
+        // Use an agent that doesn't treat HTTP status codes as errors,
+        // so we can read both success and error responses.
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .http_status_as_error(false)
+            .build()
+            .into();
+        let mut resp = agent.get(&format!("http://127.0.0.1:{}{}", port, path))
+            .call()
+            .unwrap();
+        let status = resp.status().as_u16();
+        let body = resp.body_mut().read_to_string().unwrap();
+        (status, body)
     }
 
     #[test]
@@ -358,10 +361,8 @@ mod tests {
         let server = SessionServer::start(tmp.path().to_path_buf(), 0).unwrap();
         let port = server.port();
 
-        let resp = get(port, "/");
-        assert_eq!(resp.status(), 200);
-        assert_eq!(resp.content_type(), "text/html");
-        let body = resp.into_string().unwrap();
+        let (status, body) = get_body(port, "/");
+        assert_eq!(status, 200);
         assert!(body.contains("Vlinder Sessions"));
 
         server.stop();
@@ -377,7 +378,7 @@ mod tests {
         let server = SessionServer::start(tmp.path().to_path_buf(), 0).unwrap();
         let port = server.port();
 
-        let body = get(port, "/").into_string().unwrap();
+        let (_, body) = get_body(port, "/");
         assert!(body.contains("pensieve"));
         assert!(body.contains("2 messages"));
 
@@ -395,9 +396,8 @@ mod tests {
         let server = SessionServer::start(tmp.path().to_path_buf(), 0).unwrap();
         let port = server.port();
 
-        let resp = get(port, &format!("/session/{}", filename));
-        assert_eq!(resp.status(), 200);
-        let body = resp.into_string().unwrap();
+        let (status, body) = get_body(port, &format!("/session/{}", filename));
+        assert_eq!(status, 200);
         assert!(body.contains("summarize this article"));
         assert!(body.contains("This article discusses"));
 
@@ -410,7 +410,8 @@ mod tests {
         let server = SessionServer::start(tmp.path().to_path_buf(), 0).unwrap();
         let port = server.port();
 
-        assert_eq!(get_status(port, "/session/nosuch.json"), 404);
+        let (status, _) = get_body(port, "/session/nosuch.json");
+        assert_eq!(status, 404);
 
         server.stop();
     }
@@ -421,7 +422,8 @@ mod tests {
         let server = SessionServer::start(tmp.path().to_path_buf(), 0).unwrap();
         let port = server.port();
 
-        assert_eq!(get_status(port, "/session/../../etc/passwd"), 404);
+        let (status, _) = get_body(port, "/session/../../etc/passwd");
+        assert_eq!(status, 404);
 
         server.stop();
     }

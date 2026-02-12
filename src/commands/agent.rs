@@ -292,7 +292,7 @@ fn scaffold(language: &Language, name: &str) {
 
 /// Download a URL to a temporary file and return the path.
 fn download_tarball(url: &str) -> Result<PathBuf, String> {
-    let resp = ureq::get(url)
+    let mut resp = ureq::get(url)
         .call()
         .map_err(|e| format!("{}", e))?;
 
@@ -302,7 +302,7 @@ fn download_tarball(url: &str) -> Result<PathBuf, String> {
     let mut file = std::fs::File::create(&tmp_path)
         .map_err(|e| format!("failed to create temp file: {}", e))?;
 
-    std::io::copy(&mut resp.into_reader(), &mut file)
+    std::io::copy(&mut resp.body_mut().as_reader(), &mut file)
         .map_err(|e| format!("failed to write temp file: {}", e))?;
 
     Ok(tmp_path)

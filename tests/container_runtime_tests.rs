@@ -37,6 +37,7 @@ fn container_runtime_executes_echo_agent() {
         Arc::clone(&queue),
         registry,
         vlindercli::runtime::ImagePolicy::Mutable,
+        "auto",
     );
 
     // Send InvokeMessage

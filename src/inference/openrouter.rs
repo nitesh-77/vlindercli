@@ -40,13 +40,14 @@ impl InferenceEngine for OpenRouterInferenceEngine {
             max_tokens,
         };
 
-        let response = ureq::post(&url)
-            .set("Authorization", &format!("Bearer {}", self.api_key))
+        let mut response = ureq::post(&url)
+            .header("Authorization", &format!("Bearer {}", self.api_key))
             .send_json(&request)
             .map_err(|e| format!("openrouter request failed: {}", e))?;
 
         let body: ChatCompletionResponse = response
-            .into_json()
+            .body_mut()
+            .read_json()
             .map_err(|e| format!("failed to parse openrouter response: {}", e))?;
 
         let text = body.choices

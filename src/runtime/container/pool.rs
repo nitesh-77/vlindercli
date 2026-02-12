@@ -9,7 +9,8 @@ use std::sync::Arc;
 
 use crate::domain::{Agent, ImageDigest, ImageRef, QueueBridge, ContainerDiagnostics, ContainerRuntimeInfo, InvokeMessage};
 
-use super::podman::{Podman, PodmanCli};
+use super::podman::{Podman, PodmanCli, resolve_socket};
+use super::podman_socket::PodmanSocket;
 
 /// A long-running container managed by the pool.
 pub(super) struct ManagedContainer {
@@ -56,8 +57,20 @@ pub(crate) struct ContainerPool {
 
 impl ContainerPool {
     /// Create a new pool, detecting the Podman engine version.
-    pub(crate) fn new(image_policy: ImagePolicy) -> Self {
-        let podman = Box::new(PodmanCli);
+    ///
+    /// Selects socket API or CLI based on the `podman_socket` config value (ADR 077).
+    pub(crate) fn new(image_policy: ImagePolicy, podman_socket_config: &str) -> Self {
+        let podman: Box<dyn Podman> = match resolve_socket(podman_socket_config) {
+            Some(path) => {
+                tracing::info!(event = "podman.socket", path = %path.display(), "Using Podman socket API");
+                Box::new(PodmanSocket::new(&path))
+            }
+            None => {
+                tracing::info!(event = "podman.cli", "Using Podman CLI");
+                Box::new(PodmanCli)
+            }
+        };
+
         let engine_version = podman.engine_version();
         if let Some(ref v) = engine_version {
             tracing::info!(event = "podman.detected", version = %v, "Podman engine detected");
