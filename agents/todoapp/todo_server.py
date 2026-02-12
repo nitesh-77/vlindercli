@@ -1,5 +1,8 @@
 """Todo app agent — natural language todo list powered by OpenRouter + Ollama.
 
+State machine version (ADR 075). Each service call is a separate step.
+The agent tracks its progress via ctx.state["step"].
+
 Commands (matched by prefix, case-insensitive):
   add <text>      — Add a new todo item (also embeds it for search)
   list            — Show all todos
@@ -10,108 +13,28 @@ Commands (matched by prefix, case-insensitive):
   <anything else> — Ask the LLM for advice about your todos
 """
 
-import base64
 import json
-import os
-import urllib.request
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from vlinder import Agent
 
-BRIDGE = os.environ.get("VLINDER_BRIDGE_URL", "")
+agent = Agent()
+
 INFER_MODEL = "claude-sonnet"
 EMBED_MODEL = "nomic-embed"
 TODOS_PATH = "/todos.json"
 
 
 # =============================================================================
-# Bridge helpers
+# Pure helpers (no service calls)
 # =============================================================================
 
-def bridge_call(path, body):
-    """POST to a bridge endpoint and return the response body."""
-    url = f"{BRIDGE}{path}"
-    data = json.dumps(body).encode()
-    req = urllib.request.Request(url, data=data, method="POST")
-    req.add_header("Content-Type", "application/json")
-    with urllib.request.urlopen(req) as resp:
-        return resp.read()
-
-
-def infer(prompt, max_tokens=256):
-    """Call the inference bridge endpoint."""
-    result = bridge_call("/infer", {
-        "model": INFER_MODEL,
-        "prompt": prompt,
-        "max_tokens": max_tokens,
-    })
-    return result.decode()
-
-
-def embed(text):
-    """Get embedding vector for text via Ollama."""
-    result = bridge_call("/embed", {
-        "model": EMBED_MODEL,
-        "text": text,
-    })
-    # Bridge returns the raw float array as JSON
-    return json.loads(result)
-
-
-def kv_get(path):
-    """Read a value from KV storage. Returns None if not found."""
-    try:
-        result = bridge_call("/kv/get", {"path": path})
-        return result
-    except Exception:
-        return None
-
-
-def kv_put(path, content):
-    """Write a value to KV storage."""
-    encoded = base64.b64encode(content).decode()
-    bridge_call("/kv/put", {"path": path, "content": encoded})
-
-
-def vector_store(key, vector, metadata):
-    """Store a vector with metadata."""
-    bridge_call("/vector/store", {
-        "key": key,
-        "vector": vector,
-        "metadata": metadata,
-    })
-
-
-def vector_search(vector, limit=5):
-    """Search for similar vectors. Returns JSON array of results."""
-    result = bridge_call("/vector/search", {
-        "vector": vector,
-        "limit": limit,
-    })
-    return json.loads(result)
-
-
-def vector_delete(key):
-    """Delete a vector by key."""
-    bridge_call("/vector/delete", {"key": key})
-
-
-# =============================================================================
-# Todo storage
-# =============================================================================
-
-def load_todos():
-    """Load todos from KV storage."""
-    data = kv_get(TODOS_PATH)
-    if data is None or data == b"":
-        return []
-    try:
-        return json.loads(data)
-    except (json.JSONDecodeError, ValueError):
-        return []
-
-
-def save_todos(todos):
-    """Save todos to KV storage."""
-    kv_put(TODOS_PATH, json.dumps(todos).encode())
+def parse_payload(raw_input):
+    """Extract the current command and conversation history from the payload."""
+    lines = raw_input.strip().splitlines()
+    if lines and lines[-1].startswith("User: "):
+        current = lines[-1][len("User: "):]
+        history = lines[:-1]
+        return current, history
+    return raw_input.strip(), []
 
 
 def format_todos(todos):
@@ -125,222 +48,225 @@ def format_todos(todos):
     return "\n".join(lines)
 
 
-def todo_key(index):
-    """Vector storage key for a todo by index."""
-    return f"todo-{index}"
+def parse_todos(data):
+    """Parse todos from KvGet response bytes."""
+    if not data or len(data) == 0:
+        return []
+    try:
+        return json.loads(data)
+    except (json.JSONDecodeError, ValueError):
+        return []
 
 
 # =============================================================================
-# Command handling
+# Event handlers
 # =============================================================================
 
-def parse_payload(raw_input):
-    """Extract the current command and conversation history from the payload.
-
-    The harness sends enriched payloads with history prepended:
-        User: add buy milk
-        Agent: Added: buy milk
-        User: what should I prioritize?
-
-    Returns (current_command, history_lines).
-    If there's no history format, treats the entire input as the command.
-    """
-    lines = raw_input.strip().splitlines()
-
-    # Check if the payload uses the session history format
-    if lines and lines[-1].startswith("User: "):
-        current = lines[-1][len("User: "):]
-        history = lines[:-1]
-        return current, history
-
-    # No history format — raw single-line input
-    return raw_input.strip(), []
-
-
-def handle_command(raw_input):
-    """Parse and execute a todo command. Returns response text."""
-    current_input, history = parse_payload(raw_input)
+@agent.on_invoke
+def handle_invoke(ctx):
+    current_input, history = parse_payload(ctx.input)
     text = current_input.strip()
-    if not text:
-        return "Send a command: add, list, done, remove, clear, search, or ask a question."
 
+    if not text:
+        ctx.complete("Send a command: add, list, done, remove, clear, search, or ask a question.")
+        return
+
+    ctx.state["raw_input"] = text
+    ctx.state["history"] = history
     lower = text.lower()
 
-    # --- add ---
-    if lower.startswith("add "):
-        item_text = text[4:].strip()
-        if not item_text:
-            return "Usage: add <todo text>"
-        todos = load_todos()
-        todos.append({"text": item_text, "done": False})
-        save_todos(todos)
-
-        # Embed and store for semantic search
-        try:
-            vector = embed(item_text)
-            vector_store(todo_key(len(todos) - 1), vector, item_text)
-        except Exception as e:
-            pass  # Non-fatal — search won't find this item
-
-        return f"Added: {item_text}\n\n{format_todos(todos)}"
-
-    # --- list ---
-    if lower in ("list", "ls", "show"):
-        todos = load_todos()
-        return format_todos(todos)
-
-    # --- search ---
+    # Search needs embedding first, not todos
     if lower.startswith("search "):
         query = text[7:].strip()
         if not query:
-            return "Usage: search <query>"
-        return search_todos(query)
+            ctx.complete("Usage: search <query>")
+            return
+        ctx.state["cmd"] = "search"
+        ctx.state["query"] = query
+        ctx.state["step"] = "embed_query"
+        ctx.embed(EMBED_MODEL, query)
+        return
 
-    # --- done ---
-    if lower.startswith("done "):
-        return toggle_done(text[5:].strip(), True)
-
-    # --- undo ---
-    if lower.startswith("undo "):
-        return toggle_done(text[5:].strip(), False)
-
-    # --- remove ---
-    if lower.startswith("remove ") or lower.startswith("rm "):
+    # Parse command, then load todos
+    if lower.startswith("add "):
+        ctx.state["cmd"] = "add"
+        ctx.state["item_text"] = text[4:].strip()
+    elif lower in ("list", "ls", "show"):
+        ctx.state["cmd"] = "list"
+    elif lower.startswith("done "):
+        ctx.state["cmd"] = "done"
+        ctx.state["num"] = text[5:].strip()
+    elif lower.startswith("undo "):
+        ctx.state["cmd"] = "undo"
+        ctx.state["num"] = text[5:].strip()
+    elif lower.startswith("remove ") or lower.startswith("rm "):
         parts = text.split(maxsplit=1)
-        return remove_todo(parts[1].strip() if len(parts) > 1 else "")
+        ctx.state["cmd"] = "remove"
+        ctx.state["num"] = parts[1].strip() if len(parts) > 1 else ""
+    elif lower in ("clear", "clean"):
+        ctx.state["cmd"] = "clear"
+    else:
+        ctx.state["cmd"] = "ask"
 
-    # --- clear ---
-    if lower in ("clear", "clean"):
-        todos = load_todos()
+    ctx.state["step"] = "load_todos"
+    ctx.kv_get(TODOS_PATH)
+
+
+@agent.on_kv_get
+def handle_kv_get(ctx):
+    todos = parse_todos(ctx.data)
+    cmd = ctx.state["cmd"]
+
+    if cmd == "list":
+        ctx.complete(format_todos(todos))
+        return
+
+    if cmd == "add":
+        item_text = ctx.state["item_text"]
+        if not item_text:
+            ctx.complete("Usage: add <todo text>")
+            return
+        todos.append({"text": item_text, "done": False})
+        ctx.state["todos_json"] = json.dumps(todos)
+        ctx.state["response"] = f"Added: {item_text}\n\n{format_todos(todos)}"
+        ctx.state["step"] = "save_after_add"
+        ctx.kv_put(TODOS_PATH, json.dumps(todos))
+        return
+
+    if cmd in ("done", "undo"):
+        is_done = cmd == "done"
+        try:
+            idx = int(ctx.state["num"]) - 1
+        except ValueError:
+            ctx.complete(f"Usage: {cmd} <number>")
+            return
+        if idx < 0 or idx >= len(todos):
+            ctx.complete(f"No todo #{idx + 1}. You have {len(todos)} todo(s).")
+            return
+        todos[idx]["done"] = is_done
+        verb = "Completed" if is_done else "Reopened"
+        ctx.state["response"] = f"{verb}: {todos[idx]['text']}\n\n{format_todos(todos)}"
+        ctx.state["step"] = "save_final"
+        ctx.kv_put(TODOS_PATH, json.dumps(todos))
+        return
+
+    if cmd == "remove":
+        try:
+            idx = int(ctx.state["num"]) - 1
+        except ValueError:
+            ctx.complete("Usage: remove <number>")
+            return
+        if idx < 0 or idx >= len(todos):
+            ctx.complete(f"No todo #{idx + 1}. You have {len(todos)} todo(s).")
+            return
+        removed = todos.pop(idx)
+        ctx.state["removed_text"] = removed["text"]
+        ctx.state["response"] = f"Removed: {removed['text']}\n\n{format_todos(todos)}"
+        ctx.state["step"] = "save_after_remove"
+        ctx.kv_put(TODOS_PATH, json.dumps(todos))
+        return
+
+    if cmd == "clear":
         remaining = [t for t in todos if not t.get("done")]
         removed_count = len(todos) - len(remaining)
-        # Re-index vectors for remaining todos
-        reindex_vectors(remaining)
-        save_todos(remaining)
-        return f"Cleared {removed_count} completed todo(s).\n\n{format_todos(remaining)}"
+        ctx.state["response"] = f"Cleared {removed_count} completed todo(s).\n\n{format_todos(remaining)}"
+        ctx.state["step"] = "save_final"
+        ctx.kv_put(TODOS_PATH, json.dumps(remaining))
+        return
 
-    # --- anything else: ask the LLM ---
-    return ask_llm(text, history)
+    if cmd == "ask":
+        todo_list = format_todos(todos) if todos else "(empty list)"
+        question = ctx.state["raw_input"]
+        history = ctx.state.get("history", [])
+        parts = [
+            "You are a helpful todo list assistant.",
+            f"Here are the user's current todos:\n{todo_list}",
+        ]
+        if history:
+            parts.append("Recent conversation:\n" + "\n".join(history))
+        parts.append(f"The user asks: {question}")
+        parts.append("Give a brief, helpful response.")
+        ctx.state["step"] = "ask_llm"
+        ctx.infer(INFER_MODEL, "\n\n".join(parts), 256)
+        return
 
 
-def search_todos(query):
-    """Find todos similar to the query using vector search."""
-    try:
-        query_vector = embed(query)
-        results = vector_search(query_vector, limit=5)
-    except Exception as e:
-        return f"[search error] {e}"
+@agent.on_kv_put
+def handle_kv_put(ctx):
+    step = ctx.state.get("step", "")
 
-    if not results:
-        return "No matching todos found."
+    if step == "save_after_add":
+        # Embed the new item for semantic search
+        item_text = ctx.state["item_text"]
+        ctx.state["step"] = "embed_new_item"
+        ctx.embed(EMBED_MODEL, item_text)
+        return
 
+    if step == "save_after_remove":
+        # Delete the vector for the removed item
+        removed_text = ctx.state["removed_text"]
+        ctx.state["step"] = "delete_removed_vector"
+        ctx.vector_delete(removed_text)
+        return
+
+    # save_final — done
+    ctx.complete(ctx.state.get("response", "Done"))
+
+
+@agent.on_embed
+def handle_embed(ctx):
+    step = ctx.state.get("step", "")
+
+    if step == "embed_query":
+        # Got query embedding, now search
+        ctx.state["step"] = "search_vectors"
+        ctx.vector_search(ctx.vector, 5)
+        return
+
+    if step == "embed_new_item":
+        # Got item embedding, store it (use text as key for easy deletion)
+        item_text = ctx.state["item_text"]
+        ctx.state["step"] = "store_new_vector"
+        ctx.vector_store(item_text, ctx.vector, item_text)
+        return
+
+
+@agent.on_vec_store
+def handle_vec_store(ctx):
+    ctx.complete(ctx.state.get("response", "Done"))
+
+
+@agent.on_vec_search
+def handle_vec_search(ctx):
+    if not ctx.matches:
+        ctx.complete("No matching todos found.")
+        return
     lines = ["Search results:"]
-    for r in results:
+    for r in ctx.matches:
         metadata = r.get("metadata", r.get("key", "?"))
         lines.append(f"  - {metadata}")
-    return "\n".join(lines)
+    ctx.complete("\n".join(lines))
 
 
-def toggle_done(num_str, done):
-    """Mark a todo as done or not done."""
-    try:
-        idx = int(num_str) - 1
-    except ValueError:
-        return f"Usage: {'done' if done else 'undo'} <number>"
-
-    todos = load_todos()
-    if idx < 0 or idx >= len(todos):
-        return f"No todo #{idx + 1}. You have {len(todos)} todo(s)."
-
-    todos[idx]["done"] = done
-    save_todos(todos)
-    verb = "Completed" if done else "Reopened"
-    return f"{verb}: {todos[idx]['text']}\n\n{format_todos(todos)}"
+@agent.on_vec_delete
+def handle_vec_delete(ctx):
+    ctx.complete(ctx.state.get("response", "Done"))
 
 
-def remove_todo(num_str):
-    """Remove a todo by number."""
-    try:
-        idx = int(num_str) - 1
-    except ValueError:
-        return "Usage: remove <number>"
-
-    todos = load_todos()
-    if idx < 0 or idx >= len(todos):
-        return f"No todo #{idx + 1}. You have {len(todos)} todo(s)."
-
-    removed = todos.pop(idx)
-    save_todos(todos)
-
-    # Re-index vectors after removal
-    reindex_vectors(todos)
-
-    return f"Removed: {removed['text']}\n\n{format_todos(todos)}"
+@agent.on_infer
+def handle_infer(ctx):
+    ctx.complete(ctx.text)
 
 
-def reindex_vectors(todos):
-    """Re-embed and store all todos with correct indices."""
-    # Delete old vectors then re-store
-    for i, todo in enumerate(todos):
-        try:
-            vector = embed(todo["text"])
-            vector_store(todo_key(i), vector, todo["text"])
-        except Exception:
-            pass
-
-
-def ask_llm(question, history=None):
-    """Send the question + current todos + conversation history to the LLM."""
-    todos = load_todos()
-    todo_list = format_todos(todos) if todos else "(empty list)"
-
-    parts = [
-        "You are a helpful todo list assistant.",
-        f"Here are the user's current todos:\n{todo_list}",
-    ]
-
-    # Include conversation history for multi-turn context
-    if history:
-        parts.append("Recent conversation:\n" + "\n".join(history))
-
-    parts.append(f"The user asks: {question}")
-    parts.append("Give a brief, helpful response.")
-
-    prompt = "\n\n".join(parts)
-
-    try:
-        return infer(prompt, max_tokens=256)
-    except Exception as e:
-        return f"[LLM error] {e}"
-
-
-# =============================================================================
-# HTTP server
-# =============================================================================
-
-class Handler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        """Health check."""
-        self.send_response(200)
-        self.end_headers()
-
-    def do_POST(self):
-        """Handle an invocation."""
-        length = int(self.headers.get("Content-Length", 0))
-        body = self.rfile.read(length).decode()
-
-        result = handle_command(body)
-        response = result.encode()
-
-        self.send_response(200)
-        self.send_header("Content-Length", str(len(response)))
-        self.end_headers()
-        self.wfile.write(response)
-
-    def log_message(self, format, *args):
-        """Suppress request logging."""
-        pass
+@agent.on_error
+def handle_error(ctx):
+    step = ctx.state.get("step", "")
+    # Embedding/vector errors after add are non-fatal — search just won't find the item
+    if step in ("embed_new_item", "store_new_vector", "delete_removed_vector"):
+        ctx.complete(ctx.state.get("response", "Done"))
+        return
+    ctx.complete(f"Error: {ctx.message}")
 
 
 if __name__ == "__main__":
-    HTTPServer(("0.0.0.0", 8080), Handler).serve_forever()
+    agent.run()
