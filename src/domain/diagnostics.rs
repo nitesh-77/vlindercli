@@ -28,7 +28,7 @@ pub struct InvokeDiagnostics {
 }
 
 // ============================================================================
-// RequestDiagnostics — QueueBridge (HTTP bridge)
+// RequestDiagnostics — QueueBridge
 // ============================================================================
 
 /// Diagnostics emitted by the bridge when intercepting an agent SDK call.

@@ -12,7 +12,7 @@ use serde::Deserialize;
 
 use crate::domain::registry::Registry;
 use crate::domain::{VectorStorage, ResourceId};
-use crate::queue::{MessageQueue, RequestMessage, ResponseMessage, ServiceDiagnostics};
+use crate::domain::{MessageQueue, RequestMessage, ResponseMessage, ServiceDiagnostics};
 use crate::services::vector_storage;
 use crate::storage::dispatch::open_vector_storage_from_uri;
 
@@ -220,7 +220,8 @@ impl VectorServiceWorker {
 mod tests {
     use super::*;
     use crate::domain::{Agent, InMemoryRegistry, Registry};
-    use crate::queue::{InMemoryQueue, RequestDiagnostics, Sequence, SessionId, SubmissionId};
+    use crate::domain::{RequestDiagnostics, Sequence, SessionId, SubmissionId};
+    use crate::queue::InMemoryQueue;
 
     const TEST_AGENT_ID: &str = "http://127.0.0.1:9000/agents/test-agent";
 

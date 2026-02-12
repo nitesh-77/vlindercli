@@ -11,8 +11,8 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-use super::{SdkContract, Hop, ObjectStorageType, Registry, VectorMatch, VectorStorageType};
-use crate::queue::{
+use super::{
+    SdkContract, Hop, ObjectStorageType, Registry, VectorMatch, VectorStorageType,
     DelegateMessage, DelegateDiagnostics, ContainerDiagnostics, InvokeMessage,
     MessageQueue, RequestMessage, RequestDiagnostics, SequenceCounter,
 };
@@ -280,7 +280,7 @@ impl SdkContract for QueueBridge {
             .ok_or_else(|| format!("delegate: target agent '{}' not found", target_agent))?;
 
         let invoke = self.invoke.read().unwrap();
-        let caller_agent = crate::queue::agent_routing_key(&invoke.agent_id);
+        let caller_agent = super::agent_routing_key(&invoke.agent_id);
         let sha = invoke.submission.to_string();
         let reply_subject = self.queue.create_reply_address(
             &invoke.submission, &caller_agent, target_agent,

@@ -16,7 +16,7 @@ use crate::domain::registry::{JobId, JobStatus, Registry};
 use crate::domain::{Agent, ResourceId, RuntimeType};
 use crate::domain::git_hash::compute_submission_id;
 use crate::domain::session::Session;
-use crate::queue::{
+use super::{
     HarnessType, InvokeDiagnostics, InvokeMessage, MessageQueue, SessionId, SubmissionId,
 };
 
@@ -453,7 +453,7 @@ mod tests {
 
     #[test]
     fn tick_reconciles_completed_jobs() {
-        use crate::queue::ExpectsReply;
+        use crate::domain::ExpectsReply;
 
         let queue = Arc::new(InMemoryQueue::new());
         let registry = test_registry();
@@ -467,7 +467,7 @@ mod tests {
             let typed = queue.typed_queues.lock().unwrap();
             let (_, messages) = typed.iter().next().unwrap();
             match &messages[0] {
-                crate::queue::ObservableMessage::Invoke(msg) => msg.clone(),
+                crate::domain::ObservableMessage::Invoke(msg) => msg.clone(),
                 _ => panic!("expected InvokeMessage"),
             }
         };

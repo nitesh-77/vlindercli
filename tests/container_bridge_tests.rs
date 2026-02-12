@@ -8,8 +8,9 @@ use std::time::{Duration, Instant};
 use vlindercli::domain::{
     Agent, InMemoryRegistry, ObjectStorageType, Provider, Registry,
     ResourceId, Runtime, RuntimeType,
+    InvokeDiagnostics, InvokeMessage, MessageQueue, HarnessType, SessionId, SubmissionId,
 };
-use vlindercli::queue::{InMemoryQueue, InvokeDiagnostics, InvokeMessage, MessageQueue, HarnessType, SessionId, SubmissionId};
+use vlindercli::queue::InMemoryQueue;
 use vlindercli::runtime::ContainerRuntime;
 
 #[test]

@@ -14,7 +14,7 @@ use serde::Deserialize;
 use crate::domain::{InferenceEngine, InferenceResult};
 use crate::domain::registry::Registry;
 use crate::inference::open_inference_engine;
-use crate::queue::{MessageQueue, RequestMessage, ResponseMessage, ServiceDiagnostics, ServiceMetrics};
+use crate::domain::{MessageQueue, RequestMessage, ResponseMessage, ServiceDiagnostics, ServiceMetrics};
 use crate::services::inference;
 
 // ============================================================================
@@ -173,7 +173,8 @@ impl InferenceServiceWorker {
 mod tests {
     use super::*;
     use crate::domain::{Agent, EngineType, InMemoryRegistry, Model, ModelType, ResourceId};
-    use crate::queue::{InMemoryQueue, RequestDiagnostics, Sequence, SessionId, SubmissionId};
+    use crate::domain::{RequestDiagnostics, Sequence, SessionId, SubmissionId};
+    use crate::queue::InMemoryQueue;
     use crate::inference::InMemoryInference;
 
     const TEST_AGENT_ID: &str = "http://127.0.0.1:9000/agents/test-agent";

@@ -15,13 +15,12 @@ use async_nats::jetstream::message::Message as JetStreamMessage;
 use futures::StreamExt;
 use tokio::runtime::Runtime;
 
-use super::{
+use crate::domain::{
     CompleteMessage, ContainerDiagnostics, DelegateMessage, DelegateDiagnostics,
     HarnessType, InvokeDiagnostics, InvokeMessage, MessageId, MessageQueue,
-    QueueError, RequestDiagnostics, RequestMessage, ResponseMessage, Sequence,
-    ServiceDiagnostics, SessionId, SubmissionId,
+    QueueError, RequestDiagnostics, RequestMessage, ResourceId, ResponseMessage,
+    RuntimeType, Sequence, ServiceDiagnostics, SessionId, SubmissionId,
 };
-use crate::domain::{ResourceId, RuntimeType};
 
 /// NATS queue with JetStream durability.
 ///
@@ -631,7 +630,7 @@ fn filter_to_consumer_name(filter: &str) -> String {
         .replace('>', "G")
 }
 
-use super::agent_routing_key as agent_short_name;
+use crate::domain::agent_routing_key as agent_short_name;
 
 /// Extract a header value from NATS headers.
 fn get_header(headers: &async_nats::HeaderMap, key: &str) -> Result<String, QueueError> {

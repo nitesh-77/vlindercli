@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use serde::{Deserialize, Serialize};
 
-use crate::domain::{ResourceId, RuntimeType};
+use super::{ResourceId, RuntimeType};
 use super::diagnostics::{
     InvokeDiagnostics, RequestDiagnostics, ServiceDiagnostics,
     ContainerDiagnostics, DelegateDiagnostics,

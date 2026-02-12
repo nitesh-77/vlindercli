@@ -4,8 +4,11 @@
 
 use std::sync::Arc;
 
-use vlindercli::domain::{Agent, InMemoryRegistry, Registry, ResourceId, Runtime, RuntimeType};
-use vlindercli::queue::{InMemoryQueue, InvokeDiagnostics, InvokeMessage, MessageQueue, HarnessType, SessionId, SubmissionId};
+use vlindercli::domain::{
+    Agent, InMemoryRegistry, Registry, ResourceId, Runtime, RuntimeType,
+    InvokeDiagnostics, InvokeMessage, MessageQueue, HarnessType, SessionId, SubmissionId,
+};
+use vlindercli::queue::InMemoryQueue;
 use vlindercli::runtime::ContainerRuntime;
 
 #[test]

@@ -1,52 +1,19 @@
-//! Message queue abstraction (ADR 044).
+//! Message queue implementations (ADR 044).
 //!
-//! The queue is the universal abstraction for all communication using typed messages:
-//! - `InvokeMessage`: Harness → Runtime (start a submission)
-//! - `RequestMessage`: Runtime → Service (agent calls a service)
-//! - `ResponseMessage`: Service → Runtime (service replies)
-//! - `CompleteMessage`: Runtime → Harness (submission finished)
-//!
-//! Implementations:
+//! Domain types (messages, traits, diagnostics) live in `crate::domain`.
+//! This module contains concrete implementations:
 //! - `InMemoryQueue`: Single-process, for local development
 //! - `NatsQueue`: Distributed, with JetStream durability
 
-mod message;
-mod traits;
 mod in_memory;
 mod nats;
-pub mod diagnostics;
 
 use std::sync::Arc;
 use crate::config::Config;
-use crate::domain::ResourceId;
+use crate::domain::{MessageQueue, QueueError};
 
-pub use message::{
-    MessageId, SubmissionId, SessionId, Sequence, SequenceCounter, HarnessType,
-    InvokeMessage, RequestMessage, ResponseMessage, CompleteMessage, DelegateMessage,
-    ExpectsReply, ObservableMessage,
-};
-pub use traits::{MessageQueue, QueueError};
 pub use in_memory::InMemoryQueue;
 pub use nats::NatsQueue;
-pub use diagnostics::{
-    InvokeDiagnostics, RequestDiagnostics, ServiceDiagnostics, ServiceMetrics,
-    ContainerDiagnostics, ContainerRuntimeInfo, DelegateDiagnostics,
-};
-
-/// Extract the agent name from a registry-assigned ResourceId.
-///
-/// Registry IDs have the format `<registry>/agents/<name>`.
-/// The last path component is the agent name, used as the NATS subject token.
-pub fn agent_routing_key(agent_id: &ResourceId) -> String {
-    if let Some(path) = agent_id.path() {
-        if let Some(name) = path.rsplit('/').next() {
-            if !name.is_empty() {
-                return name.to_string();
-            }
-        }
-    }
-    agent_id.as_str().to_string()
-}
 
 /// Create a queue from configuration.
 ///

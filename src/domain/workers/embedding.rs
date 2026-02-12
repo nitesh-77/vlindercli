@@ -13,7 +13,7 @@ use serde::Deserialize;
 use crate::domain::EmbeddingEngine;
 use crate::domain::registry::Registry;
 use crate::embedding::open_embedding_engine;
-use crate::queue::{MessageQueue, RequestMessage, ResponseMessage, ServiceDiagnostics, ServiceMetrics};
+use crate::domain::{MessageQueue, RequestMessage, ResponseMessage, ServiceDiagnostics, ServiceMetrics};
 use crate::services::embedding;
 
 // ============================================================================
@@ -178,7 +178,8 @@ impl EmbeddingServiceWorker {
 mod tests {
     use super::*;
     use crate::domain::{Agent, EngineType, InMemoryRegistry, Model, ModelType, ResourceId};
-    use crate::queue::{InMemoryQueue, RequestDiagnostics, Sequence, SessionId, SubmissionId};
+    use crate::domain::{RequestDiagnostics, Sequence, SessionId, SubmissionId};
+    use crate::queue::InMemoryQueue;
     use crate::embedding::InMemoryEmbedding;
 
     const TEST_AGENT_ID: &str = "http://127.0.0.1:9000/agents/test-agent";

@@ -156,7 +156,7 @@ impl Registry for PersistentRegistry {
 
     // --- Job operations (delegate directly) ---
 
-    fn create_job(&self, submission_id: crate::queue::SubmissionId, agent_id: ResourceId, input: String) -> JobId {
+    fn create_job(&self, submission_id: super::SubmissionId, agent_id: ResourceId, input: String) -> JobId {
         self.inner.create_job(submission_id, agent_id, input)
     }
 

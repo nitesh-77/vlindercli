@@ -1,4 +1,4 @@
-//! Queue trait definition (ADR 044).
+//! Message queue trait definition (ADR 044).
 //!
 //! Typed message methods for send and receive:
 //! - `send_invoke()` / `receive_invoke()`: Harness → Runtime
@@ -9,8 +9,7 @@
 //! Each receive method returns a tuple of (TypedMessage, AckFn) where
 //! AckFn acknowledges successful processing.
 
-use super::{CompleteMessage, DelegateMessage, InvokeMessage, RequestMessage, ResponseMessage, SubmissionId};
-use crate::domain::Agent;
+use super::{Agent, CompleteMessage, DelegateMessage, InvokeMessage, RequestMessage, ResponseMessage, ResourceId, SubmissionId};
 use std::fmt;
 
 // --- MessageQueue Trait ---
@@ -144,3 +143,20 @@ impl fmt::Display for QueueError {
 }
 
 impl std::error::Error for QueueError {}
+
+// --- Routing ---
+
+/// Extract the agent name from a registry-assigned ResourceId.
+///
+/// Registry IDs have the format `<registry>/agents/<name>`.
+/// The last path component is the agent name, used as the NATS subject token.
+pub fn agent_routing_key(agent_id: &ResourceId) -> String {
+    if let Some(path) = agent_id.path() {
+        if let Some(name) = path.rsplit('/').next() {
+            if !name.is_empty() {
+                return name.to_string();
+            }
+        }
+    }
+    agent_id.as_str().to_string()
+}

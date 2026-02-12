@@ -6,8 +6,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use vlindercli::domain::{Agent, InMemoryRegistry, Registry, Requirements, RuntimeType};
-use vlindercli::queue::SubmissionId;
+use vlindercli::domain::{Agent, InMemoryRegistry, Registry, Requirements, RuntimeType, SubmissionId};
 use vlindercli::registry_service::{GrpcRegistryClient, RegistryServiceServer};
 
 fn empty_requirements() -> Requirements {

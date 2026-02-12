@@ -7,7 +7,7 @@ use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 
-use crate::queue::{SessionId, SubmissionId};
+use super::{SessionId, SubmissionId};
 
 /// A conversation session tracking user/agent turns.
 #[derive(Clone, Debug, Serialize, Deserialize)]

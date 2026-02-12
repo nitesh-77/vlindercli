@@ -367,7 +367,7 @@ fn write_html_response(stream: &mut TcpStream, status: u16, body: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::queue::{SessionId, SubmissionId};
+    use crate::domain::{SessionId, SubmissionId};
     use std::io::Read;
 
     fn test_session() -> Session {

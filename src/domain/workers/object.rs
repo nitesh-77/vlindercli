@@ -18,7 +18,7 @@ use serde::Deserialize;
 
 use crate::domain::registry::Registry;
 use crate::domain::{ObjectStorage, ResourceId};
-use crate::queue::{MessageQueue, RequestMessage, ResponseMessage, ServiceDiagnostics};
+use crate::domain::{MessageQueue, RequestMessage, ResponseMessage, ServiceDiagnostics};
 use crate::services::object_storage;
 use crate::storage::dispatch::open_object_storage_from_uri;
 use crate::storage::state_store::{
@@ -429,7 +429,8 @@ fn extract_state_from_payload(payload: &[u8]) -> Option<String> {
 mod tests {
     use super::*;
     use crate::domain::{Agent, InMemoryRegistry};
-    use crate::queue::{InMemoryQueue, RequestDiagnostics, Sequence, SessionId, SubmissionId};
+    use crate::domain::{RequestDiagnostics, Sequence, SessionId, SubmissionId};
+    use crate::queue::InMemoryQueue;
 
     const TEST_AGENT_ID: &str = "http://127.0.0.1:9000/agents/test-agent";
 

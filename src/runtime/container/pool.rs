@@ -7,8 +7,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::domain::{Agent, QueueBridge};
-use crate::queue::{ContainerDiagnostics, ContainerRuntimeInfo, InvokeMessage};
+use crate::domain::{Agent, QueueBridge, ContainerDiagnostics, ContainerRuntimeInfo, InvokeMessage};
 
 use super::podman::{Podman, PodmanCli};
 

@@ -4,9 +4,8 @@ use std::collections::HashMap;
 
 use crate::domain::{
     AbsolutePath, Agent, EngineType, Job, JobId, JobStatus, Model, ModelType, Mount, Requirements,
-    ResourceId, RuntimeType,
+    ResourceId, RuntimeType, SubmissionId,
 };
-use crate::queue::SubmissionId;
 use super::proto;
 
 // =============================================================================

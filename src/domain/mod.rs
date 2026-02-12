@@ -10,6 +10,9 @@
 mod agent;
 mod sdk;
 mod queue_bridge;
+mod diagnostics;
+mod message;
+mod message_queue;
 mod agent_manifest;
 mod catalog;
 mod daemon;
@@ -43,6 +46,26 @@ pub mod workers;
 pub use agent::{Agent, LoadError as AgentLoadError, Mount, Prompts, Requirements};
 pub use sdk::{SdkContract, AgentAction, AgentEvent, VectorMatch};
 pub use queue_bridge::QueueBridge;
+
+// ============================================================================
+// Message Queue (protocol types + trait)
+// ============================================================================
+
+pub use message::{
+    MessageId, SubmissionId, SessionId, Sequence, SequenceCounter, HarnessType,
+    InvokeMessage, RequestMessage, ResponseMessage, CompleteMessage, DelegateMessage,
+    ExpectsReply, ObservableMessage,
+};
+pub use message_queue::{MessageQueue, QueueError, agent_routing_key};
+pub use diagnostics::{
+    InvokeDiagnostics, RequestDiagnostics, ServiceDiagnostics, ServiceMetrics,
+    ContainerDiagnostics, ContainerRuntimeInfo, DelegateDiagnostics,
+};
+
+// ============================================================================
+// Paths
+// ============================================================================
+
 pub use path::{AbsolutePath, AbsoluteUri};
 pub use agent_manifest::AgentManifest;
 pub use fleet::{Fleet, LoadError as FleetLoadError};

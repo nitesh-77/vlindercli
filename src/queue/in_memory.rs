@@ -1,11 +1,11 @@
 //! In-memory queue implementation.
 
-use super::{
+use crate::domain::{
     CompleteMessage, DelegateMessage, InvokeMessage, MessageQueue,
     ObservableMessage, QueueError, RequestMessage, ResponseMessage, SubmissionId,
 };
 #[cfg(test)]
-use super::{
+use crate::domain::{
     ContainerDiagnostics, DelegateDiagnostics, InvokeDiagnostics, RequestDiagnostics,
 };
 use std::collections::{HashMap, VecDeque};
@@ -267,13 +267,13 @@ impl MessageQueue for InMemoryQueue {
 // Internal helpers
 // ============================================================================
 
-use super::agent_routing_key as agent_short_name;
+use crate::domain::agent_routing_key as agent_short_name;
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::domain::{ResourceId, RuntimeType};
-    use crate::queue::{ExpectsReply, HarnessType, Sequence, SessionId, SubmissionId};
+    use crate::domain::{ExpectsReply, HarnessType, Sequence, SessionId, SubmissionId};
 
     fn test_agent_id() -> ResourceId {
         ResourceId::new("http://127.0.0.1:9000/agents/echo-agent")

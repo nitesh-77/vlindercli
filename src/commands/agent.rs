@@ -4,9 +4,9 @@ use std::sync::Arc;
 use clap::{Subcommand, ValueEnum};
 
 use vlindercli::config::{registry_db_path, Config};
-use vlindercli::domain::{CliHarness, Daemon, Harness, PersistentRegistry, Registry};
+use vlindercli::domain::{CliHarness, Daemon, Harness, PersistentRegistry, Registry, agent_routing_key, MessageQueue};
 use vlindercli::domain::harness::read_latest_state;
-use vlindercli::queue::{agent_routing_key, MessageQueue, NatsQueue};
+use vlindercli::queue::NatsQueue;
 use vlindercli::registry_service::{GrpcRegistryClient, ping_registry};
 
 use super::repl;

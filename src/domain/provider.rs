@@ -10,7 +10,7 @@ use super::workers::{
     ObjectServiceWorker, VectorServiceWorker,
     InferenceServiceWorker, EmbeddingServiceWorker,
 };
-use crate::queue::MessageQueue;
+use super::MessageQueue;
 
 /// Aggregates service workers for the runtime.
 ///
@@ -82,7 +82,8 @@ impl Provider {
 mod tests {
     use super::*;
     use crate::domain::{Agent, InMemoryRegistry, ResourceId};
-    use crate::queue::{InMemoryQueue, RequestDiagnostics, RequestMessage, Sequence, SessionId, SubmissionId};
+    use crate::domain::{RequestDiagnostics, RequestMessage, Sequence, SessionId, SubmissionId};
+    use crate::queue::InMemoryQueue;
 
     fn test_agent(name: &str) -> Agent {
         let manifest = format!(r#"

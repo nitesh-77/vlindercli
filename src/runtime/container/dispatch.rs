@@ -12,8 +12,7 @@ use std::time::Instant;
 
 use serde_json::json;
 
-use crate::domain::{AgentAction, SdkContract, AgentEvent};
-use crate::queue::InvokeMessage;
+use crate::domain::{AgentAction, SdkContract, AgentEvent, InvokeMessage};
 
 /// Tracks an in-flight invocation dispatched to a container.
 pub(crate) struct RunningTask {

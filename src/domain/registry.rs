@@ -43,7 +43,7 @@ impl JobId {
 #[derive(Clone, Debug)]
 pub struct Job {
     pub id: JobId,
-    pub submission_id: crate::queue::SubmissionId,  // ADR 044: tracks message flow
+    pub submission_id: super::SubmissionId,  // ADR 044: tracks message flow
     pub agent_id: ResourceId,
     pub input: String,
     pub status: JobStatus,
@@ -211,7 +211,7 @@ pub trait Registry: Send + Sync {
     // --- Job operations ---
 
     /// Create a new job with submission tracking (ADR 044).
-    fn create_job(&self, submission_id: crate::queue::SubmissionId, agent_id: ResourceId, input: String) -> JobId;
+    fn create_job(&self, submission_id: super::SubmissionId, agent_id: ResourceId, input: String) -> JobId;
 
     /// Get a job by ID.
     fn get_job(&self, id: &JobId) -> Option<Job>;
@@ -474,7 +474,7 @@ impl Registry for InMemoryRegistry {
 
     // --- Job operations ---
 
-    fn create_job(&self, submission_id: crate::queue::SubmissionId, agent_id: ResourceId, input: String) -> JobId {
+    fn create_job(&self, submission_id: super::SubmissionId, agent_id: ResourceId, input: String) -> JobId {
         let id = JobId::new(&self.registry_id);
         let job = Job {
             id: id.clone(),
@@ -562,7 +562,7 @@ impl Registry for InMemoryRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::queue::SubmissionId;
+    use crate::domain::SubmissionId;
 
     fn test_agent_id() -> ResourceId {
         ResourceId::new("http://127.0.0.1:9000/agents/test-agent")

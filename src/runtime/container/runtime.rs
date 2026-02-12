@@ -9,9 +9,9 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Instant;
 
-use crate::domain::{Agent, ObjectStorageType, QueueBridge, Registry, ResourceId, Runtime, RuntimeType, VectorStorageType};
-use crate::queue::{
-    ExpectsReply, HarnessType, InvokeDiagnostics, InvokeMessage, MessageQueue, SequenceCounter,
+use crate::domain::{
+    Agent, ObjectStorageType, QueueBridge, Registry, ResourceId, Runtime, RuntimeType, VectorStorageType,
+    CompleteMessage, ExpectsReply, HarnessType, InvokeDiagnostics, InvokeMessage, MessageQueue, SequenceCounter,
 };
 
 use super::dispatch::{DispatchError, RunningTask, dispatch_state_machine};
@@ -92,7 +92,7 @@ impl ContainerRuntime {
     }
 
     /// Route a CompleteMessage to the correct destination (harness or delegating agent).
-    fn send_reply(&self, complete: crate::queue::CompleteMessage, reply_subject: &Option<String>) {
+    fn send_reply(&self, complete: CompleteMessage, reply_subject: &Option<String>) {
         if let Some(ref subject) = reply_subject {
             self.queue.send_complete_to_subject(complete, subject).unwrap();
         } else {
