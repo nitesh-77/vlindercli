@@ -24,7 +24,8 @@ use std::sync::Arc;
 use vlindercli::config::{conversations_dir, Config};
 use vlindercli::worker_role::WorkerRole;
 use vlindercli::worker::run_worker_loop;
-use vlindercli::domain::{Daemon, SessionServer, Supervisor};
+use vlindercli::domain::{Daemon, Supervisor};
+use vlindercli::session_server::SessionServer;
 
 /// Execute the daemon command.
 ///

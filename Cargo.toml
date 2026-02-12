@@ -47,6 +47,9 @@ futures = "0.3"
 tonic = "0.12"
 prost = "0.13"
 
+# Lightweight HTTP server for session viewer
+tiny_http = "0.12"
+
 # Signal handling for graceful shutdown
 ctrlc = "3.4"
 

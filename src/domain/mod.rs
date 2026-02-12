@@ -31,7 +31,6 @@ mod registry;
 mod registry_repository;
 mod runtime;
 mod session;
-mod session_server;
 mod model_manifest;
 mod path;
 mod resource_id;
@@ -154,8 +153,7 @@ pub use sdk_message::{Hop, SdkMessage};
 // ============================================================================
 
 pub use harness::Harness;
-pub use session::Session;
-pub use session_server::SessionServer;
+pub use session::{HistoryEntry, Session};
 pub use route::{Route, Stop};
 
 // ============================================================================

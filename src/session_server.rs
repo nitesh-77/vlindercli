@@ -1,20 +1,18 @@
 //! SessionServer — read-only HTTP server for browsing conversation sessions.
 //!
 //! Serves `~/.vlinder/conversations/` as a chat-style HTML viewer:
-//!   GET /                     → index page listing all sessions
-//!   GET /session/{file}.json  → rendered conversation view
+//!   GET /                     -> index page listing all sessions
+//!   GET /session/{file}.json  -> rendered conversation view
 //!
 //! Starts by default alongside `vlinder agent run`. Binds to 127.0.0.1
-//! (localhost only). Zero external dependencies — uses `std::net::TcpListener`.
+//! (localhost only).
 
-use std::io::{BufRead, BufReader, Write};
-use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
-use super::session::{HistoryEntry, Session};
+use crate::domain::{HistoryEntry, Session};
 
 /// A running session viewer server.
 ///
@@ -31,15 +29,16 @@ impl SessionServer {
     ///
     /// Binds to `127.0.0.1:{port}` (localhost only — this is a local dev tool).
     pub fn start(conversations_dir: PathBuf, port: u16) -> std::io::Result<Self> {
-        let listener = TcpListener::bind(format!("127.0.0.1:{}", port))?;
-        let port = listener.local_addr()?.port();
-        listener.set_nonblocking(true)?;
+        let server = tiny_http::Server::http(format!("127.0.0.1:{}", port))
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::AddrInUse, e.to_string()))?;
+
+        let port = server.server_addr().to_ip().map(|a| a.port()).unwrap_or(port);
 
         let stop_flag = Arc::new(AtomicBool::new(false));
         let stop = Arc::clone(&stop_flag);
 
         let handle = std::thread::spawn(move || {
-            run_server(listener, conversations_dir, stop);
+            run_server(server, conversations_dir, stop);
         });
 
         Ok(Self {
@@ -73,80 +72,41 @@ impl Drop for SessionServer {
 // Server loop
 // =============================================================================
 
-fn run_server(listener: TcpListener, dir: PathBuf, stop: Arc<AtomicBool>) {
+fn run_server(server: tiny_http::Server, dir: PathBuf, stop: Arc<AtomicBool>) {
+    let timeout = std::time::Duration::from_millis(100);
     loop {
         if stop.load(Ordering::Relaxed) {
             break;
         }
 
-        match listener.accept() {
-            Ok((stream, _addr)) => {
-                let _ = stream.set_nonblocking(false);
-                handle_request(stream, &dir);
-            }
-            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                std::thread::sleep(std::time::Duration::from_millis(50));
-                continue;
-            }
+        match server.recv_timeout(timeout) {
+            Ok(Some(request)) => handle_request(request, &dir),
+            Ok(None) => continue,  // timeout — check stop flag
             Err(_) => break,
         }
     }
 }
 
-// =============================================================================
-// Request handling
-// =============================================================================
+fn handle_request(request: tiny_http::Request, dir: &Path) {
+    let url = request.url().to_string();
 
-fn handle_request(mut stream: TcpStream, dir: &Path) {
-    let path = match parse_request_path(&stream) {
-        Ok(p) => p,
-        Err(_) => {
-            write_html_response(&mut stream, 400, "Bad Request");
-            return;
-        }
-    };
-
-    if path == "/" {
+    if url == "/" {
         let body = render_index(dir);
-        write_html_response(&mut stream, 200, &body);
-    } else if let Some(filename) = path.strip_prefix("/session/") {
+        let _ = request.respond(html_response(200, &body));
+    } else if let Some(filename) = url.strip_prefix("/session/") {
         match render_session(dir, filename) {
-            Ok(body) => write_html_response(&mut stream, 200, &body),
-            Err(_) => write_html_response(&mut stream, 404, &html_page("Not Found", "<h1>Session not found</h1><p><a href=\"/\">&larr; Back</a></p>")),
+            Ok(body) => {
+                let _ = request.respond(html_response(200, &body));
+            }
+            Err(_) => {
+                let body = html_page("Not Found", "<h1>Session not found</h1><p><a href=\"/\">&larr; Back</a></p>");
+                let _ = request.respond(html_response(404, &body));
+            }
         }
     } else {
-        write_html_response(&mut stream, 404, &html_page("Not Found", "<h1>404</h1>"));
+        let body = html_page("Not Found", "<h1>404</h1>");
+        let _ = request.respond(html_response(404, &body));
     }
-}
-
-/// Parse the request path from the first HTTP line.
-fn parse_request_path(stream: &TcpStream) -> Result<String, String> {
-    let mut reader = BufReader::new(stream);
-    let mut request_line = String::new();
-    reader.read_line(&mut request_line)
-        .map_err(|e| format!("read error: {}", e))?;
-
-    let parts: Vec<&str> = request_line.trim().split_whitespace().collect();
-    if parts.len() < 2 {
-        return Err("malformed request".to_string());
-    }
-
-    // Only accept GET
-    if parts[0] != "GET" {
-        return Err("method not allowed".to_string());
-    }
-
-    // Drain remaining headers
-    loop {
-        let mut line = String::new();
-        reader.read_line(&mut line)
-            .map_err(|e| format!("header read error: {}", e))?;
-        if line.trim().is_empty() {
-            break;
-        }
-    }
-
-    Ok(parts[1].to_string())
 }
 
 // =============================================================================
@@ -345,30 +305,22 @@ fn html_escape(s: &str) -> String {
      .replace('"', "&quot;")
 }
 
-fn write_html_response(stream: &mut TcpStream, status: u16, body: &str) {
-    let status_text = match status {
-        200 => "OK",
-        400 => "Bad Request",
-        404 => "Not Found",
-        _ => "Error",
-    };
-
-    let body_bytes = body.as_bytes();
-    let header = format!(
-        "HTTP/1.1 {} {}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-        status, status_text, body_bytes.len()
-    );
-
-    let _ = stream.write_all(header.as_bytes());
-    let _ = stream.write_all(body_bytes);
-    let _ = stream.flush();
+fn html_response(status: u16, body: &str) -> tiny_http::Response<std::io::Cursor<Vec<u8>>> {
+    let status_code = tiny_http::StatusCode(status);
+    let content_type = tiny_http::Header::from_bytes("Content-Type", "text/html; charset=utf-8")
+        .expect("valid header");
+    let connection = tiny_http::Header::from_bytes("Connection", "close")
+        .expect("valid header");
+    tiny_http::Response::from_data(body.as_bytes().to_vec())
+        .with_status_code(status_code)
+        .with_header(content_type)
+        .with_header(connection)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::domain::{SessionId, SubmissionId};
-    use std::io::Read;
 
     fn test_session() -> Session {
         let mut session = Session::new(
@@ -378,6 +330,18 @@ mod tests {
         session.record_user_input("summarize this article", SubmissionId::from("a1b2c3d".to_string()));
         session.record_agent_response("This article discusses several topics.");
         session
+    }
+
+    fn get(port: u16, path: &str) -> ureq::Response {
+        ureq::get(&format!("http://127.0.0.1:{}{}", port, path)).call().unwrap()
+    }
+
+    fn get_status(port: u16, path: &str) -> u16 {
+        match ureq::get(&format!("http://127.0.0.1:{}{}", port, path)).call() {
+            Ok(resp) => resp.status(),
+            Err(ureq::Error::Status(code, _)) => code,
+            Err(e) => panic!("unexpected error: {}", e),
+        }
     }
 
     #[test]
@@ -394,14 +358,11 @@ mod tests {
         let server = SessionServer::start(tmp.path().to_path_buf(), 0).unwrap();
         let port = server.port();
 
-        let mut stream = TcpStream::connect(format!("127.0.0.1:{}", port)).unwrap();
-        stream.write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n").unwrap();
-
-        let mut response = String::new();
-        stream.read_to_string(&mut response).unwrap();
-        assert!(response.contains("200 OK"));
-        assert!(response.contains("text/html"));
-        assert!(response.contains("Vlinder Sessions"));
+        let resp = get(port, "/");
+        assert_eq!(resp.status(), 200);
+        assert_eq!(resp.content_type(), "text/html");
+        let body = resp.into_string().unwrap();
+        assert!(body.contains("Vlinder Sessions"));
 
         server.stop();
     }
@@ -416,13 +377,9 @@ mod tests {
         let server = SessionServer::start(tmp.path().to_path_buf(), 0).unwrap();
         let port = server.port();
 
-        let mut stream = TcpStream::connect(format!("127.0.0.1:{}", port)).unwrap();
-        stream.write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n").unwrap();
-
-        let mut response = String::new();
-        stream.read_to_string(&mut response).unwrap();
-        assert!(response.contains("pensieve"));
-        assert!(response.contains("2 messages"));
+        let body = get(port, "/").into_string().unwrap();
+        assert!(body.contains("pensieve"));
+        assert!(body.contains("2 messages"));
 
         server.stop();
     }
@@ -438,15 +395,11 @@ mod tests {
         let server = SessionServer::start(tmp.path().to_path_buf(), 0).unwrap();
         let port = server.port();
 
-        let request = format!("GET /session/{} HTTP/1.1\r\nHost: localhost\r\n\r\n", filename);
-        let mut stream = TcpStream::connect(format!("127.0.0.1:{}", port)).unwrap();
-        stream.write_all(request.as_bytes()).unwrap();
-
-        let mut response = String::new();
-        stream.read_to_string(&mut response).unwrap();
-        assert!(response.contains("200 OK"));
-        assert!(response.contains("summarize this article"));
-        assert!(response.contains("This article discusses"));
+        let resp = get(port, &format!("/session/{}", filename));
+        assert_eq!(resp.status(), 200);
+        let body = resp.into_string().unwrap();
+        assert!(body.contains("summarize this article"));
+        assert!(body.contains("This article discusses"));
 
         server.stop();
     }
@@ -457,12 +410,7 @@ mod tests {
         let server = SessionServer::start(tmp.path().to_path_buf(), 0).unwrap();
         let port = server.port();
 
-        let mut stream = TcpStream::connect(format!("127.0.0.1:{}", port)).unwrap();
-        stream.write_all(b"GET /session/nosuch.json HTTP/1.1\r\nHost: localhost\r\n\r\n").unwrap();
-
-        let mut response = String::new();
-        stream.read_to_string(&mut response).unwrap();
-        assert!(response.contains("404"));
+        assert_eq!(get_status(port, "/session/nosuch.json"), 404);
 
         server.stop();
     }
@@ -473,12 +421,7 @@ mod tests {
         let server = SessionServer::start(tmp.path().to_path_buf(), 0).unwrap();
         let port = server.port();
 
-        let mut stream = TcpStream::connect(format!("127.0.0.1:{}", port)).unwrap();
-        stream.write_all(b"GET /session/../../etc/passwd HTTP/1.1\r\nHost: localhost\r\n\r\n").unwrap();
-
-        let mut response = String::new();
-        stream.read_to_string(&mut response).unwrap();
-        assert!(response.contains("404"));
+        assert_eq!(get_status(port, "/session/../../etc/passwd"), 404);
 
         server.stop();
     }
