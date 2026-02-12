@@ -327,6 +327,7 @@ mod tests {
             "get",
             Sequence::first(),
             b"key".to_vec(),
+            None,
             RequestDiagnostics { sequence: 0, endpoint: String::new(), request_bytes: 0, received_at_ms: 0 },
         );
 
@@ -352,6 +353,7 @@ mod tests {
             "get",
             Sequence::from(3),
             b"key".to_vec(),
+            None,
             RequestDiagnostics { sequence: 0, endpoint: String::new(), request_bytes: 0, received_at_ms: 0 },
         );
         let response = request.create_reply(b"value".to_vec());
@@ -475,6 +477,7 @@ mod tests {
             "get",
             Sequence::first(),
             b"key".to_vec(),
+            None,
             RequestDiagnostics { sequence: 0, endpoint: String::new(), request_bytes: 0, received_at_ms: 0 },
         );
         let original_id = request.id.clone();
@@ -509,6 +512,7 @@ mod tests {
             "search",
             Sequence::from(3),
             b"query".to_vec(),
+            None,
             RequestDiagnostics { sequence: 0, endpoint: String::new(), request_bytes: 0, received_at_ms: 0 },
         );
 
@@ -536,6 +540,7 @@ mod tests {
             "",
             Sequence::first(),
             b"prompt".to_vec(),
+            None,
             RequestDiagnostics { sequence: 0, endpoint: String::new(), request_bytes: 0, received_at_ms: 0 },
         );
 
@@ -580,6 +585,7 @@ mod tests {
             "summarizer",
             b"summarize this".to_vec(),
             "vlinder.sub.reply.coordinator.summarizer.abc",
+            None,
             DelegateDiagnostics { container: ContainerDiagnostics::placeholder(0) },
         );
 
@@ -602,6 +608,7 @@ mod tests {
             "summarizer",
             b"payload".to_vec(),
             "reply.subject",
+            None,
             DelegateDiagnostics { container: ContainerDiagnostics::placeholder(0) },
         );
         let original_id = delegate.id.clone();
@@ -630,6 +637,7 @@ mod tests {
             "summarizer",
             b"payload".to_vec(),
             "reply.subject",
+            None,
             DelegateDiagnostics { container: ContainerDiagnostics::placeholder(0) },
         );
 

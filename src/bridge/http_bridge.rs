@@ -78,6 +78,7 @@ impl HttpBridge {
             received_at_ms,
         };
 
+        let state = self.current_state.read().unwrap().clone();
         let request = RequestMessage::new(
             invoke.submission.clone(),
             invoke.session.clone(),
@@ -87,6 +88,7 @@ impl HttpBridge {
             hop.operation,
             seq,
             payload,
+            state,
             request_diag,
         );
         drop(invoke);
@@ -284,6 +286,7 @@ impl AgentBridge for HttpBridge {
             &invoke.submission, &caller_agent, target_agent,
         );
 
+        let state = self.current_state.read().unwrap().clone();
         let delegate = DelegateMessage::new(
             invoke.submission.clone(),
             invoke.session.clone(),
@@ -291,6 +294,7 @@ impl AgentBridge for HttpBridge {
             target_agent,
             input.as_bytes().to_vec(),
             &reply_subject,
+            state,
             DelegateDiagnostics { container: ContainerDiagnostics::placeholder(0) },
         );
         drop(invoke);

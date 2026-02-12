@@ -308,6 +308,9 @@ pub struct RequestMessage {
     pub operation: String,
     pub sequence: Sequence,
     pub payload: Vec<u8>,
+    /// State hash at the time this request was made (ADR 055).
+    /// Records the state context before the service processes the request.
+    pub state: Option<String>,
     /// Diagnostics from the bridge (ADR 071).
     pub diagnostics: RequestDiagnostics,
 }
@@ -322,6 +325,7 @@ impl RequestMessage {
         operation: impl Into<String>,
         sequence: Sequence,
         payload: Vec<u8>,
+        state: Option<String>,
         diagnostics: RequestDiagnostics,
     ) -> Self {
         Self {
@@ -334,6 +338,7 @@ impl RequestMessage {
             operation: operation.into(),
             sequence,
             payload,
+            state,
             diagnostics,
         }
     }
@@ -354,6 +359,9 @@ pub struct ResponseMessage {
     pub sequence: Sequence,
     pub payload: Vec<u8>,
     pub correlation_id: MessageId,
+    /// State hash after this response (ADR 055).
+    /// Present when the operation changed state (e.g. kv-put returns new hash).
+    pub state: Option<String>,
     /// Diagnostics from the service worker (ADR 071).
     pub diagnostics: ServiceDiagnostics,
 }
@@ -385,6 +393,7 @@ impl ResponseMessage {
             sequence: request.sequence,
             payload,
             correlation_id: request.id.clone(),
+            state: None,
             diagnostics,
         }
     }
@@ -406,6 +415,9 @@ pub struct DelegateMessage {
     pub payload: Vec<u8>,
     /// The "handle" — caller polls this for result.
     pub reply_subject: String,
+    /// Caller's state hash at the time of delegation (ADR 055).
+    /// Records the delegating agent's state context.
+    pub state: Option<String>,
     /// Diagnostics from the container runtime (ADR 071).
     pub diagnostics: DelegateDiagnostics,
 }
@@ -418,6 +430,7 @@ impl DelegateMessage {
         target_agent: impl Into<String>,
         payload: Vec<u8>,
         reply_subject: impl Into<String>,
+        state: Option<String>,
         diagnostics: DelegateDiagnostics,
     ) -> Self {
         Self {
@@ -428,6 +441,7 @@ impl DelegateMessage {
             target_agent: target_agent.into(),
             payload,
             reply_subject: reply_subject.into(),
+            state,
             diagnostics,
         }
     }
@@ -869,6 +883,7 @@ mod tests {
             "get",
             Sequence::first(),
             b"key".to_vec(),
+            None,
             test_request_diag(),
         );
 
@@ -896,6 +911,7 @@ mod tests {
             "get",
             Sequence::from(3),
             b"key".to_vec(),
+            None,
             test_request_diag(),
         );
 
@@ -979,6 +995,7 @@ mod tests {
             "get",
             Sequence::first(),
             b"key".to_vec(),
+            None,
             test_request_diag(),
         );
 
@@ -1041,6 +1058,7 @@ mod tests {
             "get",
             Sequence::first(),
             b"test".to_vec(),
+            None,
             test_request_diag(),
         );
         let id = request.id.clone();
@@ -1088,6 +1106,7 @@ mod tests {
             "summarizer",
             b"summarize this".to_vec(),
             "vlinder.sub.delegate-reply.coordinator.summarizer.abc123",
+            None,
             DelegateDiagnostics { container: ContainerDiagnostics::placeholder(0) },
         );
 
@@ -1109,6 +1128,7 @@ mod tests {
             "summarizer",
             b"test".to_vec(),
             "reply.subject",
+            None,
             DelegateDiagnostics { container: ContainerDiagnostics::placeholder(0) },
         );
         let id = delegate.id.clone();

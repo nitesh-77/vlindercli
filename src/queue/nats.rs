@@ -275,6 +275,9 @@ impl MessageQueue for NatsQueue {
             headers.insert("backend", msg.backend.as_str());
             headers.insert("operation", msg.operation.as_str());
             headers.insert("sequence", msg.sequence.to_string());
+            if let Some(ref state) = msg.state {
+                headers.insert("state", state.as_str());
+            }
             if let Ok(diag_json) = serde_json::to_string(&msg.diagnostics) {
                 headers.insert("diagnostics", diag_json.as_str());
             }
@@ -313,6 +316,9 @@ impl MessageQueue for NatsQueue {
             headers.insert("operation", msg.operation.as_str());
             headers.insert("sequence", msg.sequence.to_string());
             headers.insert("correlation-id", msg.correlation_id.as_str());
+            if let Some(ref state) = msg.state {
+                headers.insert("state", state.as_str());
+            }
             if let Ok(diag_json) = serde_json::to_string(&msg.diagnostics) {
                 headers.insert("diagnostics", diag_json.as_str());
             }
@@ -418,6 +424,7 @@ impl MessageQueue for NatsQueue {
                 operation: get_header(headers, "operation")?,
                 sequence: Sequence::from(get_header(headers, "sequence")?.parse::<u32>().unwrap_or(1)),
                 payload: js_msg.payload.to_vec(),
+                state: get_header(headers, "state").ok(),
                 diagnostics,
             };
 
@@ -451,6 +458,7 @@ impl MessageQueue for NatsQueue {
                 sequence: Sequence::from(get_header(headers, "sequence")?.parse::<u32>().unwrap_or(1)),
                 payload: js_msg.payload.to_vec(),
                 correlation_id: MessageId::from(get_header(headers, "correlation-id")?),
+                state: get_header(headers, "state").ok(),
                 diagnostics,
             };
 
@@ -506,6 +514,9 @@ impl MessageQueue for NatsQueue {
             headers.insert("caller-agent", msg.caller_agent.as_str());
             headers.insert("target-agent", msg.target_agent.as_str());
             headers.insert("reply-subject", msg.reply_subject.as_str());
+            if let Some(ref state) = msg.state {
+                headers.insert("state", state.as_str());
+            }
             if let Ok(diag_json) = serde_json::to_string(&msg.diagnostics) {
                 headers.insert("diagnostics", diag_json.as_str());
             }
@@ -543,6 +554,7 @@ impl MessageQueue for NatsQueue {
                 target_agent: get_header(headers, "target-agent")?,
                 payload: js_msg.payload.to_vec(),
                 reply_subject: get_header(headers, "reply-subject")?,
+                state: get_header(headers, "state").ok(),
                 diagnostics,
             };
 

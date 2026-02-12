@@ -279,6 +279,7 @@ mod tests {
             "store",
             Sequence::first(),
             serde_json::to_vec(&store_payload).unwrap(),
+            None,
             test_request_diag(),
         );
 
@@ -303,6 +304,7 @@ mod tests {
             "search",
             Sequence::from(2),
             serde_json::to_vec(&search_payload).unwrap(),
+            None,
             test_request_diag(),
         );
 

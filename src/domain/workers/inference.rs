@@ -250,6 +250,7 @@ mod tests {
             "run",
             Sequence::first(),
             serde_json::to_vec(&payload).unwrap(),
+            None,
             test_request_diag(),
         );
 
@@ -288,6 +289,7 @@ mod tests {
             "run",
             Sequence::first(),
             serde_json::to_vec(&payload).unwrap(),
+            None,
             test_request_diag(),
         );
 
@@ -325,6 +327,7 @@ mod tests {
             "run",
             Sequence::first(),
             serde_json::to_vec(&payload).unwrap(),
+            None,
             test_request_diag(),
         );
 

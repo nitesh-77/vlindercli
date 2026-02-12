@@ -131,6 +131,7 @@ mod tests {
             "put",
             Sequence::first(),
             serde_json::to_vec(&put_a).unwrap(),
+            None,
             RequestDiagnostics { sequence: 0, endpoint: String::new(), request_bytes: 0, received_at_ms: 0 },
         );
         queue.send_request(request_a.clone()).unwrap();
@@ -153,6 +154,7 @@ mod tests {
             "put",
             Sequence::from(2),
             serde_json::to_vec(&put_b).unwrap(),
+            None,
             RequestDiagnostics { sequence: 0, endpoint: String::new(), request_bytes: 0, received_at_ms: 0 },
         );
         queue.send_request(request_b.clone()).unwrap();
@@ -172,6 +174,7 @@ mod tests {
             "get",
             Sequence::from(3),
             serde_json::to_vec(&get_a).unwrap(),
+            None,
             RequestDiagnostics { sequence: 0, endpoint: String::new(), request_bytes: 0, received_at_ms: 0 },
         );
         queue.send_request(request_get_a.clone()).unwrap();
@@ -191,6 +194,7 @@ mod tests {
             "get",
             Sequence::from(4),
             serde_json::to_vec(&get_b).unwrap(),
+            None,
             RequestDiagnostics { sequence: 0, endpoint: String::new(), request_bytes: 0, received_at_ms: 0 },
         );
         queue.send_request(request_get_b.clone()).unwrap();

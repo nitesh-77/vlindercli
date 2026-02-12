@@ -186,9 +186,11 @@ impl ObjectServiceWorker {
                 let diag = ServiceDiagnostics::storage(
                     "kv", &self.backend, "put", response_payload.len() as u64, duration_ms,
                 );
-                let response = ResponseMessage::from_request_with_diagnostics(
-                    &request, response_payload, diag,
+                let mut response = ResponseMessage::from_request_with_diagnostics(
+                    &request, response_payload.clone(), diag,
                 );
+                // Extract new state hash from versioned put response (ADR 055).
+                response.state = extract_state_from_payload(&response_payload);
                 let _ = self.queue.send_response(response);
                 let _ = ack();
                 true
@@ -410,6 +412,19 @@ impl ObjectServiceWorker {
     }
 }
 
+/// Extract the state hash from a versioned kv-put response payload.
+///
+/// Versioned put responses are JSON: `{"state": "hash"}`.
+/// Returns None for unversioned responses (plain `b"ok"`).
+fn extract_state_from_payload(payload: &[u8]) -> Option<String> {
+    let map: serde_json::Map<String, serde_json::Value> =
+        serde_json::from_slice(payload).ok()?;
+    match map.get("state") {
+        Some(serde_json::Value::String(s)) => Some(s.clone()),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -475,6 +490,7 @@ mod tests {
             "put",
             Sequence::first(),
             serde_json::to_vec(&put_payload).unwrap(),
+            None,
             test_request_diag(),
         );
 
@@ -499,6 +515,7 @@ mod tests {
             "get",
             Sequence::from(2),
             serde_json::to_vec(&get_payload).unwrap(),
+            None,
             test_request_diag(),
         );
 
@@ -531,6 +548,7 @@ mod tests {
             test_submission(), test_session(), test_agent_id(),
             "kv", "memory", "put", Sequence::first(),
             serde_json::to_vec(&put_payload).unwrap(),
+            None,
             test_request_diag(),
         );
 
@@ -569,6 +587,7 @@ mod tests {
             test_submission(), test_session(), test_agent_id(),
             "kv", "memory", "put", Sequence::first(),
             serde_json::to_vec(&put_payload).unwrap(),
+            None,
             test_request_diag(),
         );
         queue.send_request(put_request.clone()).unwrap();
@@ -587,6 +606,7 @@ mod tests {
             test_submission(), test_session(), test_agent_id(),
             "kv", "memory", "get", Sequence::from(2),
             serde_json::to_vec(&get_payload).unwrap(),
+            None,
             test_request_diag(),
         );
         queue.send_request(get_request.clone()).unwrap();
@@ -618,6 +638,7 @@ mod tests {
             test_submission(), test_session(), test_agent_id(),
             "kv", "memory", "put", Sequence::first(),
             serde_json::to_vec(&put1).unwrap(),
+            None,
             test_request_diag(),
         );
         queue.send_request(req1.clone()).unwrap();
@@ -637,6 +658,7 @@ mod tests {
             test_submission(), test_session(), test_agent_id(),
             "kv", "memory", "put", Sequence::from(2),
             serde_json::to_vec(&put2).unwrap(),
+            None,
             test_request_diag(),
         );
         queue.send_request(req2.clone()).unwrap();
@@ -655,6 +677,7 @@ mod tests {
             test_submission(), test_session(), test_agent_id(),
             "kv", "memory", "get", Sequence::from(3),
             serde_json::to_vec(&get).unwrap(),
+            None,
             test_request_diag(),
         );
         queue.send_request(get_req.clone()).unwrap();
@@ -685,6 +708,7 @@ mod tests {
             test_submission(), test_session(), test_agent_id(),
             "kv", "memory", "put", Sequence::first(),
             serde_json::to_vec(&put).unwrap(),
+            None,
             test_request_diag(),
         );
         queue.send_request(put_req.clone()).unwrap();
@@ -700,6 +724,7 @@ mod tests {
             test_submission(), test_session(), test_agent_id(),
             "kv", "memory", "get", Sequence::from(2),
             serde_json::to_vec(&get).unwrap(),
+            None,
             test_request_diag(),
         );
         queue.send_request(get_req.clone()).unwrap();
@@ -729,6 +754,7 @@ mod tests {
             test_submission(), test_session(), test_agent_id(),
             "kv", "memory", "put", Sequence::first(),
             serde_json::to_vec(&put_payload).unwrap(),
+            None,
             test_request_diag(),
         );
         queue.send_request(put_req.clone()).unwrap();
@@ -742,6 +768,7 @@ mod tests {
             test_submission(), test_session(), test_agent_id(),
             "kv", "memory", "get", Sequence::from(2),
             serde_json::to_vec(&get_payload).unwrap(),
+            None,
             test_request_diag(),
         );
         queue.send_request(get_req.clone()).unwrap();
