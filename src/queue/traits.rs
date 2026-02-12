@@ -98,6 +98,13 @@ pub trait MessageQueue {
     // Delegation methods (ADR 056)
     // -------------------------------------------------------------------------
 
+    /// Create an opaque reply address for a delegation.
+    ///
+    /// The caller stores this in DelegateMessage and later passes it to
+    /// receive_complete_on_subject() to poll for the result.
+    /// The format is queue-implementation-specific.
+    fn create_reply_address(&self, submission: &SubmissionId, caller: &str, target: &str) -> String;
+
     /// Send a DelegateMessage (Agent → Agent via runtime).
     fn send_delegate(&self, msg: DelegateMessage) -> Result<(), QueueError>;
 

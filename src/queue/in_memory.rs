@@ -202,6 +202,11 @@ impl MessageQueue for InMemoryQueue {
         Err(QueueError::Timeout)
     }
 
+    fn create_reply_address(&self, submission: &SubmissionId, caller: &str, target: &str) -> String {
+        let short_uuid = &uuid::Uuid::new_v4().to_string()[..8];
+        format!("reply.{}.{}.{}.{}", submission, caller, target, short_uuid)
+    }
+
     fn send_delegate(&self, msg: DelegateMessage) -> Result<(), QueueError> {
         let subject = format!(
             "vlinder.{}.delegate.{}.{}",
@@ -547,6 +552,22 @@ mod tests {
     // ========================================================================
     // Delegation tests (ADR 056)
     // ========================================================================
+
+    #[test]
+    fn create_reply_address_is_unique() {
+        let queue = InMemoryQueue::new();
+        let submission = test_submission();
+
+        let addr1 = queue.create_reply_address(&submission, "caller", "target");
+        let addr2 = queue.create_reply_address(&submission, "caller", "target");
+
+        assert!(!addr1.is_empty());
+        assert!(!addr2.is_empty());
+        assert_ne!(addr1, addr2, "each reply address must be unique");
+        assert!(addr1.contains("caller"));
+        assert!(addr1.contains("target"));
+        assert!(addr1.contains(submission.as_str()));
+    }
 
     #[test]
     fn send_delegate_builds_correct_subject() {

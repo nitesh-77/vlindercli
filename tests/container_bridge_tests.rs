@@ -41,6 +41,7 @@ fn container_bridge_kv_round_trip() {
         &ResourceId::new("http://test:9000"),
         Arc::clone(&queue),
         Arc::clone(&registry),
+        vlindercli::runtime::ImagePolicy::Mutable,
     );
 
     // Send InvokeMessage

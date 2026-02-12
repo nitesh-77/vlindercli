@@ -60,6 +60,7 @@ pub struct Config {
     pub openrouter: OpenRouterConfig,
     pub queue: QueueConfig,
     pub distributed: DistributedConfig,
+    pub runtime: RuntimeConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -196,6 +197,25 @@ pub struct DagWorkerCounts {
 }
 
 // ============================================================================
+// Runtime Config (ADR 073)
+// ============================================================================
+
+/// Container runtime configuration.
+///
+/// Controls how the container runtime resolves OCI images.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct RuntimeConfig {
+    /// Image resolution policy: "mutable" (default) or "pinned".
+    ///
+    /// - `mutable`: Uses the tag from `agent.executable` — rebuilt images are
+    ///   picked up automatically on next container start. Default for development.
+    /// - `pinned`: Uses the content-addressed digest from `agent.image_digest` —
+    ///   deterministic execution with the exact image from registration time.
+    pub image_policy: String,
+}
+
+// ============================================================================
 // Defaults
 // ============================================================================
 
@@ -207,6 +227,7 @@ impl Default for Config {
             openrouter: OpenRouterConfig::default(),
             queue: QueueConfig::default(),
             distributed: DistributedConfig::default(),
+            runtime: RuntimeConfig::default(),
         }
     }
 }
@@ -313,6 +334,14 @@ impl Default for DagWorkerCounts {
     }
 }
 
+impl Default for RuntimeConfig {
+    fn default() -> Self {
+        Self {
+            image_policy: "mutable".to_string(),
+        }
+    }
+}
+
 // ============================================================================
 // Config Implementation
 // ============================================================================
@@ -400,6 +429,11 @@ impl Config {
         }
         if let Ok(v) = std::env::var("VLINDER_WORKERS_DAG_CAPTURE") {
             self.distributed.workers.dag.capture = v.parse().unwrap_or(1);
+        }
+
+        // Runtime (ADR 073)
+        if let Ok(v) = std::env::var("VLINDER_RUNTIME_IMAGE_POLICY") {
+            self.runtime.image_policy = v;
         }
     }
 

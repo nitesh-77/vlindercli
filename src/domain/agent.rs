@@ -29,6 +29,10 @@ pub struct Agent {
     /// Container: OCI image ref (e.g., "localhost/echo-container:latest")
     /// File: absolute path or file:// URI
     pub executable: String,
+    /// Content-addressed image digest resolved at registration time (ADR 073).
+    /// For container agents: `podman image inspect` → `sha256:...`
+    /// None for non-container runtimes or if resolution failed.
+    pub image_digest: Option<String>,
     /// Object storage configuration (optional).
     pub object_storage: Option<ResourceId>,
     /// Vector storage configuration (optional).
@@ -78,6 +82,7 @@ impl Agent {
             id: Self::placeholder_id(&manifest.name),
             runtime,
             executable: manifest.executable,
+            image_digest: None,
             object_storage: manifest.object_storage,
             vector_storage: manifest.vector_storage,
         })

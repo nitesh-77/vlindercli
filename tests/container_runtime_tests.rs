@@ -32,6 +32,7 @@ fn container_runtime_executes_echo_agent() {
         &ResourceId::new("http://test:9000"),
         Arc::clone(&queue),
         registry,
+        vlindercli::runtime::ImagePolicy::Mutable,
     );
 
     // Send InvokeMessage
