@@ -13,6 +13,7 @@ mod queue_bridge;
 mod dag;
 mod state;
 mod diagnostics;
+mod image_digest;
 mod message;
 mod message_queue;
 mod agent_manifest;
@@ -41,6 +42,7 @@ pub mod workers;
 // ============================================================================
 
 pub use agent::{Agent, LoadError as AgentLoadError, Mount, Prompts, Requirements};
+pub use image_digest::ImageDigest;
 pub use sdk::{SdkContract, AgentAction, AgentEvent, VectorMatch};
 pub use queue_bridge::QueueBridge;
 
