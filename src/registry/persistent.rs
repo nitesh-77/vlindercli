@@ -133,10 +133,9 @@ impl Registry for PersistentRegistry {
         };
 
         // Check for dependent agents before deleting
-        let agents = self.inner.get_agents();
-        let dependent: Vec<String> = agents.iter()
-            .filter(|a| a.requirements.models.values().any(|uri| uri == &model.model_path))
-            .map(|a| a.name.clone())
+        let dependent: Vec<String> = self.inner.get_agents_requiring_model(&model.model_path)
+            .into_iter()
+            .map(|a| a.name)
             .collect();
 
         if !dependent.is_empty() {

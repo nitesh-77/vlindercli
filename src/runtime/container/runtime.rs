@@ -184,8 +184,7 @@ impl ContainerRuntime {
                     );
                     self.pool.evict(&name);
 
-                    let agent = self.registry.get_agents().into_iter()
-                        .find(|a| a.name == name);
+                    let agent = self.registry.get_agent_by_name(&name);
 
                     if let Some(agent) = agent {
                         self.dispatch(&name, &agent, task.invoke, task.reply_subject, true);
@@ -220,10 +219,7 @@ impl ContainerRuntime {
     /// Poll invoke queues for idle container agents, dispatch work.
     fn dispatch_invokes(&mut self) -> bool {
         let mut did_work = false;
-        let all_agents = self.registry.get_agents();
-        let container_agents: Vec<_> = all_agents.iter()
-            .filter(|a| self.registry.select_runtime(a) == Some(RuntimeType::Container))
-            .collect();
+        let container_agents = self.registry.get_agents_by_runtime(RuntimeType::Container);
 
         for agent in &container_agents {
             if self.running.contains_key(&agent.name) {
@@ -252,10 +248,7 @@ impl ContainerRuntime {
     /// Poll delegate queues for idle container agents, dispatch delegated work (ADR 056).
     fn dispatch_delegates(&mut self) -> bool {
         let mut did_work = false;
-        let all_agents = self.registry.get_agents();
-        let container_agents: Vec<_> = all_agents.iter()
-            .filter(|a| self.registry.select_runtime(a) == Some(RuntimeType::Container))
-            .collect();
+        let container_agents = self.registry.get_agents_by_runtime(RuntimeType::Container);
 
         for agent in &container_agents {
             if self.running.contains_key(&agent.name) {
