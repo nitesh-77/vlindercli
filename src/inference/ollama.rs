@@ -33,12 +33,13 @@ impl InferenceEngine for OllamaInferenceEngine {
             stream: false,
         };
 
-        let response = ureq::post(&url)
+        let mut response = ureq::post(&url)
             .send_json(&request)
             .map_err(|e| format!("ollama request failed: {}", e))?;
 
         let body: GenerateResponse = response
-            .into_json()
+            .body_mut()
+            .read_json()
             .map_err(|e| format!("failed to parse ollama response: {}", e))?;
 
         Ok(InferenceResult {

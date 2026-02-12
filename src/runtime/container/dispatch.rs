@@ -37,6 +37,16 @@ pub(crate) enum DispatchError {
     ContainerDead(String),
 }
 
+/// Shared ureq agent for dispatch — disables http_status_as_error so we can
+/// read response bodies from non-200 responses (container may return valid
+/// AgentAction JSON with error status codes).
+fn dispatch_agent() -> ureq::Agent {
+    ureq::Agent::config_builder()
+        .http_status_as_error(false)
+        .build()
+        .into()
+}
+
 /// POST a JSON event to the container's /handle endpoint and parse the response.
 ///
 /// Passes the session ID as X-Vlinder-Session header (ADR 054).
@@ -44,39 +54,36 @@ fn post_handle(host_port: u16, event: &AgentEvent, session_id: &str) -> Result<A
     let url = format!("http://127.0.0.1:{}/handle", host_port);
     let body = serde_json::to_vec(event).expect("AgentEvent serialization cannot fail");
 
-    match ureq::post(&url)
-        .set("Content-Type", "application/json")
-        .set("X-Vlinder-Session", session_id)
-        .send_bytes(&body)
+    let agent = dispatch_agent();
+
+    match agent.post(&url)
+        .header("Content-Type", "application/json")
+        .header("X-Vlinder-Session", session_id)
+        .send(&body)
     {
-        Ok(response) => {
+        Ok(mut response) => {
+            let status = response.status().as_u16();
             let mut buf = Vec::new();
-            response.into_reader().read_to_end(&mut buf).unwrap_or_default();
+            response.body_mut().as_reader().read_to_end(&mut buf).unwrap_or_default();
             serde_json::from_slice(&buf).map_err(|e| {
-                DispatchError::ContainerDead(format!("invalid AgentAction JSON: {}", e))
+                if status >= 400 {
+                    let body_str = String::from_utf8_lossy(&buf);
+                    DispatchError::ContainerDead(
+                        format!("POST /handle HTTP {} — invalid JSON: {} (body: {})", status, e, body_str)
+                    )
+                } else {
+                    DispatchError::ContainerDead(format!("invalid AgentAction JSON: {}", e))
+                }
             })
         }
-        Err(ureq::Error::Status(code, response)) => {
-            // Container is alive but returned an error status.
-            // Try to parse the body as AgentAction — agent might
-            // return valid JSON with a non-200 status.
-            let mut buf = Vec::new();
-            response.into_reader().read_to_end(&mut buf).unwrap_or_default();
-            serde_json::from_slice(&buf).map_err(|e| {
-                let body_str = String::from_utf8_lossy(&buf);
-                DispatchError::ContainerDead(
-                    format!("POST /handle HTTP {} — invalid JSON: {} (body: {})", code, e, body_str)
-                )
-            })
-        }
-        Err(ureq::Error::Transport(t)) => {
+        Err(e) => {
             tracing::warn!(
                 event = "dispatch.transport_error",
                 port = host_port,
-                error = %t,
+                error = %e,
                 "Transport error — container likely dead"
             );
-            Err(DispatchError::ContainerDead(t.to_string()))
+            Err(DispatchError::ContainerDead(e.to_string()))
         }
     }
 }
