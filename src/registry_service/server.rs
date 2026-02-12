@@ -70,10 +70,7 @@ impl RegistryService for RegistryServiceServer {
     ) -> Result<Response<GetAgentResponse>, Status> {
         let req = request.into_inner();
 
-        // Find agent by name in the list
-        let agent = self.registry.get_agents()
-            .into_iter()
-            .find(|a| a.name == req.name)
+        let agent = self.registry.get_agent_by_name(&req.name)
             .map(|a| a.into());
 
         Ok(Response::new(GetAgentResponse { agent }))

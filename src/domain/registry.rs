@@ -187,6 +187,20 @@ pub trait Registry: Send + Sync {
     /// Select the appropriate runtime for an agent.
     fn select_runtime(&self, agent: &Agent) -> Option<RuntimeType>;
 
+    /// Get all agents assigned to a specific runtime type.
+    fn get_agents_by_runtime(&self, runtime: RuntimeType) -> Vec<Agent> {
+        self.get_agents().into_iter()
+            .filter(|a| self.select_runtime(a) == Some(runtime))
+            .collect()
+    }
+
+    /// Get all agents whose model requirements reference the given model path.
+    fn get_agents_requiring_model(&self, model_path: &ResourceId) -> Vec<Agent> {
+        self.get_agents().into_iter()
+            .filter(|a| a.requirements.models.values().any(|uri| uri == model_path))
+            .collect()
+    }
+
     // --- Model operations ---
 
     /// Register a model (assigns registry-issued identity).
