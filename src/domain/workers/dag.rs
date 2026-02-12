@@ -1,502 +1,708 @@
-//! DagCaptureWorker — stateless NATS dispatcher that fans out to DAG workers (ADR 065, 067).
+//! DAG worker helpers — reconstruct typed messages from NATS wire format
+//! and convert to DagNode for SQLite storage (ADR 065, 067, 078).
 //!
-//! Subscribes to `vlinder.>` via its own JetStream consumer and captures
-//! every message as an independent DAG node. No pairing, no buffering.
+//! Two independent NATS consumers replace the old DagCaptureWorker dispatcher:
+//! - `dag-sqlite`: reconstructs ObservableMessage → DagNode → SQLite
+//! - `dag-git`: reconstructs ObservableMessage → GitDagWorker
 //!
-//! Message arrives → parse subject → build node → dispatch to workers. Done.
-//! The only state is `last_node` for Merkle chaining per session.
-//!
-//! Workers are pluggable projections (ADR 065). Each implements `DagWorker`
-//! and receives every node. SQLite for queries, git for time-travel — both
-//! are just projections of the same NATS event stream.
+//! This module provides the shared reconstruction and conversion functions
+//! used by both workers (wired in `worker.rs`).
 
 use std::collections::HashMap;
 
 use chrono::Utc;
 
-use crate::domain::{DagNode, DagStore, MessageType, hash_dag_node};
+use crate::domain::{
+    CompleteMessage, ContainerDiagnostics, DagNode, DelegateDiagnostics,
+    DelegateMessage, HarnessType, InvokeDiagnostics, InvokeMessage, MessageId, MessageType,
+    RequestDiagnostics, RequestMessage, ResourceId, ResponseMessage, RuntimeType, Sequence,
+    ServiceDiagnostics, SessionId, SubmissionId, hash_dag_node,
+};
+use crate::domain::message::ObservableMessage;
 
-/// A projection that receives DAG nodes (ADR 065).
+// ============================================================================
+// NATS → ObservableMessage reconstruction
+// ============================================================================
+
+/// Reconstruct a typed `ObservableMessage` from NATS wire format.
 ///
-/// Any backend that wants to observe the NATS message stream implements this.
-/// `SqliteDagWorker` writes to SQLite for queries. `GitDagWorker` (future)
-/// writes git commits for time-travel debugging. Both receive every node.
-pub trait DagWorker: Send {
-    /// Called for each node the dispatcher builds from a NATS message.
-    fn on_message(&mut self, node: &DagNode);
-}
-
-/// DAG worker that writes nodes to a `DagStore` (SQLite).
-pub struct SqliteDagWorker {
-    store: Box<dyn DagStore>,
-}
-
-impl SqliteDagWorker {
-    pub fn new(store: Box<dyn DagStore>) -> Self {
-        Self { store }
-    }
-}
-
-impl DagWorker for SqliteDagWorker {
-    fn on_message(&mut self, node: &DagNode) {
-        if let Err(e) = self.store.insert_node(node) {
-            tracing::error!(error = %e, hash = %node.hash, "Failed to write DAG node");
-        }
-    }
-}
-
-/// Dispatcher that parses NATS messages and fans out to DagWorkers.
-pub struct DagCaptureWorker {
-    workers: Vec<Box<dyn DagWorker>>,
-    /// Last node hash per session_id — for Merkle chaining.
-    last_node: HashMap<String, String>,
-}
-
-impl DagCaptureWorker {
-    pub fn new(workers: Vec<Box<dyn DagWorker>>) -> Self {
-        Self {
-            workers,
-            last_node: HashMap::new(),
-        }
-    }
-
-    /// Process a single NATS message.
-    ///
-    /// `subject` is the NATS subject (e.g. `vlinder.sub123.invoke.cli.container.myagent`).
-    /// `headers` contains NATS message headers as a simple map.
-    /// `payload` is the raw message body.
-    pub fn process_message(
-        &mut self,
-        subject: &str,
-        headers: &HashMap<String, String>,
-        payload: &[u8],
-    ) {
-        let segments: Vec<&str> = subject.split('.').collect();
-
-        // Minimum: vlinder.<submission>.<type>...
-        if segments.len() < 3 || segments[0] != "vlinder" {
-            return;
-        }
-
-        let submission_id = segments[1];
-        let msg_type_str = segments[2];
-
-        let message_type = match MessageType::from_str(msg_type_str) {
-            Some(mt) => mt,
-            None => return, // Unknown message type — skip
-        };
-
-        let session_id = match headers.get("session-id") {
-            Some(s) => s.clone(),
-            None => return,
-        };
-
-        // Parse from/to from the remaining subject segments.
-        // Actual NATS subject patterns (from queue/nats.rs):
-        //   invoke:   vlinder.<sub>.invoke.<harness>.<runtime>.<agent>
-        //   complete: vlinder.<sub>.complete.<agent>.<harness>
-        //   req:      vlinder.<sub>.req.<agent>.<service>.<backend>.<op>.<seq>
-        //   res:      vlinder.<sub>.res.<service>.<backend>.<agent>.<op>.<seq>
-        //   delegate: vlinder.<sub>.delegate.<caller>.<target>
-        let (from, to) = parse_from_to(message_type, &segments[3..]);
-
-        let parent_hash = self.last_node
-            .get(&session_id)
-            .cloned()
-            .unwrap_or_default();
-
-        // Extract diagnostics from NATS headers (ADR 071).
-        let diagnostics = headers.get("diagnostics")
-            .map(|s| s.as_bytes().to_vec())
-            .unwrap_or_default();
-
-        // Extract stderr from container diagnostics (Complete/Delegate only, ADR 071).
-        let stderr = extract_stderr(&diagnostics);
-
-        // Extract state hash from NATS headers (ADR 055).
-        let state = headers.get("state").cloned();
-
-        // Extract protocol version from NATS headers.
-        let protocol_version = headers.get("protocol-version")
-            .cloned()
-            .unwrap_or_default();
-
-        let hash = hash_dag_node(payload, &parent_hash, &message_type, &diagnostics);
-
-        let now = Utc::now();
-        let node = DagNode {
-            hash: hash.clone(),
-            parent_hash,
-            message_type,
-            from,
-            to,
-            session_id: session_id.clone(),
-            submission_id: submission_id.to_string(),
-            payload: payload.to_vec(),
-            diagnostics,
-            stderr,
-            created_at: now,
-            state,
-            protocol_version,
-        };
-
-        for worker in &mut self.workers {
-            worker.on_message(&node);
-        }
-
-        // Update chain pointer for this session
-        self.last_node.insert(session_id, hash);
-    }
-}
-
-/// Parse from/to from subject segments after the message type.
-fn parse_from_to(message_type: MessageType, rest: &[&str]) -> (String, String) {
-    match message_type {
-        // invoke: <harness>.<runtime>.<agent>
-        MessageType::Invoke => {
-            let from = rest.first().copied().unwrap_or("unknown");
-            let to = rest.last().copied().unwrap_or("unknown");
-            (from.to_string(), to.to_string())
-        }
-        // complete: <agent>.<harness>
-        MessageType::Complete => {
-            let from = rest.first().copied().unwrap_or("unknown");
-            let to = rest.last().copied().unwrap_or("unknown");
-            (from.to_string(), to.to_string())
-        }
-        // req: <agent>.<service>.<backend>.<op>.<seq>
-        MessageType::Request => {
-            let from = rest.first().copied().unwrap_or("unknown");
-            let to = if rest.len() >= 2 {
-                format!("{}.{}", rest[1], rest.get(2).copied().unwrap_or(""))
-            } else {
-                "unknown".to_string()
-            };
-            (from.to_string(), to)
-        }
-        // res: <service>.<backend>.<agent>.<op>.<seq>
-        MessageType::Response => {
-            let from = if rest.len() >= 2 {
-                format!("{}.{}", rest[0], rest[1])
-            } else {
-                rest.first().copied().unwrap_or("unknown").to_string()
-            };
-            let to = rest.get(2).copied().unwrap_or("unknown");
-            (from, to.to_string())
-        }
-        // delegate: <caller>.<target>
-        MessageType::Delegate => {
-            let from = rest.first().copied().unwrap_or("unknown");
-            let to = rest.get(1).copied().unwrap_or("unknown");
-            (from.to_string(), to.to_string())
-        }
-    }
-}
-
-/// Extract stderr bytes from the diagnostics JSON (ADR 071).
+/// Reads the subject to determine message type, then reads headers
+/// to reconstruct the full typed message. Returns `None` for
+/// unrecognized subjects or missing required headers.
 ///
-/// ContainerDiagnostics and DelegateDiagnostics both carry a `stderr` field
-/// (as a byte array serialized to JSON). For other message types, returns empty.
-fn extract_stderr(diagnostics: &[u8]) -> Vec<u8> {
-    if diagnostics.is_empty() {
-        return Vec::new();
+/// This is the inverse of the `send_*` methods in `NatsQueue` — it reads
+/// the same headers that were written during publish.
+pub fn reconstruct_observable_message(
+    subject: &str,
+    headers: &HashMap<String, String>,
+    payload: &[u8],
+) -> Option<ObservableMessage> {
+    let segments: Vec<&str> = subject.split('.').collect();
+
+    // Minimum: vlinder.<submission>.<type>...
+    if segments.len() < 3 || segments[0] != "vlinder" {
+        return None;
     }
-    // Try parsing as ContainerDiagnostics or DelegateDiagnostics
-    if let Ok(map) = serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(diagnostics) {
-        // Direct stderr field (ContainerDiagnostics)
-        if let Some(serde_json::Value::Array(arr)) = map.get("stderr") {
-            return arr.iter()
-                .filter_map(|v| v.as_u64().map(|b| b as u8))
-                .collect();
-        }
-        // Nested in container field (DelegateDiagnostics)
-        if let Some(serde_json::Value::Object(container)) = map.get("container") {
-            if let Some(serde_json::Value::Array(arr)) = container.get("stderr") {
-                return arr.iter()
-                    .filter_map(|v| v.as_u64().map(|b| b as u8))
-                    .collect();
-            }
-        }
+
+    let msg_type_str = segments[2];
+
+    match msg_type_str {
+        "invoke" => reconstruct_invoke(headers, payload),
+        "req" => reconstruct_request(headers, payload),
+        "res" => reconstruct_response(headers, payload),
+        "complete" => reconstruct_complete(headers, payload),
+        "delegate" => reconstruct_delegate(headers, payload),
+        _ => None,
     }
-    Vec::new()
 }
+
+fn reconstruct_invoke(
+    headers: &HashMap<String, String>,
+    payload: &[u8],
+) -> Option<ObservableMessage> {
+    let diagnostics = headers.get("diagnostics")
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or_else(|| InvokeDiagnostics {
+            harness_version: String::new(),
+            history_turns: 0,
+        });
+
+    Some(ObservableMessage::Invoke(InvokeMessage {
+        id: MessageId::from(headers.get("msg-id")?.clone()),
+        protocol_version: headers.get("protocol-version").cloned().unwrap_or_default(),
+        submission: SubmissionId::from(headers.get("submission-id")?.clone()),
+        session: SessionId::from(headers.get("session-id")?.clone()),
+        harness: parse_harness(headers.get("harness")?)?,
+        runtime: parse_runtime(headers.get("runtime")?)?,
+        agent_id: ResourceId::new(headers.get("agent-id")?),
+        payload: payload.to_vec(),
+        state: headers.get("state").cloned(),
+        diagnostics,
+    }))
+}
+
+fn reconstruct_request(
+    headers: &HashMap<String, String>,
+    payload: &[u8],
+) -> Option<ObservableMessage> {
+    let diagnostics = headers.get("diagnostics")
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or_else(|| RequestDiagnostics {
+            sequence: 0,
+            endpoint: String::new(),
+            request_bytes: 0,
+            received_at_ms: 0,
+        });
+
+    Some(ObservableMessage::Request(RequestMessage {
+        id: MessageId::from(headers.get("msg-id")?.clone()),
+        protocol_version: headers.get("protocol-version").cloned().unwrap_or_default(),
+        submission: SubmissionId::from(headers.get("submission-id")?.clone()),
+        session: SessionId::from(headers.get("session-id")?.clone()),
+        agent_id: ResourceId::new(headers.get("agent-id")?),
+        service: headers.get("service")?.clone(),
+        backend: headers.get("backend")?.clone(),
+        operation: headers.get("operation")?.clone(),
+        sequence: Sequence::from(
+            headers.get("sequence")?.parse::<u32>().ok()?
+        ),
+        payload: payload.to_vec(),
+        state: headers.get("state").cloned(),
+        diagnostics,
+    }))
+}
+
+fn reconstruct_response(
+    headers: &HashMap<String, String>,
+    payload: &[u8],
+) -> Option<ObservableMessage> {
+    let diagnostics = headers.get("diagnostics")
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or_else(ServiceDiagnostics::placeholder);
+
+    Some(ObservableMessage::Response(ResponseMessage {
+        id: MessageId::from(headers.get("msg-id")?.clone()),
+        protocol_version: headers.get("protocol-version").cloned().unwrap_or_default(),
+        submission: SubmissionId::from(headers.get("submission-id")?.clone()),
+        session: SessionId::from(headers.get("session-id")?.clone()),
+        agent_id: ResourceId::new(headers.get("agent-id")?),
+        service: headers.get("service")?.clone(),
+        backend: headers.get("backend")?.clone(),
+        operation: headers.get("operation")?.clone(),
+        sequence: Sequence::from(
+            headers.get("sequence")?.parse::<u32>().ok()?
+        ),
+        payload: payload.to_vec(),
+        correlation_id: MessageId::from(headers.get("correlation-id")?.clone()),
+        state: headers.get("state").cloned(),
+        diagnostics,
+    }))
+}
+
+fn reconstruct_complete(
+    headers: &HashMap<String, String>,
+    payload: &[u8],
+) -> Option<ObservableMessage> {
+    let diagnostics = headers.get("diagnostics")
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or_else(|| ContainerDiagnostics::placeholder(0));
+
+    Some(ObservableMessage::Complete(CompleteMessage {
+        id: MessageId::from(headers.get("msg-id")?.clone()),
+        protocol_version: headers.get("protocol-version").cloned().unwrap_or_default(),
+        submission: SubmissionId::from(headers.get("submission-id")?.clone()),
+        session: SessionId::from(headers.get("session-id")?.clone()),
+        agent_id: ResourceId::new(headers.get("agent-id")?),
+        harness: parse_harness(headers.get("harness")?)?,
+        payload: payload.to_vec(),
+        state: headers.get("state").cloned(),
+        diagnostics,
+    }))
+}
+
+fn reconstruct_delegate(
+    headers: &HashMap<String, String>,
+    payload: &[u8],
+) -> Option<ObservableMessage> {
+    let diagnostics = headers.get("diagnostics")
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or_else(|| DelegateDiagnostics {
+            container: ContainerDiagnostics::placeholder(0),
+        });
+
+    Some(ObservableMessage::Delegate(DelegateMessage {
+        id: MessageId::from(headers.get("msg-id")?.clone()),
+        protocol_version: headers.get("protocol-version").cloned().unwrap_or_default(),
+        submission: SubmissionId::from(headers.get("submission-id")?.clone()),
+        session: SessionId::from(headers.get("session-id")?.clone()),
+        caller_agent: headers.get("caller-agent")?.clone(),
+        target_agent: headers.get("target-agent")?.clone(),
+        payload: payload.to_vec(),
+        reply_subject: headers.get("reply-subject")?.clone(),
+        state: headers.get("state").cloned(),
+        diagnostics,
+    }))
+}
+
+fn parse_harness(s: &str) -> Option<HarnessType> {
+    match s {
+        "cli" => Some(HarnessType::Cli),
+        "web" => Some(HarnessType::Web),
+        "api" => Some(HarnessType::Api),
+        "whatsapp" => Some(HarnessType::Whatsapp),
+        _ => None,
+    }
+}
+
+fn parse_runtime(s: &str) -> Option<RuntimeType> {
+    match s {
+        "container" => Some(RuntimeType::Container),
+        _ => None,
+    }
+}
+
+// ============================================================================
+// ObservableMessage → DagNode conversion helpers
+// ============================================================================
+
+/// Determine the `MessageType` for a reconstructed message.
+pub fn observable_message_type(msg: &ObservableMessage) -> MessageType {
+    match msg {
+        ObservableMessage::Invoke(_) => MessageType::Invoke,
+        ObservableMessage::Request(_) => MessageType::Request,
+        ObservableMessage::Response(_) => MessageType::Response,
+        ObservableMessage::Complete(_) => MessageType::Complete,
+        ObservableMessage::Delegate(_) => MessageType::Delegate,
+    }
+}
+
+/// Extract (from, to) routing pair from a reconstructed message.
+pub fn observable_from_to(msg: &ObservableMessage) -> (String, String) {
+    match msg {
+        ObservableMessage::Invoke(m) => (
+            m.harness.as_str().to_string(),
+            last_path_segment(m.agent_id.as_str()).to_string(),
+        ),
+        ObservableMessage::Request(m) => (
+            last_path_segment(m.agent_id.as_str()).to_string(),
+            format!("{}.{}", m.service, m.backend),
+        ),
+        ObservableMessage::Response(m) => (
+            format!("{}.{}", m.service, m.backend),
+            last_path_segment(m.agent_id.as_str()).to_string(),
+        ),
+        ObservableMessage::Complete(m) => (
+            last_path_segment(m.agent_id.as_str()).to_string(),
+            m.harness.as_str().to_string(),
+        ),
+        ObservableMessage::Delegate(m) => (
+            m.caller_agent.clone(),
+            m.target_agent.clone(),
+        ),
+    }
+}
+
+/// Serialize diagnostics from a reconstructed message to JSON bytes.
+pub fn serialize_diagnostics(msg: &ObservableMessage) -> Vec<u8> {
+    let json = match msg {
+        ObservableMessage::Invoke(m) => serde_json::to_vec(&m.diagnostics),
+        ObservableMessage::Request(m) => serde_json::to_vec(&m.diagnostics),
+        ObservableMessage::Response(m) => serde_json::to_vec(&m.diagnostics),
+        ObservableMessage::Complete(m) => serde_json::to_vec(&m.diagnostics),
+        ObservableMessage::Delegate(m) => serde_json::to_vec(&m.diagnostics),
+    };
+    json.unwrap_or_default()
+}
+
+/// Extract stderr bytes from a Complete or Delegate message.
+///
+/// Stderr lives on `ContainerDiagnostics` — only Complete and Delegate carry it.
+/// Returns empty for other message types.
+pub fn extract_typed_stderr(msg: &ObservableMessage) -> Vec<u8> {
+    match msg {
+        ObservableMessage::Complete(m) => m.diagnostics.stderr.clone(),
+        ObservableMessage::Delegate(m) => m.diagnostics.container.stderr.clone(),
+        _ => Vec::new(),
+    }
+}
+
+/// Extract state from a reconstructed message.
+pub fn observable_state(msg: &ObservableMessage) -> Option<String> {
+    match msg {
+        ObservableMessage::Invoke(m) => m.state.clone(),
+        ObservableMessage::Request(m) => m.state.clone(),
+        ObservableMessage::Response(m) => m.state.clone(),
+        ObservableMessage::Complete(m) => m.state.clone(),
+        ObservableMessage::Delegate(m) => m.state.clone(),
+    }
+}
+
+/// Build a `DagNode` from a reconstructed `ObservableMessage` and Merkle chain state.
+///
+/// `parent_hash` is the hash of the previous node in the same session
+/// (empty string for the first message).
+pub fn build_dag_node(msg: &ObservableMessage, parent_hash: &str) -> DagNode {
+    let message_type = observable_message_type(msg);
+    let (from, to) = observable_from_to(msg);
+    let diagnostics = serialize_diagnostics(msg);
+    let stderr = extract_typed_stderr(msg);
+    let state = observable_state(msg);
+    let payload = msg.payload();
+    let hash = hash_dag_node(payload, parent_hash, &message_type, &diagnostics);
+
+    DagNode {
+        hash,
+        parent_hash: parent_hash.to_string(),
+        message_type,
+        from,
+        to,
+        session_id: msg.session().as_str().to_string(),
+        submission_id: msg.submission().as_str().to_string(),
+        payload: payload.to_vec(),
+        diagnostics,
+        stderr,
+        created_at: Utc::now(),
+        state,
+        protocol_version: msg.protocol_version().to_string(),
+    }
+}
+
+fn last_path_segment(s: &str) -> &str {
+    s.rsplit('/').next().unwrap_or(s)
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::DagStore;
     use crate::storage::dag_store::SqliteDagStore;
 
-    fn test_store_pair() -> (Box<SqliteDagStore>, SqliteDagStore) {
-        let tmp = tempfile::NamedTempFile::new().unwrap();
-        let worker_store = Box::new(SqliteDagStore::open(tmp.path()).unwrap());
-        let query_store = SqliteDagStore::open(tmp.path()).unwrap();
-        (worker_store, query_store)
-    }
+    // --- Header construction helpers ---
 
-    fn make_dispatcher(store: Box<SqliteDagStore>) -> DagCaptureWorker {
-        let sqlite_worker = SqliteDagWorker::new(store);
-        DagCaptureWorker::new(vec![Box::new(sqlite_worker)])
-    }
-
-    fn headers(session_id: &str) -> HashMap<String, String> {
+    fn invoke_headers() -> HashMap<String, String> {
         let mut h = HashMap::new();
-        h.insert("session-id".to_string(), session_id.to_string());
+        h.insert("msg-id".to_string(), "msg-001".to_string());
+        h.insert("protocol-version".to_string(), "0.1.0".to_string());
+        h.insert("submission-id".to_string(), "sub-1".to_string());
+        h.insert("session-id".to_string(), "sess-1".to_string());
+        h.insert("harness".to_string(), "cli".to_string());
+        h.insert("runtime".to_string(), "container".to_string());
+        h.insert("agent-id".to_string(), "http://127.0.0.1:9000/agents/myagent".to_string());
         h
     }
 
+    fn request_headers() -> HashMap<String, String> {
+        let mut h = HashMap::new();
+        h.insert("msg-id".to_string(), "msg-002".to_string());
+        h.insert("protocol-version".to_string(), "0.1.0".to_string());
+        h.insert("submission-id".to_string(), "sub-1".to_string());
+        h.insert("session-id".to_string(), "sess-1".to_string());
+        h.insert("agent-id".to_string(), "http://127.0.0.1:9000/agents/myagent".to_string());
+        h.insert("service".to_string(), "infer".to_string());
+        h.insert("backend".to_string(), "ollama".to_string());
+        h.insert("operation".to_string(), "run".to_string());
+        h.insert("sequence".to_string(), "1".to_string());
+        h
+    }
+
+    fn response_headers() -> HashMap<String, String> {
+        let mut h = request_headers();
+        h.insert("msg-id".to_string(), "msg-003".to_string());
+        h.insert("correlation-id".to_string(), "msg-002".to_string());
+        h
+    }
+
+    fn complete_headers() -> HashMap<String, String> {
+        let mut h = HashMap::new();
+        h.insert("msg-id".to_string(), "msg-004".to_string());
+        h.insert("protocol-version".to_string(), "0.1.0".to_string());
+        h.insert("submission-id".to_string(), "sub-1".to_string());
+        h.insert("session-id".to_string(), "sess-1".to_string());
+        h.insert("agent-id".to_string(), "http://127.0.0.1:9000/agents/myagent".to_string());
+        h.insert("harness".to_string(), "cli".to_string());
+        h
+    }
+
+    fn delegate_headers() -> HashMap<String, String> {
+        let mut h = HashMap::new();
+        h.insert("msg-id".to_string(), "msg-005".to_string());
+        h.insert("protocol-version".to_string(), "0.1.0".to_string());
+        h.insert("submission-id".to_string(), "sub-1".to_string());
+        h.insert("session-id".to_string(), "sess-1".to_string());
+        h.insert("caller-agent".to_string(), "coordinator".to_string());
+        h.insert("target-agent".to_string(), "summarizer".to_string());
+        h.insert("reply-subject".to_string(), "vlinder.sub-1.delegate-reply".to_string());
+        h
+    }
+
+    // --- reconstruct_observable_message tests ---
+
     #[test]
-    fn invoke_writes_dag_node() {
-        let (worker_store, query_store) = test_store_pair();
-        let mut dispatcher = make_dispatcher(worker_store);
-
-        dispatcher.process_message(
+    fn reconstruct_invoke() {
+        let msg = reconstruct_observable_message(
             "vlinder.sub-1.invoke.cli.container.myagent",
-            &headers("sess-1"),
+            &invoke_headers(),
             b"invoke-payload",
-        );
+        ).unwrap();
 
-        let nodes = query_store.get_session_nodes("sess-1").unwrap();
+        assert!(matches!(msg, ObservableMessage::Invoke(_)));
+        if let ObservableMessage::Invoke(m) = &msg {
+            assert_eq!(m.harness, HarnessType::Cli);
+            assert_eq!(m.runtime, RuntimeType::Container);
+            assert!(m.agent_id.as_str().contains("myagent"));
+            assert_eq!(m.payload, b"invoke-payload");
+            assert_eq!(m.session.as_str(), "sess-1");
+            assert_eq!(m.submission.as_str(), "sub-1");
+        }
+    }
+
+    #[test]
+    fn reconstruct_request_msg() {
+        let msg = reconstruct_observable_message(
+            "vlinder.sub-1.req.myagent.infer.ollama.run.1",
+            &request_headers(),
+            b"request-payload",
+        ).unwrap();
+
+        assert!(matches!(msg, ObservableMessage::Request(_)));
+        if let ObservableMessage::Request(m) = &msg {
+            assert_eq!(m.service, "infer");
+            assert_eq!(m.backend, "ollama");
+            assert_eq!(m.operation, "run");
+            assert_eq!(m.sequence.as_u32(), 1);
+            assert_eq!(m.payload, b"request-payload");
+        }
+    }
+
+    #[test]
+    fn reconstruct_response_msg() {
+        let msg = reconstruct_observable_message(
+            "vlinder.sub-1.res.infer.ollama.myagent.run.1",
+            &response_headers(),
+            b"response-payload",
+        ).unwrap();
+
+        assert!(matches!(msg, ObservableMessage::Response(_)));
+        if let ObservableMessage::Response(m) = &msg {
+            assert_eq!(m.service, "infer");
+            assert_eq!(m.backend, "ollama");
+            assert_eq!(m.correlation_id.as_str(), "msg-002");
+            assert_eq!(m.payload, b"response-payload");
+        }
+    }
+
+    #[test]
+    fn reconstruct_complete_msg() {
+        let msg = reconstruct_observable_message(
+            "vlinder.sub-1.complete.myagent.cli",
+            &complete_headers(),
+            b"complete-payload",
+        ).unwrap();
+
+        assert!(matches!(msg, ObservableMessage::Complete(_)));
+        if let ObservableMessage::Complete(m) = &msg {
+            assert_eq!(m.harness, HarnessType::Cli);
+            assert_eq!(m.payload, b"complete-payload");
+        }
+    }
+
+    #[test]
+    fn reconstruct_delegate_msg() {
+        let msg = reconstruct_observable_message(
+            "vlinder.sub-1.delegate.coordinator.summarizer",
+            &delegate_headers(),
+            b"delegate-payload",
+        ).unwrap();
+
+        assert!(matches!(msg, ObservableMessage::Delegate(_)));
+        if let ObservableMessage::Delegate(m) = &msg {
+            assert_eq!(m.caller_agent, "coordinator");
+            assert_eq!(m.target_agent, "summarizer");
+            assert_eq!(m.reply_subject, "vlinder.sub-1.delegate-reply");
+            assert_eq!(m.payload, b"delegate-payload");
+        }
+    }
+
+    #[test]
+    fn unknown_message_type_returns_none() {
+        let msg = reconstruct_observable_message(
+            "vlinder.sub-1.foobar.something",
+            &invoke_headers(),
+            b"payload",
+        );
+        assert!(msg.is_none());
+    }
+
+    #[test]
+    fn missing_required_header_returns_none() {
+        // Missing session-id
+        let mut h = invoke_headers();
+        h.remove("session-id");
+        let msg = reconstruct_observable_message(
+            "vlinder.sub-1.invoke.cli.container.agent",
+            &h,
+            b"payload",
+        );
+        assert!(msg.is_none());
+    }
+
+    #[test]
+    fn state_header_preserved() {
+        let mut h = invoke_headers();
+        h.insert("state".to_string(), "abc123state".to_string());
+        let msg = reconstruct_observable_message(
+            "vlinder.sub-1.invoke.cli.container.myagent",
+            &h,
+            b"payload",
+        ).unwrap();
+
+        if let ObservableMessage::Invoke(m) = &msg {
+            assert_eq!(m.state, Some("abc123state".to_string()));
+        } else {
+            panic!("expected Invoke");
+        }
+    }
+
+    #[test]
+    fn missing_state_gives_none() {
+        let msg = reconstruct_observable_message(
+            "vlinder.sub-1.invoke.cli.container.myagent",
+            &invoke_headers(),
+            b"payload",
+        ).unwrap();
+
+        if let ObservableMessage::Invoke(m) = &msg {
+            assert_eq!(m.state, None);
+        } else {
+            panic!("expected Invoke");
+        }
+    }
+
+    // --- ObservableMessage → DagNode conversion tests ---
+
+    #[test]
+    fn build_dag_node_from_invoke() {
+        let msg = reconstruct_observable_message(
+            "vlinder.sub-1.invoke.cli.container.myagent",
+            &invoke_headers(),
+            b"invoke-payload",
+        ).unwrap();
+
+        let node = build_dag_node(&msg, "");
+        assert_eq!(node.message_type, MessageType::Invoke);
+        assert_eq!(node.from, "cli");
+        assert_eq!(node.to, "myagent");
+        assert_eq!(node.session_id, "sess-1");
+        assert_eq!(node.submission_id, "sub-1");
+        assert_eq!(node.payload, b"invoke-payload");
+        assert_eq!(node.parent_hash, "");
+        assert!(!node.hash.is_empty());
+    }
+
+    #[test]
+    fn build_dag_node_from_request() {
+        let msg = reconstruct_observable_message(
+            "vlinder.sub-1.req.myagent.infer.ollama.run.1",
+            &request_headers(),
+            b"request-payload",
+        ).unwrap();
+
+        let node = build_dag_node(&msg, "parent-abc");
+        assert_eq!(node.message_type, MessageType::Request);
+        assert_eq!(node.from, "myagent");
+        assert_eq!(node.to, "infer.ollama");
+        assert_eq!(node.parent_hash, "parent-abc");
+    }
+
+    #[test]
+    fn build_dag_node_from_response() {
+        let msg = reconstruct_observable_message(
+            "vlinder.sub-1.res.infer.ollama.myagent.run.1",
+            &response_headers(),
+            b"response-payload",
+        ).unwrap();
+
+        let node = build_dag_node(&msg, "");
+        assert_eq!(node.message_type, MessageType::Response);
+        assert_eq!(node.from, "infer.ollama");
+        assert_eq!(node.to, "myagent");
+    }
+
+    #[test]
+    fn build_dag_node_from_delegate() {
+        let msg = reconstruct_observable_message(
+            "vlinder.sub-1.delegate.coordinator.summarizer",
+            &delegate_headers(),
+            b"delegate-payload",
+        ).unwrap();
+
+        let node = build_dag_node(&msg, "");
+        assert_eq!(node.message_type, MessageType::Delegate);
+        assert_eq!(node.from, "coordinator");
+        assert_eq!(node.to, "summarizer");
+    }
+
+    #[test]
+    fn build_dag_node_state_preserved() {
+        let mut h = complete_headers();
+        h.insert("state".to_string(), "state-hash".to_string());
+        let msg = reconstruct_observable_message(
+            "vlinder.sub-1.complete.myagent.cli",
+            &h,
+            b"done",
+        ).unwrap();
+
+        let node = build_dag_node(&msg, "");
+        assert_eq!(node.state, Some("state-hash".to_string()));
+    }
+
+    // --- Integration: reconstruct → DagNode → SQLite round-trip ---
+
+    fn test_store_pair() -> (SqliteDagStore, SqliteDagStore) {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let writer = SqliteDagStore::open(tmp.path()).unwrap();
+        let reader = SqliteDagStore::open(tmp.path()).unwrap();
+        (writer, reader)
+    }
+
+    #[test]
+    fn reconstruct_and_store_invoke() {
+        let (writer, reader) = test_store_pair();
+        let msg = reconstruct_observable_message(
+            "vlinder.sub-1.invoke.cli.container.myagent",
+            &invoke_headers(),
+            b"invoke-payload",
+        ).unwrap();
+
+        let node = build_dag_node(&msg, "");
+        writer.insert_node(&node).unwrap();
+
+        let nodes = reader.get_session_nodes("sess-1").unwrap();
         assert_eq!(nodes.len(), 1);
         assert_eq!(nodes[0].message_type, MessageType::Invoke);
         assert_eq!(nodes[0].from, "cli");
         assert_eq!(nodes[0].to, "myagent");
-        assert_eq!(nodes[0].submission_id, "sub-1");
-        assert_eq!(nodes[0].payload, b"invoke-payload");
-        assert_eq!(nodes[0].parent_hash, "");
-    }
-
-    #[test]
-    fn complete_writes_dag_node() {
-        let (worker_store, query_store) = test_store_pair();
-        let mut dispatcher = make_dispatcher(worker_store);
-
-        dispatcher.process_message(
-            "vlinder.sub-1.complete.myagent.cli",
-            &headers("sess-1"),
-            b"complete-payload",
-        );
-
-        let nodes = query_store.get_session_nodes("sess-1").unwrap();
-        assert_eq!(nodes.len(), 1);
-        assert_eq!(nodes[0].message_type, MessageType::Complete);
-        assert_eq!(nodes[0].from, "myagent");
-        assert_eq!(nodes[0].to, "cli");
-    }
-
-    #[test]
-    fn request_writes_dag_node() {
-        let (worker_store, query_store) = test_store_pair();
-        let mut dispatcher = make_dispatcher(worker_store);
-
-        dispatcher.process_message(
-            "vlinder.sub-1.req.myagent.infer.ollama.run.1",
-            &headers("sess-1"),
-            b"request-payload",
-        );
-
-        let nodes = query_store.get_session_nodes("sess-1").unwrap();
-        assert_eq!(nodes.len(), 1);
-        assert_eq!(nodes[0].message_type, MessageType::Request);
-        assert_eq!(nodes[0].from, "myagent");
-        assert_eq!(nodes[0].to, "infer.ollama");
-    }
-
-    #[test]
-    fn response_writes_dag_node() {
-        let (worker_store, query_store) = test_store_pair();
-        let mut dispatcher = make_dispatcher(worker_store);
-
-        dispatcher.process_message(
-            "vlinder.sub-1.res.infer.ollama.myagent.run.1",
-            &headers("sess-1"),
-            b"response-payload",
-        );
-
-        let nodes = query_store.get_session_nodes("sess-1").unwrap();
-        assert_eq!(nodes.len(), 1);
-        assert_eq!(nodes[0].message_type, MessageType::Response);
-        assert_eq!(nodes[0].from, "infer.ollama");
-        assert_eq!(nodes[0].to, "myagent");
-    }
-
-    #[test]
-    fn delegate_writes_dag_node() {
-        let (worker_store, query_store) = test_store_pair();
-        let mut dispatcher = make_dispatcher(worker_store);
-
-        dispatcher.process_message(
-            "vlinder.sub-1.delegate.coordinator.summarizer",
-            &headers("sess-1"),
-            b"delegate-payload",
-        );
-
-        let nodes = query_store.get_session_nodes("sess-1").unwrap();
-        assert_eq!(nodes.len(), 1);
-        assert_eq!(nodes[0].message_type, MessageType::Delegate);
-        assert_eq!(nodes[0].from, "coordinator");
-        assert_eq!(nodes[0].to, "summarizer");
     }
 
     #[test]
     fn messages_chain_in_session() {
-        let (worker_store, query_store) = test_store_pair();
-        let mut dispatcher = make_dispatcher(worker_store);
+        let (writer, reader) = test_store_pair();
+        let mut last_hash = String::new();
 
-        dispatcher.process_message(
+        let msg1 = reconstruct_observable_message(
             "vlinder.sub-1.invoke.cli.container.agent-a",
-            &headers("sess-1"),
+            &invoke_headers(),
             b"first",
-        );
-        dispatcher.process_message(
-            "vlinder.sub-1.req.agent-a.infer.ollama.run.1",
-            &headers("sess-1"),
+        ).unwrap();
+        let node1 = build_dag_node(&msg1, &last_hash);
+        last_hash = node1.hash.clone();
+        writer.insert_node(&node1).unwrap();
+
+        let msg2 = reconstruct_observable_message(
+            "vlinder.sub-1.req.myagent.infer.ollama.run.1",
+            &request_headers(),
             b"second",
-        );
-        dispatcher.process_message(
-            "vlinder.sub-1.res.infer.ollama.agent-a.run.1",
-            &headers("sess-1"),
+        ).unwrap();
+        let node2 = build_dag_node(&msg2, &last_hash);
+        last_hash = node2.hash.clone();
+        writer.insert_node(&node2).unwrap();
+
+        let msg3 = reconstruct_observable_message(
+            "vlinder.sub-1.res.infer.ollama.myagent.run.1",
+            &response_headers(),
             b"third",
-        );
+        ).unwrap();
+        let node3 = build_dag_node(&msg3, &last_hash);
+        writer.insert_node(&node3).unwrap();
 
-        let nodes = query_store.get_session_nodes("sess-1").unwrap();
+        let nodes = reader.get_session_nodes("sess-1").unwrap();
         assert_eq!(nodes.len(), 3);
-
-        // First node has empty parent
         assert_eq!(nodes[0].parent_hash, "");
-        // Second chains to first
         assert_eq!(nodes[1].parent_hash, nodes[0].hash);
-        // Third chains to second
         assert_eq!(nodes[2].parent_hash, nodes[1].hash);
     }
 
     #[test]
-    fn unknown_message_type_is_ignored() {
-        let (worker_store, query_store) = test_store_pair();
-        let mut dispatcher = make_dispatcher(worker_store);
-
-        dispatcher.process_message(
-            "vlinder.sub-1.foobar.something",
-            &headers("sess-1"),
-            b"payload",
-        );
-
-        let nodes = query_store.get_session_nodes("sess-1").unwrap();
-        assert!(nodes.is_empty());
-    }
-
-    #[test]
-    fn missing_session_header_is_ignored() {
-        let (worker_store, query_store) = test_store_pair();
-        let mut dispatcher = make_dispatcher(worker_store);
-
-        dispatcher.process_message(
-            "vlinder.sub-1.invoke.cli.container.agent",
-            &HashMap::new(),
-            b"payload",
-        );
-
-        let nodes = query_store.get_session_nodes("sess-1").unwrap();
-        assert!(nodes.is_empty());
-    }
-
-    #[test]
     fn different_sessions_chain_independently() {
-        let (worker_store, query_store) = test_store_pair();
-        let mut dispatcher = make_dispatcher(worker_store);
+        let (writer, reader) = test_store_pair();
 
-        dispatcher.process_message(
-            "vlinder.sub-1.invoke.cli.container.a",
-            &headers("sess-1"),
+        let msg1 = reconstruct_observable_message(
+            "vlinder.sub-1.invoke.cli.container.agent-a",
+            &invoke_headers(),
             b"sess1-first",
-        );
-        dispatcher.process_message(
-            "vlinder.sub-2.invoke.cli.container.b",
-            &headers("sess-2"),
-            b"sess2-first",
-        );
-        dispatcher.process_message(
-            "vlinder.sub-1.complete.a.cli",
-            &headers("sess-1"),
-            b"sess1-second",
-        );
+        ).unwrap();
+        let node1 = build_dag_node(&msg1, "");
+        writer.insert_node(&node1).unwrap();
 
-        let sess1 = query_store.get_session_nodes("sess-1").unwrap();
-        let sess2 = query_store.get_session_nodes("sess-2").unwrap();
+        let mut h2 = invoke_headers();
+        h2.insert("session-id".to_string(), "sess-2".to_string());
+        h2.insert("msg-id".to_string(), "msg-099".to_string());
+        let msg2 = reconstruct_observable_message(
+            "vlinder.sub-2.invoke.cli.container.agent-b",
+            &h2,
+            b"sess2-first",
+        ).unwrap();
+        let node2 = build_dag_node(&msg2, "");
+        writer.insert_node(&node2).unwrap();
+
+        let msg3 = reconstruct_observable_message(
+            "vlinder.sub-1.complete.myagent.cli",
+            &complete_headers(),
+            b"sess1-second",
+        ).unwrap();
+        let node3 = build_dag_node(&msg3, &node1.hash);
+        writer.insert_node(&node3).unwrap();
+
+        let sess1 = reader.get_session_nodes("sess-1").unwrap();
+        let sess2 = reader.get_session_nodes("sess-2").unwrap();
 
         assert_eq!(sess1.len(), 2);
         assert_eq!(sess2.len(), 1);
-
-        // sess-1's second node chains to sess-1's first, not sess-2's
         assert_eq!(sess1[1].parent_hash, sess1[0].hash);
-        // sess-2's first node has empty parent
         assert_eq!(sess2[0].parent_hash, "");
-    }
-
-    #[test]
-    fn fan_out_to_multiple_workers() {
-        // Two independent SQLite stores, both receiving every node.
-        let tmp1 = tempfile::NamedTempFile::new().unwrap();
-        let tmp2 = tempfile::NamedTempFile::new().unwrap();
-
-        let store1 = Box::new(SqliteDagStore::open(tmp1.path()).unwrap());
-        let store2 = Box::new(SqliteDagStore::open(tmp2.path()).unwrap());
-
-        let query1 = SqliteDagStore::open(tmp1.path()).unwrap();
-        let query2 = SqliteDagStore::open(tmp2.path()).unwrap();
-
-        let worker1 = SqliteDagWorker::new(store1);
-        let worker2 = SqliteDagWorker::new(store2);
-
-        let mut dispatcher = DagCaptureWorker::new(vec![
-            Box::new(worker1),
-            Box::new(worker2),
-        ]);
-
-        dispatcher.process_message(
-            "vlinder.sub-1.invoke.cli.container.agent-a",
-            &headers("sess-1"),
-            b"hello",
-        );
-
-        let nodes1 = query1.get_session_nodes("sess-1").unwrap();
-        let nodes2 = query2.get_session_nodes("sess-1").unwrap();
-
-        assert_eq!(nodes1.len(), 1);
-        assert_eq!(nodes2.len(), 1);
-        assert_eq!(nodes1[0].hash, nodes2[0].hash);
-    }
-
-    #[test]
-    fn state_header_extracted_into_dag_node() {
-        let (worker_store, query_store) = test_store_pair();
-        let mut dispatcher = make_dispatcher(worker_store);
-
-        let mut h = headers("sess-1");
-        h.insert("state".to_string(), "abc123state".to_string());
-
-        dispatcher.process_message(
-            "vlinder.sub-1.complete.todoapp.cli",
-            &h,
-            b"done",
-        );
-
-        let nodes = query_store.get_session_nodes("sess-1").unwrap();
-        assert_eq!(nodes.len(), 1);
-        assert_eq!(nodes[0].state, Some("abc123state".to_string()));
-    }
-
-    #[test]
-    fn missing_state_header_gives_none() {
-        let (worker_store, query_store) = test_store_pair();
-        let mut dispatcher = make_dispatcher(worker_store);
-
-        dispatcher.process_message(
-            "vlinder.sub-1.invoke.cli.container.agent-a",
-            &headers("sess-1"),
-            b"hello",
-        );
-
-        let nodes = query_store.get_session_nodes("sess-1").unwrap();
-        assert_eq!(nodes[0].state, None);
     }
 }

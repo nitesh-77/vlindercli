@@ -156,9 +156,28 @@ File presence/absence is itself information — `service` only exists in Request
 
 `InvokeMessage`, `RequestMessage`, `ResponseMessage`, `CompleteMessage`, `DelegateMessage` add `#[derive(Serialize)]`. Supporting types that lack it (`MessageId`, `HarnessType`, `Sequence`, `RuntimeType`) gain serde derives.
 
-### DagWorker sits at the domain layer
+### Two independent NATS consumers replace DagCaptureWorker
 
-The DagWorker observes typed messages at the point of creation — before NATS decomposition. The code that constructs an `InvokeMessage` or `CompleteMessage` also hands it to the DagWorker. This is simpler than subscribing to NATS and reconstructing.
+The old `DagCaptureWorker` was an in-process fan-out dispatcher with an array of workers. This re-implemented what NATS gives natively — multiple consumers on the same stream, each independently receiving every message.
+
+Two independent JetStream consumers subscribe to `vlinder.>`:
+
+- **`dag-sqlite`**: Reconstructs `ObservableMessage` from NATS headers, converts to `DagNode`, inserts into SQLite. Owns its own Merkle chaining state (`HashMap<String, String>`).
+- **`dag-git`**: Reconstructs `ObservableMessage` from NATS headers, calls `GitDagWorker::on_observable_message()`. Owns its own commit chain state.
+
+Each consumer is an independent process with no shared dispatcher. NATS handles the multiplexing.
+
+The shared `reconstruct_observable_message()` function reads NATS subject + headers + payload to reconstruct typed messages — the inverse of `NatsQueue::send_*()`.
+
+#### Singletons as a sensible default
+
+DAG workers are singletons — not a fundamental limitation, but the correct default for the current workload:
+
+- **Git**: The bottleneck is the ref lock file (one per branch) and the sequential commit chain. Scaling option: ref-per-session parallelism — each session gets its own branch, workers update independent refs concurrently. Object store (blobs, trees, commits) is concurrent-safe. Trade-off: lose single-directory browsability.
+- **SQLite**: Per-session Merkle chains are already independent in the HashMap — partitioning sessions across workers is mechanically straightforward.
+- **NATS routing**: Requires session-id in the subject format (currently only in headers) so consumers can filter by session. Subject format is ours to change.
+
+This is a workload-shape + UX decision, not an architecture decision. Current default (single branch, single HEAD, browse everything with `ls`) is correct for single-user moderate-throughput. When throughput demands it, the knobs exist — own ADR when needed.
 
 ### Earlier draft decisions are subsumed or simplified
 
