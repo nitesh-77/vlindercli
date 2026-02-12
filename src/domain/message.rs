@@ -26,7 +26,8 @@ pub const PROTOCOL_VERSION: &str = env!("CARGO_PKG_VERSION");
 // --- Supporting types ---
 
 /// Unique identifier for a message.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize)]
+#[serde(transparent)]
 pub struct MessageId(String);
 
 impl MessageId {
@@ -139,7 +140,8 @@ impl From<String> for SessionId {
 ///
 /// Starts at 1 and increments for each service request.
 /// Used to reconstruct the order of events when debugging.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
+#[serde(transparent)]
 pub struct Sequence(u32);
 
 impl Sequence {
@@ -203,7 +205,8 @@ impl From<u32> for Sequence {
 ///
 /// Each variant represents a concrete harness implementation.
 /// Used to route completion messages back to the correct harness type.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum HarnessType {
     /// Command-line interface harness
     Cli,
@@ -258,7 +261,7 @@ pub trait ExpectsReply {
 ///
 /// Starts a submission by invoking an agent.
 /// Expects a CompleteMessage in response (enforced by ExpectsReply trait).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct InvokeMessage {
     pub id: MessageId,
     pub protocol_version: String,
@@ -267,11 +270,14 @@ pub struct InvokeMessage {
     pub harness: HarnessType,
     pub runtime: RuntimeType,
     pub agent_id: ResourceId,
+    #[serde(skip)]
     pub payload: Vec<u8>,
     /// Initial state hash from the previous turn's State trailer (ADR 055).
     /// None for the first invocation or when state tracking is not active.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub state: Option<String>,
     /// Diagnostics from the harness (ADR 071).
+    #[serde(skip)]
     pub diagnostics: InvokeDiagnostics,
 }
 
@@ -305,7 +311,7 @@ impl InvokeMessage {
 ///
 /// Agent requests a service operation (kv, vec, infer, embed).
 /// Expects a ResponseMessage in response (enforced by ExpectsReply trait).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct RequestMessage {
     pub id: MessageId,
     pub protocol_version: String,
@@ -316,11 +322,14 @@ pub struct RequestMessage {
     pub backend: String,
     pub operation: String,
     pub sequence: Sequence,
+    #[serde(skip)]
     pub payload: Vec<u8>,
     /// State hash at the time this request was made (ADR 055).
     /// Records the state context before the service processes the request.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub state: Option<String>,
     /// Diagnostics from the bridge (ADR 071).
+    #[serde(skip)]
     pub diagnostics: RequestDiagnostics,
 }
 
@@ -357,7 +366,7 @@ impl RequestMessage {
 /// Response message: Service → Runtime
 ///
 /// Service responds to a request, echoing all dimensions for traceability.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct ResponseMessage {
     pub id: MessageId,
     pub protocol_version: String,
@@ -368,12 +377,15 @@ pub struct ResponseMessage {
     pub backend: String,
     pub operation: String,
     pub sequence: Sequence,
+    #[serde(skip)]
     pub payload: Vec<u8>,
     pub correlation_id: MessageId,
     /// State hash after this response (ADR 055).
     /// Present when the operation changed state (e.g. kv-put returns new hash).
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub state: Option<String>,
     /// Diagnostics from the service worker (ADR 071).
+    #[serde(skip)]
     pub diagnostics: ServiceDiagnostics,
 }
 
@@ -417,7 +429,7 @@ impl ResponseMessage {
 /// dispatches the target, and sends the result to the reply subject.
 /// Does NOT implement ExpectsReply — the reply is managed by the runtime,
 /// not the type system.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct DelegateMessage {
     pub id: MessageId,
     pub protocol_version: String,
@@ -425,13 +437,16 @@ pub struct DelegateMessage {
     pub session: SessionId,
     pub caller_agent: String,
     pub target_agent: String,
+    #[serde(skip)]
     pub payload: Vec<u8>,
     /// The "handle" — caller polls this for result.
     pub reply_subject: String,
     /// Caller's state hash at the time of delegation (ADR 055).
     /// Records the delegating agent's state context.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub state: Option<String>,
     /// Diagnostics from the container runtime (ADR 071).
+    #[serde(skip)]
     pub diagnostics: DelegateDiagnostics,
 }
 
@@ -464,7 +479,7 @@ impl DelegateMessage {
 /// Complete message: Runtime → Harness
 ///
 /// Signals that a submission has finished.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct CompleteMessage {
     pub id: MessageId,
     pub protocol_version: String,
@@ -472,11 +487,14 @@ pub struct CompleteMessage {
     pub session: SessionId,
     pub agent_id: ResourceId,
     pub harness: HarnessType,
+    #[serde(skip)]
     pub payload: Vec<u8>,
     /// Final state hash after this invocation (ADR 055).
     /// None when state tracking is not active.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub state: Option<String>,
     /// Diagnostics from the container runtime (ADR 071).
+    #[serde(skip)]
     pub diagnostics: ContainerDiagnostics,
 }
 

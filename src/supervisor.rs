@@ -119,11 +119,14 @@ impl Supervisor {
             }
         }
 
-        // DAG capture workers
-        for _ in 0..counts.dag.capture {
-            if let Some(child) = spawn_worker(WorkerRole::DagCapture) {
-                workers.push(child);
-            }
+        // DAG workers — always exactly one of each (singleton by design, see ADR 078).
+        // Git: single branch + HEAD lock. SQLite: per-session Merkle chains in one process.
+        // Scaling is a future workload-driven decision (ref-per-session, NATS subject routing).
+        if let Some(child) = spawn_worker(WorkerRole::DagSqlite) {
+            workers.push(child);
+        }
+        if let Some(child) = spawn_worker(WorkerRole::DagGit) {
+            workers.push(child);
         }
 
         tracing::info!(
@@ -193,14 +196,15 @@ mod tests {
                         object: crate::config::ObjectStorageWorkerCounts { sqlite: 0, memory: 0 },
                         vector: crate::config::VectorStorageWorkerCounts { sqlite: 0, memory: 0 },
                     },
-                    dag: crate::config::DagWorkerCounts { capture: 0 },
                 },
             },
             ..Default::default()
         };
 
         let mut supervisor = Supervisor::new(&config);
-        assert!(supervisor.workers.is_empty());
+        // Only the two unconditional DAG singletons (dag-sqlite, dag-git) are spawned.
+        // All config-driven workers have count 0.
+        assert_eq!(supervisor.workers.len(), 2);
         supervisor.shutdown();
     }
 }

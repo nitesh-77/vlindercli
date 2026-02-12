@@ -10,7 +10,7 @@ mod vector;
 mod inference;
 mod embedding;
 
-pub use dag::{DagCaptureWorker, DagWorker, SqliteDagWorker};
+pub use dag::{reconstruct_observable_message, build_dag_node};
 pub use git_dag::GitDagWorker;
 pub use object::ObjectServiceWorker;
 pub use vector::VectorServiceWorker;

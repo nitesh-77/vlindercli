@@ -129,6 +129,8 @@ impl ServiceDiagnostics {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ContainerDiagnostics {
     /// Agent's stderr stream, extracted from the HTTP response.
+    /// Stored as a separate binary file in the git tree, not in diagnostics.toml.
+    #[serde(skip)]
     pub stderr: Vec<u8>,
     /// Container runtime metadata.
     pub runtime: ContainerRuntimeInfo,
@@ -299,6 +301,8 @@ mod tests {
 
     #[test]
     fn container_diagnostics_json_round_trip() {
+        // stderr is #[serde(skip)] — stored as a separate binary blob (ADR 078).
+        // Round-trip only preserves the non-skipped fields.
         let diag = ContainerDiagnostics {
             stderr: b"INFO: loaded model".to_vec(),
             runtime: ContainerRuntimeInfo {
@@ -310,12 +314,16 @@ mod tests {
             duration_ms: 2300,
         };
         let json = serde_json::to_string(&diag).unwrap();
+        assert!(!json.contains("stderr"), "stderr should not appear in JSON");
         let back: ContainerDiagnostics = serde_json::from_str(&json).unwrap();
-        assert_eq!(diag, back);
+        assert!(back.stderr.is_empty(), "stderr defaults to empty on deserialize");
+        assert_eq!(back.runtime, diag.runtime);
+        assert_eq!(back.duration_ms, diag.duration_ms);
     }
 
     #[test]
     fn container_diagnostics_toml_round_trip() {
+        // stderr is #[serde(skip)] — stored as a separate binary blob (ADR 078).
         let diag = ContainerDiagnostics {
             stderr: b"WARN: truncated".to_vec(),
             runtime: ContainerRuntimeInfo {
@@ -327,8 +335,11 @@ mod tests {
             duration_ms: 2300,
         };
         let toml_str = toml::to_string_pretty(&diag).unwrap();
+        assert!(!toml_str.contains("stderr"), "stderr should not appear in TOML");
         let back: ContainerDiagnostics = toml::from_str(&toml_str).unwrap();
-        assert_eq!(diag, back);
+        assert!(back.stderr.is_empty(), "stderr defaults to empty on deserialize");
+        assert_eq!(back.runtime, diag.runtime);
+        assert_eq!(back.duration_ms, diag.duration_ms);
     }
 
     #[test]
