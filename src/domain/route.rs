@@ -118,6 +118,7 @@ mod tests {
             stderr: Vec::new(),
             created_at: DateTime::from_timestamp(epoch_secs, 0).unwrap(),
             state: None,
+            protocol_version: String::new(),
         }
     }
 

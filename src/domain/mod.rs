@@ -53,6 +53,7 @@ pub use queue_bridge::QueueBridge;
 // ============================================================================
 
 pub use message::{
+    PROTOCOL_VERSION,
     MessageId, SubmissionId, SessionId, Sequence, SequenceCounter, HarnessType,
     InvokeMessage, RequestMessage, ResponseMessage, CompleteMessage, DelegateMessage,
     ExpectsReply, ObservableMessage,
