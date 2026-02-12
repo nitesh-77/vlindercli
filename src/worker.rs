@@ -61,7 +61,8 @@ pub fn run_worker_loop(role: WorkerRole, shutdown: Arc<AtomicBool>) {
 fn run_registry_worker(config: &Config, shutdown: &AtomicBool) {
     use tonic::transport::Server;
     use crate::config::registry_db_path;
-    use crate::domain::{PersistentRegistry, RuntimeType, ObjectStorageType, VectorStorageType};
+    use crate::domain::{RuntimeType, ObjectStorageType, VectorStorageType};
+    use crate::registry::PersistentRegistry;
     use crate::registry_service::RegistryServiceServer;
 
     let db_path = registry_db_path();

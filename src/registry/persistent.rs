@@ -10,12 +10,12 @@ use std::path::Path;
 
 use crate::config::Config;
 use crate::domain::{
-    Agent, EngineType, Model, ObjectStorageType, RegistrationError,
-    RegistryRepository, ResourceId, RuntimeType, VectorStorageType,
+    Agent, EngineType, Job, JobId, JobStatus, Model, ObjectStorageType, RegistrationError,
+    Registry, RegistryRepository, ResourceId, RuntimeType, SubmissionId, VectorStorageType,
 };
 use crate::storage::SqliteRegistryRepository;
 
-use super::registry::{InMemoryRegistry, Job, JobId, JobStatus, Registry};
+use super::InMemoryRegistry;
 
 /// Registry with write-through persistence to SQLite.
 ///
@@ -156,7 +156,7 @@ impl Registry for PersistentRegistry {
 
     // --- Job operations (delegate directly) ---
 
-    fn create_job(&self, submission_id: super::SubmissionId, agent_id: ResourceId, input: String) -> JobId {
+    fn create_job(&self, submission_id: SubmissionId, agent_id: ResourceId, input: String) -> JobId {
         self.inner.create_job(submission_id, agent_id, input)
     }
 
@@ -216,7 +216,7 @@ impl Registry for PersistentRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{ModelType, RegistryRepository};
+    use crate::domain::ModelType;
 
     fn test_model(name: &str) -> Model {
         Model {

@@ -328,7 +328,7 @@ impl Runtime for ContainerRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::InMemoryRegistry;
+    use crate::registry::InMemoryRegistry;
     use crate::queue::InMemoryQueue;
 
     fn test_registry_id() -> ResourceId {

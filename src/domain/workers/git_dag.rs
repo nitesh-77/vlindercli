@@ -451,7 +451,8 @@ fn json_value_to_toml_value(json: &serde_json::Value) -> Result<toml::Value, Str
 mod tests {
     use super::*;
     use crate::domain::{MessageType, hash_dag_node};
-    use crate::domain::{InMemoryRegistry, RuntimeType, Agent};
+    use crate::domain::{RuntimeType, Agent};
+    use crate::registry::InMemoryRegistry;
 
     fn test_node_at(
         payload: &[u8],

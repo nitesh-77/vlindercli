@@ -219,7 +219,8 @@ impl VectorServiceWorker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{Agent, InMemoryRegistry, Registry};
+    use crate::domain::{Agent, Registry};
+    use crate::registry::InMemoryRegistry;
     use crate::domain::{RequestDiagnostics, Sequence, SessionId, SubmissionId};
     use crate::queue::InMemoryQueue;
 

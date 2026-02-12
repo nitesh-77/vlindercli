@@ -172,7 +172,8 @@ impl InferenceServiceWorker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{Agent, EngineType, InMemoryRegistry, Model, ModelType, ResourceId};
+    use crate::domain::{Agent, EngineType, Model, ModelType, ResourceId};
+    use crate::registry::InMemoryRegistry;
     use crate::domain::{RequestDiagnostics, Sequence, SessionId, SubmissionId};
     use crate::queue::InMemoryQueue;
     use crate::inference::InMemoryInference;

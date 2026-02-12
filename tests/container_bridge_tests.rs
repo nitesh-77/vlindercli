@@ -6,10 +6,11 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use vlindercli::domain::{
-    Agent, InMemoryRegistry, ObjectStorageType, Provider, Registry,
+    Agent, ObjectStorageType, Provider, Registry,
     ResourceId, Runtime, RuntimeType,
     InvokeDiagnostics, InvokeMessage, MessageQueue, HarnessType, SessionId, SubmissionId,
 };
+use vlindercli::registry::InMemoryRegistry;
 use vlindercli::queue::InMemoryQueue;
 use vlindercli::runtime::ContainerRuntime;
 

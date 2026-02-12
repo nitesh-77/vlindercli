@@ -13,9 +13,10 @@
 use std::sync::Arc;
 
 use crate::config::{registry_db_path, Config};
-use crate::domain::{ObjectStorageType, PersistentRegistry, Provider, Runtime, RuntimeType, VectorStorageType};
-use crate::domain::harness::CliHarness;
+use crate::domain::{ObjectStorageType, Provider, Runtime, RuntimeType, VectorStorageType};
 use crate::domain::registry::Registry;
+use crate::harness::CliHarness;
+use crate::registry::PersistentRegistry;
 use crate::queue;
 use crate::runtime::{ContainerRuntime, ImagePolicy};
 

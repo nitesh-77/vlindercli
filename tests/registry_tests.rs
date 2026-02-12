@@ -2,7 +2,8 @@
 
 use std::path::{Path, PathBuf};
 
-use vlindercli::domain::{Agent, EngineType, InMemoryRegistry, Model, ModelType, Registry, RegistrationError, ResourceId, RuntimeType};
+use vlindercli::domain::{Agent, EngineType, Model, ModelType, Registry, RegistrationError, ResourceId, RuntimeType};
+use vlindercli::registry::InMemoryRegistry;
 
 const FIXTURES: &str = "tests/fixtures/agents";
 

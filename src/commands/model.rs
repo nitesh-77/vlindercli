@@ -5,7 +5,8 @@ use clap::Subcommand;
 
 use vlindercli::catalog::{OllamaCatalog, OpenRouterCatalog};
 use vlindercli::config::{registry_db_path, Config};
-use vlindercli::domain::{Model, ModelCatalog, PersistentRegistry, Registry};
+use vlindercli::domain::{Model, ModelCatalog, Registry};
+use vlindercli::registry::PersistentRegistry;
 use vlindercli::registry_service::{GrpcRegistryClient, ping_registry};
 
 #[derive(Subcommand, Debug, PartialEq)]

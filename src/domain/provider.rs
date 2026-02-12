@@ -81,7 +81,8 @@ impl Provider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{Agent, InMemoryRegistry, ResourceId};
+    use crate::domain::{Agent, ResourceId};
+    use crate::registry::InMemoryRegistry;
     use crate::domain::{RequestDiagnostics, RequestMessage, Sequence, SessionId, SubmissionId};
     use crate::queue::InMemoryQueue;
 

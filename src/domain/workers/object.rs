@@ -427,7 +427,8 @@ fn extract_state_from_payload(payload: &[u8]) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{Agent, InMemoryRegistry};
+    use crate::domain::Agent;
+    use crate::registry::InMemoryRegistry;
     use crate::domain::{RequestDiagnostics, Sequence, SessionId, SubmissionId};
     use crate::queue::InMemoryQueue;
 
