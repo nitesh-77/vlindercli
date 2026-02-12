@@ -4,7 +4,7 @@ use std::sync::Arc;
 use clap::{Subcommand, ValueEnum};
 
 use vlindercli::config::{registry_db_path, Config};
-use vlindercli::domain::{Daemon, Harness, Registry, agent_routing_key, MessageQueue};
+use vlindercli::domain::{Harness, Registry, agent_routing_key, MessageQueue};
 use vlindercli::harness::{CliHarness, read_latest_state};
 use vlindercli::registry::PersistentRegistry;
 use vlindercli::queue::NatsQueue;
@@ -76,60 +76,6 @@ pub fn execute(cmd: AgentCommand) {
 
 fn run(path: Option<PathBuf>) {
     let config = Config::load();
-
-    if config.distributed.enabled {
-        run_distributed(path, &config);
-    } else {
-        run_local(path);
-    }
-}
-
-/// Run in local mode - creates embedded daemon with all services.
-fn run_local(path: Option<PathBuf>) {
-    let agent_path = path.unwrap_or_else(|| {
-        std::env::current_dir().expect("Failed to get current directory")
-    });
-
-    // Canonicalize to absolute path
-    let absolute_path = agent_path
-        .canonicalize()
-        .expect("Failed to resolve agent path");
-
-    // Create daemon (includes runtime, provider, registry)
-    let mut daemon = Daemon::new();
-
-    // Deploy agent (register with Registry - runtime discovers automatically)
-    let agent_id = daemon.harness.deploy_from_path(&absolute_path)
-        .expect("Failed to deploy agent");
-
-    // Start conversation session (ADR 054, ADR 070)
-    let agent_name = agent_routing_key(&agent_id);
-    daemon.harness.start_session(&agent_name);
-
-    // Read state from file-based persistence (ADR 070)
-    apply_latest_state(&mut daemon.harness, &agent_name);
-
-    // Run REPL
-    repl::run(|input| {
-        match daemon.harness.invoke(&agent_id, input) {
-            Ok(job_id) => {
-                // Tick until complete
-                loop {
-                    daemon.tick();
-                    if let Some(result) = daemon.harness.poll(&job_id) {
-                        daemon.harness.record_response(&result);
-                        return result;
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(1));
-                }
-            }
-            Err(e) => format!("[error] {}", e),
-        }
-    });
-}
-
-/// Run in distributed mode - connect as client to existing daemon.
-fn run_distributed(path: Option<PathBuf>, config: &Config) {
     let agent_path = path.unwrap_or_else(|| {
         std::env::current_dir().expect("Failed to get current directory")
     });

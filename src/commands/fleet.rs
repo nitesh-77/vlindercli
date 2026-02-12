@@ -4,7 +4,7 @@ use std::sync::Arc;
 use clap::Subcommand;
 
 use vlindercli::config::Config;
-use vlindercli::domain::{Daemon, Fleet, Harness, Registry, agent_routing_key, MessageQueue};
+use vlindercli::domain::{Fleet, Harness, Registry, agent_routing_key, MessageQueue};
 use vlindercli::harness::{CliHarness, read_latest_state};
 use vlindercli::queue::NatsQueue;
 use vlindercli::registry_service::{GrpcRegistryClient, ping_registry};
@@ -82,94 +82,6 @@ fn scaffold(name: &str) {
 
 pub fn run(path: Option<PathBuf>) {
     let config = Config::load();
-
-    if config.distributed.enabled {
-        run_distributed(path, &config);
-    } else {
-        run_local(path);
-    }
-}
-
-/// Run in local mode - creates embedded daemon with all services.
-fn run_local(path: Option<PathBuf>) {
-    let fleet_path = path.unwrap_or_else(|| {
-        std::env::current_dir().expect("Failed to get current directory")
-    });
-
-    let absolute_path = fleet_path
-        .canonicalize()
-        .expect("Failed to resolve fleet path");
-
-    // Load fleet definition
-    let fleet = Fleet::load(&absolute_path)
-        .unwrap_or_else(|e| {
-            eprintln!("Failed to load fleet: {}", e);
-            std::process::exit(1);
-        });
-
-    // Build fleet context for the entry agent
-    let fleet_context = fleet.build_context()
-        .unwrap_or_else(|e| {
-            eprintln!("Failed to build fleet context: {}", e);
-            std::process::exit(1);
-        });
-
-    // Create daemon (includes runtime, provider, registry)
-    let mut daemon = Daemon::new();
-
-    // Deploy ALL agents in the fleet
-    for (name, agent_path) in fleet.agents() {
-        match daemon.harness.deploy_from_path(agent_path) {
-            Ok(id) => {
-                tracing::debug!(agent = %name, id = %id, "Fleet agent deployed");
-            }
-            Err(e) => {
-                eprintln!("Failed to deploy fleet agent '{}': {}", name, e);
-                std::process::exit(1);
-            }
-        }
-    }
-
-    // Start session for the entry agent
-    let entry_agent_id = daemon.harness.deploy_from_path(
-        fleet.agent_path(&fleet.entry).expect("entry agent must exist in fleet"),
-    ).unwrap_or_else(|e| {
-        eprintln!("Failed to get entry agent ID: {}", e);
-        std::process::exit(1);
-    });
-
-    let entry_agent_name = agent_routing_key(&entry_agent_id);
-    daemon.harness.start_session(&entry_agent_name);
-
-    // Read state from the system timeline (current branch)
-    apply_latest_state(&mut daemon.harness, &entry_agent_name);
-
-    println!("Fleet '{}' ready. Entry agent: {}", fleet.name, fleet.entry);
-
-    // REPL loop: prepend fleet context to every user input, invoke entry agent
-    repl::run(|input| {
-        let enriched_input = format!("{}\n\n{}", fleet_context, input);
-        match daemon.harness.invoke(&entry_agent_id, &enriched_input) {
-            Ok(job_id) => {
-                loop {
-                    daemon.tick();
-                    if let Some(result) = daemon.harness.poll(&job_id) {
-                        daemon.harness.record_response(&result);
-                        return result;
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(1));
-                }
-            }
-            Err(e) => format!("[error] {}", e),
-        }
-    });
-}
-
-/// Run in distributed mode - connect as client to existing daemon.
-///
-/// Deploys agents via gRPC registry, sends invocations via NATS.
-/// The daemon's workers handle runtime, inference, storage, etc.
-fn run_distributed(path: Option<PathBuf>, config: &Config) {
     let fleet_path = path.unwrap_or_else(|| {
         std::env::current_dir().expect("Failed to get current directory")
     });

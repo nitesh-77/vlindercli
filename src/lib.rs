@@ -13,5 +13,6 @@ pub mod runtime;
 pub mod session_server;
 pub mod services;
 pub mod storage;
+pub mod supervisor;
 pub mod worker;
 pub mod worker_role;

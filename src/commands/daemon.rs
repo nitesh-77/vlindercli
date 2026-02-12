@@ -24,7 +24,7 @@ use std::sync::Arc;
 use vlindercli::config::{conversations_dir, Config};
 use vlindercli::worker_role::WorkerRole;
 use vlindercli::worker::run_worker_loop;
-use vlindercli::domain::{Daemon, Supervisor};
+use vlindercli::supervisor::Supervisor;
 use vlindercli::session_server::SessionServer;
 
 /// Execute the daemon command.
@@ -38,11 +38,7 @@ pub fn execute() {
         run_as_worker(role);
     } else {
         let config = Config::load();
-        if config.distributed.enabled {
-            run_as_supervisor(&config);
-        } else {
-            run_as_daemon();
-        }
+        run_as_supervisor(&config);
     }
 }
 
@@ -100,24 +96,3 @@ fn run_as_supervisor(config: &Config) {
     tracing::info!("Supervisor stopped");
 }
 
-/// Run as the local daemon (all services in-process).
-fn run_as_daemon() {
-    tracing::info!("Starting vlinder daemon (local mode)");
-
-    let mut daemon = Daemon::new();
-
-    let shutdown = Arc::new(AtomicBool::new(false));
-    let shutdown_clone = Arc::clone(&shutdown);
-
-    ctrlc::set_handler(move || {
-        tracing::info!("Received shutdown signal");
-        shutdown_clone.store(true, Ordering::Relaxed);
-    }).expect("Failed to set signal handler");
-
-    while !shutdown.load(Ordering::Relaxed) {
-        daemon.tick();
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    }
-
-    tracing::info!("Daemon stopped");
-}

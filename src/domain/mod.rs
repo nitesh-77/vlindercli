@@ -17,16 +17,13 @@ mod message;
 mod message_queue;
 mod agent_manifest;
 mod catalog;
-mod daemon;
 pub(crate) mod git_hash;
 mod embedding;
-mod supervisor;
 mod fleet;
 mod fleet_manifest;
 pub mod harness;
 mod inference;
 mod model;
-mod provider;
 mod registry;
 mod registry_repository;
 mod runtime;
@@ -131,12 +128,6 @@ pub use model_manifest::{ModelManifest, ModelTypeConfig, ModelEngineConfig};
 pub use catalog::{ModelCatalog, ModelInfo, CatalogError};
 
 // ============================================================================
-// Provider
-// ============================================================================
-
-pub use provider::Provider;
-
-// ============================================================================
 // Runtime (trait)
 // ============================================================================
 
@@ -157,10 +148,8 @@ pub use session::{HistoryEntry, Session};
 pub use route::{Route, Stop};
 
 // ============================================================================
-// Daemon & Registry
+// Registry
 // ============================================================================
 
-pub use daemon::Daemon;
-pub use supervisor::Supervisor;
 pub use registry::{Job, JobId, JobStatus, RegistrationError, Registry};
 pub use registry_repository::{RegistryRepository, RepositoryError, StoredModel};
