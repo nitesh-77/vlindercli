@@ -4,10 +4,8 @@ use std::sync::Arc;
 use clap::Subcommand;
 
 use vlindercli::catalog::{OllamaCatalog, OpenRouterCatalog};
-use vlindercli::config::{registry_db_path, Config};
+use vlindercli::config::Config;
 use vlindercli::domain::{Model, ModelCatalog, Registry};
-use vlindercli::registry::PersistentRegistry;
-use vlindercli::registry_service::{GrpcRegistryClient, ping_registry};
 
 #[derive(Subcommand, Debug, PartialEq)]
 pub enum ModelCommand {
@@ -106,38 +104,8 @@ pub fn execute(cmd: ModelCommand) {
     }
 }
 
-/// Connect to the registry — gRPC in distributed mode, local SQLite otherwise.
 fn open_registry(config: &Config) -> Option<Arc<dyn Registry>> {
-    if config.distributed.enabled {
-        let registry_addr = if config.distributed.registry_addr.starts_with("http://")
-            || config.distributed.registry_addr.starts_with("https://") {
-            config.distributed.registry_addr.clone()
-        } else {
-            format!("http://{}", config.distributed.registry_addr)
-        };
-
-        if ping_registry(&registry_addr).is_none() {
-            eprintln!("Cannot reach registry at {}. Is the daemon running?", registry_addr);
-            return None;
-        }
-
-        match GrpcRegistryClient::connect(&registry_addr) {
-            Ok(client) => Some(Arc::new(client)),
-            Err(e) => {
-                eprintln!("Failed to connect to registry: {}", e);
-                None
-            }
-        }
-    } else {
-        let db_path = registry_db_path();
-        match PersistentRegistry::open(&db_path, config) {
-            Ok(r) => Some(Arc::new(r)),
-            Err(e) => {
-                eprintln!("Failed to open registry: {}", e);
-                None
-            }
-        }
-    }
+    vlindercli::registry::open_registry(config)
 }
 
 /// Resolve a model from name — either a TOML manifest path or a catalog lookup.
