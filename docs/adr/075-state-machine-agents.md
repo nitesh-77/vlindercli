@@ -2,7 +2,7 @@
 
 ## Status
 
-Draft
+Accepted
 
 ## Context
 
@@ -38,54 +38,20 @@ The SDK inverts how agents interact with the platform. Previously, each service 
 
 The endpoint changes from `POST /` (plain text) to `POST /handle` (JSON):
 
-**Request** (platform → agent):
+**AgentEvent** (platform → agent), tagged by `type`:
 ```json
-{
-  "type": "invoke",
-  "input": "user message",
-  "state": {}
-}
+{"type": "Invoke", "input": "user message", "state": {}}
+{"type": "KvGet", "data": [72, 101, 108, 108, 111], "state": {"step": 1}}
+{"type": "Infer", "text": "The answer is 4.", "state": {"step": 2}}
+{"type": "Error", "message": "kv backend not configured", "state": {"step": 1}}
 ```
 
-Or, for a service response:
+**AgentAction** (agent → platform), tagged by `action`:
 ```json
-{
-  "type": "kv.get.response",
-  "payload": "...",
-  "state": {"key": "value"}
-}
-```
-
-**Response** (agent → platform):
-
-Service request:
-```json
-{
-  "action": "request",
-  "service": "kv",
-  "op": "get",
-  "params": {"path": "/data.json"},
-  "state": {"key": "value"}
-}
-```
-
-Completion:
-```json
-{
-  "action": "complete",
-  "payload": "result text",
-  "state": {"key": "value"}
-}
-```
-
-Delegation:
-```json
-{
-  "action": "delegate",
-  "agent": "other-agent",
-  "input": "...",
-  "state": {"key": "value"}
-}
+{"action": "KvGet", "path": "/data.json", "state": {"step": 1}}
+{"action": "Infer", "model": "phi3", "prompt": "...", "max_tokens": 256, "state": {"step": 2}}
+{"action": "Complete", "payload": "result text", "state": {"final": true}}
+{"action": "Delegate", "agent": "summarizer", "input": "...", "state": {}}
 ```
 
 ### Two kinds of state
@@ -108,16 +74,16 @@ The runtime orchestrates each roundtrip:
 
 ```
 1. Receive InvokeMessage from harness
-2. POST /handle → agent: {type: "invoke", input: "...", state: {}}
-3. Agent returns: {action: "request", service: "kv", op: "get", ...}
-4. Runtime builds RequestMessage, sends to NATS
-5. Worker processes, sends ResponseMessage
-6. Runtime receives response
-7. POST /handle → agent: {type: "kv.get.response", payload: "...", state: {...}}
-8. Agent returns: {action: "request", service: "infer", ...}
+2. POST /handle → agent: {type: "Invoke", input: "...", state: {}}
+3. Agent returns: {action: "KvGet", path: "/data.json", state: {...}}
+4. Platform calls bridge.kv_get("/data.json")
+5. Bridge builds RequestMessage, sends to NATS, receives ResponseMessage
+6. POST /handle → agent: {type: "KvGet", data: [...], state: {...}}
+7. Agent returns: {action: "Infer", model: "phi3", prompt: "...", ...}
+8. Platform calls bridge.infer("phi3", "...", 256)
 9. ... repeat until ...
-10. Agent returns: {action: "complete", payload: "..."}
-11. Runtime builds CompleteMessage, sends to harness
+10. Agent returns: {action: "Complete", payload: "..."}
+11. Platform builds CompleteMessage, sends to harness
 ```
 
 Each step is a git commit. The agent never calls the bridge. The platform sends requests on the agent's behalf. The bridge (as an HTTP server that agents call) is no longer needed for the agent → platform direction. The bridge concept inverts: the runtime calls the agent, not the other way around.
