@@ -11,7 +11,6 @@ mod agent;
 mod agent_bridge;
 mod agent_manifest;
 mod catalog;
-mod conversation_store;
 mod daemon;
 pub(crate) mod git_hash;
 mod embedding;

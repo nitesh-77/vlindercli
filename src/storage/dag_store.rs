@@ -76,6 +76,9 @@ pub struct DagNode {
     /// Empty for non-container messages or messages captured before ADR 071.
     pub stderr: Vec<u8>,
     pub created_at: DateTime<Utc>,
+    /// State hash from the state store (ADR 055).
+    /// Present when the message carries state context (e.g. after kv_put).
+    pub state: Option<String>,
 }
 
 /// Compute the content-addressed hash for a DAG node.
@@ -137,7 +140,8 @@ impl SqliteDagStore {
                  payload BLOB NOT NULL,
                  diagnostics BLOB NOT NULL DEFAULT x'',
                  stderr BLOB NOT NULL DEFAULT x'',
-                 created_at TEXT NOT NULL
+                 created_at TEXT NOT NULL,
+                 state TEXT
              );
              CREATE INDEX IF NOT EXISTS idx_dag_nodes_session
                  ON dag_nodes (session_id, created_at);
@@ -148,6 +152,7 @@ impl SqliteDagStore {
         // Migrate existing databases: add diagnostics and stderr columns (ADR 071).
         // ALTER TABLE ADD COLUMN is idempotent-safe: we check PRAGMA table_info first.
         Self::migrate_071(&conn)?;
+        Self::migrate_state(&conn)?;
 
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
@@ -181,12 +186,39 @@ impl SqliteDagStore {
 
         Ok(())
     }
+
+    /// Migrate existing databases to include the state column (ADR 055).
+    fn migrate_state(conn: &Connection) -> Result<(), String> {
+        let has_state = conn
+            .prepare("PRAGMA table_info(dag_nodes)")
+            .and_then(|mut stmt| {
+                let mut found = false;
+                let mut rows = stmt.query([])?;
+                while let Some(row) = rows.next()? {
+                    let name: String = row.get(1)?;
+                    if name == "state" {
+                        found = true;
+                        break;
+                    }
+                }
+                Ok(found)
+            })
+            .map_err(|e| format!("migration check failed: {}", e))?;
+
+        if !has_state {
+            conn.execute_batch(
+                "ALTER TABLE dag_nodes ADD COLUMN state TEXT;"
+            ).map_err(|e| format!("state migration failed: {}", e))?;
+        }
+
+        Ok(())
+    }
 }
 
 /// Construct a DagNode from a SQLite row.
 ///
 /// Expects columns in order: hash, parent_hash, message_type, sender, receiver,
-/// session_id, submission_id, payload, diagnostics, stderr, created_at.
+/// session_id, submission_id, payload, diagnostics, stderr, created_at, state.
 fn row_to_dag_node(row: &rusqlite::Row) -> Result<DagNode, rusqlite::Error> {
     let mt_str: String = row.get(2)?;
     let message_type = MessageType::from_str(&mt_str)
@@ -207,6 +239,7 @@ fn row_to_dag_node(row: &rusqlite::Row) -> Result<DagNode, rusqlite::Error> {
         diagnostics: row.get(8)?,
         stderr: row.get(9)?,
         created_at,
+        state: row.get(11)?,
     })
 }
 
@@ -214,8 +247,8 @@ impl DagStore for SqliteDagStore {
     fn insert_node(&self, node: &DagNode) -> Result<(), String> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT OR IGNORE INTO dag_nodes (hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            "INSERT OR IGNORE INTO dag_nodes (hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             rusqlite::params![
                 node.hash,
                 node.parent_hash,
@@ -228,6 +261,7 @@ impl DagStore for SqliteDagStore {
                 node.diagnostics,
                 node.stderr,
                 node.created_at.to_rfc3339(),
+                node.state,
             ],
         ).map_err(|e| format!("insert_node failed: {}", e))?;
         Ok(())
@@ -236,7 +270,7 @@ impl DagStore for SqliteDagStore {
     fn get_node(&self, hash: &str) -> Result<Option<DagNode>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at
+            "SELECT hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state
              FROM dag_nodes WHERE hash = ?1"
         ).map_err(|e| format!("get_node prepare failed: {}", e))?;
 
@@ -252,7 +286,7 @@ impl DagStore for SqliteDagStore {
     fn get_session_nodes(&self, session_id: &str) -> Result<Vec<DagNode>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at
+            "SELECT hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state
              FROM dag_nodes WHERE session_id = ?1 ORDER BY created_at"
         ).map_err(|e| format!("get_session_nodes prepare failed: {}", e))?;
 
@@ -270,7 +304,7 @@ impl DagStore for SqliteDagStore {
     fn get_children(&self, parent_hash: &str) -> Result<Vec<DagNode>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at
+            "SELECT hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state
              FROM dag_nodes WHERE parent_hash = ?1"
         ).map_err(|e| format!("get_children prepare failed: {}", e))?;
 
@@ -325,6 +359,7 @@ mod tests {
             diagnostics,
             stderr: Vec::new(),
             created_at: Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap(),
+            state: None,
         }
     }
 
@@ -422,6 +457,7 @@ mod tests {
             diagnostics,
             stderr,
             created_at: Utc.with_ymd_and_hms(2025, 6, 15, 12, 0, 0).unwrap(),
+            state: Some("abc123".to_string()),
         };
 
         store.insert_node(&node).unwrap();

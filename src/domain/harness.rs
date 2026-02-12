@@ -53,8 +53,6 @@ pub struct CliHarness {
     last_state: Option<String>,
     /// Pending state from a just-completed invocation, not yet committed.
     pending_state: Option<String>,
-    /// Agent name for this session (used in state file path).
-    agent_name: Option<String>,
 }
 
 impl CliHarness {
@@ -70,7 +68,6 @@ impl CliHarness {
             last_submission_hash: None,
             last_state: None,
             pending_state: None,
-            agent_name: None,
         }
     }
 
@@ -83,14 +80,12 @@ impl CliHarness {
         let session = Session::new(session_id, agent_name);
 
         self.session = Some(session);
-        self.agent_name = Some(agent_name.to_string());
     }
 
     /// Record an agent response to the in-memory session.
     ///
     /// Clears the pending question and appends the completed turn to history.
-    /// If state tracking is active (ADR 055), promotes pending_state to last_state
-    /// and persists it to a state file for cross-session continuity.
+    /// If state tracking is active (ADR 055), promotes pending_state to last_state.
     pub fn record_response(&mut self, response: &str) {
         if let Some(session) = self.session.as_mut() {
             // Take pending_state and promote it to last_state
@@ -98,13 +93,7 @@ impl CliHarness {
 
             session.record_agent_response(response);
 
-            // Persist state to file for cross-session continuity
-            if let Some(ref state_hash) = state {
-                if let Some(ref agent_name) = self.agent_name {
-                    if let Err(e) = persist_state(agent_name, state_hash) {
-                        tracing::warn!(error = %e, "failed to persist state file");
-                    }
-                }
+            if state.is_some() {
                 self.last_state = state;
             }
         }
@@ -217,25 +206,36 @@ fn compare_agents(new: &Agent, existing: &Agent) -> Vec<String> {
     diffs
 }
 
-/// Persist state hash to file for cross-session continuity (ADR 070).
+/// Read the latest state for an agent by scanning the conversations git log (ADR 055).
 ///
-/// Writes `{state_hash}` to `~/.vlinder/state/{agent_name}.latest`.
-fn persist_state(agent_name: &str, state_hash: &str) -> Result<(), String> {
-    let state_dir = crate::config::vlinder_dir().join("state");
-    std::fs::create_dir_all(&state_dir)
-        .map_err(|e| format!("failed to create state dir: {}", e))?;
-    let path = state_dir.join(format!("{}.latest", agent_name));
-    std::fs::write(&path, state_hash)
-        .map_err(|e| format!("failed to write state file: {}", e))
-}
-
-/// Read the latest persisted state for an agent (ADR 070).
-///
-/// Returns the state hash from `~/.vlinder/state/{agent_name}.latest`,
-/// or None if no state file exists.
+/// Walks backwards from HEAD looking for the most recent complete commit
+/// from the given agent, then extracts the `State:` trailer.
+/// This respects git position — detached HEAD, branches, and forks all
+/// naturally return the correct state for that point in the timeline.
 pub fn read_latest_state(agent_name: &str) -> Option<String> {
-    let path = crate::config::vlinder_dir().join("state").join(format!("{}.latest", agent_name));
-    std::fs::read_to_string(&path).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+    let dir = crate::config::conversations_dir();
+    if !dir.join(".git").exists() {
+        return None;
+    }
+
+    let grep_pattern = format!("^complete: {} ", agent_name);
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&dir)
+        .args(["log", "-1", "--format=%B", "--grep"])
+        .arg(&grep_pattern)
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let body = String::from_utf8_lossy(&output.stdout);
+    body.lines()
+        .find_map(|line| line.strip_prefix("State: "))
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
 }
 
 impl Harness for CliHarness {

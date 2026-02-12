@@ -354,8 +354,8 @@ impl DagWorker for GitDagWorker {
             // 2. Parent is the previous commit (chronological order)
             let parent = self.last_commit.as_deref();
 
-            // 3. Build commit message with Session trailer for filtering
-            let message = format!(
+            // 3. Build commit message with trailers for filtering
+            let mut message = format!(
                 "{}: {} \u{2192} {}\n\nSession: {}\nSubmission: {}\nHash: {}",
                 node.message_type.as_str(),
                 node.from,
@@ -364,6 +364,9 @@ impl DagWorker for GitDagWorker {
                 node.submission_id,
                 node.hash,
             );
+            if let Some(ref state) = node.state {
+                message.push_str(&format!("\nState: {}", state));
+            }
 
             // 4. Author = message sender (ADR 069)
             let author_email = format!("{}@{}", node.from, self.registry_host);
@@ -470,6 +473,7 @@ mod tests {
             diagnostics: Vec::new(),
             stderr: Vec::new(),
             created_at: DateTime::from_timestamp(epoch_secs, 0).unwrap(),
+            state: None,
         }
     }
 
@@ -563,6 +567,29 @@ mod tests {
         assert!(body.contains("Session: sess-1"), "body: {}", body);
         assert!(body.contains("Submission: sub-1"), "body: {}", body);
         assert!(body.contains(&format!("Hash: {}", expected_hash)), "body: {}", body);
+    }
+
+    #[test]
+    fn commit_message_includes_state_trailer() {
+        let (mut worker, _tmp) = test_worker();
+        let mut node = test_node(b"done", "", MessageType::Complete, "todoapp", "cli");
+        node.state = Some("abc123def456".to_string());
+
+        worker.on_message(&node);
+
+        let body = worker.git(&["log", "-1", "--format=%b", "main"]).unwrap();
+        assert!(body.contains("State: abc123def456"), "body: {}", body);
+    }
+
+    #[test]
+    fn commit_message_omits_state_when_none() {
+        let (mut worker, _tmp) = test_worker();
+        let node = test_node(b"payload", "", MessageType::Invoke, "cli", "agent-a");
+
+        worker.on_message(&node);
+
+        let body = worker.git(&["log", "-1", "--format=%b", "main"]).unwrap();
+        assert!(!body.contains("State:"), "body should not have State: trailer: {}", body);
     }
 
     #[test]

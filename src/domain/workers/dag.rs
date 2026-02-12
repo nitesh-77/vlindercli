@@ -113,6 +113,9 @@ impl DagCaptureWorker {
         // Extract stderr from container diagnostics (Complete/Delegate only, ADR 071).
         let stderr = extract_stderr(&diagnostics);
 
+        // Extract state hash from NATS headers (ADR 055).
+        let state = headers.get("state").cloned();
+
         let hash = hash_dag_node(payload, &parent_hash, &message_type, &diagnostics);
 
         let now = Utc::now();
@@ -128,6 +131,7 @@ impl DagCaptureWorker {
             diagnostics,
             stderr,
             created_at: now,
+            state,
         };
 
         for worker in &mut self.workers {
@@ -454,5 +458,39 @@ mod tests {
         assert_eq!(nodes1.len(), 1);
         assert_eq!(nodes2.len(), 1);
         assert_eq!(nodes1[0].hash, nodes2[0].hash);
+    }
+
+    #[test]
+    fn state_header_extracted_into_dag_node() {
+        let (worker_store, query_store) = test_store_pair();
+        let mut dispatcher = make_dispatcher(worker_store);
+
+        let mut h = headers("sess-1");
+        h.insert("state".to_string(), "abc123state".to_string());
+
+        dispatcher.process_message(
+            "vlinder.sub-1.complete.todoapp.cli",
+            &h,
+            b"done",
+        );
+
+        let nodes = query_store.get_session_nodes("sess-1").unwrap();
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].state, Some("abc123state".to_string()));
+    }
+
+    #[test]
+    fn missing_state_header_gives_none() {
+        let (worker_store, query_store) = test_store_pair();
+        let mut dispatcher = make_dispatcher(worker_store);
+
+        dispatcher.process_message(
+            "vlinder.sub-1.invoke.cli.container.agent-a",
+            &headers("sess-1"),
+            b"hello",
+        );
+
+        let nodes = query_store.get_session_nodes("sess-1").unwrap();
+        assert_eq!(nodes[0].state, None);
     }
 }

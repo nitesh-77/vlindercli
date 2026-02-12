@@ -106,6 +106,7 @@ mod tests {
             diagnostics: Vec::new(),
             stderr: Vec::new(),
             created_at: DateTime::from_timestamp(1000, 0).unwrap(),
+            state: None,
         }
     }
 
