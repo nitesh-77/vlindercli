@@ -12,9 +12,22 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use super::{
-    SdkContract, Hop, ObjectStorageType, Registry, VectorMatch, VectorStorageType,
+    SdkContract, ObjectStorageType, Registry, VectorMatch, VectorStorageType,
     DelegateMessage, DelegateDiagnostics, ContainerDiagnostics, InvokeMessage,
     MessageQueue, RequestMessage, RequestDiagnostics, SequenceCounter,
+};
+
+/// A single hop in message routing.
+#[derive(Debug)]
+struct Hop {
+    service: &'static str,
+    backend: String,
+    operation: &'static str,
+}
+use super::service_payloads::{
+    KvGetRequest, KvPutRequest, KvListRequest, KvDeleteRequest, KvPutResponse,
+    VectorStoreRequest, VectorSearchRequest, VectorDeleteRequest,
+    InferRequest, EmbedRequest,
 };
 
 /// Routes agent SDK calls to the appropriate backend service.
@@ -132,26 +145,11 @@ impl QueueBridge {
         }
     }
 
-    /// Build a KV request payload with state injection (ADR 055).
-    fn build_kv_payload(&self, op: &str, fields: serde_json::Value) -> Result<Vec<u8>, String> {
-        let mut map = match fields {
-            serde_json::Value::Object(m) => m,
-            _ => return Err("build_kv_payload: expected JSON object".to_string()),
-        };
-        map.insert("op".to_string(), serde_json::Value::String(op.to_string()));
-        if let Some(ref state) = *self.current_state.read().unwrap() {
-            map.insert("state".to_string(), serde_json::Value::String(state.clone()));
-        }
-        serde_json::to_vec(&map).map_err(|e| format!("serialize error: {}", e))
-    }
-
     /// Extract the new state hash from a kv-put response and update current_state.
     fn extract_state(&self, response_payload: &[u8]) {
-        if let Ok(map) = serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(response_payload) {
-            if let Some(serde_json::Value::String(new_state)) = map.get("state") {
-                tracing::debug!(new_state = %new_state, "extract_state: updated current_state");
-                *self.current_state.write().unwrap() = Some(new_state.clone());
-            }
+        if let Ok(resp) = serde_json::from_slice::<KvPutResponse>(response_payload) {
+            tracing::debug!(new_state = %resp.state, "extract_state: updated current_state");
+            *self.current_state.write().unwrap() = Some(resp.state);
         }
     }
 
@@ -174,7 +172,9 @@ impl SdkContract for QueueBridge {
         let backend = self.kv_backend
             .ok_or("agent called kv-get but has no object_storage configured")?;
         let hop = Hop { service: "kv", backend: backend.as_str().to_string(), operation: "get" };
-        let payload = self.build_kv_payload("kv-get", serde_json::json!({"path": path}))?;
+        let state = self.current_state.read().unwrap().clone();
+        let req = KvGetRequest { path: path.to_string(), state };
+        let payload = serde_json::to_vec(&req).map_err(|e| format!("serialize error: {}", e))?;
         let response = self.send_service_request(hop, payload)?;
         Self::check_worker_error(&response)?;
         Ok(response)
@@ -184,7 +184,9 @@ impl SdkContract for QueueBridge {
         let backend = self.kv_backend
             .ok_or("agent called kv-put but has no object_storage configured")?;
         let hop = Hop { service: "kv", backend: backend.as_str().to_string(), operation: "put" };
-        let payload = self.build_kv_payload("kv-put", serde_json::json!({"path": path, "content": content}))?;
+        let state = self.current_state.read().unwrap().clone();
+        let req = KvPutRequest { path: path.to_string(), content: content.to_string(), state };
+        let payload = serde_json::to_vec(&req).map_err(|e| format!("serialize error: {}", e))?;
         let response = self.send_service_request(hop, payload)?;
         Self::check_worker_error(&response)?;
         self.extract_state(&response);
@@ -195,7 +197,8 @@ impl SdkContract for QueueBridge {
         let backend = self.kv_backend
             .ok_or("agent called kv-list but has no object_storage configured")?;
         let hop = Hop { service: "kv", backend: backend.as_str().to_string(), operation: "list" };
-        let payload = self.build_kv_payload("kv-list", serde_json::json!({"path": prefix}))?;
+        let req = KvListRequest { path: prefix.to_string() };
+        let payload = serde_json::to_vec(&req).map_err(|e| format!("serialize error: {}", e))?;
         let response = self.send_service_request(hop, payload)?;
         Self::check_worker_error(&response)?;
         serde_json::from_slice(&response)
@@ -206,7 +209,8 @@ impl SdkContract for QueueBridge {
         let backend = self.kv_backend
             .ok_or("agent called kv-delete but has no object_storage configured")?;
         let hop = Hop { service: "kv", backend: backend.as_str().to_string(), operation: "delete" };
-        let payload = self.build_kv_payload("kv-delete", serde_json::json!({"path": path}))?;
+        let req = KvDeleteRequest { path: path.to_string() };
+        let payload = serde_json::to_vec(&req).map_err(|e| format!("serialize error: {}", e))?;
         let response = self.send_service_request(hop, payload)?;
         Self::check_worker_error(&response)?;
         Ok(response == b"ok")
@@ -216,9 +220,8 @@ impl SdkContract for QueueBridge {
         let backend = self.vec_backend
             .ok_or("agent called vector-store but has no vector_storage configured")?;
         let hop = Hop { service: "vec", backend: backend.as_str().to_string(), operation: "store" };
-        let payload = serde_json::to_vec(&serde_json::json!({
-            "op": "vector-store", "key": key, "vector": vector, "metadata": metadata,
-        })).unwrap();
+        let req = VectorStoreRequest { key: key.to_string(), vector: vector.to_vec(), metadata: metadata.to_string() };
+        let payload = serde_json::to_vec(&req).map_err(|e| format!("serialize error: {}", e))?;
         let response = self.send_service_request(hop, payload)?;
         Self::check_worker_error(&response)?;
         Ok(())
@@ -228,9 +231,8 @@ impl SdkContract for QueueBridge {
         let backend = self.vec_backend
             .ok_or("agent called vector-search but has no vector_storage configured")?;
         let hop = Hop { service: "vec", backend: backend.as_str().to_string(), operation: "search" };
-        let payload = serde_json::to_vec(&serde_json::json!({
-            "op": "vector-search", "vector": vector, "limit": limit,
-        })).unwrap();
+        let req = VectorSearchRequest { vector: vector.to_vec(), limit };
+        let payload = serde_json::to_vec(&req).map_err(|e| format!("serialize error: {}", e))?;
         let response = self.send_service_request(hop, payload)?;
         Self::check_worker_error(&response)?;
         serde_json::from_slice(&response)
@@ -241,9 +243,8 @@ impl SdkContract for QueueBridge {
         let backend = self.vec_backend
             .ok_or("agent called vector-delete but has no vector_storage configured")?;
         let hop = Hop { service: "vec", backend: backend.as_str().to_string(), operation: "delete" };
-        let payload = serde_json::to_vec(&serde_json::json!({
-            "op": "vector-delete", "key": key,
-        })).unwrap();
+        let req = VectorDeleteRequest { key: key.to_string() };
+        let payload = serde_json::to_vec(&req).map_err(|e| format!("serialize error: {}", e))?;
         let response = self.send_service_request(hop, payload)?;
         Self::check_worker_error(&response)?;
         Ok(response == b"ok")
@@ -253,9 +254,8 @@ impl SdkContract for QueueBridge {
         let backend = self.model_backends.get(model)
             .ok_or_else(|| format!("agent called infer with undeclared model '{}'", model))?;
         let hop = Hop { service: "infer", backend: backend.clone(), operation: "run" };
-        let payload = serde_json::to_vec(&serde_json::json!({
-            "op": "infer", "model": model, "prompt": prompt, "max_tokens": max_tokens,
-        })).unwrap();
+        let req = InferRequest { model: model.to_string(), prompt: prompt.to_string(), max_tokens };
+        let payload = serde_json::to_vec(&req).map_err(|e| format!("serialize error: {}", e))?;
         let response = self.send_service_request(hop, payload)?;
         Self::check_worker_error(&response)?;
         String::from_utf8(response)
@@ -266,9 +266,8 @@ impl SdkContract for QueueBridge {
         let backend = self.model_backends.get(model)
             .ok_or_else(|| format!("agent called embed with undeclared model '{}'", model))?;
         let hop = Hop { service: "embed", backend: backend.clone(), operation: "run" };
-        let payload = serde_json::to_vec(&serde_json::json!({
-            "op": "embed", "model": model, "text": text,
-        })).unwrap();
+        let req = EmbedRequest { model: model.to_string(), text: text.to_string() };
+        let payload = serde_json::to_vec(&req).map_err(|e| format!("serialize error: {}", e))?;
         let response = self.send_service_request(hop, payload)?;
         Self::check_worker_error(&response)?;
         serde_json::from_slice(&response)
@@ -447,31 +446,37 @@ mod tests {
     }
 
     // ========================================================================
-    // build_kv_payload
+    // typed payload serialization
     // ========================================================================
 
     #[test]
-    fn build_kv_payload_injects_state() {
-        let bridge = test_bridge(Some(ObjectStorageType::Sqlite));
-        *bridge.current_state.write().unwrap() = Some("sha256:prev".to_string());
-
-        let payload = bridge.build_kv_payload("kv-get", serde_json::json!({"path": "/notes"})).unwrap();
+    fn kv_get_request_includes_state() {
+        use crate::domain::service_payloads::KvGetRequest;
+        let req = KvGetRequest {
+            path: "/notes".to_string(),
+            state: Some("sha256:prev".to_string()),
+        };
+        let payload = serde_json::to_vec(&req).unwrap();
         let parsed: serde_json::Value = serde_json::from_slice(&payload).unwrap();
 
-        assert_eq!(parsed["op"], "kv-get");
         assert_eq!(parsed["path"], "/notes");
         assert_eq!(parsed["state"], "sha256:prev");
+        assert!(parsed.get("op").is_none());
     }
 
     #[test]
-    fn build_kv_payload_omits_state_when_none() {
-        let bridge = test_bridge(None);
-
-        let payload = bridge.build_kv_payload("kv-get", serde_json::json!({"path": "/x"})).unwrap();
+    fn kv_get_request_omits_state_when_none() {
+        use crate::domain::service_payloads::KvGetRequest;
+        let req = KvGetRequest {
+            path: "/x".to_string(),
+            state: None,
+        };
+        let payload = serde_json::to_vec(&req).unwrap();
         let parsed: serde_json::Value = serde_json::from_slice(&payload).unwrap();
 
-        assert_eq!(parsed["op"], "kv-get");
+        assert_eq!(parsed["path"], "/x");
         assert!(parsed.get("state").is_none());
+        assert!(parsed.get("op").is_none());
     }
 
     // ========================================================================

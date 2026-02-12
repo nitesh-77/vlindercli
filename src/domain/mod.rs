@@ -32,8 +32,8 @@ mod model_manifest;
 mod path;
 mod resource_id;
 mod route;
-mod sdk_message;
 mod storage;
+pub mod service_payloads;
 pub mod workers;
 
 // ============================================================================
@@ -132,12 +132,6 @@ pub use catalog::{ModelCatalog, ModelInfo, CatalogError};
 // ============================================================================
 
 pub use runtime::{Runtime, RuntimeType};
-
-// ============================================================================
-// SDK Message (agent-platform contract)
-// ============================================================================
-
-pub use sdk_message::{Hop, SdkMessage};
 
 // ============================================================================
 // Harness (API surface for agent interaction)
