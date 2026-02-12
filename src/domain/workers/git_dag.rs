@@ -367,6 +367,9 @@ impl DagWorker for GitDagWorker {
             if let Some(ref state) = node.state {
                 message.push_str(&format!("\nState: {}", state));
             }
+            if !node.protocol_version.is_empty() {
+                message.push_str(&format!("\nProtocol-Version: {}", node.protocol_version));
+            }
 
             // 4. Author = message sender (ADR 069)
             let author_email = format!("{}@{}", node.from, self.registry_host);
@@ -475,6 +478,7 @@ mod tests {
             stderr: Vec::new(),
             created_at: DateTime::from_timestamp(epoch_secs, 0).unwrap(),
             state: None,
+            protocol_version: String::new(),
         }
     }
 

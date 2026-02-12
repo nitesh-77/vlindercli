@@ -116,6 +116,11 @@ impl DagCaptureWorker {
         // Extract state hash from NATS headers (ADR 055).
         let state = headers.get("state").cloned();
 
+        // Extract protocol version from NATS headers.
+        let protocol_version = headers.get("protocol-version")
+            .cloned()
+            .unwrap_or_default();
+
         let hash = hash_dag_node(payload, &parent_hash, &message_type, &diagnostics);
 
         let now = Utc::now();
@@ -132,6 +137,7 @@ impl DagCaptureWorker {
             stderr,
             created_at: now,
             state,
+            protocol_version,
         };
 
         for worker in &mut self.workers {

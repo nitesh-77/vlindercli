@@ -229,6 +229,7 @@ impl MessageQueue for NatsQueue {
         self.inner.runtime.block_on(async {
             let mut headers = async_nats::HeaderMap::new();
             headers.insert("msg-id", msg.id.as_str());
+            headers.insert("protocol-version", msg.protocol_version.as_str());
             headers.insert("submission-id", msg.submission.as_str());
             headers.insert("session-id", msg.session.as_str());
             headers.insert("harness", msg.harness.as_str());
@@ -267,6 +268,7 @@ impl MessageQueue for NatsQueue {
         self.inner.runtime.block_on(async {
             let mut headers = async_nats::HeaderMap::new();
             headers.insert("msg-id", msg.id.as_str());
+            headers.insert("protocol-version", msg.protocol_version.as_str());
             headers.insert("submission-id", msg.submission.as_str());
             headers.insert("session-id", msg.session.as_str());
             headers.insert("agent-id", msg.agent_id.as_str());
@@ -307,6 +309,7 @@ impl MessageQueue for NatsQueue {
         self.inner.runtime.block_on(async {
             let mut headers = async_nats::HeaderMap::new();
             headers.insert("msg-id", msg.id.as_str());
+            headers.insert("protocol-version", msg.protocol_version.as_str());
             headers.insert("submission-id", msg.submission.as_str());
             headers.insert("session-id", msg.session.as_str());
             headers.insert("agent-id", msg.agent_id.as_str());
@@ -345,6 +348,7 @@ impl MessageQueue for NatsQueue {
         self.inner.runtime.block_on(async {
             let mut headers = async_nats::HeaderMap::new();
             headers.insert("msg-id", msg.id.as_str());
+            headers.insert("protocol-version", msg.protocol_version.as_str());
             headers.insert("submission-id", msg.submission.as_str());
             headers.insert("session-id", msg.session.as_str());
             headers.insert("agent-id", msg.agent_id.as_str());
@@ -385,6 +389,7 @@ impl MessageQueue for NatsQueue {
 
             let msg = InvokeMessage {
                 id: MessageId::from(get_header(headers, "msg-id")?),
+                protocol_version: get_header(headers, "protocol-version").unwrap_or_default(),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
                 session: SessionId::from(get_header(headers, "session-id")?),
                 harness: parse_harness_type(&get_header(headers, "harness")?)?,
@@ -415,6 +420,7 @@ impl MessageQueue for NatsQueue {
 
             let msg = RequestMessage {
                 id: MessageId::from(get_header(headers, "msg-id")?),
+                protocol_version: get_header(headers, "protocol-version").unwrap_or_default(),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
                 session: SessionId::from(get_header(headers, "session-id")?),
                 agent_id: ResourceId::new(&get_header(headers, "agent-id")?),
@@ -448,6 +454,7 @@ impl MessageQueue for NatsQueue {
 
             let msg = ResponseMessage {
                 id: MessageId::from(get_header(headers, "msg-id")?),
+                protocol_version: get_header(headers, "protocol-version").unwrap_or_default(),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
                 session: SessionId::from(get_header(headers, "session-id")?),
                 agent_id: ResourceId::new(&get_header(headers, "agent-id")?),
@@ -481,6 +488,7 @@ impl MessageQueue for NatsQueue {
 
             let msg = CompleteMessage {
                 id: MessageId::from(get_header(headers, "msg-id")?),
+                protocol_version: get_header(headers, "protocol-version").unwrap_or_default(),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
                 session: SessionId::from(get_header(headers, "session-id")?),
                 agent_id: ResourceId::new(&get_header(headers, "agent-id")?),
@@ -508,6 +516,7 @@ impl MessageQueue for NatsQueue {
         self.inner.runtime.block_on(async {
             let mut headers = async_nats::HeaderMap::new();
             headers.insert("msg-id", msg.id.as_str());
+            headers.insert("protocol-version", msg.protocol_version.as_str());
             headers.insert("submission-id", msg.submission.as_str());
             headers.insert("session-id", msg.session.as_str());
             headers.insert("caller-agent", msg.caller_agent.as_str());
@@ -547,6 +556,7 @@ impl MessageQueue for NatsQueue {
 
             let msg = DelegateMessage {
                 id: MessageId::from(get_header(headers, "msg-id")?),
+                protocol_version: get_header(headers, "protocol-version").unwrap_or_default(),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
                 session: SessionId::from(get_header(headers, "session-id")?),
                 caller_agent: get_header(headers, "caller-agent")?,
@@ -567,6 +577,7 @@ impl MessageQueue for NatsQueue {
         self.inner.runtime.block_on(async {
             let mut headers = async_nats::HeaderMap::new();
             headers.insert("msg-id", msg.id.as_str());
+            headers.insert("protocol-version", msg.protocol_version.as_str());
             headers.insert("submission-id", msg.submission.as_str());
             headers.insert("session-id", msg.session.as_str());
             headers.insert("agent-id", msg.agent_id.as_str());
@@ -605,6 +616,7 @@ impl MessageQueue for NatsQueue {
 
             let msg = CompleteMessage {
                 id: MessageId::from(get_header(headers, "msg-id")?),
+                protocol_version: get_header(headers, "protocol-version").unwrap_or_default(),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
                 session: SessionId::from(get_header(headers, "session-id")?),
                 agent_id: ResourceId::new(&get_header(headers, "agent-id")?),

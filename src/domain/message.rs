@@ -17,6 +17,12 @@ use super::diagnostics::{
     ContainerDiagnostics, DelegateDiagnostics,
 };
 
+/// Protocol version stamped on every message at construction time.
+///
+/// Any new message type MUST include a `protocol_version: String` field
+/// and set it to `PROTOCOL_VERSION.to_string()` in its constructor.
+pub const PROTOCOL_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 // --- Supporting types ---
 
 /// Unique identifier for a message.
@@ -255,6 +261,7 @@ pub trait ExpectsReply {
 #[derive(Clone, Debug)]
 pub struct InvokeMessage {
     pub id: MessageId,
+    pub protocol_version: String,
     pub submission: SubmissionId,
     pub session: SessionId,
     pub harness: HarnessType,
@@ -281,6 +288,7 @@ impl InvokeMessage {
     ) -> Self {
         Self {
             id: MessageId::new(),
+            protocol_version: PROTOCOL_VERSION.to_string(),
             submission,
             session,
             harness,
@@ -300,6 +308,7 @@ impl InvokeMessage {
 #[derive(Clone, Debug)]
 pub struct RequestMessage {
     pub id: MessageId,
+    pub protocol_version: String,
     pub submission: SubmissionId,
     pub session: SessionId,
     pub agent_id: ResourceId,
@@ -330,6 +339,7 @@ impl RequestMessage {
     ) -> Self {
         Self {
             id: MessageId::new(),
+            protocol_version: PROTOCOL_VERSION.to_string(),
             submission,
             session,
             agent_id,
@@ -350,6 +360,7 @@ impl RequestMessage {
 #[derive(Clone, Debug)]
 pub struct ResponseMessage {
     pub id: MessageId,
+    pub protocol_version: String,
     pub submission: SubmissionId,
     pub session: SessionId,
     pub agent_id: ResourceId,
@@ -384,6 +395,7 @@ impl ResponseMessage {
     ) -> Self {
         Self {
             id: MessageId::new(),
+            protocol_version: PROTOCOL_VERSION.to_string(),
             submission: request.submission.clone(),
             session: request.session.clone(),
             agent_id: request.agent_id.clone(),
@@ -408,6 +420,7 @@ impl ResponseMessage {
 #[derive(Clone, Debug)]
 pub struct DelegateMessage {
     pub id: MessageId,
+    pub protocol_version: String,
     pub submission: SubmissionId,
     pub session: SessionId,
     pub caller_agent: String,
@@ -435,6 +448,7 @@ impl DelegateMessage {
     ) -> Self {
         Self {
             id: MessageId::new(),
+            protocol_version: PROTOCOL_VERSION.to_string(),
             submission,
             session,
             caller_agent: caller_agent.into(),
@@ -453,6 +467,7 @@ impl DelegateMessage {
 #[derive(Clone, Debug)]
 pub struct CompleteMessage {
     pub id: MessageId,
+    pub protocol_version: String,
     pub submission: SubmissionId,
     pub session: SessionId,
     pub agent_id: ResourceId,
@@ -477,6 +492,7 @@ impl CompleteMessage {
     ) -> Self {
         Self {
             id: MessageId::new(),
+            protocol_version: PROTOCOL_VERSION.to_string(),
             submission,
             session,
             agent_id,
@@ -583,6 +599,17 @@ pub enum ObservableMessage {
 }
 
 impl ObservableMessage {
+    /// Get the protocol version.
+    pub fn protocol_version(&self) -> &str {
+        match self {
+            ObservableMessage::Invoke(m) => &m.protocol_version,
+            ObservableMessage::Request(m) => &m.protocol_version,
+            ObservableMessage::Response(m) => &m.protocol_version,
+            ObservableMessage::Complete(m) => &m.protocol_version,
+            ObservableMessage::Delegate(m) => &m.protocol_version,
+        }
+    }
+
     /// Get the message ID.
     pub fn id(&self) -> &MessageId {
         match self {

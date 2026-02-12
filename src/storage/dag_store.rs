@@ -41,7 +41,8 @@ impl SqliteDagStore {
                  diagnostics BLOB NOT NULL DEFAULT x'',
                  stderr BLOB NOT NULL DEFAULT x'',
                  created_at TEXT NOT NULL,
-                 state TEXT
+                 state TEXT,
+                 protocol_version TEXT NOT NULL DEFAULT ''
              );
              CREATE INDEX IF NOT EXISTS idx_dag_nodes_session
                  ON dag_nodes (session_id, created_at);
@@ -53,6 +54,7 @@ impl SqliteDagStore {
         // ALTER TABLE ADD COLUMN is idempotent-safe: we check PRAGMA table_info first.
         Self::migrate_071(&conn)?;
         Self::migrate_state(&conn)?;
+        Self::migrate_protocol_version(&conn)?;
 
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
@@ -113,12 +115,40 @@ impl SqliteDagStore {
 
         Ok(())
     }
+
+    /// Migrate existing databases to include the protocol_version column.
+    fn migrate_protocol_version(conn: &Connection) -> Result<(), String> {
+        let has_col = conn
+            .prepare("PRAGMA table_info(dag_nodes)")
+            .and_then(|mut stmt| {
+                let mut found = false;
+                let mut rows = stmt.query([])?;
+                while let Some(row) = rows.next()? {
+                    let name: String = row.get(1)?;
+                    if name == "protocol_version" {
+                        found = true;
+                        break;
+                    }
+                }
+                Ok(found)
+            })
+            .map_err(|e| format!("migration check failed: {}", e))?;
+
+        if !has_col {
+            conn.execute_batch(
+                "ALTER TABLE dag_nodes ADD COLUMN protocol_version TEXT NOT NULL DEFAULT '';"
+            ).map_err(|e| format!("protocol_version migration failed: {}", e))?;
+        }
+
+        Ok(())
+    }
 }
 
 /// Construct a DagNode from a SQLite row.
 ///
 /// Expects columns in order: hash, parent_hash, message_type, sender, receiver,
-/// session_id, submission_id, payload, diagnostics, stderr, created_at, state.
+/// session_id, submission_id, payload, diagnostics, stderr, created_at, state,
+/// protocol_version.
 fn row_to_dag_node(row: &rusqlite::Row) -> Result<DagNode, rusqlite::Error> {
     let mt_str: String = row.get(2)?;
     let message_type = MessageType::from_str(&mt_str)
@@ -140,6 +170,7 @@ fn row_to_dag_node(row: &rusqlite::Row) -> Result<DagNode, rusqlite::Error> {
         stderr: row.get(9)?,
         created_at,
         state: row.get(11)?,
+        protocol_version: row.get(12)?,
     })
 }
 
@@ -147,8 +178,8 @@ impl DagStore for SqliteDagStore {
     fn insert_node(&self, node: &DagNode) -> Result<(), String> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT OR IGNORE INTO dag_nodes (hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            "INSERT OR IGNORE INTO dag_nodes (hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state, protocol_version)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             rusqlite::params![
                 node.hash,
                 node.parent_hash,
@@ -162,6 +193,7 @@ impl DagStore for SqliteDagStore {
                 node.stderr,
                 node.created_at.to_rfc3339(),
                 node.state,
+                node.protocol_version,
             ],
         ).map_err(|e| format!("insert_node failed: {}", e))?;
         Ok(())
@@ -170,7 +202,7 @@ impl DagStore for SqliteDagStore {
     fn get_node(&self, hash: &str) -> Result<Option<DagNode>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state
+            "SELECT hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state, protocol_version
              FROM dag_nodes WHERE hash = ?1"
         ).map_err(|e| format!("get_node prepare failed: {}", e))?;
 
@@ -186,7 +218,7 @@ impl DagStore for SqliteDagStore {
     fn get_session_nodes(&self, session_id: &str) -> Result<Vec<DagNode>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state
+            "SELECT hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state, protocol_version
              FROM dag_nodes WHERE session_id = ?1 ORDER BY created_at"
         ).map_err(|e| format!("get_session_nodes prepare failed: {}", e))?;
 
@@ -204,7 +236,7 @@ impl DagStore for SqliteDagStore {
     fn get_children(&self, parent_hash: &str) -> Result<Vec<DagNode>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state
+            "SELECT hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state, protocol_version
              FROM dag_nodes WHERE parent_hash = ?1"
         ).map_err(|e| format!("get_children prepare failed: {}", e))?;
 
@@ -261,6 +293,7 @@ mod tests {
             stderr: Vec::new(),
             created_at: Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap(),
             state: None,
+            protocol_version: String::new(),
         }
     }
 
@@ -293,6 +326,7 @@ mod tests {
             stderr,
             created_at: Utc.with_ymd_and_hms(2025, 6, 15, 12, 0, 0).unwrap(),
             state: Some("abc123".to_string()),
+            protocol_version: "0.1.0".to_string(),
         };
 
         store.insert_node(&node).unwrap();

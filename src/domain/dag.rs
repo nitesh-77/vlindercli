@@ -75,6 +75,9 @@ pub struct DagNode {
     /// State hash from the state store (ADR 055).
     /// Present when the message carries state context (e.g. after kv_put).
     pub state: Option<String>,
+    /// Protocol version of the sender (semver from Cargo.toml).
+    /// Empty for messages captured before protocol versioning was added.
+    pub protocol_version: String,
 }
 
 /// Compute the content-addressed hash for a DAG node.
