@@ -30,6 +30,9 @@ The forcing function is time travel. The fix is making the agent a state machine
 ## Decision
 
 **Agents are state machines. The platform drives the execution loop.**
+The architectural shift: Currently, agents call into the platform (outbound HTTP to bridge server). The new model inverts this — the platform calls the agent repeatedly (POST /handle), and the agent returns what it needs as a JSON action. This is the "inversion of control" pattern: the platform becomes the driver, the agent becomes a pure function (Event, State) → (Action, State). This makes every intermediate step capturable — the key to time travel debugging.
+
+The SDK inverts how agents interact with the platform. Previously, each service call was a synchronous HTTP request to the bridge server — the agent's call stack held the intermediate state. Now, each handler must explicitly return an action and store its progress in ctx.state. This is the classic "continuation-passing style" pattern: instead of blocking on I/O, you say "here's what I need and here's my state — call me back with the result." The tradeoff is more explicit flow control, but the payoff is that every step is independently addressable for replay/debugging.
 
 ### Container contract
 

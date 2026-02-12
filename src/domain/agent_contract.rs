@@ -1,8 +1,8 @@
 //! State machine agent contract types (ADR 075).
 //!
 //! Strongly typed enums for the two directions of communication:
-//! - `AgentAction`: agent → platform (POST /handle response body)
-//! - `AgentEvent`: platform → agent (POST /handle request body)
+//! - `AgentAction`: agent -> platform (POST /handle response body)
+//! - `AgentEvent`: platform -> agent (POST /handle request body)
 //!
 //! Every variant mirrors an `AgentBridge` method signature. The platform
 //! passes `state` through untouched — it's agent-defined working memory.
@@ -10,16 +10,16 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::domain::VectorMatch;
+use super::VectorMatch;
 
-/// Agent → Platform (POST /handle response body).
+/// Agent -> Platform (POST /handle response body).
 ///
 /// Each variant maps 1:1 to an AgentBridge trait method.
 /// The `state` field is opaque agent working memory — the platform
 /// round-trips it without interpretation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "action")]
-pub(crate) enum AgentAction {
+pub enum AgentAction {
     KvGet { path: String, state: Value },
     KvPut { path: String, content: String, state: Value },
     KvList { prefix: String, state: Value },
@@ -33,13 +33,13 @@ pub(crate) enum AgentAction {
     Complete { payload: String, state: Value },
 }
 
-/// Platform → Agent (POST /handle request body).
+/// Platform -> Agent (POST /handle request body).
 ///
 /// Each variant carries the typed response for the preceding action.
 /// `Invoke` starts the conversation; `Error` handles bridge failures.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
-pub(crate) enum AgentEvent {
+pub enum AgentEvent {
     Invoke { input: String, state: Value },
     KvGet { data: Vec<u8>, state: Value },
     KvPut { state: Value },
@@ -59,7 +59,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    // ── AgentAction round-trips ──
+    // -- AgentAction round-trips --
 
     #[test]
     fn action_kv_get_round_trip() {
@@ -185,7 +185,7 @@ mod tests {
         let _: AgentAction = serde_json::from_str(&json).unwrap();
     }
 
-    // ── AgentEvent round-trips ──
+    // -- AgentEvent round-trips --
 
     #[test]
     fn event_invoke_round_trip() {
@@ -308,7 +308,7 @@ mod tests {
         let _: AgentEvent = serde_json::from_str(&json).unwrap();
     }
 
-    // ── Tag shape verification ──
+    // -- Tag shape verification --
 
     #[test]
     fn action_tag_is_action() {

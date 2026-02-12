@@ -5,7 +5,6 @@
 //! - `podman`: Podman CLI abstraction
 //! - `dispatch`: HTTP dispatch to containers + in-flight task tracking
 
-mod contract;
 mod dispatch;
 mod podman;
 mod pool;
