@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 
 use super::agent_manifest::{AgentManifest, MountConfig, ParseError, PromptsConfig, RequirementsConfig};
+use super::image_digest::ImageDigest;
 use super::path::AbsolutePath;
 use super::resource_id::ResourceId;
 use super::runtime::RuntimeType;
@@ -32,7 +33,7 @@ pub struct Agent {
     /// Content-addressed image digest resolved at registration time (ADR 073).
     /// For container agents: `podman image inspect` → `sha256:...`
     /// None for non-container runtimes or if resolution failed.
-    pub image_digest: Option<String>,
+    pub image_digest: Option<ImageDigest>,
     /// Object storage configuration (optional).
     pub object_storage: Option<ResourceId>,
     /// Vector storage configuration (optional).

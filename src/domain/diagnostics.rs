@@ -14,6 +14,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::image_digest::ImageDigest;
+
 // ============================================================================
 // InvokeDiagnostics — Harness
 // ============================================================================
@@ -140,8 +142,8 @@ pub struct ContainerRuntimeInfo {
     pub engine_version: String,
     /// OCI image reference (e.g., "localhost/echo-agent:latest").
     pub image_ref: String,
-    /// Image digest (e.g., "sha256:a80c4f17...").
-    pub image_digest: String,
+    /// Image digest (e.g., "sha256:a80c4f17..."), if resolved.
+    pub image_digest: Option<ImageDigest>,
     /// Container ID for this execution.
     pub container_id: String,
 }
@@ -157,7 +159,7 @@ impl ContainerDiagnostics {
             runtime: ContainerRuntimeInfo {
                 engine_version: "unknown".to_string(),
                 image_ref: "unknown".to_string(),
-                image_digest: "unknown".to_string(),
+                image_digest: None,
                 container_id: "unknown".to_string(),
             },
             duration_ms,
@@ -301,7 +303,7 @@ mod tests {
             runtime: ContainerRuntimeInfo {
                 engine_version: "5.3.1".to_string(),
                 image_ref: "localhost/echo-agent:latest".to_string(),
-                image_digest: "sha256:abc123".to_string(),
+                image_digest: Some(ImageDigest::parse("sha256:abc123").unwrap()),
                 container_id: "def456".to_string(),
             },
             duration_ms: 2300,
@@ -318,7 +320,7 @@ mod tests {
             runtime: ContainerRuntimeInfo {
                 engine_version: "5.3.1".to_string(),
                 image_ref: "localhost/support-agent:latest".to_string(),
-                image_digest: "sha256:a80c4f17".to_string(),
+                image_digest: Some(ImageDigest::parse("sha256:a80c4f17").unwrap()),
                 container_id: "abc123def456".to_string(),
             },
             duration_ms: 2300,

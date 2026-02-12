@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::domain::{Agent, QueueBridge, ContainerDiagnostics, ContainerRuntimeInfo, InvokeMessage};
+use crate::domain::{Agent, ImageDigest, QueueBridge, ContainerDiagnostics, ContainerRuntimeInfo, InvokeMessage};
 
 use super::podman::{Podman, PodmanCli};
 
@@ -20,7 +20,7 @@ pub(super) struct ManagedContainer {
     image_ref: String,
     /// Content-addressed digest from `podman image inspect` at container start.
     /// None if the inspect failed.
-    image_digest: Option<String>,
+    image_digest: Option<ImageDigest>,
 }
 
 /// Image resolution policy for container agents (ADR 073).
@@ -95,7 +95,8 @@ impl ContainerPool {
         // Select image reference based on policy (ADR 073)
         let image = match self.image_policy {
             ImagePolicy::Mutable => agent.executable.clone(),
-            ImagePolicy::Pinned => agent.image_digest.clone()
+            ImagePolicy::Pinned => agent.image_digest.as_ref()
+                .map(|d| d.as_str().to_string())
                 .unwrap_or_else(|| agent.executable.clone()),
         };
 
@@ -123,7 +124,7 @@ impl ContainerPool {
             container = %container_id,
             port = host_port,
             image_ref = %image_ref,
-            image_digest = image_digest.as_deref().unwrap_or("unknown"),
+            image_digest = image_digest.as_ref().map(|d| d.as_str()).unwrap_or("unknown"),
             "Container started"
         );
 
@@ -172,8 +173,7 @@ impl ContainerPool {
                         .map(|v| v.to_string())
                         .unwrap_or_else(|| "unknown".to_string()),
                     image_ref: mc.image_ref.clone(),
-                    image_digest: mc.image_digest.clone()
-                        .unwrap_or_else(|| "unknown".to_string()),
+                    image_digest: mc.image_digest.clone(),
                     container_id: mc.container_id.clone(),
                 },
                 duration_ms,

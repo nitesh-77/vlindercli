@@ -6,6 +6,8 @@
 
 use std::process::Command;
 
+use crate::domain::ImageDigest;
+
 /// Abstraction over the Podman container engine.
 ///
 /// Each method maps to one `podman` CLI subcommand.  The trait is
@@ -18,7 +20,7 @@ pub(crate) trait Podman: Send {
     fn run(&self, image: &str, mounts: &[String]) -> Result<String, String>;
 
     /// `podman image inspect` — return the content-addressed digest.
-    fn image_digest(&self, image_ref: &str) -> Option<String>;
+    fn image_digest(&self, image_ref: &str) -> Option<ImageDigest>;
 
     /// `podman port` — discover the host port mapped to container port 8080.
     fn port(&self, container_id: &str) -> Result<u16, String>;
@@ -73,7 +75,7 @@ impl Podman for PodmanCli {
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     }
 
-    fn image_digest(&self, image_ref: &str) -> Option<String> {
+    fn image_digest(&self, image_ref: &str) -> Option<ImageDigest> {
         Command::new("podman")
             .args(["image", "inspect", image_ref, "--format", "{{.Digest}}"])
             .output()
@@ -81,6 +83,7 @@ impl Podman for PodmanCli {
             .filter(|o| o.status.success())
             .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
             .filter(|s| !s.is_empty())
+            .and_then(|s| ImageDigest::parse(s).ok())
     }
 
     fn port(&self, container_id: &str) -> Result<u16, String> {
@@ -129,7 +132,7 @@ impl Podman for PodmanCli {
 
 /// Resolve the content-addressed digest for an image via `podman image inspect`.
 /// Returns None if the inspect fails (image not found, Podman unavailable, etc.).
-pub(crate) fn resolve_image_digest(image_ref: &str) -> Option<String> {
+pub(crate) fn resolve_image_digest(image_ref: &str) -> Option<ImageDigest> {
     PodmanCli.image_digest(image_ref)
 }
 
