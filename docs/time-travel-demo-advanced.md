@@ -35,12 +35,15 @@ sequenceDiagram
     participant User
     participant CLI as cli
     participant Agent as todoapp
+    participant Infer as infer (openrouter)
     participant KV as kv (sqlite)
     participant Embed as embed (ollama)
     participant Vec as vector (sqlite)
 
     User->>CLI: "add milk"
     CLI->>Agent: invoke
+    Agent->>Infer: infer "parse intent"
+    Infer-->>Agent: {cmd: add, item: "milk"}
     Agent->>KV: kv_get /todos.json
     KV-->>Agent: []
     Agent->>KV: kv_put /todos.json
