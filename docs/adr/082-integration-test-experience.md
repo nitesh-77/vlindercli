@@ -164,6 +164,7 @@ Integration test binaries that need shared setup include `mod common;`. The modu
 - Performance benchmarks (different concern, different infrastructure)
 - Mocking external services (defeats the purpose of integration tests)
 - Full daemon-based end-to-end tests (deploy → invoke → verify conversation) — requires daemon lifecycle management, separate iteration
+- Cross-component pipeline tests (e.g. NATS → GitDagWorker → git commits) — testing this means reimplementing production consumer logic in test code, producing test-infrastructure bugs rather than catching application bugs. Each boundary is tested independently; the glue between them is a daemon lifecycle concern.
 
 ## Consequences
 
@@ -176,4 +177,4 @@ Integration test binaries that need shared setup include `mod common;`. The modu
 - Every stateful test prints its `VLINDER_DIR` path on startup — when it fails, the path is right there
 - `just debug-integration-test <path>` generates a diagnostic prompt for AI-assisted debugging
 - The `#[ignore]` convention is preserved — `cargo test` still runs the fast unit tests by default
-- All 15 existing integration tests are migrated to this infrastructure
+- 11 existing integration tests migrated, 4 new timeline tests added — 15 total under this infrastructure
