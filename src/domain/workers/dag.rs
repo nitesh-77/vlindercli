@@ -1,12 +1,12 @@
 //! DAG worker helpers — reconstruct typed messages from NATS wire format
-//! and convert to DagNode for SQLite storage (ADR 065, 067, 078).
+//! and convert to DagNode for storage (ADR 065, 067, 078, 080).
 //!
-//! Two independent NATS consumers replace the old DagCaptureWorker dispatcher:
-//! - `dag-sqlite`: reconstructs ObservableMessage → DagNode → SQLite
-//! - `dag-git`: reconstructs ObservableMessage → GitDagWorker
+//! SQLite recording is handled synchronously by the transactional outbox
+//! (RecordingQueue, ADR 080). The `dag-git` NATS consumer reconstructs
+//! messages for git commit storage.
 //!
 //! This module provides the shared reconstruction and conversion functions
-//! used by both workers (wired in `worker.rs`).
+//! used by the git worker (wired in `worker.rs`) and RecordingQueue.
 
 use std::collections::HashMap;
 

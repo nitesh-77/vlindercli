@@ -158,12 +158,9 @@ impl Supervisor {
             }
         }
 
-        // DAG workers — always exactly one of each (singleton by design, see ADR 078).
-        // Git: single branch + HEAD lock. SQLite: per-session Merkle chains in one process.
-        // Scaling is a future workload-driven decision (ref-per-session, NATS subject routing).
-        if let Some(child) = spawn_worker(WorkerRole::DagSqlite) {
-            workers.push(child);
-        }
+        // DAG git worker — singleton (single branch + HEAD lock, see ADR 078).
+        // The dag-sqlite consumer was removed by ADR 080: the transactional outbox
+        // records nodes synchronously via the State Service on every send.
         if let Some(child) = spawn_worker(WorkerRole::DagGit) {
             workers.push(child);
         }
@@ -242,9 +239,9 @@ mod tests {
         };
 
         let mut supervisor = Supervisor::new(&config);
-        // Three unconditional singletons: state, dag-sqlite, dag-git.
+        // Two unconditional singletons: state, dag-git.
         // All config-driven workers have count 0.
-        assert_eq!(supervisor.workers.len(), 3);
+        assert_eq!(supervisor.workers.len(), 2);
         supervisor.shutdown();
     }
 }

@@ -49,6 +49,6 @@ The `RecordingQueue` writes to the gRPC State Service — the same shared store 
 
 - Every `send_*` call records a DagNode before the message hits the wire — no async lag
 - Queries against the DagStore always see the latest state
-- The dag-sqlite NATS consumer is now redundant (remove in a follow-up)
+- The dag-sqlite NATS consumer is removed — the outbox replaces it
 - `DagStore` trait gains `latest_node_hash()` — implemented in SQLite and gRPC
 - Queue creation points (`agent run`, `fleet run`, workers) use `recording_from_config()` instead of `from_config()`
