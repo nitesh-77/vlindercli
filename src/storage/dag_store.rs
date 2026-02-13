@@ -47,7 +47,11 @@ impl SqliteDagStore {
              CREATE INDEX IF NOT EXISTS idx_dag_nodes_session
                  ON dag_nodes (session_id, created_at);
              CREATE INDEX IF NOT EXISTS idx_dag_nodes_parent
-                 ON dag_nodes (parent_hash);"
+                 ON dag_nodes (parent_hash);
+             CREATE TABLE IF NOT EXISTS checkout_state (
+                 agent_name TEXT PRIMARY KEY,
+                 state_hash TEXT NOT NULL
+             );"
         ).map_err(|e| format!("failed to initialize dag store: {}", e))?;
 
         // Migrate existing databases: add diagnostics and stderr columns (ADR 071).
@@ -196,6 +200,16 @@ impl DagStore for SqliteDagStore {
                 node.protocol_version,
             ],
         ).map_err(|e| format!("insert_node failed: {}", e))?;
+
+        // Clear checkout override when a Complete with state is recorded.
+        // The agent is the sender on Complete messages.
+        if node.message_type == MessageType::Complete && node.state.is_some() {
+            conn.execute(
+                "DELETE FROM checkout_state WHERE agent_name = ?1",
+                rusqlite::params![node.from],
+            ).map_err(|e| format!("clear checkout_state failed: {}", e))?;
+        }
+
         Ok(())
     }
 
@@ -271,6 +285,23 @@ impl DagStore for SqliteDagStore {
 
     fn latest_state(&self, agent_name: &str) -> Result<Option<String>, String> {
         let conn = self.conn.lock().unwrap();
+
+        // Check checkout override first (ADR 081).
+        let mut stmt = conn.prepare(
+            "SELECT state_hash FROM checkout_state WHERE agent_name = ?1"
+        ).map_err(|e| format!("checkout_state prepare failed: {}", e))?;
+
+        let override_state: Option<String> = stmt.query_row(rusqlite::params![agent_name], |row| {
+            row.get(0)
+        })
+        .optional()
+        .map_err(|e| format!("checkout_state query failed: {}", e))?;
+
+        if override_state.is_some() {
+            return Ok(override_state);
+        }
+
+        // Fall back to latest state from dag_nodes.
         let mut stmt = conn.prepare(
             "SELECT state FROM dag_nodes
              WHERE state IS NOT NULL AND state != ''
@@ -286,6 +317,15 @@ impl DagStore for SqliteDagStore {
         .map_err(|e| format!("latest_state query failed: {}", e))?;
 
         Ok(result)
+    }
+
+    fn set_checkout_state(&self, agent_name: &str, state: &str) -> Result<(), String> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT OR REPLACE INTO checkout_state (agent_name, state_hash) VALUES (?1, ?2)",
+            rusqlite::params![agent_name, state],
+        ).map_err(|e| format!("set_checkout_state failed: {}", e))?;
+        Ok(())
     }
 }
 
@@ -569,5 +609,57 @@ mod tests {
         let store = test_store();
         let hash = store.latest_node_hash("nonexistent").unwrap();
         assert_eq!(hash, None);
+    }
+
+    #[test]
+    fn checkout_state_overrides_latest_state() {
+        let store = test_store();
+
+        // Insert a node with state
+        let mut node = test_node(b"complete", "", MessageType::Complete);
+        node.from = "todoapp".to_string();
+        node.to = "cli".to_string();
+        node.state = Some("real-state".to_string());
+        store.insert_node(&node).unwrap();
+
+        assert_eq!(store.latest_state("todoapp").unwrap(), Some("real-state".to_string()));
+
+        // Set checkout override
+        store.set_checkout_state("todoapp", "checked-out-state").unwrap();
+        assert_eq!(store.latest_state("todoapp").unwrap(), Some("checked-out-state".to_string()));
+    }
+
+    #[test]
+    fn insert_complete_clears_checkout_state() {
+        let store = test_store();
+
+        // Set checkout override
+        store.set_checkout_state("todoapp", "old-state").unwrap();
+        assert_eq!(store.latest_state("todoapp").unwrap(), Some("old-state".to_string()));
+
+        // Insert a Complete with new state — should clear override
+        let mut node = test_node(b"new-complete", "", MessageType::Complete);
+        node.from = "todoapp".to_string();
+        node.to = "cli".to_string();
+        node.state = Some("new-state".to_string());
+        node.created_at = Utc.with_ymd_and_hms(2025, 6, 1, 0, 0, 0).unwrap();
+        store.insert_node(&node).unwrap();
+
+        // Override cleared — latest_state returns the real state
+        assert_eq!(store.latest_state("todoapp").unwrap(), Some("new-state".to_string()));
+    }
+
+    #[test]
+    fn insert_non_complete_does_not_clear_checkout_state() {
+        let store = test_store();
+
+        store.set_checkout_state("agent-a", "checkout-state").unwrap();
+
+        // Insert a Response with state — should NOT clear override
+        let mut node = test_node(b"response", "", MessageType::Response);
+        node.state = Some("response-state".to_string());
+        store.insert_node(&node).unwrap();
+
+        assert_eq!(store.latest_state("agent-a").unwrap(), Some("checkout-state".to_string()));
     }
 }

@@ -14,6 +14,7 @@ use super::proto::{
     GetChildrenRequest, GetChildrenResponse,
     LatestStateRequest, LatestStateResponse,
     LatestNodeHashRequest, LatestNodeHashResponse,
+    SetCheckoutStateRequest, SetCheckoutStateResponse,
 };
 
 /// gRPC server that wraps a DagStore implementation.
@@ -133,5 +134,23 @@ impl StateService for StateServiceServer {
             .map_err(Status::internal)?;
 
         Ok(Response::new(LatestNodeHashResponse { hash }))
+    }
+
+    async fn set_checkout_state(
+        &self,
+        request: Request<SetCheckoutStateRequest>,
+    ) -> Result<Response<SetCheckoutStateResponse>, Status> {
+        let req = request.into_inner();
+
+        match self.store.set_checkout_state(&req.agent_name, &req.state) {
+            Ok(()) => Ok(Response::new(SetCheckoutStateResponse {
+                success: true,
+                error: None,
+            })),
+            Err(e) => Ok(Response::new(SetCheckoutStateResponse {
+                success: false,
+                error: Some(e),
+            })),
+        }
     }
 }

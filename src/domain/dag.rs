@@ -120,6 +120,13 @@ pub trait DagStore: Send + Sync {
     /// Used by the transactional outbox to resume Merkle chaining
     /// when a session spans multiple process lifetimes.
     fn latest_node_hash(&self, session_id: &str) -> Result<Option<String>, String>;
+
+    /// Set an override state for timeline checkout (ADR 081).
+    ///
+    /// When set, `latest_state()` returns this value instead of querying
+    /// the dag_nodes table. Cleared automatically when a Complete message
+    /// with state is recorded via `insert_node()`.
+    fn set_checkout_state(&self, agent_name: &str, state: &str) -> Result<(), String>;
 }
 
 #[cfg(test)]

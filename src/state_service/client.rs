@@ -149,4 +149,24 @@ impl DagStore for GrpcStateClient {
 
         Ok(response.into_inner().hash)
     }
+
+    fn set_checkout_state(&self, agent_name: &str, state: &str) -> Result<(), String> {
+        let request = proto::SetCheckoutStateRequest {
+            agent_name: agent_name.to_string(),
+            state: state.to_string(),
+        };
+
+        let response = self.runtime.block_on(async {
+            self.client.lock().unwrap()
+                .set_checkout_state(request)
+                .await
+        }).map_err(|e| e.to_string())?;
+
+        let resp = response.into_inner();
+        if resp.success {
+            Ok(())
+        } else {
+            Err(resp.error.unwrap_or_else(|| "unknown error".to_string()))
+        }
+    }
 }

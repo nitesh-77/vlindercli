@@ -424,6 +424,7 @@ mod tests {
             fn get_children(&self, _: &str) -> Result<Vec<DagNode>, String> { Ok(vec![]) }
             fn latest_state(&self, _: &str) -> Result<Option<String>, String> { Ok(None) }
             fn latest_node_hash(&self, _: &str) -> Result<Option<String>, String> { Ok(None) }
+            fn set_checkout_state(&self, _: &str, _: &str) -> Result<(), String> { Ok(()) }
         }
 
         let store: Arc<dyn DagStore> = Arc::new(FailStore);

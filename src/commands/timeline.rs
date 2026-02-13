@@ -16,7 +16,7 @@ use std::sync::Arc;
 use clap::Subcommand;
 
 use vlindercli::config::{Config, conversations_dir};
-use vlindercli::domain::{Harness, MessageQueue, Registry, agent_routing_key};
+use vlindercli::domain::{DagStore, Harness, MessageQueue, Registry, agent_routing_key};
 use vlindercli::harness::CliHarness;
 
 #[derive(Subcommand, Debug, PartialEq)]
@@ -129,8 +129,9 @@ fn route(dir: &Path, session_id: &str) {
 
 /// Checkout a specific point in the timeline (ADR 081).
 ///
-/// Moves HEAD to the target commit (detached) and prints trailer
-/// information so the user knows where they are.
+/// Moves HEAD to the target commit (detached), persists the checked-out
+/// state to the DAG store so that `agent run` resumes from it, and prints
+/// trailer information so the user knows where they are.
 fn checkout(dir: &Path, target: &str) {
     let status = Command::new("git")
         .arg("-C")
@@ -172,10 +173,66 @@ fn checkout(dir: &Path, target: &str) {
     }
     if let Some(state) = read_trailer(dir, "HEAD", "State") {
         println!("State:      {}", state);
-    }
 
-    println!();
-    println!("Use 'vlinder timeline repair' to re-execute from this point.");
+        // Persist checked-out state to the DAG store so that `agent run`
+        // picks it up via `latest_state()`. Parse agent name from the
+        // commit subject: "complete: <agent> → <harness>".
+        if let Some(ref subj) = subject {
+            if let Some(agent_name) = parse_agent_from_subject(subj) {
+                if let Some(store) = open_dag_store() {
+                    match store.set_checkout_state(&agent_name, &state) {
+                        Ok(()) => {}
+                        Err(e) => {
+                            eprintln!("Warning: failed to persist checkout state: {}", e);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Parse agent name from a complete commit subject line.
+///
+/// Subject format: "complete: <agent> → <harness>"
+/// Returns the agent routing key (e.g., "todoapp").
+fn parse_agent_from_subject(subject: &str) -> Option<String> {
+    let rest = subject.strip_prefix("complete: ")?;
+    let agent = rest.split(" →").next()?;
+    let agent = agent.trim();
+    if agent.is_empty() { None } else { Some(agent.to_string()) }
+}
+
+/// Open the DAG store (local SQLite or remote gRPC) for state persistence.
+fn open_dag_store() -> Option<Box<dyn DagStore>> {
+    let config = Config::load();
+    if config.distributed.enabled {
+        let state_addr = if config.distributed.state_addr.starts_with("http://")
+            || config.distributed.state_addr.starts_with("https://") {
+            config.distributed.state_addr.clone()
+        } else {
+            format!("http://{}", config.distributed.state_addr)
+        };
+        match vlindercli::state_service::GrpcStateClient::connect(&state_addr) {
+            Ok(client) => Some(Box::new(client)),
+            Err(e) => {
+                eprintln!("Warning: cannot reach state service at {}: {}", state_addr, e);
+                None
+            }
+        }
+    } else {
+        let db_path = vlindercli::config::dag_db_path();
+        if !db_path.exists() {
+            return None;
+        }
+        match vlindercli::storage::dag_store::SqliteDagStore::open(&db_path) {
+            Ok(store) => Some(Box::new(store)),
+            Err(e) => {
+                eprintln!("Warning: failed to open DAG store: {}", e);
+                None
+            }
+        }
+    }
 }
 
 /// Repair from current position — create a branch and re-execute (ADR 081).
@@ -640,5 +697,29 @@ mod tests {
             .unwrap();
         let new_main = String::from_utf8_lossy(&output.stdout).trim().to_string();
         assert_eq!(new_main, first_commit);
+    }
+
+    #[test]
+    fn parse_agent_from_complete_subject() {
+        assert_eq!(
+            parse_agent_from_subject("complete: todoapp → cli"),
+            Some("todoapp".to_string()),
+        );
+    }
+
+    #[test]
+    fn parse_agent_ignores_non_complete_subjects() {
+        assert_eq!(parse_agent_from_subject("invoke: cli → todoapp"), None);
+        assert_eq!(parse_agent_from_subject("request: todoapp → kv.sqlite"), None);
+    }
+
+    #[test]
+    fn parse_agent_handles_edge_cases() {
+        assert_eq!(parse_agent_from_subject("complete: "), None);
+        assert_eq!(parse_agent_from_subject(""), None);
+        assert_eq!(
+            parse_agent_from_subject("complete: my-agent → cli"),
+            Some("my-agent".to_string()),
+        );
     }
 }
