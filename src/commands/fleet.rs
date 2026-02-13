@@ -6,7 +6,7 @@ use clap::Subcommand;
 use vlindercli::config::Config;
 use vlindercli::domain::{DagStore, Fleet, Harness, Registry, agent_routing_key, MessageQueue};
 use vlindercli::harness::{CliHarness, read_latest_state};
-use vlindercli::queue::NatsQueue;
+use vlindercli::queue;
 use vlindercli::registry_service::{GrpcRegistryClient, ping_registry};
 use vlindercli::state_service::GrpcStateClient;
 
@@ -123,11 +123,10 @@ pub fn run(path: Option<PathBuf>) {
             .expect("Failed to connect to registry")
     );
 
-    // Connect to NATS queue
-    let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(
-        NatsQueue::connect(&config.queue.nats_url)
-            .expect("Failed to connect to NATS")
-    );
+    // Connect to queue with synchronous DAG recording
+    let queue: Arc<dyn MessageQueue + Send + Sync> =
+        queue::recording_from_config()
+            .expect("Failed to create queue");
 
     // Create harness with remote backends (no daemon, no workers)
     let mut harness = CliHarness::new(queue, registry);

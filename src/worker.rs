@@ -117,7 +117,7 @@ fn run_agent_container_worker(config: &Config, shutdown: &AtomicBool) {
     use crate::domain::Runtime;
     use crate::registry_service::GrpcRegistryClient;
 
-    let queue = queue::from_config().expect("Failed to create queue");
+    let queue = queue::recording_from_config().expect("Failed to create queue");
 
     let registry_addr = grpc_registry_addr(config);
     let registry: Arc<dyn Registry> = Arc::new(
@@ -145,7 +145,7 @@ fn run_inference_ollama_worker(config: &Config, shutdown: &AtomicBool) {
     use crate::queue;
     use crate::registry_service::GrpcRegistryClient;
 
-    let queue = queue::from_config().expect("Failed to create queue");
+    let queue = queue::recording_from_config().expect("Failed to create queue");
 
     // Connect to central registry via gRPC
     let registry_addr = grpc_registry_addr(config);
@@ -169,7 +169,7 @@ fn run_inference_openrouter_worker(config: &Config, shutdown: &AtomicBool) {
     use crate::queue;
     use crate::registry_service::GrpcRegistryClient;
 
-    let queue = queue::from_config().expect("Failed to create queue");
+    let queue = queue::recording_from_config().expect("Failed to create queue");
 
     let registry_addr = grpc_registry_addr(config);
     let registry: Arc<dyn Registry> = Arc::new(
@@ -192,7 +192,7 @@ fn run_embedding_ollama_worker(config: &Config, shutdown: &AtomicBool) {
     use crate::queue;
     use crate::registry_service::GrpcRegistryClient;
 
-    let queue = queue::from_config().expect("Failed to create queue");
+    let queue = queue::recording_from_config().expect("Failed to create queue");
 
     // Connect to central registry via gRPC
     let registry_addr = grpc_registry_addr(config);
@@ -216,7 +216,7 @@ fn run_storage_object_sqlite_worker(config: &Config, shutdown: &AtomicBool) {
     use crate::queue;
     use crate::registry_service::GrpcRegistryClient;
 
-    let queue = queue::from_config().expect("Failed to create queue");
+    let queue = queue::recording_from_config().expect("Failed to create queue");
 
     // Connect to central registry via gRPC
     let registry_addr = grpc_registry_addr(config);
@@ -240,7 +240,7 @@ fn run_storage_object_memory_worker(config: &Config, shutdown: &AtomicBool) {
     use crate::queue;
     use crate::registry_service::GrpcRegistryClient;
 
-    let queue = queue::from_config().expect("Failed to create queue");
+    let queue = queue::recording_from_config().expect("Failed to create queue");
 
     let registry_addr = grpc_registry_addr(config);
     let registry: Arc<dyn Registry> = Arc::new(
@@ -263,7 +263,7 @@ fn run_storage_vector_sqlite_worker(config: &Config, shutdown: &AtomicBool) {
     use crate::queue;
     use crate::registry_service::GrpcRegistryClient;
 
-    let queue = queue::from_config().expect("Failed to create queue");
+    let queue = queue::recording_from_config().expect("Failed to create queue");
 
     let registry_addr = grpc_registry_addr(config);
     let registry: Arc<dyn Registry> = Arc::new(
@@ -286,7 +286,7 @@ fn run_storage_vector_memory_worker(config: &Config, shutdown: &AtomicBool) {
     use crate::queue;
     use crate::registry_service::GrpcRegistryClient;
 
-    let queue = queue::from_config().expect("Failed to create queue");
+    let queue = queue::recording_from_config().expect("Failed to create queue");
 
     let registry_addr = grpc_registry_addr(config);
     let registry: Arc<dyn Registry> = Arc::new(

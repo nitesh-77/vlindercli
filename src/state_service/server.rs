@@ -13,6 +13,7 @@ use super::proto::{
     GetSessionNodesRequest, GetSessionNodesResponse,
     GetChildrenRequest, GetChildrenResponse,
     LatestStateRequest, LatestStateResponse,
+    LatestNodeHashRequest, LatestNodeHashResponse,
 };
 
 /// gRPC server that wraps a DagStore implementation.
@@ -120,5 +121,17 @@ impl StateService for StateServiceServer {
             .map_err(Status::internal)?;
 
         Ok(Response::new(LatestStateResponse { state }))
+    }
+
+    async fn latest_node_hash(
+        &self,
+        request: Request<LatestNodeHashRequest>,
+    ) -> Result<Response<LatestNodeHashResponse>, Status> {
+        let req = request.into_inner();
+
+        let hash = self.store.latest_node_hash(&req.session_id)
+            .map_err(Status::internal)?;
+
+        Ok(Response::new(LatestNodeHashResponse { hash }))
     }
 }

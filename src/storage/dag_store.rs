@@ -251,6 +251,24 @@ impl DagStore for SqliteDagStore {
         Ok(nodes)
     }
 
+    fn latest_node_hash(&self, session_id: &str) -> Result<Option<String>, String> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT hash FROM dag_nodes
+             WHERE session_id = ?1
+             ORDER BY created_at DESC
+             LIMIT 1"
+        ).map_err(|e| format!("latest_node_hash prepare failed: {}", e))?;
+
+        let result: Option<String> = stmt.query_row(rusqlite::params![session_id], |row| {
+            row.get(0)
+        })
+        .optional()
+        .map_err(|e| format!("latest_node_hash query failed: {}", e))?;
+
+        Ok(result)
+    }
+
     fn latest_state(&self, agent_name: &str) -> Result<Option<String>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
@@ -527,5 +545,29 @@ mod tests {
         assert_eq!(nodes[2].message_type, MessageType::Response);
         assert_eq!(nodes[3].message_type, MessageType::Complete);
         assert_eq!(nodes[4].message_type, MessageType::Delegate);
+    }
+
+    #[test]
+    fn latest_node_hash_returns_most_recent() {
+        let store = test_store();
+
+        let mut node1 = test_node(b"first", "", MessageType::Invoke);
+        node1.created_at = Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
+
+        let mut node2 = test_node(b"second", &node1.hash, MessageType::Request);
+        node2.created_at = Utc.with_ymd_and_hms(2025, 1, 1, 0, 1, 0).unwrap();
+
+        store.insert_node(&node1).unwrap();
+        store.insert_node(&node2).unwrap();
+
+        let hash = store.latest_node_hash("sess-1").unwrap();
+        assert_eq!(hash, Some(node2.hash));
+    }
+
+    #[test]
+    fn latest_node_hash_returns_none_for_empty_session() {
+        let store = test_store();
+        let hash = store.latest_node_hash("nonexistent").unwrap();
+        assert_eq!(hash, None);
     }
 }

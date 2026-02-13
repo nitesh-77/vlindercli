@@ -135,4 +135,18 @@ impl DagStore for GrpcStateClient {
 
         Ok(response.into_inner().state)
     }
+
+    fn latest_node_hash(&self, session_id: &str) -> Result<Option<String>, String> {
+        let request = proto::LatestNodeHashRequest {
+            session_id: session_id.to_string(),
+        };
+
+        let response = self.runtime.block_on(async {
+            self.client.lock().unwrap()
+                .latest_node_hash(request)
+                .await
+        }).map_err(|e| e.to_string())?;
+
+        Ok(response.into_inner().hash)
+    }
 }

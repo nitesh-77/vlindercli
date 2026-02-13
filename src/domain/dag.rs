@@ -114,6 +114,12 @@ pub trait DagStore: Send + Sync {
     /// Scans nodes where the agent is either sender or receiver, returning
     /// the latest non-empty state. Returns None if no state has been recorded.
     fn latest_state(&self, agent_name: &str) -> Result<Option<String>, String>;
+
+    /// Get the hash of the most recently inserted node for a session.
+    ///
+    /// Used by the transactional outbox to resume Merkle chaining
+    /// when a session spans multiple process lifetimes.
+    fn latest_node_hash(&self, session_id: &str) -> Result<Option<String>, String>;
 }
 
 #[cfg(test)]
