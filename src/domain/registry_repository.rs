@@ -1,6 +1,11 @@
 //! Repository trait for Registry persistence.
 
-use super::{Model, EngineType, ModelType, ResourceId};
+use std::collections::HashMap;
+use std::path::Path;
+
+use super::{Agent, ImageDigest, Model, EngineType, ModelType, Mount, Prompts, Requirements, ResourceId};
+use super::path::AbsolutePath;
+use super::runtime::RuntimeType;
 
 /// Repository for persisting Registry state.
 ///
@@ -18,6 +23,18 @@ pub trait RegistryRepository: Send + Sync {
 
     /// Check if a model exists.
     fn model_exists(&self, name: &str) -> Result<bool, RepositoryError>;
+
+    /// Save an agent to the repository.
+    fn save_agent(&self, agent: &Agent) -> Result<(), RepositoryError>;
+
+    /// Load all agents from the repository.
+    fn load_agents(&self) -> Result<Vec<Agent>, RepositoryError>;
+
+    /// Delete an agent by name.
+    fn delete_agent(&self, name: &str) -> Result<bool, RepositoryError>;
+
+    /// Check if an agent exists.
+    fn agent_exists(&self, name: &str) -> Result<bool, RepositoryError>;
 }
 
 #[derive(Debug)]
@@ -93,5 +110,277 @@ impl StoredModel {
             model_path: ResourceId::new(&self.model_path),
             digest: self.digest.clone(),
         })
+    }
+}
+
+/// Stored agent representation for persistence.
+///
+/// Scalar fields stored directly; complex nested fields (requirements,
+/// prompts, mounts) serialized as JSON strings.
+#[derive(Debug)]
+pub struct StoredAgent {
+    pub name: String,
+    pub description: String,
+    pub source: Option<String>,
+    pub runtime: String,
+    pub executable: String,
+    pub image_digest: Option<String>,
+    pub object_storage: Option<String>,
+    pub vector_storage: Option<String>,
+    pub requirements_json: String,
+    pub prompts_json: Option<String>,
+    pub mounts_json: String,
+}
+
+impl StoredAgent {
+    pub fn from_agent(agent: &Agent) -> Result<Self, RepositoryError> {
+        let requirements = RequirementsJson {
+            models: agent.requirements.models.iter()
+                .map(|(k, v)| (k.clone(), v.as_str().to_string()))
+                .collect(),
+            services: agent.requirements.services.clone(),
+        };
+
+        let prompts = agent.prompts.as_ref().map(|p| PromptsJson {
+            intent_recognition: p.intent_recognition.clone(),
+            query_expansion: p.query_expansion.clone(),
+            answer_generation: p.answer_generation.clone(),
+            map_summarize: p.map_summarize.clone(),
+            reduce_summaries: p.reduce_summaries.clone(),
+            direct_summarize: p.direct_summarize.clone(),
+        });
+
+        let mounts: Vec<MountJson> = agent.mounts.iter().map(|m| MountJson {
+            host_path: m.host_path.to_string(),
+            guest_path: m.guest_path.to_string_lossy().to_string(),
+            readonly: m.readonly,
+        }).collect();
+
+        let requirements_json = serde_json::to_string(&requirements)
+            .map_err(|e| RepositoryError::Serialization(e.to_string()))?;
+        let prompts_json = prompts.map(|p| serde_json::to_string(&p))
+            .transpose()
+            .map_err(|e| RepositoryError::Serialization(e.to_string()))?;
+        let mounts_json = serde_json::to_string(&mounts)
+            .map_err(|e| RepositoryError::Serialization(e.to_string()))?;
+
+        Ok(Self {
+            name: agent.name.clone(),
+            description: agent.description.clone(),
+            source: agent.source.clone(),
+            runtime: agent.runtime.as_str().to_string(),
+            executable: agent.executable.clone(),
+            image_digest: agent.image_digest.as_ref().map(|d| d.as_str().to_string()),
+            object_storage: agent.object_storage.as_ref().map(|r| r.as_str().to_string()),
+            vector_storage: agent.vector_storage.as_ref().map(|r| r.as_str().to_string()),
+            requirements_json,
+            prompts_json,
+            mounts_json,
+        })
+    }
+
+    pub fn to_agent(&self) -> Result<Agent, RepositoryError> {
+        let runtime = RuntimeType::from_str(&self.runtime)
+            .ok_or_else(|| RepositoryError::Serialization(
+                format!("unknown runtime: {}", self.runtime)
+            ))?;
+
+        let image_digest = self.image_digest.as_ref()
+            .map(ImageDigest::parse)
+            .transpose()
+            .map_err(RepositoryError::Serialization)?;
+
+        let requirements: RequirementsJson = serde_json::from_str(&self.requirements_json)
+            .map_err(|e| RepositoryError::Serialization(e.to_string()))?;
+
+        let prompts: Option<PromptsJson> = self.prompts_json.as_ref()
+            .map(|s| serde_json::from_str(s))
+            .transpose()
+            .map_err(|e| RepositoryError::Serialization(e.to_string()))?;
+
+        let mount_jsons: Vec<MountJson> = serde_json::from_str(&self.mounts_json)
+            .map_err(|e| RepositoryError::Serialization(e.to_string()))?;
+
+        let models = requirements.models.into_iter()
+            .map(|(k, v)| (k, ResourceId::new(v)))
+            .collect();
+
+        let mounts = mount_jsons.into_iter().map(|m| {
+            let host_path = AbsolutePath::from_absolute(Path::new(&m.host_path))
+                .ok_or_else(|| RepositoryError::Serialization(
+                    format!("mount host_path is not absolute: {}", m.host_path)
+                ))?;
+            Ok(Mount {
+                host_path,
+                guest_path: m.guest_path.into(),
+                readonly: m.readonly,
+            })
+        }).collect::<Result<Vec<_>, RepositoryError>>()?;
+
+        Ok(Agent {
+            id: Agent::placeholder_id(&self.name),
+            name: self.name.clone(),
+            description: self.description.clone(),
+            source: self.source.clone(),
+            runtime,
+            executable: self.executable.clone(),
+            image_digest,
+            object_storage: self.object_storage.as_ref().map(ResourceId::new),
+            vector_storage: self.vector_storage.as_ref().map(ResourceId::new),
+            requirements: Requirements { models, services: requirements.services },
+            prompts: prompts.map(|p| Prompts {
+                intent_recognition: p.intent_recognition,
+                query_expansion: p.query_expansion,
+                answer_generation: p.answer_generation,
+                map_summarize: p.map_summarize,
+                reduce_summaries: p.reduce_summaries,
+                direct_summarize: p.direct_summarize,
+            }),
+            mounts,
+        })
+    }
+}
+
+// Private serde helpers for JSON round-tripping
+#[derive(serde::Serialize, serde::Deserialize)]
+struct RequirementsJson {
+    models: HashMap<String, String>,
+    services: Vec<String>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct PromptsJson {
+    intent_recognition: Option<String>,
+    query_expansion: Option<String>,
+    answer_generation: Option<String>,
+    map_summarize: Option<String>,
+    reduce_summaries: Option<String>,
+    direct_summarize: Option<String>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct MountJson {
+    host_path: String,
+    guest_path: String,
+    readonly: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn minimal_agent() -> Agent {
+        Agent {
+            id: Agent::placeholder_id("echo"),
+            name: "echo".to_string(),
+            description: "Echoes input".to_string(),
+            source: None,
+            runtime: RuntimeType::Container,
+            executable: "localhost/echo:latest".to_string(),
+            image_digest: None,
+            object_storage: None,
+            vector_storage: None,
+            requirements: Requirements {
+                models: HashMap::new(),
+                services: vec![],
+            },
+            prompts: None,
+            mounts: vec![],
+        }
+    }
+
+    fn full_agent() -> Agent {
+        let mut models = HashMap::new();
+        models.insert("phi3".to_string(), ResourceId::new("ollama://localhost:11434/phi3:latest"));
+        models.insert("nomic".to_string(), ResourceId::new("ollama://localhost:11434/nomic-embed-text:latest"));
+
+        Agent {
+            id: Agent::placeholder_id("thinker"),
+            name: "thinker".to_string(),
+            description: "A thinking agent".to_string(),
+            source: Some("https://github.com/example/thinker".to_string()),
+            runtime: RuntimeType::Container,
+            executable: "localhost/thinker:latest".to_string(),
+            image_digest: Some(ImageDigest::parse("sha256:abc123def456").unwrap()),
+            object_storage: Some(ResourceId::new("sqlite:///data/objects.db")),
+            vector_storage: Some(ResourceId::new("sqlite:///data/vectors.db")),
+            requirements: Requirements {
+                models,
+                services: vec!["inference".to_string()],
+            },
+            prompts: Some(Prompts {
+                intent_recognition: Some("Classify intent".to_string()),
+                query_expansion: None,
+                answer_generation: Some("Generate answer".to_string()),
+                map_summarize: None,
+                reduce_summaries: None,
+                direct_summarize: None,
+            }),
+            mounts: vec![
+                Mount {
+                    host_path: AbsolutePath::from_absolute(Path::new("/data/notes")).unwrap(),
+                    guest_path: "/mnt/notes".into(),
+                    readonly: true,
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn stored_agent_round_trip_minimal() {
+        let agent = minimal_agent();
+        let stored = StoredAgent::from_agent(&agent).unwrap();
+        let restored = stored.to_agent().unwrap();
+
+        assert_eq!(restored.name, "echo");
+        assert_eq!(restored.description, "Echoes input");
+        assert_eq!(restored.runtime, RuntimeType::Container);
+        assert_eq!(restored.executable, "localhost/echo:latest");
+        assert!(restored.source.is_none());
+        assert!(restored.image_digest.is_none());
+        assert!(restored.object_storage.is_none());
+        assert!(restored.vector_storage.is_none());
+        assert!(restored.requirements.models.is_empty());
+        assert!(restored.requirements.services.is_empty());
+        assert!(restored.prompts.is_none());
+        assert!(restored.mounts.is_empty());
+    }
+
+    #[test]
+    fn stored_agent_round_trip_full() {
+        let agent = full_agent();
+        let stored = StoredAgent::from_agent(&agent).unwrap();
+        let restored = stored.to_agent().unwrap();
+
+        assert_eq!(restored.name, "thinker");
+        assert_eq!(restored.description, "A thinking agent");
+        assert_eq!(restored.source.as_deref(), Some("https://github.com/example/thinker"));
+        assert_eq!(restored.runtime, RuntimeType::Container);
+        assert_eq!(restored.executable, "localhost/thinker:latest");
+        assert_eq!(restored.image_digest.as_ref().map(|d| d.as_str()), Some("sha256:abc123def456"));
+        assert_eq!(restored.object_storage.as_ref().map(|r| r.as_str()), Some("sqlite:///data/objects.db"));
+        assert_eq!(restored.vector_storage.as_ref().map(|r| r.as_str()), Some("sqlite:///data/vectors.db"));
+
+        // Models
+        assert_eq!(restored.requirements.models.len(), 2);
+        assert_eq!(
+            restored.requirements.models.get("phi3").map(|r| r.as_str()),
+            Some("ollama://localhost:11434/phi3:latest")
+        );
+
+        // Services
+        assert_eq!(restored.requirements.services, vec!["inference"]);
+
+        // Prompts
+        let prompts = restored.prompts.unwrap();
+        assert_eq!(prompts.intent_recognition.as_deref(), Some("Classify intent"));
+        assert!(prompts.query_expansion.is_none());
+        assert_eq!(prompts.answer_generation.as_deref(), Some("Generate answer"));
+
+        // Mounts
+        assert_eq!(restored.mounts.len(), 1);
+        assert_eq!(restored.mounts[0].host_path.to_string(), "/data/notes");
+        assert_eq!(restored.mounts[0].guest_path.to_string_lossy(), "/mnt/notes");
+        assert!(restored.mounts[0].readonly);
     }
 }

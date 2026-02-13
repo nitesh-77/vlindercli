@@ -151,4 +151,4 @@ pub use route::{Route, Stop};
 // ============================================================================
 
 pub use registry::{Job, JobId, JobStatus, RegistrationError, Registry};
-pub use registry_repository::{RegistryRepository, RepositoryError, StoredModel};
+pub use registry_repository::{RegistryRepository, RepositoryError, StoredAgent, StoredModel};

@@ -61,6 +61,22 @@ impl InMemoryRegistry {
         ResourceId::new(format!("{}/agents/{}", self.registry_id.as_str(), name))
     }
 
+    /// Restore a previously-persisted agent without capability validation.
+    ///
+    /// Used during startup to load agents from disk. Bypasses runtime,
+    /// storage, and model checks — persisted agents already passed
+    /// validation at registration time.
+    pub fn restore_agent(&self, mut agent: Agent) -> Result<(), RegistrationError> {
+        let mut state = self.state.write().unwrap();
+        let agent_id = self.agent_id_internal(&agent.name);
+        if state.agents.contains_key(&agent_id) {
+            return Err(RegistrationError::DuplicateName(agent.name.clone()));
+        }
+        agent.id = agent_id.clone();
+        state.agents.insert(agent_id, agent);
+        Ok(())
+    }
+
     /// Remove a model by name. Returns true if the model existed.
     pub fn remove_model(&self, name: &str) -> bool {
         let model_id = ResourceId::new(format!("{}/models/{}", self.registry_id.as_str(), name));
@@ -486,5 +502,60 @@ mod tests {
         registry.register_embedding_engine(EngineType::InMemory);
         assert!(registry.has_embedding_engine(EngineType::Ollama));
         assert!(registry.has_embedding_engine(EngineType::InMemory));
+    }
+
+    // --- restore_agent tests ---
+
+    fn minimal_agent(name: &str) -> Agent {
+        use std::collections::HashMap;
+        use crate::domain::{Requirements, RuntimeType};
+
+        Agent {
+            id: Agent::placeholder_id(name),
+            name: name.to_string(),
+            description: format!("{} agent", name),
+            source: None,
+            runtime: RuntimeType::Container,
+            executable: format!("localhost/{}:latest", name),
+            image_digest: None,
+            object_storage: None,
+            vector_storage: None,
+            requirements: Requirements {
+                models: HashMap::new(),
+                services: vec![],
+            },
+            prompts: None,
+            mounts: vec![],
+        }
+    }
+
+    #[test]
+    fn restore_agent_bypasses_validation() {
+        let registry = InMemoryRegistry::new();
+        // No runtimes, storage, or models registered — register_agent would fail
+        let agent = minimal_agent("echo");
+
+        // register_agent should fail (no container runtime registered)
+        let result = registry.register_agent(agent.clone());
+        assert!(result.is_err());
+
+        // restore_agent should succeed despite no capabilities
+        registry.restore_agent(agent).unwrap();
+
+        let agents = registry.get_agents();
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0].name, "echo");
+        // ID should be reassigned by the registry
+        assert!(agents[0].id.as_str().contains("/agents/echo"));
+    }
+
+    #[test]
+    fn restore_agent_rejects_duplicate() {
+        let registry = InMemoryRegistry::new();
+
+        registry.restore_agent(minimal_agent("echo")).unwrap();
+
+        let result = registry.restore_agent(minimal_agent("echo"));
+        assert!(result.is_err());
     }
 }

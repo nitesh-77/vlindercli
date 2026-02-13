@@ -3,8 +3,8 @@
 //! Composes InMemoryRegistry (fast reads) with SqliteRegistryRepository
 //! (durable writes). SQLite is the source of truth; in-memory is a cache.
 //!
-//! On construction, loads all models from disk (fail-fast).
-//! On register_model(), writes to disk first, then updates cache.
+//! On construction, loads all models and agents from disk (fail-fast).
+//! On register_model()/register_agent(), writes to disk first, then updates cache.
 
 use std::path::Path;
 
@@ -61,6 +61,16 @@ impl PersistentRegistry {
             inner.register_model(model)?;
         }
 
+        // Load persisted agents (bypasses validation — capabilities not yet registered)
+        let agents = repo.load_agents()
+            .map_err(|e| RegistrationError::Persistence(
+                format!("failed to load agents from '{}': {}", db_path.display(), e)
+            ))?;
+
+        for agent in agents {
+            inner.restore_agent(agent)?;
+        }
+
         Ok(Self { inner, repo })
     }
 
@@ -75,10 +85,17 @@ impl Registry for PersistentRegistry {
         self.inner.id()
     }
 
-    // --- Agent operations (delegate directly) ---
+    // --- Agent operations (write-through for mutations) ---
 
     fn register_agent(&self, agent: Agent) -> Result<(), RegistrationError> {
-        self.inner.register_agent(agent)
+        // Validate in-memory first (runtime, storage, model checks), then persist
+        self.inner.register_agent(agent.clone())?;
+
+        // Write to disk (agent already validated and cached)
+        self.repo.save_agent(&agent)
+            .map_err(|e| RegistrationError::Persistence(e.to_string()))?;
+
+        Ok(())
     }
 
     fn agent_id(&self, name: &str) -> ResourceId {
@@ -215,7 +232,8 @@ impl Registry for PersistentRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::ModelType;
+    use std::collections::HashMap;
+    use crate::domain::{ModelType, Requirements, RuntimeType};
 
     fn test_model(name: &str) -> Model {
         Model {
@@ -331,6 +349,79 @@ mod tests {
             let model = registry.get_model("llama3");
             assert!(model.is_some(), "model should survive restart");
             assert_eq!(model.unwrap().name, "llama3");
+        }
+    }
+
+    // --- Agent tests ---
+
+    fn test_agent(name: &str) -> Agent {
+        Agent {
+            id: Agent::placeholder_id(name),
+            name: name.to_string(),
+            description: format!("{} agent", name),
+            source: None,
+            runtime: RuntimeType::Container,
+            executable: format!("localhost/{}:latest", name),
+            image_digest: None,
+            object_storage: None,
+            vector_storage: None,
+            requirements: Requirements {
+                models: HashMap::new(),
+                services: vec![],
+            },
+            prompts: None,
+            mounts: vec![],
+        }
+    }
+
+    /// Config with container runtime enabled so register_agent validation passes.
+    fn config_with_runtime() -> Config {
+        Config::default()
+    }
+
+    /// Open a PersistentRegistry with container runtime pre-registered.
+    fn open_with_runtime(db_path: &std::path::Path) -> PersistentRegistry {
+        let registry = PersistentRegistry::open(db_path, &config_with_runtime()).unwrap();
+        registry.register_runtime(RuntimeType::Container);
+        registry
+    }
+
+    #[test]
+    fn register_agent_persists_to_disk() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let db_path = temp.path().join("registry.db");
+
+        let registry = open_with_runtime(&db_path);
+        registry.register_agent(test_agent("echo")).unwrap();
+
+        // Verify in-memory
+        let agent = registry.get_agent_by_name("echo");
+        assert!(agent.is_some());
+
+        // Verify on disk: open a fresh repo and check
+        let repo = SqliteRegistryRepository::open(&db_path).unwrap();
+        let agents = repo.load_agents().unwrap();
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0].name, "echo");
+    }
+
+    #[test]
+    fn agents_survive_restart() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let db_path = temp.path().join("registry.db");
+
+        // First "session": register an agent
+        {
+            let registry = open_with_runtime(&db_path);
+            registry.register_agent(test_agent("echo")).unwrap();
+        }
+
+        // Second "session": agent should be loaded via restore_agent
+        {
+            let registry = PersistentRegistry::open(&db_path, &Config::default()).unwrap();
+            let agent = registry.get_agent_by_name("echo");
+            assert!(agent.is_some(), "agent should survive restart");
+            assert_eq!(agent.unwrap().name, "echo");
         }
     }
 }
