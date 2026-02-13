@@ -7,14 +7,12 @@
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
-use std::time::SystemTime;
 
 use crate::domain::{
     Agent, Harness, HarnessType, InvokeDiagnostics, InvokeMessage,
     JobId, JobStatus, MessageQueue, Registry, ResourceId, RuntimeType,
     SessionId, SubmissionId,
 };
-use crate::domain::git_hash::compute_submission_id;
 use crate::domain::Session;
 
 /// CLI harness implementation.
@@ -29,8 +27,8 @@ pub struct CliHarness {
     registry: Arc<dyn Registry>,
     inflight: HashMap<SubmissionId, JobId>,
     session: Option<Session>,
-    /// Last computed submission hash — parent for commit chaining (ADR 070).
-    last_submission_hash: Option<String>,
+    /// Last SubmissionId — parent for Merkle chaining (ADR 081).
+    last_submission_id: Option<String>,
     /// Final state hash from the last completed invocation (ADR 055).
     last_state: Option<String>,
     /// Pending state from a just-completed invocation, not yet committed.
@@ -47,7 +45,7 @@ impl CliHarness {
             registry,
             inflight: HashMap::new(),
             session: None,
-            last_submission_hash: None,
+            last_submission_id: None,
             last_state: None,
             pending_state: None,
         }
@@ -215,29 +213,20 @@ impl Harness for CliHarness {
         let runtime = self.registry.select_runtime(&agent)
             .ok_or_else(|| format!("no runtime available for agent: {}", agent_id))?;
 
-        // Derive submission and payload from session state (ADR 054, ADR 070)
+        // Derive submission and payload from session state (ADR 054, ADR 081)
         let (submission, session_id, payload) = if let Some(session) = self.session.as_mut() {
-            // Session mode: compute SubmissionId in-process (ADR 070)
+            // Session mode: content-addressed SubmissionId (ADR 081)
             let enriched_payload = session.build_payload(input);
-            let parent = self.last_submission_hash.as_deref().unwrap_or("");
-            let author = format!("cli <cli@localhost>");
-            let timestamp = SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs() as i64;
-            let message = format!("user\n\n{}\n\nSession: {}", input, session.session.as_str());
+            let parent = self.last_submission_id.as_deref().unwrap_or("");
 
-            let sha = compute_submission_id(
+            let submission = SubmissionId::content_addressed(
                 enriched_payload.as_bytes(),
+                session.session.as_str(),
                 parent,
-                &author,
-                timestamp,
-                &message,
             );
 
-            let submission = SubmissionId::from(sha.clone());
             session.record_user_input(input, submission.clone());
-            self.last_submission_hash = Some(sha);
+            self.last_submission_id = Some(submission.as_str().to_string());
 
             (submission, session.session.clone(), enriched_payload)
         } else {
@@ -499,10 +488,10 @@ mod tests {
 
         let job_id = harness.invoke(&agent_id, "hello").unwrap();
 
-        // Submission should be a valid hex SHA (not a UUID with sub- prefix)
+        // Submission should be a valid hex SHA-256 (not a UUID with sub- prefix)
         let job = registry.get_job(&job_id).unwrap();
         let submission_str = job.submission_id.as_str();
-        assert_eq!(submission_str.len(), 40, "SHA should be 40 chars: {}", submission_str);
+        assert_eq!(submission_str.len(), 64, "SHA-256 should be 64 chars: {}", submission_str);
         assert!(submission_str.chars().all(|c| c.is_ascii_hexdigit()),
             "submission should be hex: {}", submission_str);
     }

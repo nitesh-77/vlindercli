@@ -75,11 +75,36 @@ impl SubmissionId {
 
     /// Create a placeholder SubmissionId for non-session contexts.
     ///
-    /// In session mode, SubmissionIds are git commit SHAs derived from
-    /// the conversation store. This factory exists for backwards compatibility
-    /// and will be removed once all paths use session-derived IDs.
+    /// In session mode, SubmissionIds are content-addressed hashes derived
+    /// from the user input and session context. This factory exists for
+    /// backwards compatibility and will be removed once all paths use
+    /// content-addressed IDs.
     pub fn new() -> Self {
         Self(Uuid::new_v4().to_string())
+    }
+
+    /// Create a content-addressed SubmissionId (ADR 081).
+    ///
+    /// SHA-256 hash of (payload, session_id, parent_submission), producing
+    /// a Merkle chain of user inputs. Same inputs at the same conversation
+    /// position always produce the same SubmissionId — cherry-picks across
+    /// branches preserve identity because the content hasn't changed.
+    ///
+    /// # Arguments
+    /// * `payload` — the user's input (enriched with history)
+    /// * `session_id` — groups the submission into a conversation
+    /// * `parent_submission` — previous SubmissionId in this session (empty for first turn)
+    pub fn content_addressed(payload: &[u8], session_id: &str, parent_submission: &str) -> Self {
+        use sha2::{Sha256, Digest};
+        let mut hasher = Sha256::new();
+        hasher.update(payload);
+        hasher.update(b"\0");
+        hasher.update(session_id.as_bytes());
+        hasher.update(b"\0");
+        hasher.update(parent_submission.as_bytes());
+        let hash: Vec<u8> = hasher.finalize().to_vec();
+        let hex: String = hash.iter().map(|b| format!("{:02x}", b)).collect();
+        Self(hex)
     }
 }
 
@@ -755,6 +780,44 @@ mod tests {
         set.insert(id1.clone());
         assert!(set.contains(&id2));
         assert!(!set.contains(&id3));
+    }
+
+    // --- SubmissionId content_addressed tests (ADR 081) ---
+
+    #[test]
+    fn content_addressed_deterministic() {
+        let id1 = SubmissionId::content_addressed(b"hello", "ses-1", "");
+        let id2 = SubmissionId::content_addressed(b"hello", "ses-1", "");
+        assert_eq!(id1, id2);
+    }
+
+    #[test]
+    fn content_addressed_different_payloads() {
+        let id1 = SubmissionId::content_addressed(b"hello", "ses-1", "");
+        let id2 = SubmissionId::content_addressed(b"world", "ses-1", "");
+        assert_ne!(id1, id2);
+    }
+
+    #[test]
+    fn content_addressed_different_sessions() {
+        let id1 = SubmissionId::content_addressed(b"hello", "ses-1", "");
+        let id2 = SubmissionId::content_addressed(b"hello", "ses-2", "");
+        assert_ne!(id1, id2);
+    }
+
+    #[test]
+    fn content_addressed_chains() {
+        let first = SubmissionId::content_addressed(b"hello", "ses-1", "");
+        let second = SubmissionId::content_addressed(b"hello", "ses-1", first.as_str());
+        assert_ne!(first, second, "parent submission must change the hash");
+    }
+
+    #[test]
+    fn content_addressed_is_64_char_hex() {
+        let id = SubmissionId::content_addressed(b"test", "ses-1", "");
+        assert_eq!(id.as_str().len(), 64, "SHA-256 produces 64 hex chars: {}", id);
+        assert!(id.as_str().chars().all(|c| c.is_ascii_hexdigit()),
+            "should be hex: {}", id);
     }
 
     // --- SessionId tests ---

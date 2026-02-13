@@ -1,17 +1,23 @@
-//! Timeline subcommand — git passthrough for conversation exploration (ADR 068).
+//! Timeline subcommand — git passthrough for conversation exploration (ADR 068, ADR 081).
 //!
 //! `vlinder timeline <args>` passes arguments to `git -C <conversations_dir>`.
 //! Any git subcommand works: log, show, diff, branch, bisect.
 //!
-//! The `route` subcommand is the only domain-specific addition — it shows
-//! the full chain of messages for a session.
+//! Domain-specific subcommands:
+//! - `route` — show the full chain of messages for a session
+//! - `checkout` — move HEAD to a specific commit (ADR 081)
+//! - `repair` — branch from detached HEAD and re-execute (ADR 081)
+//! - `promote` — make the current branch "main" (ADR 081)
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Arc;
 
 use clap::Subcommand;
 
-use vlindercli::config::conversations_dir;
+use vlindercli::config::{Config, conversations_dir};
+use vlindercli::domain::{Harness, MessageQueue, Registry, agent_routing_key};
+use vlindercli::harness::CliHarness;
 
 #[derive(Subcommand, Debug, PartialEq)]
 pub enum TimelineCommand {
@@ -20,6 +26,19 @@ pub enum TimelineCommand {
         /// Session ID to show
         session_id: String,
     },
+    /// Move HEAD to a specific point in the timeline
+    Checkout {
+        /// Git commit SHA or ref to checkout
+        target: String,
+    },
+    /// Branch from current position and re-execute the agent
+    Repair {
+        /// Agent directory path (default: current directory)
+        #[arg(short, long)]
+        path: Option<PathBuf>,
+    },
+    /// Promote the current branch to main
+    Promote,
     /// Any other argument is passed directly to git
     #[command(external_subcommand)]
     Git(Vec<String>),
@@ -35,9 +54,57 @@ pub fn execute(cmd: TimelineCommand) {
 
     match cmd {
         TimelineCommand::Route { session_id } => route(&dir, &session_id),
+        TimelineCommand::Checkout { target } => checkout(&dir, &target),
+        TimelineCommand::Repair { path } => repair(&dir, path),
+        TimelineCommand::Promote => promote(&dir),
         TimelineCommand::Git(args) => passthrough(&dir, &args),
     }
 }
+
+// ============================================================================
+// Trailer reading helpers (ADR 081)
+// ============================================================================
+
+/// Read a trailer value from a git commit.
+///
+/// Uses `git log --format="%(trailers:key=<key>,valueonly)"` to extract
+/// a specific trailer. Returns `None` if the trailer is missing or empty.
+fn read_trailer(dir: &Path, commit: &str, key: &str) -> Option<String> {
+    let format = format!("%(trailers:key={},valueonly)", key);
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["log", "-1", &format!("--format={}", format), commit])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if value.is_empty() { None } else { Some(value) }
+}
+
+/// Get the current HEAD commit SHA.
+fn read_head_sha(dir: &Path) -> Option<String> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["rev-parse", "--verify", "HEAD"])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+// ============================================================================
+// Subcommand implementations
+// ============================================================================
 
 /// Show the route for a session — all commits matching the session trailer.
 fn route(dir: &Path, session_id: &str) {
@@ -58,6 +125,301 @@ fn route(dir: &Path, session_id: &str) {
         }
         _ => {}
     }
+}
+
+/// Checkout a specific point in the timeline (ADR 081).
+///
+/// Moves HEAD to the target commit (detached) and prints trailer
+/// information so the user knows where they are.
+fn checkout(dir: &Path, target: &str) {
+    let status = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["checkout", target])
+        .status();
+
+    match status {
+        Ok(s) if !s.success() => {
+            eprintln!("Failed to checkout '{}'.", target);
+            return;
+        }
+        Err(e) => {
+            eprintln!("Failed to run git: {}", e);
+            return;
+        }
+        _ => {}
+    }
+
+    // Read commit subject line
+    let subject = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["log", "-1", "--format=%s", "HEAD"])
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+
+    if let Some(ref subj) = subject {
+        println!("At: {}", subj);
+    }
+
+    // Print trailers
+    if let Some(session) = read_trailer(dir, "HEAD", "Session") {
+        println!("Session:    {}", session);
+    }
+    if let Some(submission) = read_trailer(dir, "HEAD", "Submission") {
+        println!("Submission: {}", submission);
+    }
+    if let Some(state) = read_trailer(dir, "HEAD", "State") {
+        println!("State:      {}", state);
+    }
+
+    println!();
+    println!("Use 'vlinder timeline repair' to re-execute from this point.");
+}
+
+/// Repair from current position — create a branch and re-execute (ADR 081).
+///
+/// Expects HEAD to be detached (from a prior `checkout`). Creates a
+/// `repair-YYYY-MM-DD` branch, restores the agent's state from the
+/// State: trailer, and enters the REPL for re-execution.
+fn repair(dir: &Path, path: Option<PathBuf>) {
+    // 1. Read HEAD
+    let Some(head_sha) = read_head_sha(dir) else {
+        eprintln!("Cannot read HEAD. Is there a conversation?");
+        return;
+    };
+
+    // 2. Read trailers
+    let session_trailer = read_trailer(dir, "HEAD", "Session");
+    let state_trailer = read_trailer(dir, "HEAD", "State");
+    let submission_trailer = read_trailer(dir, "HEAD", "Submission");
+
+    // 3. Verify detached HEAD
+    let symbolic = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["symbolic-ref", "--short", "HEAD"])
+        .output();
+
+    let is_detached = match symbolic {
+        Ok(ref o) => !o.status.success(),
+        Err(_) => true,
+    };
+
+    if !is_detached {
+        eprintln!("HEAD is on a branch — repair only works from a detached HEAD.");
+        eprintln!("Use 'vlinder timeline checkout <sha>' first.");
+        return;
+    }
+
+    // 4. Create repair branch
+    let date = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    let branch_name = format!("repair-{}", date);
+    let status = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["checkout", "-b", &branch_name])
+        .status();
+
+    match status {
+        Ok(s) if !s.success() => {
+            eprintln!("Failed to create branch '{}'.", branch_name);
+            return;
+        }
+        Err(e) => {
+            eprintln!("Failed to run git: {}", e);
+            return;
+        }
+        _ => {}
+    }
+
+    println!("Created branch '{}' from {}", branch_name, &head_sha[..8.min(head_sha.len())]);
+
+    if let Some(ref session) = session_trailer {
+        println!("Session:    {}", session);
+    }
+    if let Some(ref submission) = submission_trailer {
+        println!("Submission: {}", submission);
+    }
+    if let Some(ref state) = state_trailer {
+        println!("State:      {}", state);
+    }
+
+    // 5-8. Connect to registry/queue, deploy agent, start session, enter REPL
+    let config = Config::load();
+    let agent_path = path.unwrap_or_else(|| {
+        std::env::current_dir().expect("Failed to get current directory")
+    });
+
+    let absolute_path = match agent_path.canonicalize() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("Failed to resolve agent path: {}", e);
+            return;
+        }
+    };
+
+    let registry_addr = if config.distributed.registry_addr.starts_with("http://")
+        || config.distributed.registry_addr.starts_with("https://") {
+        config.distributed.registry_addr.clone()
+    } else {
+        format!("http://{}", config.distributed.registry_addr)
+    };
+
+    if vlindercli::registry_service::ping_registry(&registry_addr).is_none() {
+        eprintln!("Cannot reach registry at {}. Is the daemon running?", registry_addr);
+        return;
+    }
+
+    let registry: Arc<dyn Registry> = Arc::new(
+        match vlindercli::registry_service::GrpcRegistryClient::connect(&registry_addr) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("Failed to connect to registry: {}", e);
+                return;
+            }
+        }
+    );
+
+    let queue: Arc<dyn MessageQueue + Send + Sync> =
+        match vlindercli::queue::recording_from_config() {
+            Ok(q) => q,
+            Err(e) => {
+                eprintln!("Failed to create queue: {}", e);
+                return;
+            }
+        };
+
+    let mut harness = CliHarness::new(queue, registry);
+
+    let agent_id = match harness.deploy_from_path(&absolute_path) {
+        Ok(id) => id,
+        Err(e) => {
+            eprintln!("Failed to deploy agent: {}", e);
+            return;
+        }
+    };
+
+    let agent_name = agent_routing_key(&agent_id);
+    harness.start_session(&agent_name);
+
+    // Restore state from trailer
+    if let Some(state) = state_trailer {
+        println!("Restoring state {}…", &state[..8.min(state.len())]);
+        harness.set_initial_state(state);
+    }
+
+    println!();
+
+    // Enter REPL
+    super::repl::run(|input| {
+        match harness.invoke(&agent_id, input) {
+            Ok(job_id) => {
+                loop {
+                    harness.tick();
+                    if let Some(result) = harness.poll(&job_id) {
+                        harness.record_response(&result);
+                        return result;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+            }
+            Err(e) => format!("[error] {}", e),
+        }
+    });
+}
+
+/// Promote the current branch to main (ADR 081).
+///
+/// Labels the old main as `broken-YYYY-MM-DD`, moves main to the current
+/// HEAD, and switches to main.
+fn promote(dir: &Path) {
+    // 1. Get current branch name
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["symbolic-ref", "--short", "HEAD"])
+        .output();
+
+    let current_branch = match output {
+        Ok(ref o) if o.status.success() => {
+            String::from_utf8_lossy(&o.stdout).trim().to_string()
+        }
+        _ => {
+            eprintln!("Cannot determine current branch. Are you on a branch?");
+            return;
+        }
+    };
+
+    // 2. Refuse if already on main
+    if current_branch == "main" {
+        eprintln!("Already on main — nothing to promote.");
+        return;
+    }
+
+    let date = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    let broken_name = format!("broken-{}", date);
+
+    // 3. Label old main as broken-YYYY-MM-DD
+    let status = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["branch", &broken_name, "main"])
+        .status();
+
+    match status {
+        Ok(s) if !s.success() => {
+            eprintln!("Failed to label old main as '{}'.", broken_name);
+            return;
+        }
+        Err(e) => {
+            eprintln!("Failed to run git: {}", e);
+            return;
+        }
+        _ => {}
+    }
+
+    // 4. Move main to current HEAD
+    let status = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["branch", "-f", "main", "HEAD"])
+        .status();
+
+    match status {
+        Ok(s) if !s.success() => {
+            eprintln!("Failed to move main to HEAD.");
+            return;
+        }
+        Err(e) => {
+            eprintln!("Failed to run git: {}", e);
+            return;
+        }
+        _ => {}
+    }
+
+    // 5. Switch to main
+    let status = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["checkout", "main"])
+        .status();
+
+    match status {
+        Ok(s) if !s.success() => {
+            eprintln!("Failed to switch to main.");
+            return;
+        }
+        Err(e) => {
+            eprintln!("Failed to run git: {}", e);
+            return;
+        }
+        _ => {}
+    }
+
+    println!("Old main labeled as '{}'.", broken_name);
+    println!("Promoted '{}' to main.", current_branch);
 }
 
 /// Pass arguments directly to git operating on the conversations repo.
@@ -82,6 +444,7 @@ fn passthrough(dir: &Path, args: &[String]) {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use chrono::DateTime;
     use vlindercli::domain::workers::GitDagWorker;
     use vlindercli::domain::{
@@ -91,8 +454,8 @@ mod tests {
         RuntimeType, ResourceId,
     };
 
-    #[test]
-    fn route_shows_session_commits() {
+    /// Create a test repo with an invoke+complete pair, returning the worker and tmpdir.
+    fn test_repo() -> (GitDagWorker, tempfile::TempDir) {
         let tmp = tempfile::TempDir::new().unwrap();
         let mut worker = GitDagWorker::open(tmp.path(), "registry.local:9000", None).unwrap();
 
@@ -117,13 +480,19 @@ mod tests {
             agent_id,
             HarnessType::Cli,
             b"a".to_vec(),
-            None,
+            Some("state-abc123".to_string()),
             ContainerDiagnostics::placeholder(100),
         );
         let ts2 = DateTime::from_timestamp(1001, 0).unwrap();
         worker.on_observable_message(&ObservableMessage::Complete(complete), ts2);
 
-        // Both commits are on main, filterable by Session trailer
+        (worker, tmp)
+    }
+
+    #[test]
+    fn route_shows_session_commits() {
+        let (_worker, tmp) = test_repo();
+
         let output = std::process::Command::new("git")
             .arg("-C")
             .arg(tmp.path())
@@ -134,5 +503,142 @@ mod tests {
         let log = String::from_utf8_lossy(&output.stdout);
         let lines: Vec<&str> = log.trim().lines().collect();
         assert_eq!(lines.len(), 2);
+    }
+
+    #[test]
+    fn checkout_reads_trailers() {
+        let (_worker, tmp) = test_repo();
+
+        // Get the HEAD commit (complete message)
+        let head = read_head_sha(tmp.path()).unwrap();
+
+        // Read trailers from the complete commit
+        let session = read_trailer(tmp.path(), &head, "Session");
+        let submission = read_trailer(tmp.path(), &head, "Submission");
+        let state = read_trailer(tmp.path(), &head, "State");
+
+        assert_eq!(session.as_deref(), Some("sess-1"));
+        assert_eq!(submission.as_deref(), Some("sub-1"));
+        assert_eq!(state.as_deref(), Some("state-abc123"));
+    }
+
+    #[test]
+    fn repair_creates_branch() {
+        let (_worker, tmp) = test_repo();
+
+        // Get first commit (invoke)
+        let output = std::process::Command::new("git")
+            .arg("-C")
+            .arg(tmp.path())
+            .args(["rev-list", "--reverse", "main"])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let first_commit: String = stdout.trim().lines().next().unwrap().to_string();
+
+        // Detach HEAD at first commit
+        let status = std::process::Command::new("git")
+            .arg("-C")
+            .arg(tmp.path())
+            .args(["checkout", &first_commit])
+            .output()
+            .unwrap();
+        assert!(status.status.success());
+
+        // Create a repair branch (simulating what repair() does)
+        let branch_name = "repair-test";
+        let status = std::process::Command::new("git")
+            .arg("-C")
+            .arg(tmp.path())
+            .args(["checkout", "-b", branch_name])
+            .output()
+            .unwrap();
+        assert!(status.status.success());
+
+        // Verify branch exists and points to the right commit
+        let output = std::process::Command::new("git")
+            .arg("-C")
+            .arg(tmp.path())
+            .args(["rev-parse", branch_name])
+            .output()
+            .unwrap();
+        let branch_sha = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        assert_eq!(branch_sha, first_commit);
+    }
+
+    #[test]
+    fn promote_moves_main_and_labels_broken() {
+        let (_worker, tmp) = test_repo();
+
+        // Get current main SHA
+        let output = std::process::Command::new("git")
+            .arg("-C")
+            .arg(tmp.path())
+            .args(["rev-parse", "main"])
+            .output()
+            .unwrap();
+        let original_main = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+        // Get first commit
+        let output = std::process::Command::new("git")
+            .arg("-C")
+            .arg(tmp.path())
+            .args(["rev-list", "--reverse", "main"])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let first_commit: String = stdout.trim().lines().next().unwrap().to_string();
+
+        // Create a branch at the first commit
+        let status = std::process::Command::new("git")
+            .arg("-C")
+            .arg(tmp.path())
+            .args(["checkout", "-b", "fix-branch", &first_commit])
+            .output()
+            .unwrap();
+        assert!(status.status.success());
+
+        // Simulate promote: label old main, move main, switch
+        let broken_name = "broken-test";
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(tmp.path())
+            .args(["branch", broken_name, "main"])
+            .output()
+            .unwrap();
+
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(tmp.path())
+            .args(["branch", "-f", "main", "HEAD"])
+            .output()
+            .unwrap();
+
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(tmp.path())
+            .args(["checkout", "main"])
+            .output()
+            .unwrap();
+
+        // Verify: broken-test points to original main
+        let output = std::process::Command::new("git")
+            .arg("-C")
+            .arg(tmp.path())
+            .args(["rev-parse", broken_name])
+            .output()
+            .unwrap();
+        let broken_sha = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        assert_eq!(broken_sha, original_main);
+
+        // Verify: main now points to first_commit
+        let output = std::process::Command::new("git")
+            .arg("-C")
+            .arg(tmp.path())
+            .args(["rev-parse", "main"])
+            .output()
+            .unwrap();
+        let new_main = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        assert_eq!(new_main, first_commit);
     }
 }

@@ -304,6 +304,54 @@ mod tests {
     }
 
     #[test]
+    fn cli_timeline_checkout() {
+        let cli = Cli::try_parse_from(["vlinder", "timeline", "checkout", "abc123"]).unwrap();
+        assert_eq!(
+            cli.command,
+            Command::Timeline {
+                cmd: timeline::TimelineCommand::Checkout {
+                    target: "abc123".to_string(),
+                }
+            }
+        );
+    }
+
+    #[test]
+    fn cli_timeline_repair_default_path() {
+        let cli = Cli::try_parse_from(["vlinder", "timeline", "repair"]).unwrap();
+        assert_eq!(
+            cli.command,
+            Command::Timeline {
+                cmd: timeline::TimelineCommand::Repair { path: None }
+            }
+        );
+    }
+
+    #[test]
+    fn cli_timeline_repair_with_path() {
+        let cli = Cli::try_parse_from(["vlinder", "timeline", "repair", "-p", "/tmp/agent"]).unwrap();
+        assert_eq!(
+            cli.command,
+            Command::Timeline {
+                cmd: timeline::TimelineCommand::Repair {
+                    path: Some(PathBuf::from("/tmp/agent")),
+                }
+            }
+        );
+    }
+
+    #[test]
+    fn cli_timeline_promote() {
+        let cli = Cli::try_parse_from(["vlinder", "timeline", "promote"]).unwrap();
+        assert_eq!(
+            cli.command,
+            Command::Timeline {
+                cmd: timeline::TimelineCommand::Promote,
+            }
+        );
+    }
+
+    #[test]
     fn cli_agent_new_invalid_language_fails() {
         let result = Cli::try_parse_from(["vlinder", "agent", "new", "ruby", "my-agent"]);
         assert!(result.is_err());
