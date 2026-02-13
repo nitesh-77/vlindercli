@@ -188,36 +188,12 @@ fn compare_agents(new: &Agent, existing: &Agent) -> Vec<String> {
     diffs
 }
 
-/// Read the latest state for an agent by scanning the conversations git log (ADR 055).
+/// Read the latest state for an agent from the DAG store (ADR 079).
 ///
-/// Walks backwards from HEAD looking for the most recent complete commit
-/// from the given agent, then extracts the `State:` trailer.
-/// This respects git position — detached HEAD, branches, and forks all
-/// naturally return the correct state for that point in the timeline.
-pub fn read_latest_state(agent_name: &str) -> Option<String> {
-    let dir = crate::config::conversations_dir();
-    if !dir.join(".git").exists() {
-        return None;
-    }
-
-    let grep_pattern = format!("^complete: {} ", agent_name);
-    let output = std::process::Command::new("git")
-        .arg("-C")
-        .arg(&dir)
-        .args(["log", "-1", "--format=%B", "--grep"])
-        .arg(&grep_pattern)
-        .output()
-        .ok()?;
-
-    if !output.status.success() {
-        return None;
-    }
-
-    let body = String::from_utf8_lossy(&output.stdout);
-    body.lines()
-        .find_map(|line| line.strip_prefix("State: "))
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
+/// Queries the given DagStore for the most recent non-empty state hash
+/// associated with the agent. Returns None if no state has been recorded.
+pub fn read_latest_state(store: &dyn crate::domain::DagStore, agent_name: &str) -> Option<String> {
+    store.latest_state(agent_name).ok().flatten()
 }
 
 impl Harness for CliHarness {

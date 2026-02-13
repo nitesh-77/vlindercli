@@ -108,6 +108,12 @@ pub trait DagStore: Send + Sync {
 
     /// Get all children of a given parent hash.
     fn get_children(&self, parent_hash: &str) -> Result<Vec<DagNode>, String>;
+
+    /// Get the most recent state hash associated with an agent (ADR 079).
+    ///
+    /// Scans nodes where the agent is either sender or receiver, returning
+    /// the latest non-empty state. Returns None if no state has been recorded.
+    fn latest_state(&self, agent_name: &str) -> Result<Option<String>, String>;
 }
 
 #[cfg(test)]

@@ -1,0 +1,73 @@
+syntax = "proto3";
+
+package vlinder.state;
+
+// =============================================================================
+// State Service — gRPC interface to the DagStore trait (ADR 079)
+// =============================================================================
+
+service StateService {
+  // Health check — returns server's protocol version
+  rpc Ping(PingRequest) returns (SemVer);
+
+  // DagStore trait methods
+  rpc InsertNode(InsertNodeRequest) returns (InsertNodeResponse);
+  rpc GetNode(GetNodeRequest) returns (GetNodeResponse);
+  rpc GetSessionNodes(GetSessionNodesRequest) returns (GetSessionNodesResponse);
+  rpc GetChildren(GetChildrenRequest) returns (GetChildrenResponse);
+  rpc LatestState(LatestStateRequest) returns (LatestStateResponse);
+}
+
+// =============================================================================
+// Health Check
+// =============================================================================
+
+message PingRequest {}
+
+message SemVer {
+  uint32 major = 1;
+  uint32 minor = 2;
+  uint32 patch = 3;
+}
+
+// =============================================================================
+// DagNode
+// =============================================================================
+
+message DagNode {
+  string hash = 1;
+  string parent_hash = 2;
+  string message_type = 3;         // "invoke", "request", "response", "complete", "delegate"
+  string sender = 4;               // "from" in domain (reserved word in proto)
+  string receiver = 5;             // "to" in domain
+  string session_id = 6;
+  string submission_id = 7;
+  bytes payload = 8;
+  bytes diagnostics = 9;
+  bytes stderr = 10;
+  string created_at = 11;          // ISO-8601
+  optional string state = 12;
+  string protocol_version = 13;
+}
+
+// =============================================================================
+// RPC Messages
+// =============================================================================
+
+message InsertNodeRequest { DagNode node = 1; }
+message InsertNodeResponse {
+  bool success = 1;
+  optional string error = 2;
+}
+
+message GetNodeRequest { string hash = 1; }
+message GetNodeResponse { optional DagNode node = 1; }
+
+message GetSessionNodesRequest { string session_id = 1; }
+message GetSessionNodesResponse { repeated DagNode nodes = 1; }
+
+message GetChildrenRequest { string parent_hash = 1; }
+message GetChildrenResponse { repeated DagNode nodes = 1; }
+
+message LatestStateRequest { string agent_name = 1; }
+message LatestStateResponse { optional string state = 1; }

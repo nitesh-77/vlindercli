@@ -33,6 +33,8 @@ pub enum WorkerRole {
     StorageVectorSqlite,
     /// In-memory vector storage service
     StorageVectorMemory,
+    /// State service — gRPC interface to the DagStore (ADR 079)
+    State,
     /// DAG SQLite worker — indexes messages into Merkle DAG (SQLite)
     DagSqlite,
     /// DAG git worker — writes messages as git commits for time-travel
@@ -61,6 +63,7 @@ impl WorkerRole {
             WorkerRole::StorageObjectMemory => "storage-object-memory",
             WorkerRole::StorageVectorSqlite => "storage-vector-sqlite",
             WorkerRole::StorageVectorMemory => "storage-vector-memory",
+            WorkerRole::State => "state",
             WorkerRole::DagSqlite => "dag-sqlite",
             WorkerRole::DagGit => "dag-git",
         }
@@ -78,6 +81,7 @@ impl WorkerRole {
             WorkerRole::StorageObjectMemory => "In-memory object storage",
             WorkerRole::StorageVectorSqlite => "SQLite-vec vector storage",
             WorkerRole::StorageVectorMemory => "In-memory vector storage",
+            WorkerRole::State => "State service",
             WorkerRole::DagSqlite => "DAG SQLite worker",
             WorkerRole::DagGit => "DAG git worker",
         }
@@ -104,6 +108,7 @@ impl FromStr for WorkerRole {
             "storage-object-memory" => Ok(WorkerRole::StorageObjectMemory),
             "storage-vector-sqlite" => Ok(WorkerRole::StorageVectorSqlite),
             "storage-vector-memory" => Ok(WorkerRole::StorageVectorMemory),
+            "state" => Ok(WorkerRole::State),
             "dag-sqlite" => Ok(WorkerRole::DagSqlite),
             "dag-git" => Ok(WorkerRole::DagGit),
             _ => Err(ParseWorkerRoleError(s.to_string())),
@@ -134,6 +139,7 @@ mod tests {
         assert_eq!("embedding-ollama".parse::<WorkerRole>().unwrap(), WorkerRole::EmbeddingOllama);
         assert_eq!("storage-object-sqlite".parse::<WorkerRole>().unwrap(), WorkerRole::StorageObjectSqlite);
         assert_eq!("storage-vector-sqlite".parse::<WorkerRole>().unwrap(), WorkerRole::StorageVectorSqlite);
+        assert_eq!("state".parse::<WorkerRole>().unwrap(), WorkerRole::State);
         assert_eq!("dag-sqlite".parse::<WorkerRole>().unwrap(), WorkerRole::DagSqlite);
         assert_eq!("dag-git".parse::<WorkerRole>().unwrap(), WorkerRole::DagGit);
     }
@@ -155,6 +161,7 @@ mod tests {
             WorkerRole::EmbeddingOllama,
             WorkerRole::StorageObjectSqlite,
             WorkerRole::StorageVectorSqlite,
+            WorkerRole::State,
             WorkerRole::DagSqlite,
             WorkerRole::DagGit,
         ] {

@@ -110,6 +110,8 @@ pub struct DistributedConfig {
     pub enabled: bool,
     /// Registry gRPC address for worker coordination
     pub registry_addr: String,
+    /// State service gRPC address (ADR 079)
+    pub state_addr: String,
     /// Worker process counts by type
     pub workers: WorkerCounts,
 }
@@ -265,6 +267,7 @@ impl Default for DistributedConfig {
         Self {
             enabled: false,
             registry_addr: "http://127.0.0.1:9090".to_string(),
+            state_addr: "http://127.0.0.1:9092".to_string(),
             workers: WorkerCounts::default(),
         }
     }
@@ -391,6 +394,9 @@ impl Config {
         }
         if let Ok(v) = std::env::var("VLINDER_DISTRIBUTED_REGISTRY_ADDR") {
             self.distributed.registry_addr = v;
+        }
+        if let Ok(v) = std::env::var("VLINDER_DISTRIBUTED_STATE_ADDR") {
+            self.distributed.state_addr = v;
         }
 
         // Worker counts (flat env vars for simplicity)

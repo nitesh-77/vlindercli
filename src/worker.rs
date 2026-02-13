@@ -48,6 +48,7 @@ pub fn run_worker_loop(role: WorkerRole, shutdown: Arc<AtomicBool>) {
         WorkerRole::StorageObjectMemory => run_storage_object_memory_worker(&config, &shutdown),
         WorkerRole::StorageVectorSqlite => run_storage_vector_sqlite_worker(&config, &shutdown),
         WorkerRole::StorageVectorMemory => run_storage_vector_memory_worker(&config, &shutdown),
+        WorkerRole::State => run_state_worker(&config, &shutdown),
         WorkerRole::DagSqlite => run_dag_sqlite_worker(&config, &shutdown),
         WorkerRole::DagGit => run_dag_git_worker(&config, &shutdown),
     }
@@ -301,6 +302,46 @@ fn run_storage_vector_memory_worker(config: &Config, shutdown: &AtomicBool) {
         worker.tick();
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
+}
+
+fn run_state_worker(config: &Config, shutdown: &AtomicBool) {
+    use tonic::transport::Server;
+    use crate::config::dag_db_path;
+    use crate::domain::DagStore;
+    use crate::storage::dag_store::SqliteDagStore;
+    use crate::state_service::StateServiceServer;
+
+    let db_path = dag_db_path();
+    let store = SqliteDagStore::open(&db_path)
+        .unwrap_or_else(|e| panic!("Failed to open DAG store: {}", e));
+
+    let store: Arc<dyn DagStore> = Arc::new(store);
+
+    // Parse address, stripping http:// prefix if present
+    let addr_str = config.distributed.state_addr
+        .strip_prefix("http://")
+        .unwrap_or(&config.distributed.state_addr);
+    let addr: std::net::SocketAddr = addr_str.parse()
+        .expect("Invalid state service address");
+
+    tracing::info!(?addr, db = %db_path.display(), "Starting state gRPC server");
+
+    let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
+    rt.block_on(async {
+        let service = StateServiceServer::new(store).into_service();
+
+        let server = Server::builder()
+            .add_service(service)
+            .serve_with_shutdown(addr, async {
+                while !shutdown.load(Ordering::Relaxed) {
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                }
+            });
+
+        if let Err(e) = server.await {
+            tracing::error!(?e, "State server error");
+        }
+    });
 }
 
 fn run_dag_sqlite_worker(_config: &Config, shutdown: &AtomicBool) {

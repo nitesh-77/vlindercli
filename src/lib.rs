@@ -9,6 +9,7 @@ pub mod loader;
 pub mod queue;
 pub mod registry;
 pub mod registry_service;
+pub mod state_service;
 pub mod runtime;
 pub mod session_server;
 pub mod services;

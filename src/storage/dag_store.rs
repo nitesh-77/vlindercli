@@ -250,6 +250,25 @@ impl DagStore for SqliteDagStore {
         }
         Ok(nodes)
     }
+
+    fn latest_state(&self, agent_name: &str) -> Result<Option<String>, String> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT state FROM dag_nodes
+             WHERE state IS NOT NULL AND state != ''
+               AND (sender = ?1 OR receiver = ?1)
+             ORDER BY created_at DESC
+             LIMIT 1"
+        ).map_err(|e| format!("latest_state prepare failed: {}", e))?;
+
+        let result: Option<String> = stmt.query_row(rusqlite::params![agent_name], |row| {
+            row.get(0)
+        })
+        .optional()
+        .map_err(|e| format!("latest_state query failed: {}", e))?;
+
+        Ok(result)
+    }
 }
 
 /// Trait extension for rusqlite optional queries.
@@ -420,6 +439,64 @@ mod tests {
         let sess2 = store.get_session_nodes("sess-2").unwrap();
         assert_eq!(sess2.len(), 1);
         assert_eq!(sess2[0].session_id, "sess-2");
+    }
+
+    #[test]
+    fn latest_state_returns_most_recent() {
+        let store = test_store();
+
+        // Insert two nodes with state — different timestamps
+        let mut node1 = test_node(b"first", "", MessageType::Response);
+        node1.state = Some("old-state".to_string());
+        node1.created_at = Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
+
+        let mut node2 = test_node(b"second", &node1.hash, MessageType::Response);
+        node2.state = Some("new-state".to_string());
+        node2.created_at = Utc.with_ymd_and_hms(2025, 1, 1, 0, 1, 0).unwrap();
+
+        store.insert_node(&node1).unwrap();
+        store.insert_node(&node2).unwrap();
+
+        // agent-a is the `to` field on test nodes
+        let state = store.latest_state("agent-a").unwrap();
+        assert_eq!(state, Some("new-state".to_string()));
+    }
+
+    #[test]
+    fn latest_state_returns_none_when_no_state() {
+        let store = test_store();
+
+        // Insert nodes without state
+        let node = test_node(b"payload", "", MessageType::Invoke);
+        store.insert_node(&node).unwrap();
+
+        let state = store.latest_state("agent-a").unwrap();
+        assert_eq!(state, None);
+    }
+
+    #[test]
+    fn latest_state_filters_by_agent() {
+        let store = test_store();
+
+        // Node for agent-a
+        let mut node_a = test_node(b"a-data", "", MessageType::Response);
+        node_a.to = "agent-a".to_string();
+        node_a.state = Some("state-a".to_string());
+        node_a.created_at = Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
+
+        // Node for agent-b
+        let mut node_b = test_node(b"b-data", "", MessageType::Response);
+        node_b.to = "agent-b".to_string();
+        node_b.from = "cli".to_string();
+        node_b.state = Some("state-b".to_string());
+        node_b.created_at = Utc.with_ymd_and_hms(2025, 1, 1, 0, 1, 0).unwrap();
+
+        store.insert_node(&node_a).unwrap();
+        store.insert_node(&node_b).unwrap();
+
+        assert_eq!(store.latest_state("agent-a").unwrap(), Some("state-a".to_string()));
+        assert_eq!(store.latest_state("agent-b").unwrap(), Some("state-b".to_string()));
+        assert_eq!(store.latest_state("agent-c").unwrap(), None);
     }
 
     #[test]

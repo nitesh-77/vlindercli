@@ -86,9 +86,10 @@ impl VectorServiceWorker {
                 let diag = ServiceDiagnostics::storage(
                     "vec", &self.backend, "store", response_payload.len() as u64, duration_ms,
                 );
-                let response = ResponseMessage::from_request_with_diagnostics(
+                let mut response = ResponseMessage::from_request_with_diagnostics(
                     &request, response_payload, diag,
                 );
+                response.state = request.state.clone();
                 let _ = self.queue.send_response(response);
                 let _ = ack();
                 true
@@ -106,9 +107,10 @@ impl VectorServiceWorker {
                 let diag = ServiceDiagnostics::storage(
                     "vec", &self.backend, "search", response_payload.len() as u64, duration_ms,
                 );
-                let response = ResponseMessage::from_request_with_diagnostics(
+                let mut response = ResponseMessage::from_request_with_diagnostics(
                     &request, response_payload, diag,
                 );
+                response.state = request.state.clone();
                 let _ = self.queue.send_response(response);
                 let _ = ack();
                 true
@@ -126,9 +128,10 @@ impl VectorServiceWorker {
                 let diag = ServiceDiagnostics::storage(
                     "vec", &self.backend, "delete", response_payload.len() as u64, duration_ms,
                 );
-                let response = ResponseMessage::from_request_with_diagnostics(
+                let mut response = ResponseMessage::from_request_with_diagnostics(
                     &request, response_payload, diag,
                 );
+                response.state = request.state.clone();
                 let _ = self.queue.send_response(response);
                 let _ = ack();
                 true
@@ -226,6 +229,56 @@ mod tests {
             services = []
         "#;
         Agent::from_toml(manifest).unwrap()
+    }
+
+    #[test]
+    fn vector_search_response_echoes_state() {
+        let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
+        let registry = InMemoryRegistry::new();
+        registry.register_runtime(crate::domain::RuntimeType::Container);
+        registry.register_vector_storage(crate::domain::VectorStorageType::InMemory);
+        let agent = test_agent_with_vector_storage();
+        registry.register_agent(agent).unwrap();
+        let registry: Arc<dyn Registry> = Arc::new(registry);
+        let handler = VectorServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry), "memory");
+
+        // Store an embedding first
+        let embedding: Vec<f32> = (0..768).map(|i| i as f32 * 0.001).collect();
+        let store_payload = serde_json::json!({
+            "key": "doc1",
+            "vector": embedding,
+            "metadata": "test"
+        });
+        let store_request = RequestMessage::new(
+            test_submission(), SessionId::new(), test_agent_id(),
+            "vec", "memory", "store", Sequence::first(),
+            serde_json::to_vec(&store_payload).unwrap(),
+            Some("state-vec".to_string()),
+            test_request_diag(),
+        );
+        queue.send_request(store_request.clone()).unwrap();
+        handler.tick();
+        let (store_resp, ack) = queue.receive_response(&store_request).unwrap();
+        ack().unwrap();
+        assert_eq!(store_resp.state, Some("state-vec".to_string()), "store should echo request.state");
+
+        // Search — also with state
+        let search_payload = serde_json::json!({
+            "vector": embedding,
+            "limit": 1
+        });
+        let search_request = RequestMessage::new(
+            test_submission(), SessionId::new(), test_agent_id(),
+            "vec", "memory", "search", Sequence::from(2),
+            serde_json::to_vec(&search_payload).unwrap(),
+            Some("state-vec2".to_string()),
+            test_request_diag(),
+        );
+        queue.send_request(search_request.clone()).unwrap();
+        handler.tick();
+        let (search_resp, ack) = queue.receive_response(&search_request).unwrap();
+        ack().unwrap();
+        assert_eq!(search_resp.state, Some("state-vec2".to_string()), "search should echo request.state");
     }
 
     #[test]

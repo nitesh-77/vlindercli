@@ -25,7 +25,7 @@ struct Hop {
     operation: &'static str,
 }
 use super::service_payloads::{
-    KvGetRequest, KvPutRequest, KvListRequest, KvDeleteRequest, KvPutResponse,
+    KvGetRequest, KvPutRequest, KvListRequest, KvDeleteRequest,
     VectorStoreRequest, VectorSearchRequest, VectorDeleteRequest,
     InferRequest, EmbedRequest,
 };
@@ -118,6 +118,10 @@ impl QueueBridge {
         loop {
             match self.queue.receive_response(&request) {
                 Ok((response, ack)) => {
+                    // Update state cursor from response envelope (ADR 079)
+                    if let Some(ref state) = response.state {
+                        *self.current_state.write().unwrap() = Some(state.clone());
+                    }
                     let response_payload = response.payload.clone();
                     let _ = ack();
                     tracing::debug!(
@@ -142,14 +146,6 @@ impl QueueBridge {
                 }
             }
             std::thread::sleep(std::time::Duration::from_millis(1));
-        }
-    }
-
-    /// Extract the new state hash from a kv-put response and update current_state.
-    fn extract_state(&self, response_payload: &[u8]) {
-        if let Ok(resp) = serde_json::from_slice::<KvPutResponse>(response_payload) {
-            tracing::debug!(new_state = %resp.state, "extract_state: updated current_state");
-            *self.current_state.write().unwrap() = Some(resp.state);
         }
     }
 
@@ -189,7 +185,6 @@ impl SdkContract for QueueBridge {
         let payload = serde_json::to_vec(&req).map_err(|e| format!("serialize error: {}", e))?;
         let response = self.send_service_request(hop, payload)?;
         Self::check_worker_error(&response)?;
-        self.extract_state(&response);
         Ok(())
     }
 
@@ -400,49 +395,6 @@ mod tests {
     #[test]
     fn check_worker_error_passes_empty() {
         assert!(QueueBridge::check_worker_error(b"").is_ok());
-    }
-
-    // ========================================================================
-    // extract_state
-    // ========================================================================
-
-    #[test]
-    fn extract_state_updates_current_state() {
-        let bridge = test_bridge(Some(ObjectStorageType::Sqlite));
-        assert!(bridge.current_state.read().unwrap().is_none());
-
-        let response = serde_json::to_vec(&serde_json::json!({
-            "state": "sha256:abc123",
-            "ok": true,
-        })).unwrap();
-
-        bridge.extract_state(&response);
-        assert_eq!(
-            *bridge.current_state.read().unwrap(),
-            Some("sha256:abc123".to_string()),
-        );
-    }
-
-    #[test]
-    fn extract_state_ignores_missing_state_field() {
-        let bridge = test_bridge(None);
-        *bridge.current_state.write().unwrap() = Some("old-state".to_string());
-
-        let response = serde_json::to_vec(&serde_json::json!({"ok": true})).unwrap();
-        bridge.extract_state(&response);
-
-        // State unchanged — no "state" key in response
-        assert_eq!(
-            *bridge.current_state.read().unwrap(),
-            Some("old-state".to_string()),
-        );
-    }
-
-    #[test]
-    fn extract_state_ignores_non_json() {
-        let bridge = test_bridge(None);
-        bridge.extract_state(b"not json");
-        assert!(bridge.current_state.read().unwrap().is_none());
     }
 
     // ========================================================================

@@ -70,9 +70,10 @@ impl EmbeddingServiceWorker {
                         model,
                     },
                 };
-                let response = ResponseMessage::from_request_with_diagnostics(
+                let mut response = ResponseMessage::from_request_with_diagnostics(
                     &request, response_payload, diag,
                 );
+                response.state = request.state.clone();
                 if let Err(e) = self.queue.send_response(response) {
                     tracing::error!(seq = %request.sequence, error = %e, "embed worker: failed to send response");
                 }
@@ -261,6 +262,41 @@ mod tests {
         assert_eq!(vector.len(), 768);
         assert_eq!(vector, canned);
         ack().unwrap();
+    }
+
+    #[test]
+    fn embed_response_echoes_state() {
+        let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
+        let registry = test_registry_with_agent_and_model(test_agent_with_model("test-model"), "test-model");
+        let handler = EmbeddingServiceWorker::new(Arc::clone(&queue), registry, "memory");
+
+        let canned: Vec<f32> = (0..768).map(|i| i as f32 * 0.001).collect();
+        let engine = Arc::new(InMemoryEmbedding::new(canned));
+        handler.register("test-model", engine);
+
+        let payload = serde_json::json!({
+            "model": "test-model",
+            "text": "hello world"
+        });
+        let request = RequestMessage::new(
+            test_submission(),
+            SessionId::new(),
+            test_agent_id(),
+            "embed",
+            "memory",
+            "run",
+            Sequence::first(),
+            serde_json::to_vec(&payload).unwrap(),
+            Some("state-xyz".to_string()),
+            test_request_diag(),
+        );
+
+        queue.send_request(request.clone()).unwrap();
+        assert!(handler.tick());
+
+        let (response, ack) = queue.receive_response(&request).unwrap();
+        ack().unwrap();
+        assert_eq!(response.state, Some("state-xyz".to_string()), "embed should echo request.state");
     }
 
     #[test]

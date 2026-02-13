@@ -136,9 +136,10 @@ impl ObjectServiceWorker {
                 let diag = ServiceDiagnostics::storage(
                     "kv", &self.backend, "get", response_payload.len() as u64, duration_ms,
                 );
-                let response = ResponseMessage::from_request_with_diagnostics(
+                let mut response = ResponseMessage::from_request_with_diagnostics(
                     &request, response_payload, diag,
                 );
+                response.state = request.state.clone();
                 let _ = self.queue.send_response(response);
                 let _ = ack();
                 true
@@ -160,7 +161,9 @@ impl ObjectServiceWorker {
                     &request, response_payload.clone(), diag,
                 );
                 // Extract new state hash from versioned put response (ADR 055).
-                response.state = extract_state_from_payload(&response_payload);
+                // Falls back to echoing request.state for unversioned puts.
+                response.state = extract_state_from_payload(&response_payload)
+                    .or_else(|| request.state.clone());
                 let _ = self.queue.send_response(response);
                 let _ = ack();
                 true
@@ -178,9 +181,10 @@ impl ObjectServiceWorker {
                 let diag = ServiceDiagnostics::storage(
                     "kv", &self.backend, "list", response_payload.len() as u64, duration_ms,
                 );
-                let response = ResponseMessage::from_request_with_diagnostics(
+                let mut response = ResponseMessage::from_request_with_diagnostics(
                     &request, response_payload, diag,
                 );
+                response.state = request.state.clone();
                 let _ = self.queue.send_response(response);
                 let _ = ack();
                 true
@@ -198,9 +202,10 @@ impl ObjectServiceWorker {
                 let diag = ServiceDiagnostics::storage(
                     "kv", &self.backend, "delete", response_payload.len() as u64, duration_ms,
                 );
-                let response = ResponseMessage::from_request_with_diagnostics(
+                let mut response = ResponseMessage::from_request_with_diagnostics(
                     &request, response_payload, diag,
                 );
+                response.state = request.state.clone();
                 let _ = self.queue.send_response(response);
                 let _ = ack();
                 true
@@ -704,6 +709,51 @@ mod tests {
         let (resp, ack) = queue.receive_response(&get_req).unwrap();
         ack().unwrap();
         assert!(resp.payload.is_empty());
+    }
+
+    #[test]
+    fn kv_get_response_echoes_state() {
+        let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
+        let registry = InMemoryRegistry::new();
+        registry.register_runtime(crate::domain::RuntimeType::Container);
+        registry.register_object_storage(crate::domain::ObjectStorageType::InMemory);
+        let agent = test_agent_with_object_storage();
+        registry.register_agent(agent).unwrap();
+        let registry: Arc<dyn Registry> = Arc::new(registry);
+        let handler = ObjectServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry), "memory");
+
+        // First put a file so get has something to return
+        let put_payload = serde_json::json!({
+            "path": "/hello.txt",
+            "content": base64::engine::general_purpose::STANDARD.encode(b"hello")
+        });
+        let put_request = RequestMessage::new(
+            test_submission(), test_session(), test_agent_id(),
+            "kv", "memory", "put", Sequence::first(),
+            serde_json::to_vec(&put_payload).unwrap(),
+            None,
+            test_request_diag(),
+        );
+        queue.send_request(put_request.clone()).unwrap();
+        handler.tick();
+        let (_resp, ack) = queue.receive_response(&put_request).unwrap();
+        ack().unwrap();
+
+        // Now send a get request with state
+        let get_payload = serde_json::json!({"path": "/hello.txt"});
+        let get_request = RequestMessage::new(
+            test_submission(), test_session(), test_agent_id(),
+            "kv", "memory", "get", Sequence::from(2),
+            serde_json::to_vec(&get_payload).unwrap(),
+            Some("hash123".to_string()),
+            test_request_diag(),
+        );
+        queue.send_request(get_request.clone()).unwrap();
+        handler.tick();
+        let (response, ack) = queue.receive_response(&get_request).unwrap();
+        ack().unwrap();
+
+        assert_eq!(response.state, Some("hash123".to_string()), "get should echo request.state");
     }
 
     #[test]

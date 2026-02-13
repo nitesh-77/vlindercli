@@ -1,0 +1,176 @@
+//! Conversions between domain DagNode and protobuf DagNode.
+
+use chrono::{DateTime, Utc};
+
+use crate::domain::{DagNode, MessageType};
+use super::proto;
+
+// =============================================================================
+// DagNode → proto::DagNode
+// =============================================================================
+
+impl From<DagNode> for proto::DagNode {
+    fn from(node: DagNode) -> Self {
+        Self {
+            hash: node.hash,
+            parent_hash: node.parent_hash,
+            message_type: node.message_type.as_str().to_string(),
+            sender: node.from,
+            receiver: node.to,
+            session_id: node.session_id,
+            submission_id: node.submission_id,
+            payload: node.payload,
+            diagnostics: node.diagnostics,
+            stderr: node.stderr,
+            created_at: node.created_at.to_rfc3339(),
+            state: node.state,
+            protocol_version: node.protocol_version,
+        }
+    }
+}
+
+impl From<&DagNode> for proto::DagNode {
+    fn from(node: &DagNode) -> Self {
+        Self {
+            hash: node.hash.clone(),
+            parent_hash: node.parent_hash.clone(),
+            message_type: node.message_type.as_str().to_string(),
+            sender: node.from.clone(),
+            receiver: node.to.clone(),
+            session_id: node.session_id.clone(),
+            submission_id: node.submission_id.clone(),
+            payload: node.payload.clone(),
+            diagnostics: node.diagnostics.clone(),
+            stderr: node.stderr.clone(),
+            created_at: node.created_at.to_rfc3339(),
+            state: node.state.clone(),
+            protocol_version: node.protocol_version.clone(),
+        }
+    }
+}
+
+// =============================================================================
+// proto::DagNode → DagNode
+// =============================================================================
+
+impl TryFrom<proto::DagNode> for DagNode {
+    type Error = String;
+
+    fn try_from(node: proto::DagNode) -> Result<Self, Self::Error> {
+        let message_type = MessageType::from_str(&node.message_type)
+            .ok_or_else(|| format!("unknown message type: {}", node.message_type))?;
+
+        let created_at: DateTime<Utc> = node.created_at.parse()
+            .map_err(|e| format!("invalid created_at: {}", e))?;
+
+        Ok(Self {
+            hash: node.hash,
+            parent_hash: node.parent_hash,
+            message_type,
+            from: node.sender,
+            to: node.receiver,
+            session_id: node.session_id,
+            submission_id: node.submission_id,
+            payload: node.payload,
+            diagnostics: node.diagnostics,
+            stderr: node.stderr,
+            created_at,
+            state: node.state,
+            protocol_version: node.protocol_version,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+
+    fn sample_dag_node() -> DagNode {
+        DagNode {
+            hash: "abc123".to_string(),
+            parent_hash: "parent456".to_string(),
+            message_type: MessageType::Invoke,
+            from: "cli".to_string(),
+            to: "agent-echo".to_string(),
+            session_id: "sess-001".to_string(),
+            submission_id: "sub-001".to_string(),
+            payload: b"hello".to_vec(),
+            diagnostics: b"{\"version\":\"0.1.0\"}".to_vec(),
+            stderr: b"some stderr".to_vec(),
+            created_at: Utc::now(),
+            state: Some("state-hash-abc".to_string()),
+            protocol_version: "0.1.0".to_string(),
+        }
+    }
+
+    #[test]
+    fn dag_node_round_trip() {
+        let original = sample_dag_node();
+        let proto_node: proto::DagNode = original.clone().into();
+        let recovered: DagNode = proto_node.try_into().unwrap();
+
+        assert_eq!(recovered.hash, original.hash);
+        assert_eq!(recovered.parent_hash, original.parent_hash);
+        assert_eq!(recovered.message_type, original.message_type);
+        assert_eq!(recovered.from, original.from);
+        assert_eq!(recovered.to, original.to);
+        assert_eq!(recovered.session_id, original.session_id);
+        assert_eq!(recovered.submission_id, original.submission_id);
+        assert_eq!(recovered.payload, original.payload);
+        assert_eq!(recovered.diagnostics, original.diagnostics);
+        assert_eq!(recovered.stderr, original.stderr);
+        assert_eq!(recovered.state, original.state);
+        assert_eq!(recovered.protocol_version, original.protocol_version);
+    }
+
+    #[test]
+    fn dag_node_without_state_round_trips() {
+        let mut node = sample_dag_node();
+        node.state = None;
+
+        let proto_node: proto::DagNode = node.clone().into();
+        let recovered: DagNode = proto_node.try_into().unwrap();
+
+        assert_eq!(recovered.state, None);
+    }
+
+    #[test]
+    fn message_type_round_trip() {
+        for mt in [
+            MessageType::Invoke,
+            MessageType::Request,
+            MessageType::Response,
+            MessageType::Complete,
+            MessageType::Delegate,
+        ] {
+            let node = DagNode {
+                message_type: mt,
+                ..sample_dag_node()
+            };
+            let proto_node: proto::DagNode = node.into();
+            let recovered: DagNode = proto_node.try_into().unwrap();
+            assert_eq!(recovered.message_type, mt);
+        }
+    }
+
+    #[test]
+    fn invalid_message_type_fails() {
+        let proto_node = proto::DagNode {
+            message_type: "bogus".to_string(),
+            created_at: Utc::now().to_rfc3339(),
+            ..Default::default()
+        };
+        assert!(DagNode::try_from(proto_node).is_err());
+    }
+
+    #[test]
+    fn invalid_created_at_fails() {
+        let proto_node = proto::DagNode {
+            message_type: "invoke".to_string(),
+            created_at: "not-a-date".to_string(),
+            ..Default::default()
+        };
+        assert!(DagNode::try_from(proto_node).is_err());
+    }
+}

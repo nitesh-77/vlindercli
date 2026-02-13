@@ -75,9 +75,10 @@ impl InferenceServiceWorker {
                         model,
                     },
                 };
-                let response = ResponseMessage::from_request_with_diagnostics(
+                let mut response = ResponseMessage::from_request_with_diagnostics(
                     &request, response_payload, diag,
                 );
+                response.state = request.state.clone();
                 let _ = self.queue.send_response(response);
                 let _ = ack();
                 true
@@ -248,6 +249,40 @@ mod tests {
         let (response, ack) = queue.receive_response(&request).unwrap();
         assert_eq!(String::from_utf8(response.payload.clone()).unwrap(), "test response");
         ack().unwrap();
+    }
+
+    #[test]
+    fn infer_response_echoes_state() {
+        let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
+        let registry = test_registry_with_agent_and_model(test_agent_with_model("test-model"), "test-model");
+        let handler = InferenceServiceWorker::new(Arc::clone(&queue), registry, "memory");
+
+        let engine = Arc::new(InMemoryInference::new("test response"));
+        handler.register("test-model", engine);
+
+        let payload = serde_json::json!({
+            "model": "test-model",
+            "prompt": "Hello"
+        });
+        let request = RequestMessage::new(
+            test_submission(),
+            SessionId::new(),
+            test_agent_id(),
+            "infer",
+            "memory",
+            "run",
+            Sequence::first(),
+            serde_json::to_vec(&payload).unwrap(),
+            Some("state-abc".to_string()),
+            test_request_diag(),
+        );
+
+        queue.send_request(request.clone()).unwrap();
+        assert!(handler.tick());
+
+        let (response, ack) = queue.receive_response(&request).unwrap();
+        ack().unwrap();
+        assert_eq!(response.state, Some("state-abc".to_string()), "infer should echo request.state");
     }
 
     #[test]

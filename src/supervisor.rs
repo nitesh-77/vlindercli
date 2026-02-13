@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 
 use crate::config::Config;
 use crate::registry_service::ping_registry;
+use crate::state_service::ping_state_service;
 use crate::worker_role::WorkerRole;
 
 /// Process manager for distributed worker processes.
@@ -65,6 +66,44 @@ impl Supervisor {
                         let _ = child.kill();
                     }
                     panic!("Registry failed to start — aborting distributed mode");
+                }
+            }
+        }
+
+        // State service — singleton gRPC server for DagStore queries (ADR 079).
+        // Non-fatal health check: callers handle connection failures gracefully.
+        if let Some(child) = spawn_worker(WorkerRole::State) {
+            workers.push(child);
+        }
+
+        {
+            let state_addr = if config.distributed.state_addr.starts_with("http://") {
+                config.distributed.state_addr.clone()
+            } else {
+                format!("http://{}", config.distributed.state_addr)
+            };
+
+            let deadline = Instant::now() + Duration::from_secs(10);
+            let mut version = None;
+
+            while Instant::now() < deadline {
+                if let Some(v) = ping_state_service(&state_addr) {
+                    version = Some(v);
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+
+            match version {
+                Some((major, minor, patch)) => {
+                    tracing::info!(
+                        addr = %state_addr,
+                        version = %format!("{}.{}.{}", major, minor, patch),
+                        "State service is ready"
+                    );
+                }
+                None => {
+                    tracing::warn!(addr = %state_addr, "State service did not become ready within 10s — state queries will fail until it starts");
                 }
             }
         }
@@ -187,6 +226,7 @@ mod tests {
             distributed: crate::config::DistributedConfig {
                 enabled: true,
                 registry_addr: "http://127.0.0.1:9090".to_string(),
+                state_addr: "http://127.0.0.1:9092".to_string(),
                 workers: crate::config::WorkerCounts {
                     registry: 0,
                     agent: crate::config::AgentWorkerCounts { container: 0 },
@@ -202,9 +242,9 @@ mod tests {
         };
 
         let mut supervisor = Supervisor::new(&config);
-        // Only the two unconditional DAG singletons (dag-sqlite, dag-git) are spawned.
+        // Three unconditional singletons: state, dag-sqlite, dag-git.
         // All config-driven workers have count 0.
-        assert_eq!(supervisor.workers.len(), 2);
+        assert_eq!(supervisor.workers.len(), 3);
         supervisor.shutdown();
     }
 }
