@@ -140,7 +140,15 @@ run-integration-tests:
         done < tests/required-models.txt
     fi
 
-    # 4. Check container images
+    # 4. Check OpenRouter API key (optional — tests skip gracefully if absent)
+    if [ -n "${VLINDER_OPENROUTER_API_KEY:-}" ]; then
+        echo "  ✓ VLINDER_OPENROUTER_API_KEY set — OpenRouter tests will run"
+    else
+        echo "  ⚠ VLINDER_OPENROUTER_API_KEY not set — OpenRouter tests will be skipped"
+        echo "    To enable: export VLINDER_OPENROUTER_API_KEY=<your-key>"
+    fi
+
+    # 5. Check container images
     if ! podman image exists localhost/echo-container:latest 2>/dev/null; then
         echo "  ✗ Missing image: localhost/echo-container:latest"
         echo "    Run: just build-echo-container"
@@ -148,7 +156,7 @@ run-integration-tests:
     fi
     echo "  ✓ Container image: echo-container"
 
-    # 5. Handle NATS
+    # 6. Handle NATS
     echo ""
     echo "=== Setting up NATS ==="
 
@@ -192,14 +200,14 @@ run-integration-tests:
     fi
     echo "  ✓ NATS ready on localhost:4222"
 
-    # 6. Create date-stamped run directory
+    # 7. Create date-stamped run directory
     RUN_DIR="/tmp/vlinder-integration/$(date +%Y-%m-%d-%H%M%S)"
     mkdir -p "$RUN_DIR"
     echo ""
     echo "=== Run directory: $RUN_DIR ==="
     echo ""
 
-    # 7. Run integration tests
+    # 8. Run integration tests
     echo "=== Running integration tests ==="
     VLINDER_INTEGRATION_RUN="$RUN_DIR" cargo test --test '*' -- --ignored --test-threads=1
 

@@ -1,2 +1,4 @@
 # Models required for integration tests (one per line).
 # The `just run-integration-tests` recipe checks these are pulled in ollama.
+phi3
+nomic-embed-text

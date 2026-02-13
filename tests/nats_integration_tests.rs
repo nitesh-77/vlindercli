@@ -3,7 +3,7 @@
 use vlindercli::queue::NatsQueue;
 
 #[test]
-#[ignore] // Requires running NATS server
+#[ignore] // Run via: just run-integration-tests
 fn connect_to_localhost() {
     let queue = NatsQueue::localhost();
     assert!(queue.is_ok());

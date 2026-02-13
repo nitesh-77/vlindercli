@@ -21,14 +21,14 @@ fn fleet_fixture_uri(name: &str) -> String {
 }
 
 #[test]
-#[ignore] // Requires local fixture files
+#[ignore] // Run via: just run-integration-tests
 fn load_agent_with_file_uri() {
     let agent = load_agent(&fixture_uri("echo-agent")).unwrap();
     assert_eq!(agent.name, "echo-agent");
 }
 
 #[test]
-#[ignore] // Requires local fixture files
+#[ignore] // Run via: just run-integration-tests
 fn load_fleet_with_file_uri() {
     let fleet = load_fleet(&fleet_fixture_uri("test-fleet")).unwrap();
     assert_eq!(fleet.name, "test-fleet");

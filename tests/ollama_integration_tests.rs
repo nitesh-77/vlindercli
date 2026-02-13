@@ -6,7 +6,7 @@ use vlindercli::embedding::OllamaEmbeddingEngine;
 use vlindercli::inference::OllamaInferenceEngine;
 
 #[test]
-#[ignore] // Requires running Ollama server
+#[ignore] // Run via: just run-integration-tests
 fn lists_models_from_ollama() {
     let catalog = OllamaCatalog::from_config();
     let models = catalog.list();
@@ -14,7 +14,7 @@ fn lists_models_from_ollama() {
 }
 
 #[test]
-#[ignore] // Requires running Ollama server with model pulled
+#[ignore] // Run via: just run-integration-tests
 fn resolves_model_from_ollama() {
     let catalog = OllamaCatalog::from_config();
     let model = catalog.resolve("phi3");
@@ -25,7 +25,7 @@ fn resolves_model_from_ollama() {
 }
 
 #[test]
-#[ignore] // Requires running Ollama server
+#[ignore] // Run via: just run-integration-tests
 fn embeds_with_ollama_server() {
     let engine = OllamaEmbeddingEngine::new("http://localhost:11434", "nomic-embed-text");
     let result = engine.embed("Hello world");
@@ -34,7 +34,7 @@ fn embeds_with_ollama_server() {
 }
 
 #[test]
-#[ignore] // Requires running Ollama server
+#[ignore] // Run via: just run-integration-tests
 fn infers_with_ollama_server() {
     let engine = OllamaInferenceEngine::new("http://localhost:11434", "phi3");
     let result = engine.infer("Say hello", 10);

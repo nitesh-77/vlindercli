@@ -13,7 +13,7 @@ use vlindercli::queue::InMemoryQueue;
 use vlindercli::runtime::ContainerRuntime;
 
 #[test]
-#[ignore] // Requires: podman + just build-echo-container
+#[ignore] // Run via: just run-integration-tests
 fn container_runtime_executes_echo_agent() {
     let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
 
