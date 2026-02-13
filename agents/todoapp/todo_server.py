@@ -260,11 +260,6 @@ def handle_infer(ctx):
 
 @agent.on_error
 def handle_error(ctx):
-    step = ctx.state.get("step", "")
-    # Embedding/vector errors after add are non-fatal — search just won't find the item
-    if step in ("embed_new_item", "store_new_vector", "delete_removed_vector"):
-        ctx.complete(ctx.state.get("response", "Done"))
-        return
     ctx.complete(f"Error: {ctx.message}")
 
 
