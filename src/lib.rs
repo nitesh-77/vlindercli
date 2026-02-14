@@ -8,6 +8,7 @@ pub mod inference;
 pub mod loader;
 pub mod queue;
 pub mod registry;
+pub mod secret_store;
 pub mod registry_service;
 pub mod state_service;
 pub mod runtime;

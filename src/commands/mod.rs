@@ -4,6 +4,7 @@ mod fleet;
 mod help;
 mod model;
 mod repl;
+mod secret;
 mod timeline;
 
 use clap::{Parser, Subcommand};
@@ -35,6 +36,11 @@ pub enum Command {
         #[command(subcommand)]
         cmd: model::ModelCommand,
     },
+    /// Manage secrets (private keys, NKeys, API keys)
+    Secret {
+        #[command(subcommand)]
+        cmd: secret::SecretCommand,
+    },
     /// Explore agent conversations via git
     Timeline {
         #[command(subcommand)]
@@ -52,6 +58,7 @@ pub fn run() {
         Command::Fleet { cmd } => fleet::execute(cmd),
         Command::Support => help::execute(),
         Command::Model { cmd } => model::execute(cmd),
+        Command::Secret { cmd } => secret::execute(cmd),
         Command::Timeline { cmd } => timeline::execute(cmd),
         Command::Daemon => daemon::execute(),
     }
@@ -360,6 +367,70 @@ mod tests {
     #[test]
     fn cli_agent_new_missing_name_fails() {
         let result = Cli::try_parse_from(["vlinder", "agent", "new", "python"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn cli_secret_put() {
+        let cli =
+            Cli::try_parse_from(["vlinder", "secret", "put", "agents/echo/private-key"]).unwrap();
+        assert_eq!(
+            cli.command,
+            Command::Secret {
+                cmd: secret::SecretCommand::Put {
+                    name: "agents/echo/private-key".to_string(),
+                }
+            }
+        );
+    }
+
+    #[test]
+    fn cli_secret_get() {
+        let cli =
+            Cli::try_parse_from(["vlinder", "secret", "get", "agents/echo/private-key"]).unwrap();
+        assert_eq!(
+            cli.command,
+            Command::Secret {
+                cmd: secret::SecretCommand::Get {
+                    name: "agents/echo/private-key".to_string(),
+                }
+            }
+        );
+    }
+
+    #[test]
+    fn cli_secret_delete() {
+        let cli =
+            Cli::try_parse_from(["vlinder", "secret", "delete", "agents/echo/private-key"])
+                .unwrap();
+        assert_eq!(
+            cli.command,
+            Command::Secret {
+                cmd: secret::SecretCommand::Delete {
+                    name: "agents/echo/private-key".to_string(),
+                }
+            }
+        );
+    }
+
+    #[test]
+    fn cli_secret_exists() {
+        let cli =
+            Cli::try_parse_from(["vlinder", "secret", "exists", "agents/echo/private-key"])
+                .unwrap();
+        assert_eq!(
+            cli.command,
+            Command::Secret {
+                cmd: secret::SecretCommand::Exists {
+                    name: "agents/echo/private-key".to_string(),
+                }
+            }
+        );
+    }
+
+    #[test]
+    fn cli_secret_missing_action_fails() {
+        let result = Cli::try_parse_from(["vlinder", "secret"]);
         assert!(result.is_err());
     }
 }

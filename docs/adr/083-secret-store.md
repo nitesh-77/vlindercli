@@ -2,7 +2,7 @@
 
 ## Status
 
-Draft
+Accepted
 
 ## Context
 
@@ -69,6 +69,19 @@ pub struct InMemorySecretStore {
 ```
 
 Same pattern as `InMemoryQueue` and `InMemoryRegistry` — unit tests never touch real infrastructure.
+
+### CLI: `vlinder secret`
+
+The `vlinder secret` subcommand exposes the secret store for operators — useful for setup, debugging, and manual key management.
+
+| Command | Usage | Description |
+|---------|-------|-------------|
+| `put` | `echo 'val' \| vlinder secret put <name>` | Store a secret (reads value from stdin) |
+| `get` | `vlinder secret get <name>` | Retrieve and print a secret (raw bytes to stdout) |
+| `delete` | `vlinder secret delete <name>` | Delete a secret |
+| `exists` | `vlinder secret exists <name>` | Check if a secret exists (exit code 0/1) |
+
+`put` reads from stdin so secret values never appear in shell history or `ps` output. `get` writes raw bytes to stdout so binary keys (Ed25519) round-trip correctly through pipes.
 
 ### Integration with ADR 084 (Container Identity)
 
