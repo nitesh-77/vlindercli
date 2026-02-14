@@ -35,23 +35,116 @@ The architecture:
 
 The key insight: identity is *attested*, not *self-declared*. The workload doesn't choose its name — the platform verifies what it is and issues a credential asserting that identity.
 
-### Kubernetes service accounts
+### Applicability to Vlinder
 
-Kubernetes projects a signed JWT into every pod via a mounted volume (`/var/run/secrets/kubernetes.io/serviceaccount/token`). The token is bound to a ServiceAccount and namespace. API server validates it. Since 1.22, tokens are audience-bound and time-limited (projected service account tokens).
+Vlinder controls the full container lifecycle — `podman pod create`, `podman run`, secret injection. The platform knows what it's deploying and can generate credentials without any participation from the agent author. The SPIFFE JWT-SVID format provides an industry-standard claim structure and a clean upgrade path to full SPIRE if attestation or automatic rotation is ever needed.
 
-This is simpler than SPIFFE — no separate attestation step. The platform controls the container lifecycle and injects the credential during scheduling. The container can present the token to any service that trusts the API server as an issuer.
+## Decision
 
-### Cloud provider managed identity
+### Platform generates the key pair
 
-AWS IAM Roles for Tasks (ECS), GCP Workload Identity, Azure Managed Identity — all follow the same pattern: the platform assigns an identity to the workload at scheduling time and makes credentials available via a metadata endpoint or injected token. The workload never holds long-lived secrets.
+The platform generates an asymmetric key pair when an agent is first deployed. Deploy is idempotent — subsequent deploys reuse the existing key pair. The agent author never touches cryptography.
 
-### What this means for Vlinder
+The private key is stored as a Podman secret. The public key is stored in the registry alongside the agent's `ResourceId`. No `[identity]` section in `agent.toml`. No key generation for authors. Identity is infrastructure, managed by the platform.
 
-Vlinder controls the full container lifecycle — `podman run` with known parameters. This is analogous to Kubernetes scheduling a pod: the platform knows exactly what it's starting, what agent it belongs to, and what session it's part of. Full SPIFFE/SPIRE is overkill for a single-node, single-tenant system where the platform *is* the scheduler. But the core pattern applies directly:
+```bash
+# Platform does this internally on first deploy:
+podman secret create todoapp-key /path/to/generated/private.pem
+```
 
-1. **Platform generates credential at container start** — a token encoding agent identity, instance ID, session binding.
-2. **Injected via environment variable** — the container receives it without any registration or handshake.
-3. **Presented on every platform interaction** — `Authorization: Bearer <token>` on inference proxy requests, included in DAG metadata for git authorship.
-4. **Verified by the platform** — the proxy, the bridge, the DAG writer all validate the token against what the platform issued.
+### Instance identity
 
-The question is what the token contains and how it's verified — not whether containers need identity.
+Multiple containers of the same agent share the same key pair — identity is per-agent, not per-instance. To distinguish instances, the platform assigns a unique instance ID when starting each container and passes it to the sidecar:
+
+```bash
+podman run --pod todoapp-pod --secret todoapp-key -e VLINDER_INSTANCE_ID=abc123 -d vlinder-sidecar
+```
+
+The sidecar includes the instance ID in the JWT claims:
+
+```json
+{
+  "sub": "spiffe://vlinder.local/agents/todoapp",
+  "instance": "abc123",
+  "aud": ["vlinder-proxy"],
+  "iat": 1707951600,
+  "exp": 1707955200
+}
+```
+
+Same key pair, distinct instances. The DAG can attribute each side effect to a specific container.
+
+### Sidecar container in a Podman pod
+
+The platform runs agent containers inside a Podman pod alongside a platform-owned sidecar. The sidecar handles all credential presentation — the agent container has no Vlinder infrastructure baked in.
+
+```
+podman pod create --name todoapp-pod -p 8080:8080
+podman run --pod todoapp-pod --secret todoapp-key -d vlinder-sidecar
+podman run --pod todoapp-pod -d todoapp-agent
+```
+
+The sidecar receives the private key via Podman secrets at `/run/secrets/todoapp-key`. The agent container has no access to the secret — only the sidecar does. Even a compromised agent cannot exfiltrate the key.
+
+All containers in a pod share the same network namespace. The agent reaches the sidecar at `localhost`. The sidecar reaches the platform at the host address. No special networking configuration.
+
+The sidecar is a platform-owned OCI image, versioned and updated independently of agent images. Agent images stay pure — just agent code and dependencies.
+
+### Sidecar intercepts and signs
+
+The agent makes standard HTTP calls using standard SDKs (OpenAI, LangChain, LiteLLM). The `VLINDER_OPENROUTER_URL` env var points to the sidecar inside the pod, not directly to the platform proxy:
+
+```
+VLINDER_OPENROUTER_URL=http://localhost:19999/openrouter
+```
+
+Agent code is unmodified:
+
+```python
+client = OpenAI(
+    base_url=os.environ["VLINDER_OPENROUTER_URL"] + "/v1",
+    api_key="unused",
+)
+```
+
+On each request, the sidecar:
+
+1. Receives the HTTP request from the SDK on localhost
+2. Reads the private key from `/run/secrets/todoapp-key`
+3. Signs a SPIFFE-compatible JWT-SVID: `{ sub: "spiffe://vlinder.local/agents/todoapp", aud: ["vlinder-proxy"], iat, exp }` with the private key
+4. Adds `X-Vlinder-Identity: <signed-jwt>` header (leaves `Authorization` untouched for provider auth)
+5. Forwards to the platform proxy
+6. Returns the response unmodified
+
+The agent never participates in identity. The SDK never knows. Standard libraries, standard code, identity is invisible infrastructure — the same pattern as Istio/Envoy service mesh sidecars, without Kubernetes.
+
+### Platform verifies with the public key
+
+The platform proxy (ADR 083) receives each request:
+
+1. Reads the JWT from `X-Vlinder-Identity`
+2. Extracts `agent_id` from the claims
+3. Looks up the registered public key for that agent
+4. Verifies the JWT signature
+5. Proceeds with the verified identity: model validation, NATS routing, DAG recording
+
+Verification is local — no callback to an identity service. The public key is loaded from the registry where it was stored at first deploy.
+
+### What this replaces
+
+The fabricated author email (`todoapp@127.0.0.1:9000`) is replaced by a verified `agent_id` derived from the JWT claims. Today there is no authentication between containers and the platform — the sidecar adds it. Multi-instance disambiguation comes from the `instance` claim in the JWT, assigned by the platform at container start.
+
+## Consequences
+
+- Zero burden on agent authors — the platform generates and manages credentials, no `[identity]` config
+- Agent images contain no Vlinder infrastructure — the sidecar is platform-owned
+- Standard SDKs work unmodified — identity injection is invisible to agent code
+- Podman pods provide shared-localhost networking between agent and sidecar
+- Podman secrets isolate the private key to the sidecar — the agent container cannot access it
+- The sidecar is versioned independently — upgrades don't require rebuilding agent images
+- Asymmetric signing means verifiers only need the public key — no shared secrets across distributed workers
+- SPIFFE-compatible JWT-SVID format — upgrade path to full SPIRE if needed, interoperable with SPIFFE-aware services
+- Git commit authorship uses verified identity, not fabricated strings
+- The inference proxy (ADR 083) identifies callers through verified JWTs, enabling a single always-on proxy for all agents
+- Container runtime changes from `podman run` to `podman pod create` + `podman run --pod` — the pod becomes the unit of deployment
+- Service worker identity (inference, storage, DAG workers authenticating to NATS) is a separate problem — future ADR
