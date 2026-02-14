@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Superseded — assumes WASM-era cross-agent SDK calls that no longer exist (ADR 046, 075)
 
 ## Context
 

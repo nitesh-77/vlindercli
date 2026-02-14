@@ -2,7 +2,7 @@
 
 ## Status
 
-Draft
+Accepted (validated in a87ea70, eda5521)
 
 ## Context
 
