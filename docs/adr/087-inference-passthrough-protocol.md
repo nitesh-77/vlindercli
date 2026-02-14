@@ -1,4 +1,4 @@
-# ADR 084: Inference Passthrough Protocol
+# ADR 087: Inference Passthrough Protocol
 
 ## Status
 
@@ -6,7 +6,7 @@ Draft
 
 ## Context
 
-ADR 083 decides that inference moves from a platform-defined pinhole (`model, prompt, max_tokens`) to per-provider transparent proxies on the bridge. This ADR defines the wire format: how requests and responses flow through NATS between the bridge proxy and the inference service workers.
+ADR 086 decides that inference moves from a platform-defined pinhole (`model, prompt, max_tokens`) to per-provider transparent proxies on the bridge. This ADR defines the wire format: how requests and responses flow through NATS between the bridge proxy and the inference service workers.
 
 The key constraint: message payloads are strongly typed per provider, pinned to a specific API version. Providers version their APIs — OpenRouter tracks OpenAI API v1, Ollama versions its own endpoints. We don't reinvent these type definitions. Rust SDKs already exist for both providers with complete, versioned, serde-compatible types.
 

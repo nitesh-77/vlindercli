@@ -1,4 +1,4 @@
-# ADR 083: Inference API Passthrough
+# ADR 086: Inference API Passthrough
 
 ## Status
 
