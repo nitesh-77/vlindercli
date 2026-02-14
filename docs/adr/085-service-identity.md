@@ -1,4 +1,4 @@
-# ADR 086: Service Identity
+# ADR 085: Service Identity
 
 ## Status
 
@@ -6,7 +6,7 @@ Draft
 
 ## Context
 
-ADR 085 solves container identity — agent containers authenticate to the platform via a sidecar-signed JWT. But the platform's own service workers have no identity either.
+ADR 084 solves container identity — agent containers authenticate to the platform via a sidecar-signed JWT. But the platform's own service workers have no identity either.
 
 Service workers — inference, embedding, storage, state, DAG — are processes that connect to NATS and subscribe to subjects. In distributed mode, they run as separate processes, potentially on separate machines. Today, there is no authentication at any layer.
 
@@ -72,7 +72,7 @@ A compromised inference worker cannot read storage requests. A compromised stora
 
 The daemon generates all NKeys and NATS account JWTs at startup. Workers receive their credentials as arguments or environment variables when the daemon spawns them. No worker manages its own auth — the platform owns everything.
 
-This is the same principle as ADR 085: the platform controls the lifecycle, the platform assigns the credential. Workers are platform-owned processes — there is no reason to burden them with identity management.
+This is the same principle as ADR 084: the platform controls the lifecycle, the platform assigns the credential. Workers are platform-owned processes — there is no reason to burden them with identity management.
 
 ### No application-level changes
 
@@ -83,7 +83,7 @@ Workers connect to NATS with credentials. The `MessageQueue` trait and `NatsQueu
 - Subject-level isolation between worker roles — inference can't see storage, storage can't see inference
 - NATS enforces permissions at the server — no application-level auth code needed
 - Credentials are generated and distributed by the daemon — zero burden on operators
-- NKeys use Ed25519 — same cryptographic primitive as ADR 085 container identity
+- NKeys use Ed25519 — same cryptographic primitive as ADR 084 container identity
 - Rogue NATS subscribers are rejected — connection requires a valid NKey for an authorized account
 - Worker code is unchanged — auth is at the connection layer, not the application layer
 - gRPC endpoint authentication (registry, state service) is out of scope — separate ADR

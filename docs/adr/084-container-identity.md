@@ -1,4 +1,4 @@
-# ADR 085: Container Identity
+# ADR 084: Container Identity
 
 ## Status
 
@@ -12,7 +12,7 @@ This absence shows up in several places:
 
 **Git commit authorship.** The conversation store records every side effect as a git commit. The author is `todoapp@127.0.0.1:9000` — the agent name concatenated with the registry host. This is a fabricated string that encodes infrastructure details (which registry, which port) rather than a real identity. It cannot distinguish between two instances of the same agent. It doesn't survive registry moves.
 
-**Inference proxy identification.** ADR 083 introduces per-provider proxy ports on the bridge. A single always-on proxy is simpler than per-container lifecycle management — but a single proxy serving multiple agents needs to know which agent is making each request. Standard SDKs (OpenAI, LangChain) send an API key as `Authorization: Bearer <token>` on every request. This is the natural injection point, but there is nothing to inject — containers have no token.
+**Inference proxy identification.** The inference passthrough ADR introduces per-provider proxy ports on the bridge. A single always-on proxy is simpler than per-container lifecycle management — but a single proxy serving multiple agents needs to know which agent is making each request. Standard SDKs (OpenAI, LangChain) send an API key as `Authorization: Bearer <token>` on every request. This is the natural injection point, but there is nothing to inject — containers have no token.
 
 **Multi-instance ambiguity.** The architecture supports multiple containers of the same agent (agents are stateless). But today there is no way to distinguish which instance produced a given side effect. The DAG records the agent name, not the instance.
 
@@ -120,7 +120,7 @@ The agent never participates in identity. The SDK never knows. Standard librarie
 
 ### Platform verifies with the public key
 
-The platform proxy (ADR 083) receives each request:
+The platform proxy (inference passthrough ADR) receives each request:
 
 1. Reads the JWT from `X-Vlinder-Identity`
 2. Extracts `agent_id` from the claims
@@ -145,6 +145,6 @@ The fabricated author email (`todoapp@127.0.0.1:9000`) is replaced by a verified
 - Asymmetric signing means verifiers only need the public key — no shared secrets across distributed workers
 - SPIFFE-compatible JWT-SVID format — upgrade path to full SPIRE if needed, interoperable with SPIFFE-aware services
 - Git commit authorship uses verified identity, not fabricated strings
-- The inference proxy (ADR 083) identifies callers through verified JWTs, enabling a single always-on proxy for all agents
+- The inference proxy identifies callers through verified JWTs, enabling a single always-on proxy for all agents
 - Container runtime changes from `podman run` to `podman pod create` + `podman run --pod` — the pod becomes the unit of deployment
 - Service worker identity (inference, storage, DAG workers authenticating to NATS) is a separate problem — future ADR
