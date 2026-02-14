@@ -2,7 +2,7 @@
 
 ## Status
 
-Draft — needs discussion
+Superseded — registry handles capability binding directly (ADR 035, 048)
 
 ## Context
 

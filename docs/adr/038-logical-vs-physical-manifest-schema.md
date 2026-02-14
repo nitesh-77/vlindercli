@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted (validated in dca944b)
 
 ## Context
 

@@ -2,7 +2,7 @@
 
 ## Status
 
-Draft
+Accepted (validated in 26eb0ac)
 
 ## Context
 

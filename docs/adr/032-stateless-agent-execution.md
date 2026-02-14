@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Superseded by ADR 046 (Podman containers) and ADR 075 (state machine agents)
 
 ## Context
 

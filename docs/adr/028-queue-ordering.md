@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted (validated in 38d908e)
 
 ## Context
 
