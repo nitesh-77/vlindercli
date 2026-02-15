@@ -5,9 +5,64 @@
 //! - `PodmanApiClient` (primary) — REST API over Unix socket
 //! - `PodmanCliClient` (fallback) — shells out to the `podman` binary
 
-use crate::domain::ImageDigest;
+use std::fmt;
+
+use crate::domain::{ContainerId, ImageDigest, ImageRef, Mount};
 
 use super::podman_cli::PodmanCliClient;
+
+// ── Error type ──────────────────────────────────────────────────────
+
+/// Podman operation failure.
+///
+/// Three variants match the three fallible phases of container startup:
+/// run, port discovery, and health check.
+#[derive(Debug)]
+pub(crate) enum PodmanError {
+    /// Container create or start failed.
+    Run(String),
+    /// Host port could not be determined.
+    Port(String),
+    /// Container health check timed out.
+    ReadinessTimeout,
+}
+
+impl fmt::Display for PodmanError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PodmanError::Run(msg) => write!(f, "container run failed: {}", msg),
+            PodmanError::Port(msg) => write!(f, "port discovery failed: {}", msg),
+            PodmanError::ReadinessTimeout => {
+                write!(f, "container did not become ready within 30 seconds")
+            }
+        }
+    }
+}
+
+// ── Run target ──────────────────────────────────────────────────────
+
+/// What to pass to `podman run` as the image argument.
+///
+/// Mutable policy uses the image ref (tag-based, picks up rebuilds).
+/// Pinned policy uses the content-addressed digest (deterministic bytes).
+pub(crate) enum RunTarget<'a> {
+    /// Tag-based image reference (e.g., `localhost/echo:latest`).
+    Ref(&'a ImageRef),
+    /// Content-addressed digest (e.g., `sha256:abc123...`).
+    Digest(&'a ImageDigest),
+}
+
+impl RunTarget<'_> {
+    /// The string to pass to Podman (CLI flag or API field).
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            RunTarget::Ref(r) => r.as_str(),
+            RunTarget::Digest(d) => d.as_str(),
+        }
+    }
+}
+
+// ── Trait ────────────────────────────────────────────────────────────
 
 /// Abstraction over the Podman container engine.
 ///
@@ -18,26 +73,26 @@ pub(crate) trait Podman: Send {
     fn engine_version(&self) -> Option<semver::Version>;
 
     /// Start a detached container and return its ID.
-    fn run(&self, image: &str, mounts: &[String]) -> Result<String, String>;
+    fn run(&self, image: RunTarget<'_>, mounts: &[Mount]) -> Result<ContainerId, PodmanError>;
 
     /// Return the content-addressed digest for an image.
-    fn image_digest(&self, image_ref: &str) -> Option<ImageDigest>;
+    fn image_digest(&self, image_ref: &ImageRef) -> Option<ImageDigest>;
 
     /// Discover the host port mapped to container port 8080.
-    fn port(&self, container_id: &str) -> Result<u16, String>;
+    fn port(&self, container_id: &ContainerId) -> Result<u16, PodmanError>;
 
     /// Tear down a container (stop + force remove).
-    fn stop_and_remove(&self, container_id: &str, timeout_secs: u32);
+    fn stop_and_remove(&self, container_id: &ContainerId, timeout_secs: u32);
 
     /// Poll `GET /health` until the container responds or a deadline expires.
-    fn wait_for_ready(&self, host_port: u16) -> Result<(), String>;
+    fn wait_for_ready(&self, host_port: u16) -> Result<(), PodmanError>;
 }
 
 // ── Shared utilities ────────────────────────────────────────────────
 
 /// Resolve the content-addressed digest for an image via `podman image inspect`.
 /// Returns None if the inspect fails (image not found, Podman unavailable, etc.).
-pub(crate) fn resolve_image_digest(image_ref: &str) -> Option<ImageDigest> {
+pub(crate) fn resolve_image_digest(image_ref: &ImageRef) -> Option<ImageDigest> {
     PodmanCliClient.image_digest(image_ref)
 }
 
@@ -108,10 +163,37 @@ mod tests {
 
     #[test]
     fn resolve_socket_auto_no_sockets() {
-        // On CI / dev machines without Podman, auto should return None
-        // (unless a real socket exists, in which case it returns Some)
         let result = resolve_socket("auto");
-        // Just verify it doesn't panic — the result depends on the host
         let _ = result;
+    }
+
+    #[test]
+    fn run_target_ref() {
+        let r = ImageRef::parse("localhost/echo:latest").unwrap();
+        let target = RunTarget::Ref(&r);
+        assert_eq!(target.as_str(), "localhost/echo:latest");
+    }
+
+    #[test]
+    fn run_target_digest() {
+        let d = ImageDigest::parse("sha256:abc123").unwrap();
+        let target = RunTarget::Digest(&d);
+        assert_eq!(target.as_str(), "sha256:abc123");
+    }
+
+    #[test]
+    fn podman_error_display() {
+        assert_eq!(
+            PodmanError::Run("boom".to_string()).to_string(),
+            "container run failed: boom"
+        );
+        assert_eq!(
+            PodmanError::Port("no port".to_string()).to_string(),
+            "port discovery failed: no port"
+        );
+        assert_eq!(
+            PodmanError::ReadinessTimeout.to_string(),
+            "container did not become ready within 30 seconds"
+        );
     }
 }

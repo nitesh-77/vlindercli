@@ -12,6 +12,7 @@ mod sdk;
 mod queue_bridge;
 mod dag;
 mod state;
+mod container_id;
 mod diagnostics;
 mod image_digest;
 mod image_ref;
@@ -45,6 +46,7 @@ pub mod workers;
 // ============================================================================
 
 pub use agent::{Agent, LoadError as AgentLoadError, Mount, Prompts, Requirements};
+pub use container_id::ContainerId;
 pub use image_digest::ImageDigest;
 pub use image_ref::ImageRef;
 pub use sdk::{SdkContract, AgentAction, AgentEvent, VectorMatch};

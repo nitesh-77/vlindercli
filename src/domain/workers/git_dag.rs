@@ -578,7 +578,7 @@ mod tests {
     use super::*;
     use crate::domain::message::*;
     use crate::domain::diagnostics::*;
-    use crate::domain::{RuntimeType, ResourceId, Agent, SecretStore};
+    use crate::domain::{ContainerId, RuntimeType, ResourceId, Agent, SecretStore};
     use crate::secret_store::InMemorySecretStore;
     use crate::registry::InMemoryRegistry;
 
@@ -890,7 +890,7 @@ mod tests {
                     engine_version: "5.3.1".to_string(),
                     image_ref: None,
                     image_digest: None,
-                    container_id: "abc123".to_string(),
+                    container_id: ContainerId::new("abc123"),
                 },
                 duration_ms: 2300,
             },

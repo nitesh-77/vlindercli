@@ -7,15 +7,15 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::domain::{Agent, ImageDigest, ImageRef, QueueBridge, ContainerDiagnostics, ContainerRuntimeInfo, InvokeMessage};
+use crate::domain::{Agent, ContainerId, ImageDigest, ImageRef, QueueBridge, ContainerDiagnostics, ContainerRuntimeInfo, InvokeMessage};
 
-use super::podman::{Podman, resolve_socket};
+use super::podman::{Podman, RunTarget, resolve_socket};
 use super::podman_api::PodmanApiClient;
 use super::podman_cli::PodmanCliClient;
 
 /// A long-running container managed by the pool.
 pub(super) struct ManagedContainer {
-    container_id: String,
+    container_id: ContainerId,
     host_port: u16,
     pub(super) bridge: Arc<QueueBridge>,
     /// The OCI image reference (always `agent.executable` — identifies *which* image).
@@ -106,34 +106,31 @@ impl ContainerPool {
         agent: &Agent,
         bridge: Arc<QueueBridge>,
     ) -> Result<(u16, Arc<QueueBridge>), String> {
-        // Select what to pass to `podman run` based on policy (ADR 073)
-        let run_image = match self.image_policy {
-            ImagePolicy::Mutable => agent.executable.clone(),
-            ImagePolicy::Pinned => agent.image_digest.as_ref()
-                .map(|d| d.as_str().to_string())
-                .unwrap_or_else(|| agent.executable.clone()),
-        };
-
         // image_ref always records *which* image, not *which bytes*
         let image_ref = ImageRef::parse(&agent.executable)
             .unwrap_or_else(|_| ImageRef::parse("unknown/unknown").unwrap());
 
-        // Build volume mount flags from agent manifest (ADR 057)
-        let mount_flags: Vec<String> = agent.mounts.iter().map(|m| {
-            let mode = if m.readonly { "ro" } else { "rw" };
-            format!("{}:{}:{}", m.host_path, m.guest_path.display(), mode)
-        }).collect();
+        // Select what to pass to `podman run` based on policy (ADR 073)
+        let run_target = match self.image_policy {
+            ImagePolicy::Mutable => RunTarget::Ref(&image_ref),
+            ImagePolicy::Pinned => agent.image_digest.as_ref()
+                .map(RunTarget::Digest)
+                .unwrap_or(RunTarget::Ref(&image_ref)),
+        };
 
-        let container_id = self.podman.run(&run_image, &mount_flags)?;
+        let container_id = self.podman.run(run_target, &agent.mounts)
+            .map_err(|e| e.to_string())?;
 
         // Capture image metadata for diagnostics (ADR 073)
-        let image_digest = self.podman.image_digest(&run_image);
+        let image_digest = self.podman.image_digest(&image_ref);
 
         // Discover the mapped host port
-        let host_port = self.podman.port(&container_id)?;
+        let host_port = self.podman.port(&container_id)
+            .map_err(|e| e.to_string())?;
 
         // Wait for container to be ready
-        self.podman.wait_for_ready(host_port)?;
+        self.podman.wait_for_ready(host_port)
+            .map_err(|e| e.to_string())?;
 
         tracing::info!(
             event = "container.started",
@@ -141,7 +138,6 @@ impl ContainerPool {
             container = %container_id,
             port = host_port,
             image_ref = %image_ref,
-            run_image = %run_image,
             image_digest = image_digest.as_ref().map(|d| d.as_str()).unwrap_or("unknown"),
             "Container started"
         );

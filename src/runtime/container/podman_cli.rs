@@ -5,9 +5,9 @@
 
 use std::process::Command;
 
-use crate::domain::ImageDigest;
+use crate::domain::{ContainerId, ImageDigest, ImageRef, Mount};
 
-use super::podman::Podman;
+use super::podman::{Podman, PodmanError, RunTarget};
 
 /// Fallback implementation that shells out to the `podman` CLI.
 pub(crate) struct PodmanCliClient;
@@ -25,36 +25,38 @@ impl Podman for PodmanCliClient {
             })
     }
 
-    fn run(&self, image: &str, mounts: &[String]) -> Result<String, String> {
+    fn run(&self, image: RunTarget<'_>, mounts: &[Mount]) -> Result<ContainerId, PodmanError> {
         let mut podman_args = vec![
-            "run", "-d",
-            "--pull=never",
-            "-p", ":8080",
+            "run".to_string(), "-d".to_string(),
+            "--pull=never".to_string(),
+            "-p".to_string(), ":8080".to_string(),
         ];
 
-        for flag in mounts {
-            podman_args.push("-v");
-            podman_args.push(flag);
+        for m in mounts {
+            let mode = if m.readonly { "ro" } else { "rw" };
+            podman_args.push("-v".to_string());
+            podman_args.push(format!("{}:{}:{}", m.host_path, m.guest_path.display(), mode));
         }
 
-        podman_args.push(image);
+        podman_args.push(image.as_str().to_string());
 
         let output = Command::new("podman")
             .args(&podman_args)
             .output()
-            .map_err(|e| format!("failed to spawn podman: {}", e))?;
+            .map_err(|e| PodmanError::Run(format!("failed to spawn podman: {}", e)))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("podman run failed: {}", stderr));
+            return Err(PodmanError::Run(format!("podman run failed: {}", stderr)));
         }
 
-        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+        let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        Ok(ContainerId::new(raw))
     }
 
-    fn image_digest(&self, image_ref: &str) -> Option<ImageDigest> {
+    fn image_digest(&self, image_ref: &ImageRef) -> Option<ImageDigest> {
         Command::new("podman")
-            .args(["image", "inspect", image_ref, "--format", "{{.Digest}}"])
+            .args(["image", "inspect", image_ref.as_str(), "--format", "{{.Digest}}"])
             .output()
             .ok()
             .filter(|o| o.status.success())
@@ -63,38 +65,39 @@ impl Podman for PodmanCliClient {
             .and_then(|s| ImageDigest::parse(s).ok())
     }
 
-    fn port(&self, container_id: &str) -> Result<u16, String> {
+    fn port(&self, container_id: &ContainerId) -> Result<u16, PodmanError> {
         let output = Command::new("podman")
-            .args(["port", container_id, "8080"])
+            .args(["port", container_id.as_str(), "8080"])
             .output()
-            .map_err(|e| format!("podman port failed: {}", e))?;
+            .map_err(|e| PodmanError::Port(format!("podman port failed: {}", e)))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("podman port failed: {}", stderr));
+            return Err(PodmanError::Port(format!("podman port failed: {}", stderr)));
         }
 
         let raw = String::from_utf8_lossy(&output.stdout);
         parse_port_output(raw.trim())
     }
 
-    fn stop_and_remove(&self, container_id: &str, timeout_secs: u32) {
+    fn stop_and_remove(&self, container_id: &ContainerId, timeout_secs: u32) {
         let timeout = timeout_secs.to_string();
+        let id = container_id.as_str();
         let _ = Command::new("podman")
-            .args(["stop", "-t", &timeout, container_id])
+            .args(["stop", "-t", &timeout, id])
             .output();
         let _ = Command::new("podman")
-            .args(["rm", "-f", container_id])
+            .args(["rm", "-f", id])
             .output();
     }
 
-    fn wait_for_ready(&self, host_port: u16) -> Result<(), String> {
+    fn wait_for_ready(&self, host_port: u16) -> Result<(), PodmanError> {
         let url = format!("http://127.0.0.1:{}/health", host_port);
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
 
         loop {
             if std::time::Instant::now() > deadline {
-                return Err("container did not become ready within 30 seconds".to_string());
+                return Err(PodmanError::ReadinessTimeout);
             }
 
             match ureq::get(&url).call() {
@@ -117,12 +120,12 @@ fn parse_version(raw: &str) -> Option<semver::Version> {
 /// Extract host port from `podman port` output.
 ///
 /// Expected format: `"0.0.0.0:XXXXX"` or `"[::]:XXXXX"`.
-fn parse_port_output(raw: &str) -> Result<u16, String> {
+fn parse_port_output(raw: &str) -> Result<u16, PodmanError> {
     raw.rsplit(':')
         .next()
-        .ok_or_else(|| format!("unexpected podman port output: {}", raw))?
+        .ok_or_else(|| PodmanError::Port(format!("unexpected podman port output: {}", raw)))?
         .parse::<u16>()
-        .map_err(|e| format!("invalid port number: {}", e))
+        .map_err(|e| PodmanError::Port(format!("invalid port number: {}", e)))
 }
 
 #[cfg(test)]
@@ -141,7 +144,6 @@ mod tests {
 
     #[test]
     fn parse_version_with_pre() {
-        // Some distros ship e.g. 5.0.0-rc1
         assert!(parse_version("5.0.0-rc1").is_some());
     }
 
@@ -159,27 +161,26 @@ mod tests {
 
     #[test]
     fn parse_port_ipv4() {
-        assert_eq!(parse_port_output("0.0.0.0:43210"), Ok(43210));
+        assert!(matches!(parse_port_output("0.0.0.0:43210"), Ok(43210)));
     }
 
     #[test]
     fn parse_port_ipv6() {
-        assert_eq!(parse_port_output("[::]:12345"), Ok(12345));
+        assert!(matches!(parse_port_output("[::]:12345"), Ok(12345)));
     }
 
     #[test]
     fn parse_port_bare_number() {
-        // Defensive: if Podman ever returns just the port number
-        assert_eq!(parse_port_output("8080"), Ok(8080));
+        assert!(matches!(parse_port_output("8080"), Ok(8080)));
     }
 
     #[test]
     fn parse_port_bad_number() {
-        assert!(parse_port_output("0.0.0.0:notaport").is_err());
+        assert!(matches!(parse_port_output("0.0.0.0:notaport"), Err(PodmanError::Port(_))));
     }
 
     #[test]
     fn parse_port_empty() {
-        assert!(parse_port_output("").is_err());
+        assert!(matches!(parse_port_output(""), Err(PodmanError::Port(_))));
     }
 }

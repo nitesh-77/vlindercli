@@ -14,6 +14,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::container_id::ContainerId;
 use super::image_digest::ImageDigest;
 use super::image_ref::ImageRef;
 
@@ -148,7 +149,7 @@ pub struct ContainerRuntimeInfo {
     /// Image digest (e.g., "sha256:a80c4f17..."), if resolved.
     pub image_digest: Option<ImageDigest>,
     /// Container ID for this execution.
-    pub container_id: String,
+    pub container_id: ContainerId,
 }
 
 impl ContainerDiagnostics {
@@ -163,7 +164,7 @@ impl ContainerDiagnostics {
                 engine_version: "unknown".to_string(),
                 image_ref: None,
                 image_digest: None,
-                container_id: "unknown".to_string(),
+                container_id: ContainerId::unknown(),
             },
             duration_ms,
         }
@@ -309,7 +310,7 @@ mod tests {
                 engine_version: "5.3.1".to_string(),
                 image_ref: Some(ImageRef::parse("localhost/echo-agent:latest").unwrap()),
                 image_digest: Some(ImageDigest::parse("sha256:abc123").unwrap()),
-                container_id: "def456".to_string(),
+                container_id: ContainerId::new("def456"),
             },
             duration_ms: 2300,
         };
@@ -330,7 +331,7 @@ mod tests {
                 engine_version: "5.3.1".to_string(),
                 image_ref: Some(ImageRef::parse("localhost/support-agent:latest").unwrap()),
                 image_digest: Some(ImageDigest::parse("sha256:a80c4f17").unwrap()),
-                container_id: "abc123def456".to_string(),
+                container_id: ContainerId::new("abc123def456"),
             },
             duration_ms: 2300,
         };
