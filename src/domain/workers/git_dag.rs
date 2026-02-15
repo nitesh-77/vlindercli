@@ -279,7 +279,7 @@ impl GitDagWorker {
             ObservableMessage::Request(m) => {
                 entries.push(self.write_field("type", "request")?);
                 entries.push(self.write_field("agent_id", m.agent_id.as_str())?);
-                entries.push(self.write_field("service", &m.service)?);
+                entries.push(self.write_field("service", m.service.as_str())?);
                 entries.push(self.write_field("backend", &m.backend)?);
                 entries.push(self.write_field("operation", &m.operation)?);
                 entries.push(self.write_field("sequence", &m.sequence.as_u32().to_string())?);
@@ -291,7 +291,7 @@ impl GitDagWorker {
             ObservableMessage::Response(m) => {
                 entries.push(self.write_field("type", "response")?);
                 entries.push(self.write_field("agent_id", m.agent_id.as_str())?);
-                entries.push(self.write_field("service", &m.service)?);
+                entries.push(self.write_field("service", m.service.as_str())?);
                 entries.push(self.write_field("backend", &m.backend)?);
                 entries.push(self.write_field("operation", &m.operation)?);
                 entries.push(self.write_field("sequence", &m.sequence.as_u32().to_string())?);
@@ -578,7 +578,7 @@ mod tests {
     use super::*;
     use crate::domain::message::*;
     use crate::domain::diagnostics::*;
-    use crate::domain::{ContainerId, RuntimeType, ResourceId, Agent, SecretStore};
+    use crate::domain::{ContainerId, RuntimeType, ResourceId, ServiceType, Agent, SecretStore};
     use crate::secret_store::InMemorySecretStore;
     use crate::registry::InMemoryRegistry;
 
@@ -609,7 +609,7 @@ mod tests {
             SubmissionId::from("sub-1".to_string()),
             SessionId::from("sess-1".to_string()),
             test_agent_id(),
-            "infer",
+            ServiceType::Infer,
             "ollama",
             "chat",
             Sequence::from(1),
@@ -632,7 +632,7 @@ mod tests {
             SubmissionId::from("sub-1".to_string()),
             SessionId::from("sess-1".to_string()),
             test_agent_id(),
-            "infer",
+            ServiceType::Infer,
             "ollama",
             "chat",
             Sequence::from(1),
@@ -649,7 +649,7 @@ mod tests {
             &request,
             payload.to_vec(),
             ServiceDiagnostics {
-                service: "infer".to_string(),
+                service: ServiceType::Infer,
                 backend: "ollama".to_string(),
                 duration_ms: 1800,
                 metrics: ServiceMetrics::Inference {

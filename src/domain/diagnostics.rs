@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use super::container_id::ContainerId;
 use super::image_digest::ImageDigest;
 use super::image_ref::ImageRef;
+use super::service_type::ServiceType;
 
 // ============================================================================
 // InvokeDiagnostics — Harness
@@ -55,8 +56,8 @@ pub struct RequestDiagnostics {
 /// Diagnostics emitted by a service worker after processing a request.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ServiceDiagnostics {
-    /// Service type: "infer", "embed", "kv", "vec".
-    pub service: String,
+    /// Which platform service handled this request.
+    pub service: ServiceType,
     /// Backend identifier: "ollama", "openrouter", "sqlite", "memory".
     pub backend: String,
     /// Execution time in milliseconds.
@@ -92,7 +93,7 @@ impl ServiceDiagnostics {
     /// older senders that don't yet include diagnostics headers.
     pub fn placeholder() -> Self {
         Self {
-            service: "unknown".to_string(),
+            service: ServiceType::Kv,
             backend: "unknown".to_string(),
             duration_ms: 0,
             metrics: ServiceMetrics::Storage {
@@ -104,14 +105,14 @@ impl ServiceDiagnostics {
 
     /// Convenience constructor for storage service workers (kv, vec).
     pub fn storage(
-        service: impl Into<String>,
+        service: ServiceType,
         backend: impl Into<String>,
         operation: impl Into<String>,
         bytes: u64,
         duration_ms: u64,
     ) -> Self {
         Self {
-            service: service.into(),
+            service,
             backend: backend.into(),
             duration_ms,
             metrics: ServiceMetrics::Storage {
@@ -237,7 +238,7 @@ mod tests {
     #[test]
     fn service_diagnostics_inference_json_round_trip() {
         let diag = ServiceDiagnostics {
-            service: "infer".to_string(),
+            service: ServiceType::Infer,
             backend: "ollama".to_string(),
             duration_ms: 1800,
             metrics: ServiceMetrics::Inference {
@@ -254,7 +255,7 @@ mod tests {
     #[test]
     fn service_diagnostics_inference_toml_round_trip() {
         let diag = ServiceDiagnostics {
-            service: "infer".to_string(),
+            service: ServiceType::Infer,
             backend: "ollama".to_string(),
             duration_ms: 1800,
             metrics: ServiceMetrics::Inference {
@@ -271,7 +272,7 @@ mod tests {
     #[test]
     fn service_diagnostics_embedding_json_round_trip() {
         let diag = ServiceDiagnostics {
-            service: "embed".to_string(),
+            service: ServiceType::Embed,
             backend: "ollama".to_string(),
             duration_ms: 200,
             metrics: ServiceMetrics::Embedding {
@@ -286,7 +287,7 @@ mod tests {
 
     #[test]
     fn service_diagnostics_storage_json_round_trip() {
-        let diag = ServiceDiagnostics::storage("kv", "sqlite", "put", 2048, 5);
+        let diag = ServiceDiagnostics::storage(ServiceType::Kv, "sqlite", "put", 2048, 5);
         let json = serde_json::to_string(&diag).unwrap();
         let back: ServiceDiagnostics = serde_json::from_str(&json).unwrap();
         assert_eq!(diag, back);
@@ -294,7 +295,7 @@ mod tests {
 
     #[test]
     fn service_diagnostics_storage_toml_round_trip() {
-        let diag = ServiceDiagnostics::storage("kv", "sqlite", "get", 512, 2);
+        let diag = ServiceDiagnostics::storage(ServiceType::Kv, "sqlite", "get", 512, 2);
         let toml_str = toml::to_string_pretty(&diag).unwrap();
         let back: ServiceDiagnostics = toml::from_str(&toml_str).unwrap();
         assert_eq!(diag, back);

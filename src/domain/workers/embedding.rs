@@ -12,7 +12,7 @@ use crate::domain::EmbeddingEngine;
 use crate::domain::registry::Registry;
 use crate::domain::service_payloads::EmbedRequest;
 use crate::embedding::open_embedding_engine;
-use crate::domain::{MessageQueue, RequestMessage, ResponseMessage, ServiceDiagnostics, ServiceMetrics};
+use crate::domain::{MessageQueue, RequestMessage, ResponseMessage, ServiceDiagnostics, ServiceMetrics, ServiceType};
 use crate::services::embedding;
 
 // ============================================================================
@@ -52,7 +52,7 @@ impl EmbeddingServiceWorker {
     /// Process one message if available. Returns true if processed.
     pub fn tick(&self) -> bool {
         // Receive typed RequestMessage (ADR 044)
-        match self.queue.receive_request("embed", &self.backend, "run") {
+        match self.queue.receive_request(ServiceType::Embed, &self.backend, "run") {
             Ok((request, ack)) => {
                 tracing::debug!(seq = %request.sequence, agent = %request.agent_id, "embed worker: received request");
                 let model = self.extract_model_name(&request);
@@ -62,7 +62,7 @@ impl EmbeddingServiceWorker {
                 tracing::debug!(seq = %request.sequence, duration_ms, "embed worker: handled, sending response");
 
                 let diag = ServiceDiagnostics {
-                    service: "embed".to_string(),
+                    service: ServiceType::Embed,
                     backend: self.backend.clone(),
                     duration_ms,
                     metrics: ServiceMetrics::Embedding {
@@ -169,7 +169,7 @@ mod tests {
     use super::*;
     use crate::domain::{Agent, EngineType, Model, ModelType, ResourceId};
     use crate::registry::InMemoryRegistry;
-    use crate::domain::{RequestDiagnostics, Sequence, SessionId, SubmissionId};
+    use crate::domain::{RequestDiagnostics, Sequence, ServiceType, SessionId, SubmissionId};
     use crate::domain::SecretStore;
     use crate::secret_store::InMemorySecretStore;
     use crate::queue::InMemoryQueue;
@@ -249,7 +249,7 @@ mod tests {
             test_submission(),
             SessionId::new(),
             test_agent_id(),
-            "embed",
+            ServiceType::Embed,
             "memory",
             "run",
             Sequence::first(),
@@ -288,7 +288,7 @@ mod tests {
             test_submission(),
             SessionId::new(),
             test_agent_id(),
-            "embed",
+            ServiceType::Embed,
             "memory",
             "run",
             Sequence::first(),
@@ -325,7 +325,7 @@ mod tests {
             test_submission(),
             SessionId::new(),
             test_agent_id(),
-            "embed",
+            ServiceType::Embed,
             "memory",
             "run",
             Sequence::first(),
@@ -364,7 +364,7 @@ mod tests {
             test_submission(),
             SessionId::new(),
             ResourceId::new("http://127.0.0.1:9000/agents/unknown-agent"),
-            "embed",
+            ServiceType::Embed,
             "memory",
             "run",
             Sequence::first(),

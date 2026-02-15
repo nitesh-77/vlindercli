@@ -12,6 +12,7 @@ use uuid::Uuid;
 use serde::{Deserialize, Serialize};
 
 use super::{ResourceId, RuntimeType};
+use super::service_type::ServiceType;
 use super::diagnostics::{
     InvokeDiagnostics, RequestDiagnostics, ServiceDiagnostics,
     ContainerDiagnostics, DelegateDiagnostics,
@@ -343,7 +344,7 @@ pub struct RequestMessage {
     pub submission: SubmissionId,
     pub session: SessionId,
     pub agent_id: ResourceId,
-    pub service: String,
+    pub service: ServiceType,
     pub backend: String,
     pub operation: String,
     pub sequence: Sequence,
@@ -363,7 +364,7 @@ impl RequestMessage {
         submission: SubmissionId,
         session: SessionId,
         agent_id: ResourceId,
-        service: impl Into<String>,
+        service: ServiceType,
         backend: impl Into<String>,
         operation: impl Into<String>,
         sequence: Sequence,
@@ -377,7 +378,7 @@ impl RequestMessage {
             submission,
             session,
             agent_id,
-            service: service.into(),
+            service,
             backend: backend.into(),
             operation: operation.into(),
             sequence,
@@ -398,7 +399,7 @@ pub struct ResponseMessage {
     pub submission: SubmissionId,
     pub session: SessionId,
     pub agent_id: ResourceId,
-    pub service: String,
+    pub service: ServiceType,
     pub backend: String,
     pub operation: String,
     pub sequence: Sequence,
@@ -420,7 +421,7 @@ impl ResponseMessage {
     /// Uses placeholder diagnostics. Call `from_request_with_diagnostics()`
     /// when the service worker has real metrics.
     pub fn from_request(request: &RequestMessage, payload: Vec<u8>) -> Self {
-        let placeholder = ServiceDiagnostics::storage("unknown", "unknown", "unknown", 0, 0);
+        let placeholder = ServiceDiagnostics::storage(request.service, &request.backend, &request.operation, 0, 0);
         Self::from_request_with_diagnostics(request, payload, placeholder)
     }
 
@@ -986,7 +987,7 @@ mod tests {
             submission.clone(),
             session.clone(),
             agent_id.clone(),
-            "kv",
+            ServiceType::Kv,
             "sqlite",
             "get",
             Sequence::first(),
@@ -998,7 +999,7 @@ mod tests {
         assert_eq!(msg.submission, submission);
         assert_eq!(msg.session, session);
         assert_eq!(msg.agent_id, agent_id);
-        assert_eq!(msg.service, "kv");
+        assert_eq!(msg.service, ServiceType::Kv);
         assert_eq!(msg.backend, "sqlite");
         assert_eq!(msg.operation, "get");
         assert_eq!(msg.sequence.as_u32(), 1);
@@ -1014,7 +1015,7 @@ mod tests {
             submission.clone(),
             session.clone(),
             agent_id.clone(),
-            "kv",
+            ServiceType::Kv,
             "sqlite",
             "get",
             Sequence::from(3),
@@ -1098,7 +1099,7 @@ mod tests {
             test_submission(),
             SessionId::new(),
             test_agent_id(),
-            "kv",
+            ServiceType::Kv,
             "sqlite",
             "get",
             Sequence::first(),
@@ -1161,7 +1162,7 @@ mod tests {
             test_submission(),
             SessionId::new(),
             test_agent_id(),
-            "kv",
+            ServiceType::Kv,
             "sqlite",
             "get",
             Sequence::first(),

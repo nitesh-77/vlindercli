@@ -2,7 +2,7 @@
 
 use crate::domain::{
     CompleteMessage, DelegateMessage, InvokeMessage, MessageQueue,
-    ObservableMessage, QueueError, RequestMessage, ResponseMessage, SubmissionId,
+    ObservableMessage, QueueError, RequestMessage, ResponseMessage, ServiceType, SubmissionId,
 };
 #[cfg(test)]
 use crate::domain::{
@@ -37,7 +37,7 @@ impl Default for InMemoryQueue {
 }
 
 impl MessageQueue for InMemoryQueue {
-    fn service_queue(&self, service: &str, backend: &str, action: &str) -> String {
+    fn service_queue(&self, service: ServiceType, backend: &str, action: &str) -> String {
         if action.is_empty() {
             format!("vlinder.svc.{}.{}", service, backend)
         } else {
@@ -141,7 +141,7 @@ impl MessageQueue for InMemoryQueue {
         Err(QueueError::Timeout)
     }
 
-    fn receive_request(&self, service: &str, backend: &str, operation: &str) -> Result<(RequestMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+    fn receive_request(&self, service: ServiceType, backend: &str, operation: &str) -> Result<(RequestMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
         let mut typed = self.typed_queues.lock().unwrap();
 
         let pattern = format!(".{}.{}.{}.", service, backend, operation);
@@ -272,7 +272,7 @@ use crate::domain::agent_routing_key as agent_short_name;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{ResourceId, RuntimeType};
+    use crate::domain::{ResourceId, RuntimeType, ServiceType};
     use crate::domain::{ExpectsReply, HarnessType, Sequence, SessionId, SubmissionId};
 
     fn test_agent_id() -> ResourceId {
@@ -322,7 +322,7 @@ mod tests {
             test_submission(),
             SessionId::new(),
             test_agent_id(),
-            "kv",
+            ServiceType::Kv,
             "sqlite",
             "get",
             Sequence::first(),
@@ -348,7 +348,7 @@ mod tests {
             test_submission(),
             SessionId::new(),
             test_agent_id(),
-            "kv",
+            ServiceType::Kv,
             "sqlite",
             "get",
             Sequence::from(3),
@@ -472,7 +472,7 @@ mod tests {
             test_submission(),
             SessionId::new(),
             test_agent_id(),
-            "kv",
+            ServiceType::Kv,
             "sqlite",
             "get",
             Sequence::first(),
@@ -485,10 +485,10 @@ mod tests {
         queue.send_request(request).unwrap();
 
         // Receive by service/backend/operation
-        let (received, ack) = queue.receive_request("kv", "sqlite", "get").unwrap();
+        let (received, ack) = queue.receive_request(ServiceType::Kv, "sqlite", "get").unwrap();
 
         assert_eq!(received.id, original_id);
-        assert_eq!(received.service, "kv");
+        assert_eq!(received.service, ServiceType::Kv);
         assert_eq!(received.backend, "sqlite");
         assert_eq!(received.operation, "get");
         assert_eq!(received.payload, b"key");
@@ -507,7 +507,7 @@ mod tests {
             submission.clone(),
             SessionId::new(),
             agent_id.clone(),
-            "vec",
+            ServiceType::Vec,
             "sqlite-vec",
             "search",
             Sequence::from(3),
@@ -518,7 +518,7 @@ mod tests {
 
         queue.send_request(request).unwrap();
 
-        let (received, _) = queue.receive_request("vec", "sqlite-vec", "search").unwrap();
+        let (received, _) = queue.receive_request(ServiceType::Vec, "sqlite-vec", "search").unwrap();
 
         // All dimensions preserved for reply construction
         assert_eq!(received.submission, submission);
@@ -535,7 +535,7 @@ mod tests {
             test_submission(),
             SessionId::new(),
             test_agent_id(),
-            "infer",
+            ServiceType::Infer,
             "ollama",
             "",
             Sequence::first(),
@@ -547,9 +547,9 @@ mod tests {
         queue.send_request(request).unwrap();
 
         // Receive with empty operation
-        let (received, _) = queue.receive_request("infer", "ollama", "").unwrap();
+        let (received, _) = queue.receive_request(ServiceType::Infer, "ollama", "").unwrap();
 
-        assert_eq!(received.service, "infer");
+        assert_eq!(received.service, ServiceType::Infer);
         assert_eq!(received.backend, "ollama");
         assert_eq!(received.operation, "");
     }

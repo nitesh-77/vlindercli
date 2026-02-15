@@ -19,7 +19,7 @@ use crate::domain::{
     CompleteMessage, ContainerDiagnostics, DelegateMessage, DelegateDiagnostics,
     HarnessType, InvokeDiagnostics, InvokeMessage, MessageId, MessageQueue,
     QueueError, RequestDiagnostics, RequestMessage, ResourceId, ResponseMessage,
-    RuntimeType, Sequence, ServiceDiagnostics, SessionId, SubmissionId,
+    RuntimeType, Sequence, ServiceDiagnostics, ServiceType, SessionId, SubmissionId,
 };
 
 /// NATS queue with JetStream durability.
@@ -205,7 +205,7 @@ impl NatsQueue {
 }
 
 impl MessageQueue for NatsQueue {
-    fn service_queue(&self, service: &str, backend: &str, action: &str) -> String {
+    fn service_queue(&self, service: ServiceType, backend: &str, action: &str) -> String {
         if action.is_empty() {
             format!("vlinder.svc.{}.{}", service, backend)
         } else {
@@ -404,7 +404,7 @@ impl MessageQueue for NatsQueue {
         })
     }
 
-    fn receive_request(&self, service: &str, backend: &str, operation: &str) -> Result<(RequestMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+    fn receive_request(&self, service: ServiceType, backend: &str, operation: &str) -> Result<(RequestMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
         // Build filter: vlinder.*.req.*.{service}.{backend}.{operation}.{sequence}
         let filter = format!("vlinder.*.req.*.{}.{}.{}.*", service, backend, operation);
 
@@ -424,7 +424,7 @@ impl MessageQueue for NatsQueue {
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
                 session: SessionId::from(get_header(headers, "session-id")?),
                 agent_id: ResourceId::new(&get_header(headers, "agent-id")?),
-                service: get_header(headers, "service")?,
+                service: parse_service_type(&get_header(headers, "service")?)?,
                 backend: get_header(headers, "backend")?,
                 operation: get_header(headers, "operation")?,
                 sequence: Sequence::from(get_header(headers, "sequence")?.parse::<u32>().unwrap_or(1)),
@@ -458,7 +458,7 @@ impl MessageQueue for NatsQueue {
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
                 session: SessionId::from(get_header(headers, "session-id")?),
                 agent_id: ResourceId::new(&get_header(headers, "agent-id")?),
-                service: get_header(headers, "service")?,
+                service: parse_service_type(&get_header(headers, "service")?)?,
                 backend: get_header(headers, "backend")?,
                 operation: get_header(headers, "operation")?,
                 sequence: Sequence::from(get_header(headers, "sequence")?.parse::<u32>().unwrap_or(1)),
@@ -669,5 +669,11 @@ fn parse_runtime_type(s: &str) -> Result<RuntimeType, QueueError> {
         "container" => Ok(RuntimeType::Container),
         _ => Err(QueueError::ReceiveFailed(format!("unknown runtime type: {}", s))),
     }
+}
+
+/// Parse a service type string.
+fn parse_service_type(s: &str) -> Result<ServiceType, QueueError> {
+    ServiceType::from_str(s)
+        .ok_or_else(|| QueueError::ReceiveFailed(format!("unknown service type: {}", s)))
 }
 
