@@ -20,7 +20,6 @@ mod message;
 mod message_queue;
 mod agent_manifest;
 mod catalog;
-pub(crate) mod git_hash;
 mod embedding;
 mod fleet;
 mod fleet_manifest;

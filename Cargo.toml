@@ -32,7 +32,6 @@ sqlite-vec = "0.1"
 zerocopy = { version = "0.7", features = ["derive"] }
 uuid = { version = "1.20.0", features = ["v4"] }
 base64 = "0.22.1"
-sha1 = "0.10"
 sha2 = "0.10"
 ed25519-dalek = { version = "2", features = ["rand_core"] }
 rand = "0.8"
