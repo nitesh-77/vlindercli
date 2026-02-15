@@ -80,6 +80,8 @@ pub enum RegistrationError {
     EmbeddingEngineUnavailable(EngineType, String),
     /// Model cannot be removed because deployed agents depend on it.
     ModelInUse(String, Vec<String>),
+    /// Identity provisioning failed (ADR 084).
+    IdentityFailed(String),
     /// Persistence operation failed (disk I/O, database error, etc.).
     Persistence(String),
     /// Error forwarded from a remote registry (gRPC).
@@ -109,6 +111,7 @@ impl std::fmt::Display for RegistrationError {
                 write!(f, "no {} embedding engine available for model '{}'\n\nIs the daemon running? Start it with: vlinder daemon", engine.as_backend_str(), model)
             }
             RegistrationError::ModelInUse(name, agents) => write!(f, "model '{}' is in use by agents: {}", name, agents.join(", ")),
+            RegistrationError::IdentityFailed(msg) => write!(f, "identity provisioning failed: {}", msg),
             RegistrationError::Persistence(msg) => write!(f, "persistence error: {}", msg),
             RegistrationError::Remote(msg) => write!(f, "{}", msg),
         }

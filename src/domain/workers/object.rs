@@ -406,7 +406,13 @@ mod tests {
     use crate::domain::Agent;
     use crate::registry::InMemoryRegistry;
     use crate::domain::{RequestDiagnostics, Sequence, SessionId, SubmissionId};
+    use crate::domain::SecretStore;
+    use crate::secret_store::InMemorySecretStore;
     use crate::queue::InMemoryQueue;
+
+    fn test_secret_store() -> Arc<dyn SecretStore> {
+        Arc::new(InMemorySecretStore::new())
+    }
 
     const TEST_AGENT_ID: &str = "http://127.0.0.1:9000/agents/test-agent";
 
@@ -442,7 +448,7 @@ mod tests {
     #[test]
     fn handles_put_and_get() {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
-        let registry = InMemoryRegistry::new();
+        let registry = InMemoryRegistry::new(test_secret_store());
         registry.register_runtime(crate::domain::RuntimeType::Container);
         registry.register_object_storage(crate::domain::ObjectStorageType::InMemory);
 
@@ -508,7 +514,7 @@ mod tests {
     #[test]
     fn versioned_put_returns_state_hash() {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
-        let registry = InMemoryRegistry::new();
+        let registry = InMemoryRegistry::new(test_secret_store());
         registry.register_runtime(crate::domain::RuntimeType::Container);
         registry.register_object_storage(crate::domain::ObjectStorageType::InMemory);
         let agent = test_agent_with_object_storage();
@@ -546,7 +552,7 @@ mod tests {
     #[test]
     fn versioned_get_resolves_through_snapshot() {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
-        let registry = InMemoryRegistry::new();
+        let registry = InMemoryRegistry::new(test_secret_store());
         registry.register_runtime(crate::domain::RuntimeType::Container);
         registry.register_object_storage(crate::domain::ObjectStorageType::InMemory);
         let agent = test_agent_with_object_storage();
@@ -597,7 +603,7 @@ mod tests {
     #[test]
     fn versioned_put_chains_state() {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
-        let registry = InMemoryRegistry::new();
+        let registry = InMemoryRegistry::new(test_secret_store());
         registry.register_runtime(crate::domain::RuntimeType::Container);
         registry.register_object_storage(crate::domain::ObjectStorageType::InMemory);
         let agent = test_agent_with_object_storage();
@@ -667,7 +673,7 @@ mod tests {
     #[test]
     fn versioned_get_returns_empty_for_unknown_path() {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
-        let registry = InMemoryRegistry::new();
+        let registry = InMemoryRegistry::new(test_secret_store());
         registry.register_runtime(crate::domain::RuntimeType::Container);
         registry.register_object_storage(crate::domain::ObjectStorageType::InMemory);
         let agent = test_agent_with_object_storage();
@@ -714,7 +720,7 @@ mod tests {
     #[test]
     fn kv_get_response_echoes_state() {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
-        let registry = InMemoryRegistry::new();
+        let registry = InMemoryRegistry::new(test_secret_store());
         registry.register_runtime(crate::domain::RuntimeType::Container);
         registry.register_object_storage(crate::domain::ObjectStorageType::InMemory);
         let agent = test_agent_with_object_storage();
@@ -760,7 +766,7 @@ mod tests {
     fn unversioned_put_and_get_still_work() {
         // Backward compat: no state field = existing behavior
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
-        let registry = InMemoryRegistry::new();
+        let registry = InMemoryRegistry::new(test_secret_store());
         registry.register_runtime(crate::domain::RuntimeType::Container);
         registry.register_object_storage(crate::domain::ObjectStorageType::InMemory);
         let agent = test_agent_with_object_storage();

@@ -323,14 +323,20 @@ impl Runtime for ContainerRuntime {
 mod tests {
     use super::*;
     use crate::registry::InMemoryRegistry;
+    use crate::domain::SecretStore;
+    use crate::secret_store::InMemorySecretStore;
     use crate::queue::InMemoryQueue;
 
     fn test_registry_id() -> ResourceId {
         ResourceId::new("http://test:9000")
     }
 
+    fn test_secret_store() -> Arc<dyn SecretStore> {
+        Arc::new(InMemorySecretStore::new())
+    }
+
     fn test_registry() -> Arc<dyn Registry> {
-        Arc::new(InMemoryRegistry::new())
+        Arc::new(InMemoryRegistry::new(test_secret_store()))
     }
 
     #[test]

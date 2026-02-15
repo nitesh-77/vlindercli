@@ -3,12 +3,13 @@
 //! Used directly for tests and as the read cache inside PersistentRegistry.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 
 use crate::domain::{
     Agent, EngineType, Job, JobId, JobStatus, Model, ModelType,
     ObjectStorageType, RegistrationError, Registry, ResourceId, RuntimeType,
-    SubmissionId, VectorStorageType,
+    SecretStore, SubmissionId, VectorStorageType,
+    ensure_agent_identity,
 };
 
 /// Internal state for InMemoryRegistry.
@@ -28,10 +29,12 @@ pub struct InMemoryRegistry {
     /// URI where this registry exposes its API.
     registry_id: ResourceId,
     state: RwLock<RegistryState>,
+    /// Secret store for agent identity provisioning (ADR 084).
+    secret_store: Arc<dyn SecretStore>,
 }
 
 impl InMemoryRegistry {
-    pub fn new() -> Self {
+    pub fn new(secret_store: Arc<dyn SecretStore>) -> Self {
         Self {
             registry_id: ResourceId::new("http://127.0.0.1:9000"),
             state: RwLock::new(RegistryState {
@@ -44,6 +47,7 @@ impl InMemoryRegistry {
                 available_inference_engines: HashSet::new(),
                 available_embedding_engines: HashSet::new(),
             }),
+            secret_store,
         }
     }
 
@@ -82,12 +86,6 @@ impl InMemoryRegistry {
         let model_id = ResourceId::new(format!("{}/models/{}", self.registry_id.as_str(), name));
         let mut state = self.state.write().unwrap();
         state.models.remove(&model_id).is_some()
-    }
-}
-
-impl Default for InMemoryRegistry {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -159,6 +157,11 @@ impl Registry for InMemoryRegistry {
                 }
             }
         }
+
+        // Provision identity (ADR 084): generate Ed25519 key pair, store private key
+        let identity = ensure_agent_identity(&agent.name, self.secret_store.as_ref())
+            .map_err(|e| RegistrationError::IdentityFailed(e.to_string()))?;
+        agent.public_key = Some(identity.public_key.to_vec());
 
         // Assign registry identity and store
         agent.id = agent_id.clone();
@@ -347,6 +350,11 @@ impl Registry for InMemoryRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::secret_store::InMemorySecretStore;
+
+    fn test_secret_store() -> Arc<dyn SecretStore> {
+        Arc::new(InMemorySecretStore::new())
+    }
 
     fn test_agent_id() -> ResourceId {
         ResourceId::new("http://127.0.0.1:9000/agents/test-agent")
@@ -354,7 +362,7 @@ mod tests {
 
     #[test]
     fn registry_has_api_endpoint() {
-        let registry = InMemoryRegistry::new();
+        let registry = InMemoryRegistry::new(test_secret_store());
 
         // Registry exposes an HTTP API endpoint
         let id = registry.id();
@@ -364,7 +372,7 @@ mod tests {
 
     #[test]
     fn job_id_includes_registry_id() {
-        let registry = InMemoryRegistry::new();
+        let registry = InMemoryRegistry::new(test_secret_store());
         let agent_id = test_agent_id();
 
         let job_id = registry.create_job(SubmissionId::new(), agent_id, "test".to_string());
@@ -376,7 +384,7 @@ mod tests {
 
     #[test]
     fn job_lifecycle() {
-        let registry = InMemoryRegistry::new();
+        let registry = InMemoryRegistry::new(test_secret_store());
         let agent_id = test_agent_id();
 
         // Create job
@@ -402,7 +410,7 @@ mod tests {
 
     #[test]
     fn pending_jobs_filters_by_status() {
-        let registry = InMemoryRegistry::new();
+        let registry = InMemoryRegistry::new(test_secret_store());
         let agent_id = test_agent_id();
 
         let job1 = registry.create_job(SubmissionId::new(), agent_id.clone(), "a".to_string());
@@ -424,7 +432,7 @@ mod tests {
 
     #[test]
     fn register_object_storage_types() {
-        let registry = InMemoryRegistry::new();
+        let registry = InMemoryRegistry::new(test_secret_store());
 
         // Initially nothing available
         assert!(!registry.has_object_storage(ObjectStorageType::Sqlite));
@@ -445,7 +453,7 @@ mod tests {
 
     #[test]
     fn register_vector_storage_types() {
-        let registry = InMemoryRegistry::new();
+        let registry = InMemoryRegistry::new(test_secret_store());
 
         // Initially nothing available
         assert!(!registry.has_vector_storage(VectorStorageType::SqliteVec));
@@ -466,7 +474,7 @@ mod tests {
 
     #[test]
     fn register_inference_engine_types() {
-        let registry = InMemoryRegistry::new();
+        let registry = InMemoryRegistry::new(test_secret_store());
 
         // Initially nothing available
         assert!(!registry.has_inference_engine(EngineType::Ollama));
@@ -487,7 +495,7 @@ mod tests {
 
     #[test]
     fn register_embedding_engine_types() {
-        let registry = InMemoryRegistry::new();
+        let registry = InMemoryRegistry::new(test_secret_store());
 
         // Initially nothing available
         assert!(!registry.has_embedding_engine(EngineType::Ollama));
@@ -532,7 +540,7 @@ mod tests {
 
     #[test]
     fn restore_agent_bypasses_validation() {
-        let registry = InMemoryRegistry::new();
+        let registry = InMemoryRegistry::new(test_secret_store());
         // No runtimes, storage, or models registered — register_agent would fail
         let agent = minimal_agent("echo");
 
@@ -552,7 +560,7 @@ mod tests {
 
     #[test]
     fn restore_agent_rejects_duplicate() {
-        let registry = InMemoryRegistry::new();
+        let registry = InMemoryRegistry::new(test_secret_store());
 
         registry.restore_agent(minimal_agent("echo")).unwrap();
 

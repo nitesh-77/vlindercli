@@ -202,7 +202,13 @@ mod tests {
     use crate::domain::{Agent, Registry};
     use crate::registry::InMemoryRegistry;
     use crate::domain::{RequestDiagnostics, Sequence, SessionId, SubmissionId};
+    use crate::domain::SecretStore;
+    use crate::secret_store::InMemorySecretStore;
     use crate::queue::InMemoryQueue;
+
+    fn test_secret_store() -> Arc<dyn SecretStore> {
+        Arc::new(InMemorySecretStore::new())
+    }
 
     const TEST_AGENT_ID: &str = "http://127.0.0.1:9000/agents/test-agent";
 
@@ -234,7 +240,7 @@ mod tests {
     #[test]
     fn vector_search_response_echoes_state() {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
-        let registry = InMemoryRegistry::new();
+        let registry = InMemoryRegistry::new(test_secret_store());
         registry.register_runtime(crate::domain::RuntimeType::Container);
         registry.register_vector_storage(crate::domain::VectorStorageType::InMemory);
         let agent = test_agent_with_vector_storage();
@@ -284,7 +290,7 @@ mod tests {
     #[test]
     fn handles_store_and_search() {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
-        let registry = InMemoryRegistry::new();
+        let registry = InMemoryRegistry::new(test_secret_store());
         registry.register_runtime(crate::domain::RuntimeType::Container);
         registry.register_vector_storage(crate::domain::VectorStorageType::InMemory);
 

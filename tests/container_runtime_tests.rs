@@ -5,19 +5,24 @@
 use std::sync::Arc;
 
 use vlindercli::domain::{
-    Agent, Registry, ResourceId, Runtime, RuntimeType,
+    Agent, Registry, ResourceId, Runtime, RuntimeType, SecretStore,
     InvokeDiagnostics, InvokeMessage, MessageQueue, HarnessType, SessionId, SubmissionId,
 };
 use vlindercli::registry::InMemoryRegistry;
 use vlindercli::queue::InMemoryQueue;
 use vlindercli::runtime::ContainerRuntime;
+use vlindercli::secret_store::InMemorySecretStore;
+
+fn test_secret_store() -> Arc<dyn SecretStore> {
+    Arc::new(InMemorySecretStore::new())
+}
 
 #[test]
 #[ignore] // Run via: just run-integration-tests
 fn container_runtime_executes_echo_agent() {
     let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
 
-    let registry = InMemoryRegistry::new();
+    let registry = InMemoryRegistry::new(test_secret_store());
     registry.register_runtime(RuntimeType::Container);
 
     let agent = Agent::from_toml(r#"

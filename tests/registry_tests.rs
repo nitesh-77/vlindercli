@@ -1,9 +1,15 @@
 //! Integration tests for Registry that require agent fixtures.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use vlindercli::domain::{Agent, EngineType, Model, ModelType, Registry, RegistrationError, ResourceId, RuntimeType};
+use vlindercli::domain::{Agent, EngineType, Model, ModelType, Registry, RegistrationError, ResourceId, RuntimeType, SecretStore};
 use vlindercli::registry::InMemoryRegistry;
+use vlindercli::secret_store::InMemorySecretStore;
+
+fn test_secret_store() -> Arc<dyn SecretStore> {
+    Arc::new(InMemorySecretStore::new())
+}
 
 const FIXTURES: &str = "tests/fixtures/agents";
 
@@ -21,7 +27,7 @@ fn load_agent(name: &str) -> Agent {
 
 #[test]
 fn agent_registration() {
-    let registry = InMemoryRegistry::new();
+    let registry = InMemoryRegistry::new(test_secret_store());
     registry.register_runtime(RuntimeType::Container);
 
     // Agent not found initially
@@ -35,6 +41,10 @@ fn agent_registration() {
     // Now found by registry-assigned id
     let agent = registry.get_agent(&agent_id).unwrap();
     assert_eq!(agent.name, "echo-agent");
+
+    // Identity provisioned: public key is 32 bytes (Ed25519)
+    let public_key = agent.public_key.as_ref().expect("public_key must be set after registration");
+    assert_eq!(public_key.len(), 32);
 }
 
 // ============================================================================
@@ -43,7 +53,7 @@ fn agent_registration() {
 
 #[test]
 fn select_runtime_identifies_container_agent() {
-    let registry = InMemoryRegistry::new();
+    let registry = InMemoryRegistry::new(test_secret_store());
     registry.register_runtime(RuntimeType::Container);
 
     let agent = load_agent("echo-agent");
@@ -54,7 +64,7 @@ fn select_runtime_identifies_container_agent() {
 
 #[test]
 fn select_runtime_returns_none_without_registered_runtime() {
-    let registry = InMemoryRegistry::new(); // No runtimes registered
+    let registry = InMemoryRegistry::new(test_secret_store()); // No runtimes registered
 
     let agent = load_agent("echo-agent");
 
@@ -95,7 +105,7 @@ fn register_model_test_agent(registry: &InMemoryRegistry) {
 
 #[test]
 fn delete_model_blocked_by_deployed_agent() {
-    let registry = InMemoryRegistry::new();
+    let registry = InMemoryRegistry::new(test_secret_store());
     register_model_test_agent(&registry);
 
     let result = registry.delete_model("phi3");
@@ -116,7 +126,7 @@ fn delete_model_blocked_by_deployed_agent() {
 
 #[test]
 fn delete_model_succeeds_without_dependent_agents() {
-    let registry = InMemoryRegistry::new();
+    let registry = InMemoryRegistry::new(test_secret_store());
     registry.register_inference_engine(EngineType::Ollama);
 
     let model = Model {
@@ -140,7 +150,7 @@ fn delete_model_succeeds_without_dependent_agents() {
 
 #[test]
 fn register_model_rejected_without_inference_engine() {
-    let registry = InMemoryRegistry::new();
+    let registry = InMemoryRegistry::new(test_secret_store());
     // No inference engine registered
 
     let model = Model {
@@ -165,7 +175,7 @@ fn register_model_rejected_without_inference_engine() {
 
 #[test]
 fn register_model_rejected_without_embedding_engine() {
-    let registry = InMemoryRegistry::new();
+    let registry = InMemoryRegistry::new(test_secret_store());
     // No embedding engine registered
 
     let model = Model {

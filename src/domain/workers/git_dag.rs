@@ -578,7 +578,8 @@ mod tests {
     use super::*;
     use crate::domain::message::*;
     use crate::domain::diagnostics::*;
-    use crate::domain::{RuntimeType, ResourceId, Agent};
+    use crate::domain::{RuntimeType, ResourceId, Agent, SecretStore};
+    use crate::secret_store::InMemorySecretStore;
     use crate::registry::InMemoryRegistry;
 
     fn test_agent_id() -> ResourceId {
@@ -697,9 +698,13 @@ mod tests {
         (worker, tmp)
     }
 
+    fn test_secret_store() -> Arc<dyn SecretStore> {
+        Arc::new(InMemorySecretStore::new())
+    }
+
     fn test_worker_with_registry() -> (GitDagWorker, tempfile::TempDir, Arc<InMemoryRegistry>) {
         let tmp = tempfile::TempDir::new().unwrap();
-        let registry = Arc::new(InMemoryRegistry::new());
+        let registry = Arc::new(InMemoryRegistry::new(test_secret_store()));
         registry.register_runtime(RuntimeType::Container);
 
         let agent = Agent::from_toml(r#"

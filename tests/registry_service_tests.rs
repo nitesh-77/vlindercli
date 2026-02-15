@@ -6,9 +6,14 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use vlindercli::domain::{Agent, Registry, Requirements, RuntimeType, SubmissionId};
+use vlindercli::domain::{Agent, Registry, Requirements, RuntimeType, SecretStore, SubmissionId};
 use vlindercli::registry::InMemoryRegistry;
 use vlindercli::registry_service::{GrpcRegistryClient, RegistryServiceServer};
+use vlindercli::secret_store::InMemorySecretStore;
+
+fn test_secret_store() -> Arc<dyn SecretStore> {
+    Arc::new(InMemorySecretStore::new())
+}
 
 fn empty_requirements() -> Requirements {
     Requirements {
@@ -51,7 +56,7 @@ fn start_server_background(registry: Arc<dyn Registry>) -> SocketAddr {
 #[test]
 fn grpc_register_and_get_agent() {
     // Create in-memory registry and register Container runtime
-    let registry = Arc::new(InMemoryRegistry::new());
+    let registry = Arc::new(InMemoryRegistry::new(test_secret_store()));
     registry.register_runtime(RuntimeType::Container);
     let addr = start_server_background(registry.clone());
 
@@ -86,7 +91,7 @@ fn grpc_register_and_get_agent() {
 
 #[test]
 fn grpc_list_agents() {
-    let registry = Arc::new(InMemoryRegistry::new());
+    let registry = Arc::new(InMemoryRegistry::new(test_secret_store()));
     registry.register_runtime(RuntimeType::Container);
     let addr = start_server_background(registry.clone());
     let client = GrpcRegistryClient::connect(&format!("http://{}", addr)).unwrap();
@@ -118,7 +123,7 @@ fn grpc_list_agents() {
 
 #[test]
 fn grpc_job_lifecycle() {
-    let registry = Arc::new(InMemoryRegistry::new());
+    let registry = Arc::new(InMemoryRegistry::new(test_secret_store()));
     registry.register_runtime(RuntimeType::Container);
     let addr = start_server_background(registry.clone());
     let client = GrpcRegistryClient::connect(&format!("http://{}", addr)).unwrap();

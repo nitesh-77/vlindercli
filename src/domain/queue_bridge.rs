@@ -348,12 +348,18 @@ mod tests {
     use crate::registry::InMemoryRegistry;
     use crate::domain::{
         HarnessType, InvokeDiagnostics, RuntimeType, ResourceId, SessionId, SubmissionId,
+        SecretStore,
     };
+    use crate::secret_store::InMemorySecretStore;
+
+    fn test_secret_store() -> Arc<dyn SecretStore> {
+        Arc::new(InMemorySecretStore::new())
+    }
 
     /// Build a QueueBridge wired to in-memory backends for unit testing.
     fn test_bridge(kv: Option<ObjectStorageType>) -> QueueBridge {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
-        let registry: Arc<dyn Registry> = Arc::new(InMemoryRegistry::new());
+        let registry: Arc<dyn Registry> = Arc::new(InMemoryRegistry::new(test_secret_store()));
         let invoke = InvokeMessage::new(
             SubmissionId::new(),
             SessionId::new(),

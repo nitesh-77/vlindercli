@@ -170,8 +170,14 @@ mod tests {
     use crate::domain::{Agent, EngineType, Model, ModelType, ResourceId};
     use crate::registry::InMemoryRegistry;
     use crate::domain::{RequestDiagnostics, Sequence, SessionId, SubmissionId};
+    use crate::domain::SecretStore;
+    use crate::secret_store::InMemorySecretStore;
     use crate::queue::InMemoryQueue;
     use crate::embedding::InMemoryEmbedding;
+
+    fn test_secret_store() -> Arc<dyn SecretStore> {
+        Arc::new(InMemorySecretStore::new())
+    }
 
     const TEST_AGENT_ID: &str = "http://127.0.0.1:9000/agents/test-agent";
 
@@ -215,7 +221,7 @@ mod tests {
     }
 
     fn test_registry_with_agent_and_model(agent: Agent, model_name: &str) -> Arc<dyn Registry> {
-        let registry = InMemoryRegistry::new();
+        let registry = InMemoryRegistry::new(test_secret_store());
         registry.register_runtime(crate::domain::RuntimeType::Container);
         registry.register_embedding_engine(EngineType::InMemory);
         registry.register_model(test_model(model_name)).unwrap();
@@ -342,7 +348,7 @@ mod tests {
     fn rejects_unknown_agent() {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
         // Registry with no agents registered
-        let registry: Arc<dyn Registry> = Arc::new(InMemoryRegistry::new());
+        let registry: Arc<dyn Registry> = Arc::new(InMemoryRegistry::new(test_secret_store()));
         let handler = EmbeddingServiceWorker::new(Arc::clone(&queue), registry, "memory");
 
         // Register mock engine

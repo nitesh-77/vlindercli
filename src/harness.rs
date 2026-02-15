@@ -292,6 +292,8 @@ mod tests {
     use super::*;
     use crate::registry::InMemoryRegistry;
     use crate::queue::InMemoryQueue;
+    use crate::secret_store::InMemorySecretStore;
+    use crate::domain::SecretStore;
     use std::path::PathBuf;
 
     fn test_agent_id() -> ResourceId {
@@ -304,7 +306,8 @@ mod tests {
 
     /// Create a registry with Container runtime registered (required for agent deployment).
     fn test_registry() -> Arc<dyn Registry> {
-        let registry = InMemoryRegistry::new();
+        let store: Arc<dyn SecretStore> = Arc::new(InMemorySecretStore::new());
+        let registry = InMemoryRegistry::new(store);
         registry.register_runtime(RuntimeType::Container);
         Arc::new(registry)
     }

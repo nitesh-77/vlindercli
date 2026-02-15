@@ -66,8 +66,11 @@ fn run_registry_worker(config: &Config, shutdown: &AtomicBool) {
     use crate::registry::PersistentRegistry;
     use crate::registry_service::RegistryServiceServer;
 
+    let secret_store = crate::secret_store::from_config()
+        .unwrap_or_else(|e| panic!("Failed to open secret store: {}", e));
+
     let db_path = registry_db_path();
-    let registry = PersistentRegistry::open(&db_path, config)
+    let registry = PersistentRegistry::open(&db_path, config, secret_store)
         .unwrap_or_else(|e| panic!("Failed to initialize registry: {}", e));
 
     // Register non-engine capabilities (engines are registered by open())

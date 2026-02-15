@@ -13,14 +13,14 @@ pub(crate) use persistent::PersistentRegistry;
 
 use std::sync::Arc;
 use crate::config::{registry_db_path, Config};
-use crate::domain::Registry;
+use crate::domain::{Registry, SecretStore};
 use crate::registry_service::{GrpcRegistryClient, ping_registry};
 
 /// Connect to the registry — gRPC in distributed mode, local SQLite otherwise.
 ///
 /// CLI commands use this to get a `dyn Registry` without knowing which
 /// concrete implementation is behind it.
-pub fn open_registry(config: &Config) -> Option<Arc<dyn Registry>> {
+pub fn open_registry(config: &Config, secret_store: Arc<dyn SecretStore>) -> Option<Arc<dyn Registry>> {
     if config.distributed.enabled {
         let registry_addr = if config.distributed.registry_addr.starts_with("http://")
             || config.distributed.registry_addr.starts_with("https://") {
@@ -43,7 +43,7 @@ pub fn open_registry(config: &Config) -> Option<Arc<dyn Registry>> {
         }
     } else {
         let db_path = registry_db_path();
-        match PersistentRegistry::open(&db_path, config) {
+        match PersistentRegistry::open(&db_path, config, secret_store) {
             Ok(r) => Some(Arc::new(r)),
             Err(e) => {
                 eprintln!("Failed to open registry: {}", e);
