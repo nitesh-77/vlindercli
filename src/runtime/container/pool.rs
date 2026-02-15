@@ -9,8 +9,9 @@ use std::sync::Arc;
 
 use crate::domain::{Agent, ImageDigest, ImageRef, QueueBridge, ContainerDiagnostics, ContainerRuntimeInfo, InvokeMessage};
 
-use super::podman::{Podman, PodmanCli, resolve_socket};
-use super::podman_socket::PodmanSocket;
+use super::podman::{Podman, resolve_socket};
+use super::podman_api::PodmanApiClient;
+use super::podman_cli::PodmanCliClient;
 
 /// A long-running container managed by the pool.
 pub(super) struct ManagedContainer {
@@ -63,11 +64,11 @@ impl ContainerPool {
         let podman: Box<dyn Podman> = match resolve_socket(podman_socket_config) {
             Some(path) => {
                 tracing::info!(event = "podman.socket", path = %path.display(), "Using Podman socket API");
-                Box::new(PodmanSocket::new(&path))
+                Box::new(PodmanApiClient::new(&path))
             }
             None => {
                 tracing::info!(event = "podman.cli", "Using Podman CLI");
-                Box::new(PodmanCli)
+                Box::new(PodmanCliClient)
             }
         };
 

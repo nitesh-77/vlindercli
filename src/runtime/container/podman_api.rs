@@ -1,6 +1,6 @@
-//! PodmanSocket — Podman trait implementation using the libpod REST API.
+//! PodmanApiClient — Podman trait implementation using the libpod REST API.
 //!
-//! Talks to Podman's Unix socket API instead of shelling out to the CLI.
+//! Primary implementation. Talks to Podman's REST API over a Unix socket.
 //! Uses ureq with a Unix transport adapter for HTTP-over-socket.
 
 use std::collections::HashMap;
@@ -15,12 +15,15 @@ use super::unix_transport::unix_agent;
 
 const API_BASE: &str = "http://localhost/v5.0.0/libpod";
 
-/// Podman REST API client over a Unix socket.
-pub(crate) struct PodmanSocket {
+/// Podman REST API client — primary implementation.
+///
+/// Talks to the libpod REST API over a Unix socket. The socket path is
+/// resolved by `resolve_socket()` in `podman.rs` (ADR 077).
+pub(crate) struct PodmanApiClient {
     agent: ureq::Agent,
 }
 
-impl PodmanSocket {
+impl PodmanApiClient {
     pub(crate) fn new(socket_path: &Path) -> Self {
         Self {
             agent: unix_agent(socket_path),
@@ -30,7 +33,7 @@ impl PodmanSocket {
 
 // ── Podman trait implementation ──────────────────────────────────────
 
-impl Podman for PodmanSocket {
+impl Podman for PodmanApiClient {
     fn engine_version(&self) -> Option<semver::Version> {
         let url = "http://localhost/version";
         let mut resp = self.agent.get(url).call().ok()?;
