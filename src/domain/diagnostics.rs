@@ -14,8 +14,11 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::container_id::ContainerId;
 use super::image_digest::ImageDigest;
 use super::image_ref::ImageRef;
+use super::operation::Operation;
+use super::service_type::ServiceType;
 
 // ============================================================================
 // InvokeDiagnostics — Harness
@@ -54,8 +57,8 @@ pub struct RequestDiagnostics {
 /// Diagnostics emitted by a service worker after processing a request.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ServiceDiagnostics {
-    /// Service type: "infer", "embed", "kv", "vec".
-    pub service: String,
+    /// Which platform service handled this request.
+    pub service: ServiceType,
     /// Backend identifier: "ollama", "openrouter", "sqlite", "memory".
     pub backend: String,
     /// Execution time in milliseconds.
@@ -79,7 +82,7 @@ pub enum ServiceMetrics {
         model: String,
     },
     Storage {
-        operation: String,
+        operation: Operation,
         bytes_transferred: u64,
     },
 }
@@ -91,11 +94,11 @@ impl ServiceDiagnostics {
     /// older senders that don't yet include diagnostics headers.
     pub fn placeholder() -> Self {
         Self {
-            service: "unknown".to_string(),
+            service: ServiceType::Kv,
             backend: "unknown".to_string(),
             duration_ms: 0,
             metrics: ServiceMetrics::Storage {
-                operation: "unknown".to_string(),
+                operation: Operation::Get,
                 bytes_transferred: 0,
             },
         }
@@ -103,18 +106,18 @@ impl ServiceDiagnostics {
 
     /// Convenience constructor for storage service workers (kv, vec).
     pub fn storage(
-        service: impl Into<String>,
+        service: ServiceType,
         backend: impl Into<String>,
-        operation: impl Into<String>,
+        operation: Operation,
         bytes: u64,
         duration_ms: u64,
     ) -> Self {
         Self {
-            service: service.into(),
+            service,
             backend: backend.into(),
             duration_ms,
             metrics: ServiceMetrics::Storage {
-                operation: operation.into(),
+                operation,
                 bytes_transferred: bytes,
             },
         }
@@ -148,7 +151,7 @@ pub struct ContainerRuntimeInfo {
     /// Image digest (e.g., "sha256:a80c4f17..."), if resolved.
     pub image_digest: Option<ImageDigest>,
     /// Container ID for this execution.
-    pub container_id: String,
+    pub container_id: ContainerId,
 }
 
 impl ContainerDiagnostics {
@@ -163,7 +166,7 @@ impl ContainerDiagnostics {
                 engine_version: "unknown".to_string(),
                 image_ref: None,
                 image_digest: None,
-                container_id: "unknown".to_string(),
+                container_id: ContainerId::unknown(),
             },
             duration_ms,
         }
@@ -236,7 +239,7 @@ mod tests {
     #[test]
     fn service_diagnostics_inference_json_round_trip() {
         let diag = ServiceDiagnostics {
-            service: "infer".to_string(),
+            service: ServiceType::Infer,
             backend: "ollama".to_string(),
             duration_ms: 1800,
             metrics: ServiceMetrics::Inference {
@@ -253,7 +256,7 @@ mod tests {
     #[test]
     fn service_diagnostics_inference_toml_round_trip() {
         let diag = ServiceDiagnostics {
-            service: "infer".to_string(),
+            service: ServiceType::Infer,
             backend: "ollama".to_string(),
             duration_ms: 1800,
             metrics: ServiceMetrics::Inference {
@@ -270,7 +273,7 @@ mod tests {
     #[test]
     fn service_diagnostics_embedding_json_round_trip() {
         let diag = ServiceDiagnostics {
-            service: "embed".to_string(),
+            service: ServiceType::Embed,
             backend: "ollama".to_string(),
             duration_ms: 200,
             metrics: ServiceMetrics::Embedding {
@@ -285,7 +288,7 @@ mod tests {
 
     #[test]
     fn service_diagnostics_storage_json_round_trip() {
-        let diag = ServiceDiagnostics::storage("kv", "sqlite", "put", 2048, 5);
+        let diag = ServiceDiagnostics::storage(ServiceType::Kv, "sqlite", Operation::Put, 2048, 5);
         let json = serde_json::to_string(&diag).unwrap();
         let back: ServiceDiagnostics = serde_json::from_str(&json).unwrap();
         assert_eq!(diag, back);
@@ -293,7 +296,7 @@ mod tests {
 
     #[test]
     fn service_diagnostics_storage_toml_round_trip() {
-        let diag = ServiceDiagnostics::storage("kv", "sqlite", "get", 512, 2);
+        let diag = ServiceDiagnostics::storage(ServiceType::Kv, "sqlite", Operation::Get, 512, 2);
         let toml_str = toml::to_string_pretty(&diag).unwrap();
         let back: ServiceDiagnostics = toml::from_str(&toml_str).unwrap();
         assert_eq!(diag, back);
@@ -309,7 +312,7 @@ mod tests {
                 engine_version: "5.3.1".to_string(),
                 image_ref: Some(ImageRef::parse("localhost/echo-agent:latest").unwrap()),
                 image_digest: Some(ImageDigest::parse("sha256:abc123").unwrap()),
-                container_id: "def456".to_string(),
+                container_id: ContainerId::new("def456"),
             },
             duration_ms: 2300,
         };
@@ -330,7 +333,7 @@ mod tests {
                 engine_version: "5.3.1".to_string(),
                 image_ref: Some(ImageRef::parse("localhost/support-agent:latest").unwrap()),
                 image_digest: Some(ImageDigest::parse("sha256:a80c4f17").unwrap()),
-                container_id: "abc123def456".to_string(),
+                container_id: ContainerId::new("abc123def456"),
             },
             duration_ms: 2300,
         };

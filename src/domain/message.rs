@@ -12,6 +12,8 @@ use uuid::Uuid;
 use serde::{Deserialize, Serialize};
 
 use super::{ResourceId, RuntimeType};
+use super::operation::Operation;
+use super::service_type::ServiceType;
 use super::diagnostics::{
     InvokeDiagnostics, RequestDiagnostics, ServiceDiagnostics,
     ContainerDiagnostics, DelegateDiagnostics,
@@ -343,9 +345,9 @@ pub struct RequestMessage {
     pub submission: SubmissionId,
     pub session: SessionId,
     pub agent_id: ResourceId,
-    pub service: String,
+    pub service: ServiceType,
     pub backend: String,
-    pub operation: String,
+    pub operation: Operation,
     pub sequence: Sequence,
     #[serde(skip)]
     pub payload: Vec<u8>,
@@ -363,9 +365,9 @@ impl RequestMessage {
         submission: SubmissionId,
         session: SessionId,
         agent_id: ResourceId,
-        service: impl Into<String>,
+        service: ServiceType,
         backend: impl Into<String>,
-        operation: impl Into<String>,
+        operation: Operation,
         sequence: Sequence,
         payload: Vec<u8>,
         state: Option<String>,
@@ -377,9 +379,9 @@ impl RequestMessage {
             submission,
             session,
             agent_id,
-            service: service.into(),
+            service,
             backend: backend.into(),
-            operation: operation.into(),
+            operation,
             sequence,
             payload,
             state,
@@ -398,9 +400,9 @@ pub struct ResponseMessage {
     pub submission: SubmissionId,
     pub session: SessionId,
     pub agent_id: ResourceId,
-    pub service: String,
+    pub service: ServiceType,
     pub backend: String,
-    pub operation: String,
+    pub operation: Operation,
     pub sequence: Sequence,
     #[serde(skip)]
     pub payload: Vec<u8>,
@@ -420,7 +422,7 @@ impl ResponseMessage {
     /// Uses placeholder diagnostics. Call `from_request_with_diagnostics()`
     /// when the service worker has real metrics.
     pub fn from_request(request: &RequestMessage, payload: Vec<u8>) -> Self {
-        let placeholder = ServiceDiagnostics::storage("unknown", "unknown", "unknown", 0, 0);
+        let placeholder = ServiceDiagnostics::storage(request.service, &request.backend, request.operation, 0, 0);
         Self::from_request_with_diagnostics(request, payload, placeholder)
     }
 
@@ -436,9 +438,9 @@ impl ResponseMessage {
             submission: request.submission.clone(),
             session: request.session.clone(),
             agent_id: request.agent_id.clone(),
-            service: request.service.clone(),
+            service: request.service,
             backend: request.backend.clone(),
-            operation: request.operation.clone(),
+            operation: request.operation,
             sequence: request.sequence,
             payload,
             correlation_id: request.id.clone(),
@@ -986,9 +988,9 @@ mod tests {
             submission.clone(),
             session.clone(),
             agent_id.clone(),
-            "kv",
+            ServiceType::Kv,
             "sqlite",
-            "get",
+            Operation::Get,
             Sequence::first(),
             b"key".to_vec(),
             None,
@@ -998,9 +1000,9 @@ mod tests {
         assert_eq!(msg.submission, submission);
         assert_eq!(msg.session, session);
         assert_eq!(msg.agent_id, agent_id);
-        assert_eq!(msg.service, "kv");
+        assert_eq!(msg.service, ServiceType::Kv);
         assert_eq!(msg.backend, "sqlite");
-        assert_eq!(msg.operation, "get");
+        assert_eq!(msg.operation, Operation::Get);
         assert_eq!(msg.sequence.as_u32(), 1);
         assert_eq!(msg.payload, b"key");
     }
@@ -1014,9 +1016,9 @@ mod tests {
             submission.clone(),
             session.clone(),
             agent_id.clone(),
-            "kv",
+            ServiceType::Kv,
             "sqlite",
-            "get",
+            Operation::Get,
             Sequence::from(3),
             b"key".to_vec(),
             None,
@@ -1098,9 +1100,9 @@ mod tests {
             test_submission(),
             SessionId::new(),
             test_agent_id(),
-            "kv",
+            ServiceType::Kv,
             "sqlite",
-            "get",
+            Operation::Get,
             Sequence::first(),
             b"key".to_vec(),
             None,
@@ -1161,9 +1163,9 @@ mod tests {
             test_submission(),
             SessionId::new(),
             test_agent_id(),
-            "kv",
+            ServiceType::Kv,
             "sqlite",
-            "get",
+            Operation::Get,
             Sequence::first(),
             b"test".to_vec(),
             None,

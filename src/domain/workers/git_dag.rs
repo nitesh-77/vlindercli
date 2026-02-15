@@ -28,7 +28,7 @@
 //! │   ├── ...per-field files...
 //! │   ├── service                 # "infer"
 //! │   ├── backend                 # "ollama"
-//! │   ├── operation               # "chat"
+//! │   ├── operation               # "run"
 //! │   ├── sequence                # "1"
 //! │   ├── payload
 //! │   └── diagnostics.toml
@@ -279,9 +279,9 @@ impl GitDagWorker {
             ObservableMessage::Request(m) => {
                 entries.push(self.write_field("type", "request")?);
                 entries.push(self.write_field("agent_id", m.agent_id.as_str())?);
-                entries.push(self.write_field("service", &m.service)?);
+                entries.push(self.write_field("service", m.service.as_str())?);
                 entries.push(self.write_field("backend", &m.backend)?);
-                entries.push(self.write_field("operation", &m.operation)?);
+                entries.push(self.write_field("operation", m.operation.as_str())?);
                 entries.push(self.write_field("sequence", &m.sequence.as_u32().to_string())?);
                 if let Some(ref state) = m.state {
                     entries.push(self.write_field("state", state)?);
@@ -291,9 +291,9 @@ impl GitDagWorker {
             ObservableMessage::Response(m) => {
                 entries.push(self.write_field("type", "response")?);
                 entries.push(self.write_field("agent_id", m.agent_id.as_str())?);
-                entries.push(self.write_field("service", &m.service)?);
+                entries.push(self.write_field("service", m.service.as_str())?);
                 entries.push(self.write_field("backend", &m.backend)?);
-                entries.push(self.write_field("operation", &m.operation)?);
+                entries.push(self.write_field("operation", m.operation.as_str())?);
                 entries.push(self.write_field("sequence", &m.sequence.as_u32().to_string())?);
                 entries.push(self.write_field("correlation_id", m.correlation_id.as_str())?);
                 if let Some(ref state) = m.state {
@@ -578,7 +578,7 @@ mod tests {
     use super::*;
     use crate::domain::message::*;
     use crate::domain::diagnostics::*;
-    use crate::domain::{RuntimeType, ResourceId, Agent, SecretStore};
+    use crate::domain::{ContainerId, Operation, RuntimeType, ResourceId, ServiceType, Agent, SecretStore};
     use crate::secret_store::InMemorySecretStore;
     use crate::registry::InMemoryRegistry;
 
@@ -609,9 +609,9 @@ mod tests {
             SubmissionId::from("sub-1".to_string()),
             SessionId::from("sess-1".to_string()),
             test_agent_id(),
-            "infer",
+            ServiceType::Infer,
             "ollama",
-            "chat",
+            Operation::Run,
             Sequence::from(1),
             payload.to_vec(),
             None,
@@ -632,9 +632,9 @@ mod tests {
             SubmissionId::from("sub-1".to_string()),
             SessionId::from("sess-1".to_string()),
             test_agent_id(),
-            "infer",
+            ServiceType::Infer,
             "ollama",
-            "chat",
+            Operation::Run,
             Sequence::from(1),
             b"prompt".to_vec(),
             None,
@@ -649,7 +649,7 @@ mod tests {
             &request,
             payload.to_vec(),
             ServiceDiagnostics {
-                service: "infer".to_string(),
+                service: ServiceType::Infer,
                 backend: "ollama".to_string(),
                 duration_ms: 1800,
                 metrics: ServiceMetrics::Inference {
@@ -851,7 +851,7 @@ mod tests {
         assert_eq!(show("type").unwrap(), "request");
         assert_eq!(show("service").unwrap(), "infer");
         assert_eq!(show("backend").unwrap(), "ollama");
-        assert_eq!(show("operation").unwrap(), "chat");
+        assert_eq!(show("operation").unwrap(), "run");
         assert_eq!(show("sequence").unwrap(), "1");
         assert!(show("agent_id").unwrap().contains("support-agent"));
     }
@@ -890,7 +890,7 @@ mod tests {
                     engine_version: "5.3.1".to_string(),
                     image_ref: None,
                     image_digest: None,
-                    container_id: "abc123".to_string(),
+                    container_id: ContainerId::new("abc123"),
                 },
                 duration_ms: 2300,
             },

@@ -106,7 +106,9 @@ impl CliHarness {
         // Resolve image digest for container agents at registration time (ADR 073).
         // Both forms (tag + digest) are stored — the runtime switches based on ImagePolicy.
         if agent.runtime == RuntimeType::Container && agent.image_digest.is_none() {
-            agent.image_digest = crate::runtime::resolve_image_digest(&agent.executable);
+            if let Ok(image_ref) = crate::domain::ImageRef::parse(&agent.executable) {
+                agent.image_digest = crate::runtime::resolve_image_digest(&image_ref);
+            }
         }
 
         let name = agent.name.clone();

@@ -76,7 +76,7 @@ impl MessageQueue for RecordingQueue {
     // Routing helpers — delegate straight through
     // -------------------------------------------------------------------------
 
-    fn service_queue(&self, service: &str, backend: &str, action: &str) -> String {
+    fn service_queue(&self, service: crate::domain::ServiceType, backend: &str, action: crate::domain::Operation) -> String {
         self.inner.service_queue(service, backend, action)
     }
 
@@ -126,7 +126,7 @@ impl MessageQueue for RecordingQueue {
         self.inner.receive_invoke(subject_pattern)
     }
 
-    fn receive_request(&self, service: &str, backend: &str, operation: &str) -> Result<(RequestMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+    fn receive_request(&self, service: crate::domain::ServiceType, backend: &str, operation: crate::domain::Operation) -> Result<(RequestMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
         self.inner.receive_request(service, backend, operation)
     }
 
@@ -160,8 +160,8 @@ mod tests {
     use super::*;
     use crate::domain::{
         ContainerDiagnostics, DagNode, DelegateDiagnostics, HarnessType,
-        InvokeDiagnostics, MessageType, RequestDiagnostics, ResourceId,
-        RuntimeType, Sequence, ServiceDiagnostics, SessionId, SubmissionId,
+        InvokeDiagnostics, MessageType, Operation, RequestDiagnostics, ResourceId,
+        RuntimeType, Sequence, ServiceDiagnostics, ServiceType, SessionId, SubmissionId,
     };
     use crate::queue::InMemoryQueue;
     use crate::storage::dag_store::SqliteDagStore;
@@ -209,9 +209,9 @@ mod tests {
             test_submission(),
             test_session(),
             test_agent_id(),
-            "infer".to_string(),
-            "ollama".to_string(),
-            "".to_string(),
+            ServiceType::Infer,
+            "ollama",
+            Operation::Run,
             Sequence::first(),
             b"prompt".to_vec(),
             None,

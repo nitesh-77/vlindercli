@@ -15,8 +15,8 @@ use chrono::Utc;
 use crate::domain::{
     CompleteMessage, ContainerDiagnostics, DagNode, DelegateDiagnostics,
     DelegateMessage, HarnessType, InvokeDiagnostics, InvokeMessage, MessageId, MessageType,
-    RequestDiagnostics, RequestMessage, ResourceId, ResponseMessage, RuntimeType, Sequence,
-    ServiceDiagnostics, SessionId, SubmissionId, hash_dag_node,
+    Operation, RequestDiagnostics, RequestMessage, ResourceId, ResponseMessage, RuntimeType,
+    Sequence, ServiceDiagnostics, ServiceType, SessionId, SubmissionId, hash_dag_node,
 };
 use crate::domain::message::ObservableMessage;
 
@@ -100,9 +100,9 @@ fn reconstruct_request(
         submission: SubmissionId::from(headers.get("submission-id")?.clone()),
         session: SessionId::from(headers.get("session-id")?.clone()),
         agent_id: ResourceId::new(headers.get("agent-id")?),
-        service: headers.get("service")?.clone(),
+        service: ServiceType::from_str(headers.get("service")?)?,
         backend: headers.get("backend")?.clone(),
-        operation: headers.get("operation")?.clone(),
+        operation: Operation::from_str(headers.get("operation")?)?,
         sequence: Sequence::from(
             headers.get("sequence")?.parse::<u32>().ok()?
         ),
@@ -126,9 +126,9 @@ fn reconstruct_response(
         submission: SubmissionId::from(headers.get("submission-id")?.clone()),
         session: SessionId::from(headers.get("session-id")?.clone()),
         agent_id: ResourceId::new(headers.get("agent-id")?),
-        service: headers.get("service")?.clone(),
+        service: ServiceType::from_str(headers.get("service")?)?,
         backend: headers.get("backend")?.clone(),
-        operation: headers.get("operation")?.clone(),
+        operation: Operation::from_str(headers.get("operation")?)?,
         sequence: Sequence::from(
             headers.get("sequence")?.parse::<u32>().ok()?
         ),
@@ -410,9 +410,9 @@ mod tests {
 
         assert!(matches!(msg, ObservableMessage::Request(_)));
         if let ObservableMessage::Request(m) = &msg {
-            assert_eq!(m.service, "infer");
+            assert_eq!(m.service, ServiceType::Infer);
             assert_eq!(m.backend, "ollama");
-            assert_eq!(m.operation, "run");
+            assert_eq!(m.operation, Operation::Run);
             assert_eq!(m.sequence.as_u32(), 1);
             assert_eq!(m.payload, b"request-payload");
         }
@@ -428,7 +428,7 @@ mod tests {
 
         assert!(matches!(msg, ObservableMessage::Response(_)));
         if let ObservableMessage::Response(m) = &msg {
-            assert_eq!(m.service, "infer");
+            assert_eq!(m.service, ServiceType::Infer);
             assert_eq!(m.backend, "ollama");
             assert_eq!(m.correlation_id.as_str(), "msg-002");
             assert_eq!(m.payload, b"response-payload");
