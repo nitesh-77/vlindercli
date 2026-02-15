@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use super::container_id::ContainerId;
 use super::image_digest::ImageDigest;
 use super::image_ref::ImageRef;
+use super::operation::Operation;
 use super::service_type::ServiceType;
 
 // ============================================================================
@@ -81,7 +82,7 @@ pub enum ServiceMetrics {
         model: String,
     },
     Storage {
-        operation: String,
+        operation: Operation,
         bytes_transferred: u64,
     },
 }
@@ -97,7 +98,7 @@ impl ServiceDiagnostics {
             backend: "unknown".to_string(),
             duration_ms: 0,
             metrics: ServiceMetrics::Storage {
-                operation: "unknown".to_string(),
+                operation: Operation::Get,
                 bytes_transferred: 0,
             },
         }
@@ -107,7 +108,7 @@ impl ServiceDiagnostics {
     pub fn storage(
         service: ServiceType,
         backend: impl Into<String>,
-        operation: impl Into<String>,
+        operation: Operation,
         bytes: u64,
         duration_ms: u64,
     ) -> Self {
@@ -116,7 +117,7 @@ impl ServiceDiagnostics {
             backend: backend.into(),
             duration_ms,
             metrics: ServiceMetrics::Storage {
-                operation: operation.into(),
+                operation,
                 bytes_transferred: bytes,
             },
         }
@@ -287,7 +288,7 @@ mod tests {
 
     #[test]
     fn service_diagnostics_storage_json_round_trip() {
-        let diag = ServiceDiagnostics::storage(ServiceType::Kv, "sqlite", "put", 2048, 5);
+        let diag = ServiceDiagnostics::storage(ServiceType::Kv, "sqlite", Operation::Put, 2048, 5);
         let json = serde_json::to_string(&diag).unwrap();
         let back: ServiceDiagnostics = serde_json::from_str(&json).unwrap();
         assert_eq!(diag, back);
@@ -295,7 +296,7 @@ mod tests {
 
     #[test]
     fn service_diagnostics_storage_toml_round_trip() {
-        let diag = ServiceDiagnostics::storage(ServiceType::Kv, "sqlite", "get", 512, 2);
+        let diag = ServiceDiagnostics::storage(ServiceType::Kv, "sqlite", Operation::Get, 512, 2);
         let toml_str = toml::to_string_pretty(&diag).unwrap();
         let back: ServiceDiagnostics = toml::from_str(&toml_str).unwrap();
         assert_eq!(diag, back);

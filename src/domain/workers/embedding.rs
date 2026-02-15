@@ -12,7 +12,7 @@ use crate::domain::EmbeddingEngine;
 use crate::domain::registry::Registry;
 use crate::domain::service_payloads::EmbedRequest;
 use crate::embedding::open_embedding_engine;
-use crate::domain::{MessageQueue, RequestMessage, ResponseMessage, ServiceDiagnostics, ServiceMetrics, ServiceType};
+use crate::domain::{MessageQueue, Operation, RequestMessage, ResponseMessage, ServiceDiagnostics, ServiceMetrics, ServiceType};
 use crate::services::embedding;
 
 // ============================================================================
@@ -52,7 +52,7 @@ impl EmbeddingServiceWorker {
     /// Process one message if available. Returns true if processed.
     pub fn tick(&self) -> bool {
         // Receive typed RequestMessage (ADR 044)
-        match self.queue.receive_request(ServiceType::Embed, &self.backend, "run") {
+        match self.queue.receive_request(ServiceType::Embed, &self.backend, Operation::Run) {
             Ok((request, ack)) => {
                 tracing::debug!(seq = %request.sequence, agent = %request.agent_id, "embed worker: received request");
                 let model = self.extract_model_name(&request);
@@ -169,7 +169,7 @@ mod tests {
     use super::*;
     use crate::domain::{Agent, EngineType, Model, ModelType, ResourceId};
     use crate::registry::InMemoryRegistry;
-    use crate::domain::{RequestDiagnostics, Sequence, ServiceType, SessionId, SubmissionId};
+    use crate::domain::{Operation, RequestDiagnostics, Sequence, ServiceType, SessionId, SubmissionId};
     use crate::domain::SecretStore;
     use crate::secret_store::InMemorySecretStore;
     use crate::queue::InMemoryQueue;
@@ -251,7 +251,7 @@ mod tests {
             test_agent_id(),
             ServiceType::Embed,
             "memory",
-            "run",
+            Operation::Run,
             Sequence::first(),
             serde_json::to_vec(&payload).unwrap(),
             None,
@@ -290,7 +290,7 @@ mod tests {
             test_agent_id(),
             ServiceType::Embed,
             "memory",
-            "run",
+            Operation::Run,
             Sequence::first(),
             serde_json::to_vec(&payload).unwrap(),
             Some("state-xyz".to_string()),
@@ -327,7 +327,7 @@ mod tests {
             test_agent_id(),
             ServiceType::Embed,
             "memory",
-            "run",
+            Operation::Run,
             Sequence::first(),
             serde_json::to_vec(&payload).unwrap(),
             None,
@@ -366,7 +366,7 @@ mod tests {
             ResourceId::new("http://127.0.0.1:9000/agents/unknown-agent"),
             ServiceType::Embed,
             "memory",
-            "run",
+            Operation::Run,
             Sequence::first(),
             serde_json::to_vec(&payload).unwrap(),
             None,

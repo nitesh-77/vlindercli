@@ -76,7 +76,7 @@ impl MessageQueue for RecordingQueue {
     // Routing helpers — delegate straight through
     // -------------------------------------------------------------------------
 
-    fn service_queue(&self, service: crate::domain::ServiceType, backend: &str, action: &str) -> String {
+    fn service_queue(&self, service: crate::domain::ServiceType, backend: &str, action: crate::domain::Operation) -> String {
         self.inner.service_queue(service, backend, action)
     }
 
@@ -126,7 +126,7 @@ impl MessageQueue for RecordingQueue {
         self.inner.receive_invoke(subject_pattern)
     }
 
-    fn receive_request(&self, service: crate::domain::ServiceType, backend: &str, operation: &str) -> Result<(RequestMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+    fn receive_request(&self, service: crate::domain::ServiceType, backend: &str, operation: crate::domain::Operation) -> Result<(RequestMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
         self.inner.receive_request(service, backend, operation)
     }
 
@@ -160,7 +160,7 @@ mod tests {
     use super::*;
     use crate::domain::{
         ContainerDiagnostics, DagNode, DelegateDiagnostics, HarnessType,
-        InvokeDiagnostics, MessageType, RequestDiagnostics, ResourceId,
+        InvokeDiagnostics, MessageType, Operation, RequestDiagnostics, ResourceId,
         RuntimeType, Sequence, ServiceDiagnostics, ServiceType, SessionId, SubmissionId,
     };
     use crate::queue::InMemoryQueue;
@@ -211,7 +211,7 @@ mod tests {
             test_agent_id(),
             ServiceType::Infer,
             "ollama",
-            "",
+            Operation::Run,
             Sequence::first(),
             b"prompt".to_vec(),
             None,

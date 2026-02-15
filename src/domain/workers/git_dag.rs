@@ -28,7 +28,7 @@
 //! │   ├── ...per-field files...
 //! │   ├── service                 # "infer"
 //! │   ├── backend                 # "ollama"
-//! │   ├── operation               # "chat"
+//! │   ├── operation               # "run"
 //! │   ├── sequence                # "1"
 //! │   ├── payload
 //! │   └── diagnostics.toml
@@ -281,7 +281,7 @@ impl GitDagWorker {
                 entries.push(self.write_field("agent_id", m.agent_id.as_str())?);
                 entries.push(self.write_field("service", m.service.as_str())?);
                 entries.push(self.write_field("backend", &m.backend)?);
-                entries.push(self.write_field("operation", &m.operation)?);
+                entries.push(self.write_field("operation", m.operation.as_str())?);
                 entries.push(self.write_field("sequence", &m.sequence.as_u32().to_string())?);
                 if let Some(ref state) = m.state {
                     entries.push(self.write_field("state", state)?);
@@ -293,7 +293,7 @@ impl GitDagWorker {
                 entries.push(self.write_field("agent_id", m.agent_id.as_str())?);
                 entries.push(self.write_field("service", m.service.as_str())?);
                 entries.push(self.write_field("backend", &m.backend)?);
-                entries.push(self.write_field("operation", &m.operation)?);
+                entries.push(self.write_field("operation", m.operation.as_str())?);
                 entries.push(self.write_field("sequence", &m.sequence.as_u32().to_string())?);
                 entries.push(self.write_field("correlation_id", m.correlation_id.as_str())?);
                 if let Some(ref state) = m.state {
@@ -578,7 +578,7 @@ mod tests {
     use super::*;
     use crate::domain::message::*;
     use crate::domain::diagnostics::*;
-    use crate::domain::{ContainerId, RuntimeType, ResourceId, ServiceType, Agent, SecretStore};
+    use crate::domain::{ContainerId, Operation, RuntimeType, ResourceId, ServiceType, Agent, SecretStore};
     use crate::secret_store::InMemorySecretStore;
     use crate::registry::InMemoryRegistry;
 
@@ -611,7 +611,7 @@ mod tests {
             test_agent_id(),
             ServiceType::Infer,
             "ollama",
-            "chat",
+            Operation::Run,
             Sequence::from(1),
             payload.to_vec(),
             None,
@@ -634,7 +634,7 @@ mod tests {
             test_agent_id(),
             ServiceType::Infer,
             "ollama",
-            "chat",
+            Operation::Run,
             Sequence::from(1),
             b"prompt".to_vec(),
             None,
@@ -851,7 +851,7 @@ mod tests {
         assert_eq!(show("type").unwrap(), "request");
         assert_eq!(show("service").unwrap(), "infer");
         assert_eq!(show("backend").unwrap(), "ollama");
-        assert_eq!(show("operation").unwrap(), "chat");
+        assert_eq!(show("operation").unwrap(), "run");
         assert_eq!(show("sequence").unwrap(), "1");
         assert!(show("agent_id").unwrap().contains("support-agent"));
     }

@@ -2,7 +2,7 @@
 
 use crate::domain::{
     CompleteMessage, DelegateMessage, InvokeMessage, MessageQueue,
-    ObservableMessage, QueueError, RequestMessage, ResponseMessage, ServiceType, SubmissionId,
+    ObservableMessage, Operation, QueueError, RequestMessage, ResponseMessage, ServiceType, SubmissionId,
 };
 #[cfg(test)]
 use crate::domain::{
@@ -37,12 +37,8 @@ impl Default for InMemoryQueue {
 }
 
 impl MessageQueue for InMemoryQueue {
-    fn service_queue(&self, service: ServiceType, backend: &str, action: &str) -> String {
-        if action.is_empty() {
-            format!("vlinder.svc.{}.{}", service, backend)
-        } else {
-            format!("vlinder.svc.{}.{}.{}", service, backend, action)
-        }
+    fn service_queue(&self, service: ServiceType, backend: &str, action: Operation) -> String {
+        format!("vlinder.svc.{}.{}.{}", service, backend, action)
     }
 
     fn agent_queue(&self, runtime: &str, agent: &crate::domain::Agent) -> String {
@@ -141,18 +137,13 @@ impl MessageQueue for InMemoryQueue {
         Err(QueueError::Timeout)
     }
 
-    fn receive_request(&self, service: ServiceType, backend: &str, operation: &str) -> Result<(RequestMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+    fn receive_request(&self, service: ServiceType, backend: &str, operation: Operation) -> Result<(RequestMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
         let mut typed = self.typed_queues.lock().unwrap();
 
         let pattern = format!(".{}.{}.{}.", service, backend, operation);
-        let bare_pattern = format!(".{}.{}.", service, backend);
 
         for (subject, queue) in typed.iter_mut() {
-            let matches = if operation.is_empty() {
-                subject.contains(&bare_pattern) && subject.contains(".req.")
-            } else {
-                subject.contains(&pattern) && subject.contains(".req.")
-            };
+            let matches = subject.contains(&pattern) && subject.contains(".req.");
 
             if matches {
                 if let Some(ObservableMessage::Request(msg)) = queue.front() {
@@ -272,7 +263,7 @@ use crate::domain::agent_routing_key as agent_short_name;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{ResourceId, RuntimeType, ServiceType};
+    use crate::domain::{Operation, ResourceId, RuntimeType, ServiceType};
     use crate::domain::{ExpectsReply, HarnessType, Sequence, SessionId, SubmissionId};
 
     fn test_agent_id() -> ResourceId {
@@ -324,7 +315,7 @@ mod tests {
             test_agent_id(),
             ServiceType::Kv,
             "sqlite",
-            "get",
+            Operation::Get,
             Sequence::first(),
             b"key".to_vec(),
             None,
@@ -350,7 +341,7 @@ mod tests {
             test_agent_id(),
             ServiceType::Kv,
             "sqlite",
-            "get",
+            Operation::Get,
             Sequence::from(3),
             b"key".to_vec(),
             None,
@@ -474,7 +465,7 @@ mod tests {
             test_agent_id(),
             ServiceType::Kv,
             "sqlite",
-            "get",
+            Operation::Get,
             Sequence::first(),
             b"key".to_vec(),
             None,
@@ -485,12 +476,12 @@ mod tests {
         queue.send_request(request).unwrap();
 
         // Receive by service/backend/operation
-        let (received, ack) = queue.receive_request(ServiceType::Kv, "sqlite", "get").unwrap();
+        let (received, ack) = queue.receive_request(ServiceType::Kv, "sqlite", Operation::Get).unwrap();
 
         assert_eq!(received.id, original_id);
         assert_eq!(received.service, ServiceType::Kv);
         assert_eq!(received.backend, "sqlite");
-        assert_eq!(received.operation, "get");
+        assert_eq!(received.operation, Operation::Get);
         assert_eq!(received.payload, b"key");
 
         ack().unwrap();
@@ -509,7 +500,7 @@ mod tests {
             agent_id.clone(),
             ServiceType::Vec,
             "sqlite-vec",
-            "search",
+            Operation::Search,
             Sequence::from(3),
             b"query".to_vec(),
             None,
@@ -518,7 +509,7 @@ mod tests {
 
         queue.send_request(request).unwrap();
 
-        let (received, _) = queue.receive_request(ServiceType::Vec, "sqlite-vec", "search").unwrap();
+        let (received, _) = queue.receive_request(ServiceType::Vec, "sqlite-vec", Operation::Search).unwrap();
 
         // All dimensions preserved for reply construction
         assert_eq!(received.submission, submission);
@@ -527,17 +518,16 @@ mod tests {
     }
 
     #[test]
-    fn receive_request_matches_bare_service() {
+    fn receive_request_matches_infer_run() {
         let queue = InMemoryQueue::new();
 
-        // For inference, operation is empty
         let request = RequestMessage::new(
             test_submission(),
             SessionId::new(),
             test_agent_id(),
             ServiceType::Infer,
             "ollama",
-            "",
+            Operation::Run,
             Sequence::first(),
             b"prompt".to_vec(),
             None,
@@ -546,12 +536,11 @@ mod tests {
 
         queue.send_request(request).unwrap();
 
-        // Receive with empty operation
-        let (received, _) = queue.receive_request(ServiceType::Infer, "ollama", "").unwrap();
+        let (received, _) = queue.receive_request(ServiceType::Infer, "ollama", Operation::Run).unwrap();
 
         assert_eq!(received.service, ServiceType::Infer);
         assert_eq!(received.backend, "ollama");
-        assert_eq!(received.operation, "");
+        assert_eq!(received.operation, Operation::Run);
     }
 
     // ========================================================================

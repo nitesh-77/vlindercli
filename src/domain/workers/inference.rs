@@ -13,7 +13,7 @@ use crate::domain::{InferenceEngine, InferenceResult};
 use crate::domain::registry::Registry;
 use crate::domain::service_payloads::InferRequest;
 use crate::inference::open_inference_engine;
-use crate::domain::{MessageQueue, RequestMessage, ResponseMessage, ServiceDiagnostics, ServiceMetrics, ServiceType};
+use crate::domain::{MessageQueue, Operation, RequestMessage, ResponseMessage, ServiceDiagnostics, ServiceMetrics, ServiceType};
 use crate::services::inference;
 
 // ============================================================================
@@ -53,7 +53,7 @@ impl InferenceServiceWorker {
     /// Process one message if available. Returns true if processed.
     pub fn tick(&self) -> bool {
         // Receive typed RequestMessage (ADR 044)
-        match self.queue.receive_request(ServiceType::Infer, &self.backend, "run") {
+        match self.queue.receive_request(ServiceType::Infer, &self.backend, Operation::Run) {
             Ok((request, ack)) => {
                 let model = self.extract_model_name(&request);
                 let start = Instant::now();
@@ -158,7 +158,7 @@ mod tests {
     use super::*;
     use crate::domain::{Agent, EngineType, Model, ModelType, ResourceId};
     use crate::registry::InMemoryRegistry;
-    use crate::domain::{RequestDiagnostics, Sequence, ServiceType, SessionId, SubmissionId};
+    use crate::domain::{Operation, RequestDiagnostics, Sequence, ServiceType, SessionId, SubmissionId};
     use crate::domain::SecretStore;
     use crate::secret_store::InMemorySecretStore;
     use crate::queue::InMemoryQueue;
@@ -239,7 +239,7 @@ mod tests {
             test_agent_id(),
             ServiceType::Infer,
             "memory",
-            "run",
+            Operation::Run,
             Sequence::first(),
             serde_json::to_vec(&payload).unwrap(),
             None,
@@ -276,7 +276,7 @@ mod tests {
             test_agent_id(),
             ServiceType::Infer,
             "memory",
-            "run",
+            Operation::Run,
             Sequence::first(),
             serde_json::to_vec(&payload).unwrap(),
             Some("state-abc".to_string()),
@@ -312,7 +312,7 @@ mod tests {
             test_agent_id(),
             ServiceType::Infer,
             "memory",
-            "run",
+            Operation::Run,
             Sequence::first(),
             serde_json::to_vec(&payload).unwrap(),
             None,
@@ -350,7 +350,7 @@ mod tests {
             ResourceId::new("http://127.0.0.1:9000/agents/unknown-agent"),
             ServiceType::Infer,
             "memory",
-            "run",
+            Operation::Run,
             Sequence::first(),
             serde_json::to_vec(&payload).unwrap(),
             None,

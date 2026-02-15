@@ -18,7 +18,7 @@ use base64::Engine as _;
 use crate::domain::registry::Registry;
 use crate::domain::service_payloads::{KvGetRequest, KvPutRequest, KvListRequest, KvDeleteRequest};
 use crate::domain::{ObjectStorage, ResourceId};
-use crate::domain::{MessageQueue, RequestMessage, ResponseMessage, ServiceDiagnostics, ServiceType};
+use crate::domain::{MessageQueue, Operation, RequestMessage, ResponseMessage, ServiceDiagnostics, ServiceType};
 use crate::services::object_storage;
 use crate::storage::dispatch::open_object_storage_from_uri;
 use crate::domain::{hash_snapshot, hash_state_commit, hash_value};
@@ -128,13 +128,13 @@ impl ObjectServiceWorker {
 
     fn try_get(&self) -> bool {
         // Receive typed RequestMessage (ADR 044)
-        match self.queue.receive_request(ServiceType::Kv, &self.backend, "get") {
+        match self.queue.receive_request(ServiceType::Kv, &self.backend, Operation::Get) {
             Ok((request, ack)) => {
                 let start = std::time::Instant::now();
                 let response_payload = self.handle_get(&request);
                 let duration_ms = start.elapsed().as_millis() as u64;
                 let diag = ServiceDiagnostics::storage(
-                    ServiceType::Kv, &self.backend, "get", response_payload.len() as u64, duration_ms,
+                    ServiceType::Kv, &self.backend, Operation::Get, response_payload.len() as u64, duration_ms,
                 );
                 let mut response = ResponseMessage::from_request_with_diagnostics(
                     &request, response_payload, diag,
@@ -149,13 +149,13 @@ impl ObjectServiceWorker {
     }
 
     fn try_put(&self) -> bool {
-        match self.queue.receive_request(ServiceType::Kv, &self.backend, "put") {
+        match self.queue.receive_request(ServiceType::Kv, &self.backend, Operation::Put) {
             Ok((request, ack)) => {
                 let start = std::time::Instant::now();
                 let response_payload = self.handle_put(&request);
                 let duration_ms = start.elapsed().as_millis() as u64;
                 let diag = ServiceDiagnostics::storage(
-                    ServiceType::Kv, &self.backend, "put", response_payload.len() as u64, duration_ms,
+                    ServiceType::Kv, &self.backend, Operation::Put, response_payload.len() as u64, duration_ms,
                 );
                 let mut response = ResponseMessage::from_request_with_diagnostics(
                     &request, response_payload.clone(), diag,
@@ -173,13 +173,13 @@ impl ObjectServiceWorker {
     }
 
     fn try_list(&self) -> bool {
-        match self.queue.receive_request(ServiceType::Kv, &self.backend, "list") {
+        match self.queue.receive_request(ServiceType::Kv, &self.backend, Operation::List) {
             Ok((request, ack)) => {
                 let start = std::time::Instant::now();
                 let response_payload = self.handle_list(&request);
                 let duration_ms = start.elapsed().as_millis() as u64;
                 let diag = ServiceDiagnostics::storage(
-                    ServiceType::Kv, &self.backend, "list", response_payload.len() as u64, duration_ms,
+                    ServiceType::Kv, &self.backend, Operation::List, response_payload.len() as u64, duration_ms,
                 );
                 let mut response = ResponseMessage::from_request_with_diagnostics(
                     &request, response_payload, diag,
@@ -194,13 +194,13 @@ impl ObjectServiceWorker {
     }
 
     fn try_delete(&self) -> bool {
-        match self.queue.receive_request(ServiceType::Kv, &self.backend, "delete") {
+        match self.queue.receive_request(ServiceType::Kv, &self.backend, Operation::Delete) {
             Ok((request, ack)) => {
                 let start = std::time::Instant::now();
                 let response_payload = self.handle_delete(&request);
                 let duration_ms = start.elapsed().as_millis() as u64;
                 let diag = ServiceDiagnostics::storage(
-                    ServiceType::Kv, &self.backend, "delete", response_payload.len() as u64, duration_ms,
+                    ServiceType::Kv, &self.backend, Operation::Delete, response_payload.len() as u64, duration_ms,
                 );
                 let mut response = ResponseMessage::from_request_with_diagnostics(
                     &request, response_payload, diag,
@@ -405,7 +405,7 @@ mod tests {
     use super::*;
     use crate::domain::Agent;
     use crate::registry::InMemoryRegistry;
-    use crate::domain::{RequestDiagnostics, Sequence, ServiceType, SessionId, SubmissionId};
+    use crate::domain::{Operation, RequestDiagnostics, Sequence, ServiceType, SessionId, SubmissionId};
     use crate::domain::SecretStore;
     use crate::secret_store::InMemorySecretStore;
     use crate::queue::InMemoryQueue;
@@ -470,7 +470,7 @@ mod tests {
             test_agent_id(),
             ServiceType::Kv,
             "memory",
-            "put",
+            Operation::Put,
             Sequence::first(),
             serde_json::to_vec(&put_payload).unwrap(),
             None,
@@ -495,7 +495,7 @@ mod tests {
             test_agent_id(),
             ServiceType::Kv,
             "memory",
-            "get",
+            Operation::Get,
             Sequence::from(2),
             serde_json::to_vec(&get_payload).unwrap(),
             None,
@@ -529,7 +529,7 @@ mod tests {
         });
         let put_request = RequestMessage::new(
             test_submission(), test_session(), test_agent_id(),
-            ServiceType::Kv, "memory", "put", Sequence::first(),
+            ServiceType::Kv, "memory", Operation::Put, Sequence::first(),
             serde_json::to_vec(&put_payload).unwrap(),
             None,
             test_request_diag(),
@@ -568,7 +568,7 @@ mod tests {
         });
         let put_request = RequestMessage::new(
             test_submission(), test_session(), test_agent_id(),
-            ServiceType::Kv, "memory", "put", Sequence::first(),
+            ServiceType::Kv, "memory", Operation::Put, Sequence::first(),
             serde_json::to_vec(&put_payload).unwrap(),
             None,
             test_request_diag(),
@@ -587,7 +587,7 @@ mod tests {
         });
         let get_request = RequestMessage::new(
             test_submission(), test_session(), test_agent_id(),
-            ServiceType::Kv, "memory", "get", Sequence::from(2),
+            ServiceType::Kv, "memory", Operation::Get, Sequence::from(2),
             serde_json::to_vec(&get_payload).unwrap(),
             None,
             test_request_diag(),
@@ -619,7 +619,7 @@ mod tests {
         });
         let req1 = RequestMessage::new(
             test_submission(), test_session(), test_agent_id(),
-            ServiceType::Kv, "memory", "put", Sequence::first(),
+            ServiceType::Kv, "memory", Operation::Put, Sequence::first(),
             serde_json::to_vec(&put1).unwrap(),
             None,
             test_request_diag(),
@@ -639,7 +639,7 @@ mod tests {
         });
         let req2 = RequestMessage::new(
             test_submission(), test_session(), test_agent_id(),
-            ServiceType::Kv, "memory", "put", Sequence::from(2),
+            ServiceType::Kv, "memory", Operation::Put, Sequence::from(2),
             serde_json::to_vec(&put2).unwrap(),
             None,
             test_request_diag(),
@@ -658,7 +658,7 @@ mod tests {
         let get = serde_json::json!({"path": "/a.txt", "state": hash2});
         let get_req = RequestMessage::new(
             test_submission(), test_session(), test_agent_id(),
-            ServiceType::Kv, "memory", "get", Sequence::from(3),
+            ServiceType::Kv, "memory", Operation::Get, Sequence::from(3),
             serde_json::to_vec(&get).unwrap(),
             None,
             test_request_diag(),
@@ -689,7 +689,7 @@ mod tests {
         });
         let put_req = RequestMessage::new(
             test_submission(), test_session(), test_agent_id(),
-            ServiceType::Kv, "memory", "put", Sequence::first(),
+            ServiceType::Kv, "memory", Operation::Put, Sequence::first(),
             serde_json::to_vec(&put).unwrap(),
             None,
             test_request_diag(),
@@ -705,7 +705,7 @@ mod tests {
         let get = serde_json::json!({"path": "/nope.txt", "state": state_hash});
         let get_req = RequestMessage::new(
             test_submission(), test_session(), test_agent_id(),
-            ServiceType::Kv, "memory", "get", Sequence::from(2),
+            ServiceType::Kv, "memory", Operation::Get, Sequence::from(2),
             serde_json::to_vec(&get).unwrap(),
             None,
             test_request_diag(),
@@ -735,7 +735,7 @@ mod tests {
         });
         let put_request = RequestMessage::new(
             test_submission(), test_session(), test_agent_id(),
-            ServiceType::Kv, "memory", "put", Sequence::first(),
+            ServiceType::Kv, "memory", Operation::Put, Sequence::first(),
             serde_json::to_vec(&put_payload).unwrap(),
             None,
             test_request_diag(),
@@ -749,7 +749,7 @@ mod tests {
         let get_payload = serde_json::json!({"path": "/hello.txt"});
         let get_request = RequestMessage::new(
             test_submission(), test_session(), test_agent_id(),
-            ServiceType::Kv, "memory", "get", Sequence::from(2),
+            ServiceType::Kv, "memory", Operation::Get, Sequence::from(2),
             serde_json::to_vec(&get_payload).unwrap(),
             Some("hash123".to_string()),
             test_request_diag(),
@@ -780,7 +780,7 @@ mod tests {
         });
         let put_req = RequestMessage::new(
             test_submission(), test_session(), test_agent_id(),
-            ServiceType::Kv, "memory", "put", Sequence::first(),
+            ServiceType::Kv, "memory", Operation::Put, Sequence::first(),
             serde_json::to_vec(&put_payload).unwrap(),
             None,
             test_request_diag(),
@@ -794,7 +794,7 @@ mod tests {
         let get_payload = serde_json::json!({"path": "/test.txt"});
         let get_req = RequestMessage::new(
             test_submission(), test_session(), test_agent_id(),
-            ServiceType::Kv, "memory", "get", Sequence::from(2),
+            ServiceType::Kv, "memory", Operation::Get, Sequence::from(2),
             serde_json::to_vec(&get_payload).unwrap(),
             None,
             test_request_diag(),

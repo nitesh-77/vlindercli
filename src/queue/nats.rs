@@ -18,7 +18,7 @@ use tokio::runtime::Runtime;
 use crate::domain::{
     CompleteMessage, ContainerDiagnostics, DelegateMessage, DelegateDiagnostics,
     HarnessType, InvokeDiagnostics, InvokeMessage, MessageId, MessageQueue,
-    QueueError, RequestDiagnostics, RequestMessage, ResourceId, ResponseMessage,
+    Operation, QueueError, RequestDiagnostics, RequestMessage, ResourceId, ResponseMessage,
     RuntimeType, Sequence, ServiceDiagnostics, ServiceType, SessionId, SubmissionId,
 };
 
@@ -205,12 +205,8 @@ impl NatsQueue {
 }
 
 impl MessageQueue for NatsQueue {
-    fn service_queue(&self, service: ServiceType, backend: &str, action: &str) -> String {
-        if action.is_empty() {
-            format!("vlinder.svc.{}.{}", service, backend)
-        } else {
-            format!("vlinder.svc.{}.{}.{}", service, backend, action)
-        }
+    fn service_queue(&self, service: ServiceType, backend: &str, action: Operation) -> String {
+        format!("vlinder.svc.{}.{}.{}", service, backend, action)
     }
 
     fn agent_queue(&self, runtime: &str, agent: &crate::domain::Agent) -> String {
@@ -404,7 +400,7 @@ impl MessageQueue for NatsQueue {
         })
     }
 
-    fn receive_request(&self, service: ServiceType, backend: &str, operation: &str) -> Result<(RequestMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+    fn receive_request(&self, service: ServiceType, backend: &str, operation: Operation) -> Result<(RequestMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
         // Build filter: vlinder.*.req.*.{service}.{backend}.{operation}.{sequence}
         let filter = format!("vlinder.*.req.*.{}.{}.{}.*", service, backend, operation);
 
@@ -426,7 +422,7 @@ impl MessageQueue for NatsQueue {
                 agent_id: ResourceId::new(&get_header(headers, "agent-id")?),
                 service: parse_service_type(&get_header(headers, "service")?)?,
                 backend: get_header(headers, "backend")?,
-                operation: get_header(headers, "operation")?,
+                operation: parse_operation(&get_header(headers, "operation")?)?,
                 sequence: Sequence::from(get_header(headers, "sequence")?.parse::<u32>().unwrap_or(1)),
                 payload: js_msg.payload.to_vec(),
                 state: get_header(headers, "state").ok(),
@@ -460,7 +456,7 @@ impl MessageQueue for NatsQueue {
                 agent_id: ResourceId::new(&get_header(headers, "agent-id")?),
                 service: parse_service_type(&get_header(headers, "service")?)?,
                 backend: get_header(headers, "backend")?,
-                operation: get_header(headers, "operation")?,
+                operation: parse_operation(&get_header(headers, "operation")?)?,
                 sequence: Sequence::from(get_header(headers, "sequence")?.parse::<u32>().unwrap_or(1)),
                 payload: js_msg.payload.to_vec(),
                 correlation_id: MessageId::from(get_header(headers, "correlation-id")?),
@@ -675,5 +671,11 @@ fn parse_runtime_type(s: &str) -> Result<RuntimeType, QueueError> {
 fn parse_service_type(s: &str) -> Result<ServiceType, QueueError> {
     ServiceType::from_str(s)
         .ok_or_else(|| QueueError::ReceiveFailed(format!("unknown service type: {}", s)))
+}
+
+/// Parse an operation string.
+fn parse_operation(s: &str) -> Result<Operation, QueueError> {
+    Operation::from_str(s)
+        .ok_or_else(|| QueueError::ReceiveFailed(format!("unknown operation: {}", s)))
 }
 

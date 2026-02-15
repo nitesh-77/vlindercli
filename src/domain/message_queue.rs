@@ -9,7 +9,7 @@
 //! Each receive method returns a tuple of (TypedMessage, AckFn) where
 //! AckFn acknowledges successful processing.
 
-use super::{Agent, CompleteMessage, DelegateMessage, InvokeMessage, RequestMessage, ResponseMessage, ResourceId, ServiceType, SubmissionId};
+use super::{Agent, CompleteMessage, DelegateMessage, InvokeMessage, Operation, RequestMessage, ResponseMessage, ResourceId, ServiceType, SubmissionId};
 use std::fmt;
 
 // --- MessageQueue Trait ---
@@ -27,8 +27,8 @@ pub trait MessageQueue {
     /// # Arguments
     /// - `service`: Service type (Kv, Vec, Infer, Embed)
     /// - `backend`: Backend implementation (e.g., "sqlite", "ollama", "memory")
-    /// - `action`: Operation (e.g., "get", "put", "search") - empty for bare service
-    fn service_queue(&self, service: ServiceType, backend: &str, action: &str) -> String;
+    /// - `action`: Operation (e.g., Get, Put, Search)
+    fn service_queue(&self, service: ServiceType, backend: &str, action: Operation) -> String;
 
     /// Build queue name for an agent with runtime type.
     ///
@@ -76,7 +76,7 @@ pub trait MessageQueue {
     ///
     /// Used by workers to receive typed service requests.
     /// Returns the typed message with all dimensions intact.
-    fn receive_request(&self, service: ServiceType, backend: &str, operation: &str) -> Result<(RequestMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError>;
+    fn receive_request(&self, service: ServiceType, backend: &str, operation: Operation) -> Result<(RequestMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError>;
 
     /// Receive a ResponseMessage for the given request.
     ///

@@ -11,7 +11,7 @@ use std::sync::{Arc, RwLock};
 use crate::domain::registry::Registry;
 use crate::domain::service_payloads::{VectorStoreRequest, VectorSearchRequest, VectorDeleteRequest};
 use crate::domain::{VectorStorage, ResourceId};
-use crate::domain::{MessageQueue, RequestMessage, ResponseMessage, ServiceDiagnostics, ServiceType};
+use crate::domain::{MessageQueue, Operation, RequestMessage, ResponseMessage, ServiceDiagnostics, ServiceType};
 use crate::services::vector_storage;
 use crate::storage::dispatch::open_vector_storage_from_uri;
 
@@ -78,13 +78,13 @@ impl VectorServiceWorker {
 
     fn try_store(&self) -> bool {
         // Receive typed RequestMessage (ADR 044)
-        match self.queue.receive_request(ServiceType::Vec, &self.backend, "store") {
+        match self.queue.receive_request(ServiceType::Vec, &self.backend, Operation::Store) {
             Ok((request, ack)) => {
                 let start = std::time::Instant::now();
                 let response_payload = self.handle_store(&request);
                 let duration_ms = start.elapsed().as_millis() as u64;
                 let diag = ServiceDiagnostics::storage(
-                    ServiceType::Vec, &self.backend, "store", response_payload.len() as u64, duration_ms,
+                    ServiceType::Vec, &self.backend, Operation::Store, response_payload.len() as u64, duration_ms,
                 );
                 let mut response = ResponseMessage::from_request_with_diagnostics(
                     &request, response_payload, diag,
@@ -99,13 +99,13 @@ impl VectorServiceWorker {
     }
 
     fn try_search(&self) -> bool {
-        match self.queue.receive_request(ServiceType::Vec, &self.backend, "search") {
+        match self.queue.receive_request(ServiceType::Vec, &self.backend, Operation::Search) {
             Ok((request, ack)) => {
                 let start = std::time::Instant::now();
                 let response_payload = self.handle_search(&request);
                 let duration_ms = start.elapsed().as_millis() as u64;
                 let diag = ServiceDiagnostics::storage(
-                    ServiceType::Vec, &self.backend, "search", response_payload.len() as u64, duration_ms,
+                    ServiceType::Vec, &self.backend, Operation::Search, response_payload.len() as u64, duration_ms,
                 );
                 let mut response = ResponseMessage::from_request_with_diagnostics(
                     &request, response_payload, diag,
@@ -120,13 +120,13 @@ impl VectorServiceWorker {
     }
 
     fn try_delete(&self) -> bool {
-        match self.queue.receive_request(ServiceType::Vec, &self.backend, "delete") {
+        match self.queue.receive_request(ServiceType::Vec, &self.backend, Operation::Delete) {
             Ok((request, ack)) => {
                 let start = std::time::Instant::now();
                 let response_payload = self.handle_delete(&request);
                 let duration_ms = start.elapsed().as_millis() as u64;
                 let diag = ServiceDiagnostics::storage(
-                    ServiceType::Vec, &self.backend, "delete", response_payload.len() as u64, duration_ms,
+                    ServiceType::Vec, &self.backend, Operation::Delete, response_payload.len() as u64, duration_ms,
                 );
                 let mut response = ResponseMessage::from_request_with_diagnostics(
                     &request, response_payload, diag,
@@ -201,7 +201,7 @@ mod tests {
     use super::*;
     use crate::domain::{Agent, Registry};
     use crate::registry::InMemoryRegistry;
-    use crate::domain::{RequestDiagnostics, Sequence, ServiceType, SessionId, SubmissionId};
+    use crate::domain::{Operation, RequestDiagnostics, Sequence, ServiceType, SessionId, SubmissionId};
     use crate::domain::SecretStore;
     use crate::secret_store::InMemorySecretStore;
     use crate::queue::InMemoryQueue;
@@ -257,7 +257,7 @@ mod tests {
         });
         let store_request = RequestMessage::new(
             test_submission(), SessionId::new(), test_agent_id(),
-            ServiceType::Vec, "memory", "store", Sequence::first(),
+            ServiceType::Vec, "memory", Operation::Store, Sequence::first(),
             serde_json::to_vec(&store_payload).unwrap(),
             Some("state-vec".to_string()),
             test_request_diag(),
@@ -275,7 +275,7 @@ mod tests {
         });
         let search_request = RequestMessage::new(
             test_submission(), SessionId::new(), test_agent_id(),
-            ServiceType::Vec, "memory", "search", Sequence::from(2),
+            ServiceType::Vec, "memory", Operation::Search, Sequence::from(2),
             serde_json::to_vec(&search_payload).unwrap(),
             Some("state-vec2".to_string()),
             test_request_diag(),
@@ -314,7 +314,7 @@ mod tests {
             test_agent_id(),
             ServiceType::Vec,
             "memory",
-            "store",
+            Operation::Store,
             Sequence::first(),
             serde_json::to_vec(&store_payload).unwrap(),
             None,
@@ -339,7 +339,7 @@ mod tests {
             test_agent_id(),
             ServiceType::Vec,
             "memory",
-            "search",
+            Operation::Search,
             Sequence::from(2),
             serde_json::to_vec(&search_payload).unwrap(),
             None,
