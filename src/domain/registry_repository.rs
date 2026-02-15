@@ -130,6 +130,8 @@ pub struct StoredAgent {
     pub requirements_json: String,
     pub prompts_json: Option<String>,
     pub mounts_json: String,
+    /// Base64-encoded Ed25519 public key (ADR 084).
+    pub public_key: Option<String>,
 }
 
 impl StoredAgent {
@@ -176,6 +178,9 @@ impl StoredAgent {
             requirements_json,
             prompts_json,
             mounts_json,
+            public_key: agent.public_key.as_ref().map(|k| {
+                base64::Engine::encode(&base64::engine::general_purpose::STANDARD, k)
+            }),
         })
     }
 
@@ -217,6 +222,11 @@ impl StoredAgent {
             })
         }).collect::<Result<Vec<_>, RepositoryError>>()?;
 
+        let public_key = self.public_key.as_ref()
+            .map(|b64| base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b64))
+            .transpose()
+            .map_err(|e| RepositoryError::Serialization(format!("invalid public_key base64: {}", e)))?;
+
         Ok(Agent {
             id: Agent::placeholder_id(&self.name),
             name: self.name.clone(),
@@ -225,6 +235,7 @@ impl StoredAgent {
             runtime,
             executable: self.executable.clone(),
             image_digest,
+            public_key,
             object_storage: self.object_storage.as_ref().map(ResourceId::new),
             vector_storage: self.vector_storage.as_ref().map(ResourceId::new),
             requirements: Requirements { models, services: requirements.services },
@@ -278,6 +289,7 @@ mod tests {
             runtime: RuntimeType::Container,
             executable: "localhost/echo:latest".to_string(),
             image_digest: None,
+            public_key: None,
             object_storage: None,
             vector_storage: None,
             requirements: Requirements {
@@ -302,6 +314,7 @@ mod tests {
             runtime: RuntimeType::Container,
             executable: "localhost/thinker:latest".to_string(),
             image_digest: Some(ImageDigest::parse("sha256:abc123def456").unwrap()),
+            public_key: None,
             object_storage: Some(ResourceId::new("sqlite:///data/objects.db")),
             vector_storage: Some(ResourceId::new("sqlite:///data/vectors.db")),
             requirements: Requirements {
@@ -382,5 +395,31 @@ mod tests {
         assert_eq!(restored.mounts[0].host_path.to_string(), "/data/notes");
         assert_eq!(restored.mounts[0].guest_path.to_string_lossy(), "/mnt/notes");
         assert!(restored.mounts[0].readonly);
+    }
+
+    #[test]
+    fn round_trip_with_public_key() {
+        let mut agent = minimal_agent();
+        agent.public_key = Some(vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+                                     11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+                                     21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]);
+
+        let stored = StoredAgent::from_agent(&agent).unwrap();
+        assert!(stored.public_key.is_some());
+
+        let restored = stored.to_agent().unwrap();
+        assert_eq!(restored.public_key, agent.public_key);
+    }
+
+    #[test]
+    fn round_trip_without_public_key() {
+        let agent = minimal_agent();
+        assert!(agent.public_key.is_none());
+
+        let stored = StoredAgent::from_agent(&agent).unwrap();
+        assert!(stored.public_key.is_none());
+
+        let restored = stored.to_agent().unwrap();
+        assert!(restored.public_key.is_none());
     }
 }

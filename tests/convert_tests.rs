@@ -65,6 +65,7 @@ fn agent_domain_to_proto_preserves_fields() {
         runtime: RuntimeType::Container,
         executable: "localhost/echo:latest".to_string(),
         image_digest: None,
+        public_key: None,
         requirements: Requirements {
             models: HashMap::from([
                 ("phi3".to_string(), ResourceId::new("ollama://localhost/phi3")),

@@ -64,7 +64,8 @@ impl SqliteRegistryRepository {
                 vector_storage TEXT,
                 requirements_json TEXT NOT NULL,
                 prompts_json TEXT,
-                mounts_json TEXT NOT NULL
+                mounts_json TEXT NOT NULL,
+                public_key BLOB
             )",
             [],
         ).map_err(|e| RepositoryError::Database(e.to_string()))?;
@@ -139,8 +140,9 @@ impl RegistryRepository for SqliteRegistryRepository {
 
         conn.execute(
             "INSERT OR REPLACE INTO agents (name, description, source, runtime, executable,
-             image_digest, object_storage, vector_storage, requirements_json, prompts_json, mounts_json)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+             image_digest, object_storage, vector_storage, requirements_json, prompts_json, mounts_json,
+             public_key)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             rusqlite::params![
                 stored.name,
                 stored.description,
@@ -153,6 +155,7 @@ impl RegistryRepository for SqliteRegistryRepository {
                 stored.requirements_json,
                 stored.prompts_json,
                 stored.mounts_json,
+                stored.public_key,
             ],
         ).map_err(|e| RepositoryError::Database(e.to_string()))?;
 
@@ -165,7 +168,7 @@ impl RegistryRepository for SqliteRegistryRepository {
             .prepare(
                 "SELECT name, description, source, runtime, executable,
                  image_digest, object_storage, vector_storage,
-                 requirements_json, prompts_json, mounts_json
+                 requirements_json, prompts_json, mounts_json, public_key
                  FROM agents"
             )
             .map_err(|e| RepositoryError::Database(e.to_string()))?;
@@ -184,6 +187,7 @@ impl RegistryRepository for SqliteRegistryRepository {
                     requirements_json: row.get(8)?,
                     prompts_json: row.get(9)?,
                     mounts_json: row.get(10)?,
+                    public_key: row.get(11)?,
                 })
             })
             .map_err(|e| RepositoryError::Database(e.to_string()))?;
@@ -301,6 +305,7 @@ mod tests {
             runtime: RuntimeType::Container,
             executable: format!("localhost/{}:latest", name),
             image_digest: None,
+            public_key: None,
             object_storage: None,
             vector_storage: None,
             requirements: Requirements {
@@ -325,6 +330,7 @@ mod tests {
             runtime: RuntimeType::Container,
             executable: "localhost/full:latest".to_string(),
             image_digest: Some(ImageDigest::parse("sha256:abc123").unwrap()),
+            public_key: None,
             object_storage: Some(ResourceId::new("sqlite:///data/objects.db")),
             vector_storage: Some(ResourceId::new("sqlite:///data/vectors.db")),
             requirements: Requirements {
@@ -420,5 +426,29 @@ mod tests {
         assert!(restored.prompts.as_ref().unwrap().intent_recognition.is_some());
         assert_eq!(restored.mounts.len(), 1);
         assert!(restored.mounts[0].readonly);
+    }
+
+    #[test]
+    fn agent_with_public_key_persists() {
+        let repo = SqliteRegistryRepository::in_memory().unwrap();
+        let mut agent = test_agent("keyed");
+        let key_bytes: Vec<u8> = (0..32).collect();
+        agent.public_key = Some(key_bytes.clone());
+
+        repo.save_agent(&agent).unwrap();
+        let agents = repo.load_agents().unwrap();
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0].public_key.as_ref().unwrap(), &key_bytes);
+    }
+
+    #[test]
+    fn agent_without_public_key_persists_none() {
+        let repo = SqliteRegistryRepository::in_memory().unwrap();
+        let agent = test_agent("no-key");
+
+        repo.save_agent(&agent).unwrap();
+        let agents = repo.load_agents().unwrap();
+        assert_eq!(agents.len(), 1);
+        assert!(agents[0].public_key.is_none());
     }
 }

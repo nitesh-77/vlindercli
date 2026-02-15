@@ -518,6 +518,7 @@ mod tests {
             runtime: RuntimeType::Container,
             executable: format!("localhost/{}:latest", name),
             image_digest: None,
+            public_key: None,
             object_storage: None,
             vector_storage: None,
             requirements: Requirements {

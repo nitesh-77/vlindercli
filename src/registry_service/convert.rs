@@ -142,6 +142,7 @@ impl TryFrom<proto::Agent> for Agent {
             source: None,
             prompts: None,
             image_digest: None,
+            public_key: None,
         })
     }
 }

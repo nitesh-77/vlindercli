@@ -34,6 +34,7 @@ mod model_manifest;
 mod path;
 mod resource_id;
 mod route;
+mod identity;
 mod secret_store;
 mod storage;
 pub mod service_payloads;
@@ -152,6 +153,7 @@ pub use route::{Route, Stop};
 // ============================================================================
 
 pub use secret_store::{SecretStore, SecretStoreError};
+pub use identity::{AgentIdentity, IdentityError, ensure_agent_identity};
 
 // ============================================================================
 // Registry

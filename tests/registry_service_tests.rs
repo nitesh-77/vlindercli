@@ -72,6 +72,7 @@ fn grpc_register_and_get_agent() {
         source: None,
         prompts: None,
         image_digest: None,
+        public_key: None,
     };
 
     client.register_agent(agent).unwrap();
@@ -106,6 +107,7 @@ fn grpc_list_agents() {
             source: None,
             prompts: None,
             image_digest: None,
+            public_key: None,
         };
         client.register_agent(agent).unwrap();
     }
@@ -135,6 +137,7 @@ fn grpc_job_lifecycle() {
         source: None,
         prompts: None,
         image_digest: None,
+        public_key: None,
     };
     client.register_agent(agent).unwrap();
 

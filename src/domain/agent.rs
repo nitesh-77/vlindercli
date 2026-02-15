@@ -34,6 +34,10 @@ pub struct Agent {
     /// For container agents: `podman image inspect` → `sha256:...`
     /// None for non-container runtimes or if resolution failed.
     pub image_digest: Option<ImageDigest>,
+    /// Ed25519 public key for this agent's identity (ADR 084).
+    /// Set by `ensure_agent_identity()` before registration.
+    /// None until identity is provisioned.
+    pub public_key: Option<Vec<u8>>,
     /// Object storage configuration (optional).
     pub object_storage: Option<ResourceId>,
     /// Vector storage configuration (optional).
@@ -84,6 +88,7 @@ impl Agent {
             runtime,
             executable: manifest.executable,
             image_digest: None,
+            public_key: None,
             object_storage: manifest.object_storage,
             vector_storage: manifest.vector_storage,
         })
