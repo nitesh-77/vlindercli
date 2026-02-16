@@ -132,7 +132,7 @@ pub use embedding::{
 // ============================================================================
 
 pub use model::{Model, ModelType, LoadError as ModelLoadError};
-pub use model_manifest::{ModelManifest, ModelTypeConfig, ModelEngineConfig};
+pub use model_manifest::{ModelManifest, ModelTypeConfig};
 
 // ============================================================================
 // Model Catalog (trait)

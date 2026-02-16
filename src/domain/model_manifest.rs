@@ -3,6 +3,8 @@
 use serde::Deserialize;
 use std::path::Path;
 
+use super::provider::Provider;
+
 /// Model manifest as read from a model.toml file.
 #[derive(Clone, Debug, Deserialize)]
 pub struct ModelManifest {
@@ -10,7 +12,7 @@ pub struct ModelManifest {
     pub name: Option<String>,
     #[serde(rename = "type")]
     pub model_type: ModelTypeConfig,
-    pub engine: ModelEngineConfig,
+    pub provider: Provider,
     /// Path to the model file (e.g., GGUF).
     pub model_path: String,
 }
@@ -20,13 +22,6 @@ pub struct ModelManifest {
 pub enum ModelTypeConfig {
     Inference,
     Embedding,
-}
-
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum ModelEngineConfig {
-    Ollama,
-    OpenRouter,
 }
 
 impl ModelManifest {

@@ -4,7 +4,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use super::model_manifest::{ModelManifest, ModelTypeConfig, ModelEngineConfig, ParseError};
+use super::model_manifest::{ModelManifest, ModelTypeConfig, ParseError};
 use super::provider::Provider;
 use super::resource_id::ResourceId;
 
@@ -45,13 +45,12 @@ impl Model {
     /// The `id` field is set to a placeholder. The registry assigns the real
     /// id (`<registry_id>/models/<name>`) during registration.
     pub fn from_manifest(manifest: ModelManifest, digest: String) -> Model {
-        let provider: Provider = manifest.engine.into();
-        let name = name_from_model_path(&manifest.model_path, provider);
+        let name = name_from_model_path(&manifest.model_path, manifest.provider);
         Model {
             id: Self::placeholder_id(&name),
             name,
             model_type: manifest.model_type.into(),
-            provider,
+            provider: manifest.provider,
             model_path: ResourceId::new(manifest.model_path),
             digest,
         }
@@ -99,15 +98,6 @@ impl From<ModelTypeConfig> for ModelType {
     }
 }
 
-impl From<ModelEngineConfig> for Provider {
-    fn from(config: ModelEngineConfig) -> Self {
-        match config {
-            ModelEngineConfig::Ollama => Provider::Ollama,
-            ModelEngineConfig::OpenRouter => Provider::OpenRouter,
-        }
-    }
-}
-
 // ============================================================================
 // Errors
 // ============================================================================
@@ -140,7 +130,7 @@ impl std::fmt::Display for LoadError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::model_manifest::{ModelManifest, ModelTypeConfig, ModelEngineConfig};
+    use crate::domain::model_manifest::{ModelManifest, ModelTypeConfig};
 
     // ========================================================================
     // name_from_model_path
@@ -195,7 +185,7 @@ mod tests {
         let manifest = ModelManifest {
             name: None,
             model_type: ModelTypeConfig::Inference,
-            engine: ModelEngineConfig::Ollama,
+            provider: Provider::Ollama,
             model_path: "ollama://localhost:11434/phi3:latest".to_string(),
         };
         let model = Model::from_manifest(manifest, "sha256:abc123".to_string());
@@ -212,7 +202,7 @@ mod tests {
         let manifest = ModelManifest {
             name: None,
             model_type: ModelTypeConfig::Inference,
-            engine: ModelEngineConfig::OpenRouter,
+            provider: Provider::OpenRouter,
             model_path: "openrouter://anthropic/claude-sonnet-4".to_string(),
         };
         let model = Model::from_manifest(manifest, String::new());
@@ -226,7 +216,7 @@ mod tests {
         let manifest = ModelManifest {
             name: None,
             model_type: ModelTypeConfig::Embedding,
-            engine: ModelEngineConfig::Ollama,
+            provider: Provider::Ollama,
             model_path: "ollama://localhost:11434/nomic-embed-text:latest".to_string(),
         };
         let model = Model::from_manifest(manifest, String::new());

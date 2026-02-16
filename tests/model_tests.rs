@@ -1,6 +1,6 @@
 //! Model and ModelManifest tests.
 
-use vlindercli::domain::{Model, ModelManifest, ModelType, ModelTypeConfig, Provider, ModelEngineConfig};
+use vlindercli::domain::{Model, ModelManifest, ModelType, ModelTypeConfig, Provider};
 
 // ============================================================================
 // ModelManifest Tests (inline TOML - no fixtures needed)
@@ -15,13 +15,13 @@ fn model_manifest_parses_inference_type() {
     let manifest: ModelManifest = parse_model_manifest(r#"
         name = "phi3"
         type = "inference"
-        engine = "ollama"
+        provider = "ollama"
         model_path = "ollama://localhost:11434/phi3"
     "#).unwrap();
 
     assert_eq!(manifest.name, Some("phi3".to_string()));
     assert_eq!(manifest.model_type, ModelTypeConfig::Inference);
-    assert_eq!(manifest.engine, ModelEngineConfig::Ollama);
+    assert_eq!(manifest.provider, Provider::Ollama);
     assert_eq!(manifest.model_path, "ollama://localhost:11434/phi3");
 }
 
@@ -30,13 +30,13 @@ fn model_manifest_parses_embedding_type() {
     let manifest: ModelManifest = parse_model_manifest(r#"
         name = "nomic-embed"
         type = "embedding"
-        engine = "ollama"
+        provider = "ollama"
         model_path = "ollama://localhost:11434/nomic-embed-text"
     "#).unwrap();
 
     assert_eq!(manifest.name, Some("nomic-embed".to_string()));
     assert_eq!(manifest.model_type, ModelTypeConfig::Embedding);
-    assert_eq!(manifest.engine, ModelEngineConfig::Ollama);
+    assert_eq!(manifest.provider, Provider::Ollama);
 }
 
 #[test]
@@ -44,13 +44,13 @@ fn model_manifest_parses_openrouter_engine() {
     let manifest: ModelManifest = parse_model_manifest(r#"
         name = "claude-sonnet"
         type = "inference"
-        engine = "openrouter"
+        provider = "openrouter"
         model_path = "openrouter://anthropic/claude-sonnet-4-20250514"
     "#).unwrap();
 
     assert_eq!(manifest.name, Some("claude-sonnet".to_string()));
     assert_eq!(manifest.model_type, ModelTypeConfig::Inference);
-    assert_eq!(manifest.engine, ModelEngineConfig::OpenRouter);
+    assert_eq!(manifest.provider, Provider::OpenRouter);
     assert_eq!(manifest.model_path, "openrouter://anthropic/claude-sonnet-4-20250514");
 }
 
@@ -63,7 +63,7 @@ fn openrouter_model_loads_with_correct_engine_type() {
     let manifest = r#"
         name = "claude-sonnet"
         type = "inference"
-        engine = "openrouter"
+        provider = "openrouter"
         model_path = "openrouter://anthropic/claude-sonnet-4-20250514"
     "#;
     std::fs::write(temp_dir.join("model.toml"), manifest).unwrap();
@@ -82,7 +82,7 @@ fn model_manifest_fails_for_invalmodel_type() {
     let result = parse_model_manifest(r#"
         name = "bad"
         type = "unknown"
-        engine = "ollama"
+        provider = "ollama"
         model_path = "ollama://localhost:11434/bad"
     "#);
     assert!(result.is_err());
@@ -93,7 +93,7 @@ fn model_manifest_fails_for_missing_field() {
     let result = parse_model_manifest(r#"
         name = "incomplete"
         type = "inference"
-        engine = "ollama"
+        provider = "ollama"
     "#);
     assert!(result.is_err());
 }
@@ -111,7 +111,7 @@ fn model_load_parses_manifest() {
     let manifest = r#"
         name = "phi3"
         type = "inference"
-        engine = "ollama"
+        provider = "ollama"
         model_path = "ollama://localhost:11434/phi3"
     "#;
     std::fs::write(temp_dir.join("model.toml"), manifest).unwrap();
@@ -134,7 +134,7 @@ fn model_type_from_manifest() {
     let inference_manifest = r#"
         name = "inference-model"
         type = "inference"
-        engine = "ollama"
+        provider = "ollama"
         model_path = "ollama://localhost:11434/inference-model"
     "#;
     std::fs::write(temp_dir.join("inference.toml"), inference_manifest).unwrap();
@@ -145,7 +145,7 @@ fn model_type_from_manifest() {
     let embedding_manifest = r#"
         name = "embedding-model"
         type = "embedding"
-        engine = "ollama"
+        provider = "ollama"
         model_path = "ollama://localhost:11434/embedding-model"
     "#;
     std::fs::write(temp_dir.join("embedding.toml"), embedding_manifest).unwrap();
@@ -168,7 +168,7 @@ fn model_type_can_be_compared() {
     let manifest = r#"
         name = "test"
         type = "inference"
-        engine = "ollama"
+        provider = "ollama"
         model_path = "ollama://localhost:11434/test"
     "#;
     std::fs::write(temp_dir.join("model.toml"), manifest).unwrap();
@@ -191,7 +191,7 @@ fn model_engine_is_ollama() {
     let manifest = r#"
         name = "test"
         type = "inference"
-        engine = "ollama"
+        provider = "ollama"
         model_path = "ollama://localhost:11434/test"
     "#;
     std::fs::write(temp_dir.join("model.toml"), manifest).unwrap();
@@ -216,7 +216,7 @@ fn name_derived_from_ollama_path() {
     let manifest = r#"
         name = "nomic-embed"
         type = "embedding"
-        engine = "ollama"
+        provider = "ollama"
         model_path = "ollama://localhost:11434/nomic-embed-text:latest"
     "#;
     std::fs::write(temp_dir.join("model.toml"), manifest).unwrap();
@@ -236,7 +236,7 @@ fn name_derived_from_openrouter_path() {
     let manifest = r#"
         name = "claude-sonnet"
         type = "inference"
-        engine = "openrouter"
+        provider = "openrouter"
         model_path = "openrouter://anthropic/claude-sonnet-4"
     "#;
     std::fs::write(temp_dir.join("model.toml"), manifest).unwrap();
@@ -256,7 +256,7 @@ fn name_derived_when_manifest_name_matches_path() {
     let manifest = r#"
         name = "phi3:latest"
         type = "inference"
-        engine = "ollama"
+        provider = "ollama"
         model_path = "ollama://localhost:11434/phi3:latest"
     "#;
     std::fs::write(temp_dir.join("model.toml"), manifest).unwrap();
@@ -271,7 +271,7 @@ fn name_derived_when_manifest_name_matches_path() {
 fn manifest_without_name_field_parses() {
     let manifest: ModelManifest = toml::from_str(r#"
         type = "inference"
-        engine = "ollama"
+        provider = "ollama"
         model_path = "ollama://localhost:11434/phi3"
     "#).unwrap();
 
