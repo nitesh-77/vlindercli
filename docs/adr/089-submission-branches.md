@@ -1,8 +1,8 @@
-# ADR 089: Submission Branches
+# ADR 089: DAG Event Strategy
 
 ## Status
 
-Proposed
+Draft
 
 ## Context
 
@@ -21,35 +21,6 @@ We built a submission-branched DAG worker to validate the concept (branch `error
 3. The user should choose it — they know their agent's trust profile.
 4. But if they don't choose, it should fall in place as a sensible default.
 
-### Git platforms provide governance
-
-Git is infrastructure. Vlinder is the platform on top.
-
-The conversations repo is a real git repo. The developer's existing tools, policies, and governance just work:
-
-- GitHub branch protection on `main` → merge policy
-- Pull requests → review of agent outcomes
-- GitHub Actions → automated checks on submission branches
-- Required reviewers → human-in-the-loop
-- CODEOWNERS → who's responsible for which agent's outcomes
-- Notifications → agent submission needs review
-
-Vlinder doesn't need to build governance. Merge policies, branch protection, review workflows, access control — these are solved problems.
-
-### Identities are git authors
-
-Agent IDs and service IDs are already git commit authors (ADR 069). Push to a git platform and those become real identities:
-
-- `git blame` → which agent/service produced this outcome
-- Contributor graphs → which agents are most active
-- CODEOWNERS → assign responsibility per agent to a human developer
-
-Every domain entity that writes a git commit needs an identity: every agent in the registry, every platform service (infer, kv, vec, embed), and the harness. One identity per entity.
-
-The developer issues identities and stores them in the secret store. Vlinder reads identities from the secret store and writes commits with matching authors. Vlinder is an identity consumer, not an identity provider.
-
-If the developer hasn't configured an identity, Vlinder falls back to auto-generated defaults.
-
 ## Decision
 
-Deferred. The experiment validated that submission branches work mechanically (see `error-message-adr` branch). What remains is deciding how the developer configures what each event does to the timeline — and what the sensible default is.
+Deferred.
