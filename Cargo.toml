@@ -36,6 +36,7 @@ sha2 = "0.10"
 ed25519-dalek = { version = "2", features = ["rand_core"] }
 rand = "0.8"
 ureq = { version = "3", features = ["json"] }
+async-openai = { version = "0.32", default-features = false, features = ["chat-completion-types"] }
 semver = "1"
 
 
