@@ -3,7 +3,7 @@
 //! These tests skip gracefully if VLINDER_OPENROUTER_API_KEY is not set.
 
 use vlindercli::catalog::OpenRouterCatalog;
-use vlindercli::domain::{EngineType, InferenceEngine, ModelCatalog};
+use vlindercli::domain::{Provider, InferenceEngine, ModelCatalog};
 use vlindercli::inference::OpenRouterInferenceEngine;
 
 /// Return the API key if set, or print a skip message and return None.
@@ -39,7 +39,7 @@ fn resolves_model_from_openrouter() {
     let model = catalog.resolve("anthropic/claude-sonnet-4");
     assert!(model.is_ok());
     let model = model.unwrap();
-    assert_eq!(model.engine, EngineType::OpenRouter);
+    assert_eq!(model.provider, Provider::OpenRouter);
     assert!(model.id.as_str().starts_with("pending-registration://"));
 }
 

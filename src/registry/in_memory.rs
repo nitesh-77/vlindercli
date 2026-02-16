@@ -6,9 +6,9 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
 
 use crate::domain::{
-    Agent, EngineType, Job, JobId, JobStatus, Model, ModelType,
-    ObjectStorageType, RegistrationError, Registry, ResourceId, RuntimeType,
-    SecretStore, SubmissionId, VectorStorageType,
+    Agent, Job, JobId, JobStatus, Model, ModelType,
+    ObjectStorageType, Provider, RegistrationError, Registry, ResourceId, RuntimeType,
+    SecretStore, ServiceType, SubmissionId, VectorStorageType,
     ensure_agent_identity,
 };
 
@@ -20,8 +20,8 @@ struct RegistryState {
     available_runtimes: HashSet<RuntimeType>,
     available_object_storage: HashSet<ObjectStorageType>,
     available_vector_storage: HashSet<VectorStorageType>,
-    available_inference_engines: HashSet<EngineType>,
-    available_embedding_engines: HashSet<EngineType>,
+    available_inference_engines: HashSet<Provider>,
+    available_embedding_engines: HashSet<Provider>,
 }
 
 /// In-memory registry with internal RwLock for thread-safe access.
@@ -142,19 +142,43 @@ impl Registry for InMemoryRegistry {
 
             match model.model_type {
                 ModelType::Inference => {
-                    if !state.available_inference_engines.contains(&model.engine) {
+                    if !state.available_inference_engines.contains(&model.provider) {
                         return Err(RegistrationError::InferenceEngineUnavailable(
-                            model.engine, model.name.clone(),
+                            model.provider, model.name.clone(),
                         ));
+                    }
+                    if !agent.requirements.services.contains_key(&ServiceType::Infer) {
+                        return Err(RegistrationError::InferenceServiceNotDeclared(model_alias.clone()));
                     }
                 }
                 ModelType::Embedding => {
-                    if !state.available_embedding_engines.contains(&model.engine) {
+                    if !state.available_embedding_engines.contains(&model.provider) {
                         return Err(RegistrationError::EmbeddingEngineUnavailable(
-                            model.engine, model.name.clone(),
+                            model.provider, model.name.clone(),
                         ));
                     }
+                    if !agent.requirements.services.contains_key(&ServiceType::Embed) {
+                        return Err(RegistrationError::EmbeddingServiceNotDeclared(model_alias.clone()));
+                    }
                 }
+            }
+        }
+
+        // Validate services have corresponding models
+        if agent.requirements.services.contains_key(&ServiceType::Infer) {
+            let has_inference_model = agent.requirements.models.iter().any(|(_, uri)| {
+                state.models.values().any(|m| &m.model_path == uri && m.model_type == ModelType::Inference)
+            });
+            if !has_inference_model {
+                return Err(RegistrationError::InferenceServiceWithoutModel);
+            }
+        }
+        if agent.requirements.services.contains_key(&ServiceType::Embed) {
+            let has_embedding_model = agent.requirements.models.iter().any(|(_, uri)| {
+                state.models.values().any(|m| &m.model_path == uri && m.model_type == ModelType::Embedding)
+            });
+            if !has_embedding_model {
+                return Err(RegistrationError::EmbeddingServiceWithoutModel);
             }
         }
 
@@ -194,16 +218,16 @@ impl Registry for InMemoryRegistry {
         // Validate that the required engine is available
         match model.model_type {
             ModelType::Inference => {
-                if !state.available_inference_engines.contains(&model.engine) {
+                if !state.available_inference_engines.contains(&model.provider) {
                     return Err(RegistrationError::InferenceEngineUnavailable(
-                        model.engine, model.name,
+                        model.provider, model.name,
                     ));
                 }
             }
             ModelType::Embedding => {
-                if !state.available_embedding_engines.contains(&model.engine) {
+                if !state.available_embedding_engines.contains(&model.provider) {
                     return Err(RegistrationError::EmbeddingEngineUnavailable(
-                        model.engine, model.name,
+                        model.provider, model.name,
                     ));
                 }
             }
@@ -314,12 +338,12 @@ impl Registry for InMemoryRegistry {
         state.available_vector_storage.insert(storage_type);
     }
 
-    fn register_inference_engine(&self, engine_type: EngineType) {
+    fn register_inference_engine(&self, engine_type: Provider) {
         let mut state = self.state.write().unwrap();
         state.available_inference_engines.insert(engine_type);
     }
 
-    fn register_embedding_engine(&self, engine_type: EngineType) {
+    fn register_embedding_engine(&self, engine_type: Provider) {
         let mut state = self.state.write().unwrap();
         state.available_embedding_engines.insert(engine_type);
     }
@@ -336,12 +360,12 @@ impl Registry for InMemoryRegistry {
         state.available_vector_storage.contains(&storage_type)
     }
 
-    fn has_inference_engine(&self, engine_type: EngineType) -> bool {
+    fn has_inference_engine(&self, engine_type: Provider) -> bool {
         let state = self.state.read().unwrap();
         state.available_inference_engines.contains(&engine_type)
     }
 
-    fn has_embedding_engine(&self, engine_type: EngineType) -> bool {
+    fn has_embedding_engine(&self, engine_type: Provider) -> bool {
         let state = self.state.read().unwrap();
         state.available_embedding_engines.contains(&engine_type)
     }
@@ -477,18 +501,18 @@ mod tests {
         let registry = InMemoryRegistry::new(test_secret_store());
 
         // Initially nothing available
-        assert!(!registry.has_inference_engine(EngineType::Ollama));
-        assert!(!registry.has_inference_engine(EngineType::InMemory));
+        assert!(!registry.has_inference_engine(Provider::Ollama));
+        assert!(!registry.has_inference_engine(Provider::InMemory));
 
         // Register Ollama
-        registry.register_inference_engine(EngineType::Ollama);
-        assert!(registry.has_inference_engine(EngineType::Ollama));
-        assert!(!registry.has_inference_engine(EngineType::InMemory));
+        registry.register_inference_engine(Provider::Ollama);
+        assert!(registry.has_inference_engine(Provider::Ollama));
+        assert!(!registry.has_inference_engine(Provider::InMemory));
 
         // Register InMemory
-        registry.register_inference_engine(EngineType::InMemory);
-        assert!(registry.has_inference_engine(EngineType::Ollama));
-        assert!(registry.has_inference_engine(EngineType::InMemory));
+        registry.register_inference_engine(Provider::InMemory);
+        assert!(registry.has_inference_engine(Provider::Ollama));
+        assert!(registry.has_inference_engine(Provider::InMemory));
     }
 
     // --- Embedding engine tests ---
@@ -498,18 +522,18 @@ mod tests {
         let registry = InMemoryRegistry::new(test_secret_store());
 
         // Initially nothing available
-        assert!(!registry.has_embedding_engine(EngineType::Ollama));
-        assert!(!registry.has_embedding_engine(EngineType::InMemory));
+        assert!(!registry.has_embedding_engine(Provider::Ollama));
+        assert!(!registry.has_embedding_engine(Provider::InMemory));
 
         // Register Ollama
-        registry.register_embedding_engine(EngineType::Ollama);
-        assert!(registry.has_embedding_engine(EngineType::Ollama));
-        assert!(!registry.has_embedding_engine(EngineType::InMemory));
+        registry.register_embedding_engine(Provider::Ollama);
+        assert!(registry.has_embedding_engine(Provider::Ollama));
+        assert!(!registry.has_embedding_engine(Provider::InMemory));
 
         // Register InMemory
-        registry.register_embedding_engine(EngineType::InMemory);
-        assert!(registry.has_embedding_engine(EngineType::Ollama));
-        assert!(registry.has_embedding_engine(EngineType::InMemory));
+        registry.register_embedding_engine(Provider::InMemory);
+        assert!(registry.has_embedding_engine(Provider::Ollama));
+        assert!(registry.has_embedding_engine(Provider::InMemory));
     }
 
     // --- restore_agent tests ---
@@ -531,7 +555,7 @@ mod tests {
             vector_storage: None,
             requirements: Requirements {
                 models: HashMap::new(),
-                services: vec![],
+                services: HashMap::new(),
             },
             prompts: None,
             mounts: vec![],

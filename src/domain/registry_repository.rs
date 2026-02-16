@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use super::{Agent, ImageDigest, Model, EngineType, ModelType, Mount, Prompts, Requirements, ResourceId};
+use super::{Agent, ImageDigest, Model, ModelType, Mount, Prompts, Provider, Requirements, ResourceId, ServiceConfig, ServiceType};
 use super::path::AbsolutePath;
 use super::runtime::RuntimeType;
 
@@ -60,8 +60,8 @@ impl std::error::Error for RepositoryError {}
 #[derive(Debug)]
 pub struct StoredModel {
     pub name: String,
-    pub model_type: String,
-    pub engine: String,
+    pub model_type: ModelType,
+    pub provider: Provider,
     pub model_path: String,
     pub digest: String,
 }
@@ -70,46 +70,22 @@ impl StoredModel {
     pub fn from_model(model: &Model) -> Self {
         Self {
             name: model.name.clone(),
-            model_type: match model.model_type {
-                ModelType::Inference => "inference".to_string(),
-                ModelType::Embedding => "embedding".to_string(),
-            },
-            engine: match model.engine {
-                EngineType::Ollama => "ollama".to_string(),
-                EngineType::OpenRouter => "openrouter".to_string(),
-                EngineType::InMemory => "inmemory".to_string(),
-            },
+            model_type: model.model_type.clone(),
+            provider: model.provider,
             model_path: model.model_path.as_str().to_string(),
             digest: model.digest.clone(),
         }
     }
 
-    pub fn to_model(&self) -> Result<Model, RepositoryError> {
-        let model_type = match self.model_type.as_str() {
-            "inference" => ModelType::Inference,
-            "embedding" => ModelType::Embedding,
-            other => return Err(RepositoryError::Serialization(
-                format!("unknown model type: {}", other)
-            )),
-        };
-
-        let engine = match self.engine.as_str() {
-            "ollama" => EngineType::Ollama,
-            "openrouter" => EngineType::OpenRouter,
-            "inmemory" => EngineType::InMemory,
-            other => return Err(RepositoryError::Serialization(
-                format!("unknown engine type: {}", other)
-            )),
-        };
-
-        Ok(Model {
+    pub fn to_model(&self) -> Model {
+        Model {
             id: Model::placeholder_id(&self.name),
             name: self.name.clone(),
-            model_type,
-            engine,
+            model_type: self.model_type.clone(),
+            provider: self.provider,
             model_path: ResourceId::new(&self.model_path),
             digest: self.digest.clone(),
-        })
+        }
     }
 }
 
@@ -256,7 +232,7 @@ impl StoredAgent {
 #[derive(serde::Serialize, serde::Deserialize)]
 struct RequirementsJson {
     models: HashMap<String, String>,
-    services: Vec<String>,
+    services: HashMap<ServiceType, ServiceConfig>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -279,6 +255,7 @@ struct MountJson {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::{Provider, Protocol};
 
     fn minimal_agent() -> Agent {
         Agent {
@@ -294,7 +271,7 @@ mod tests {
             vector_storage: None,
             requirements: Requirements {
                 models: HashMap::new(),
-                services: vec![],
+                services: HashMap::new(),
             },
             prompts: None,
             mounts: vec![],
@@ -305,6 +282,13 @@ mod tests {
         let mut models = HashMap::new();
         models.insert("phi3".to_string(), ResourceId::new("ollama://localhost:11434/phi3:latest"));
         models.insert("nomic".to_string(), ResourceId::new("ollama://localhost:11434/nomic-embed-text:latest"));
+
+        let mut services = HashMap::new();
+        services.insert(ServiceType::Infer, ServiceConfig {
+            provider: Provider::Ollama,
+            protocol: Protocol::OpenAi,
+            models: vec!["phi3:latest".to_string()],
+        });
 
         Agent {
             id: Agent::placeholder_id("thinker"),
@@ -319,7 +303,7 @@ mod tests {
             vector_storage: Some(ResourceId::new("sqlite:///data/vectors.db")),
             requirements: Requirements {
                 models,
-                services: vec!["inference".to_string()],
+                services,
             },
             prompts: Some(Prompts {
                 intent_recognition: Some("Classify intent".to_string()),
@@ -382,7 +366,11 @@ mod tests {
         );
 
         // Services
-        assert_eq!(restored.requirements.services, vec!["inference"]);
+        assert_eq!(restored.requirements.services.len(), 1);
+        let infer = &restored.requirements.services[&ServiceType::Infer];
+        assert_eq!(infer.provider, Provider::Ollama);
+        assert_eq!(infer.protocol, Protocol::OpenAi);
+        assert_eq!(infer.models, vec!["phi3:latest"]);
 
         // Prompts
         let prompts = restored.prompts.unwrap();

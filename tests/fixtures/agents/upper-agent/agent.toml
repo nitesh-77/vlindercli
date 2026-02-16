@@ -4,4 +4,3 @@ runtime = "container"
 executable = "localhost/upper-agent:latest"
 
 [requirements]
-services = []

@@ -4,7 +4,6 @@ runtime = "container"
 executable = "localhost/vlinder-log-analyst:latest"
 
 [requirements]
-services = []
 
 [[mounts]]
 host_path = "~/.vlinder"

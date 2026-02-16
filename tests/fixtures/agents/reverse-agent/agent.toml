@@ -4,4 +4,3 @@ runtime = "container"
 executable = "localhost/reverse-agent:latest"
 
 [requirements]
-services = []

@@ -3,8 +3,9 @@
 use std::collections::HashMap;
 
 use crate::domain::{
-    AbsolutePath, Agent, EngineType, Job, JobId, JobStatus, Model, ModelType, Mount, Requirements,
-    ResourceId, RuntimeType, SubmissionId,
+    AbsolutePath, Agent, Job, JobId, JobStatus, Model, ModelType, Mount,
+    Protocol, Provider, Requirements, ResourceId, RuntimeType, ServiceConfig, ServiceType,
+    SubmissionId,
 };
 use super::proto;
 
@@ -84,16 +85,20 @@ impl From<Agent> for proto::Agent {
             name: agent.name,
             description: agent.description,
             id: Some(agent.id.into()),
-            required_services: agent.requirements.services,
-            models: agent.requirements.models.into_iter()
-                .map(|(k, v)| (k, v.to_string()))
+            services: agent.requirements.services.into_iter()
+                .map(|(st, cfg)| proto::ServiceEntry {
+                    service_type: proto::ServiceType::from(st).into(),
+                    provider: proto::Provider::from(cfg.provider).into(),
+                    protocol: proto::Protocol::from(cfg.protocol).into(),
+                    models: cfg.models,
+                })
                 .collect(),
             object_storage: agent.object_storage.map(|r| proto::ObjectStorageConfig {
                 resource_id: Some(r.into()),
             }),
             vector_storage: agent.vector_storage.map(|r| proto::VectorStorageConfig {
                 resource_id: Some(r.into()),
-                dimensions: 0, // Not stored in domain model
+                dimensions: 0,
             }),
             runtime: agent.runtime.as_str().to_string(),
             executable: agent.executable,
@@ -102,6 +107,12 @@ impl From<Agent> for proto::Agent {
                 guest_path: m.guest_path.to_string_lossy().to_string(),
                 readonly: m.readonly,
             }).collect(),
+            models: agent.requirements.models.into_iter()
+                .map(|(alias, uri)| proto::ModelAlias {
+                    alias,
+                    uri: uri.to_string(),
+                })
+                .collect(),
         }
     }
 }
@@ -110,9 +121,19 @@ impl TryFrom<proto::Agent> for Agent {
     type Error = String;
 
     fn try_from(agent: proto::Agent) -> Result<Self, Self::Error> {
-        let models: HashMap<String, ResourceId> = agent.models.into_iter()
-            .map(|(k, v)| (k, ResourceId::new(&v)))
-            .collect();
+        let mut services = HashMap::new();
+        for entry in agent.services {
+            let st: ServiceType = proto::ServiceType::try_from(entry.service_type)
+                .map_err(|_| "invalid service type")?
+                .try_into()?;
+            let provider: Provider = proto::Provider::try_from(entry.provider)
+                .map_err(|_| "invalid provider")?
+                .try_into()?;
+            let protocol: Protocol = proto::Protocol::try_from(entry.protocol)
+                .map_err(|_| "invalid protocol")?
+                .try_into()?;
+            services.insert(st, ServiceConfig { provider, protocol, models: entry.models });
+        }
 
         let runtime = RuntimeType::from_str(&agent.runtime)
             .ok_or_else(|| format!("unknown runtime: {}", agent.runtime))?;
@@ -124,8 +145,10 @@ impl TryFrom<proto::Agent> for Agent {
             runtime,
             executable: agent.executable,
             requirements: Requirements {
-                models,
-                services: agent.required_services,
+                models: agent.models.into_iter()
+                    .map(|m| (m.alias, ResourceId::new(&m.uri)))
+                    .collect(),
+                services,
             },
             object_storage: agent.object_storage
                 .and_then(|cfg| cfg.resource_id)
@@ -157,7 +180,7 @@ impl From<Model> for proto::Model {
             id: Some(model.id.into()),
             name: model.name,
             model_type: proto::ModelType::from(model.model_type).into(),
-            engine: proto::EngineType::from(model.engine).into(),
+            provider: proto::Provider::from(model.provider).into(),
             model_path: Some(model.model_path.into()),
             digest: model.digest,
         }
@@ -174,9 +197,9 @@ impl TryFrom<proto::Model> for Model {
             model_type: proto::ModelType::try_from(model.model_type)
                 .map_err(|_| "invalid model type")?
                 .into(),
-            engine: proto::EngineType::try_from(model.engine)
-                .map_err(|_| "invalid engine type")?
-                .into(),
+            provider: proto::Provider::try_from(model.provider)
+                .map_err(|_| "invalid provider")?
+                .try_into()?,
             model_path: model.model_path.ok_or("missing model path")?.into(),
             digest: model.digest,
         })
@@ -198,28 +221,6 @@ impl From<proto::ModelType> for ModelType {
             proto::ModelType::Inference => ModelType::Inference,
             proto::ModelType::Embedding => ModelType::Embedding,
             proto::ModelType::Unspecified => ModelType::Inference, // Default
-        }
-    }
-}
-
-impl From<EngineType> for proto::EngineType {
-    fn from(t: EngineType) -> Self {
-        match t {
-            EngineType::Ollama => proto::EngineType::Ollama,
-            EngineType::OpenRouter => proto::EngineType::Openrouter,
-            EngineType::InMemory => proto::EngineType::InMemory,
-        }
-    }
-}
-
-impl From<proto::EngineType> for EngineType {
-    fn from(t: proto::EngineType) -> Self {
-        match t {
-            proto::EngineType::Llama => EngineType::Ollama, // Legacy: treat as Ollama
-            proto::EngineType::Ollama => EngineType::Ollama,
-            proto::EngineType::Openrouter => EngineType::OpenRouter,
-            proto::EngineType::InMemory => EngineType::InMemory,
-            proto::EngineType::Unspecified => EngineType::InMemory, // Default
         }
     }
 }
@@ -292,6 +293,87 @@ impl From<proto::JobStatus> for JobStatus {
             proto::JobStatus::Completed => JobStatus::Completed(String::new()),
             proto::JobStatus::Failed => JobStatus::Failed(String::new()),
             proto::JobStatus::Unspecified => JobStatus::Pending,
+        }
+    }
+}
+
+// =============================================================================
+// ServiceType
+// =============================================================================
+
+impl From<ServiceType> for proto::ServiceType {
+    fn from(t: ServiceType) -> Self {
+        match t {
+            ServiceType::Infer => proto::ServiceType::Infer,
+            ServiceType::Embed => proto::ServiceType::Embed,
+            ServiceType::Kv => proto::ServiceType::Kv,
+            ServiceType::Vec => proto::ServiceType::Vec,
+        }
+    }
+}
+
+impl TryFrom<proto::ServiceType> for ServiceType {
+    type Error = String;
+
+    fn try_from(t: proto::ServiceType) -> Result<Self, Self::Error> {
+        match t {
+            proto::ServiceType::Infer => Ok(ServiceType::Infer),
+            proto::ServiceType::Embed => Ok(ServiceType::Embed),
+            proto::ServiceType::Kv => Ok(ServiceType::Kv),
+            proto::ServiceType::Vec => Ok(ServiceType::Vec),
+            proto::ServiceType::Unspecified => Err("unspecified service type".into()),
+        }
+    }
+}
+
+// =============================================================================
+// Provider
+// =============================================================================
+
+impl From<Provider> for proto::Provider {
+    fn from(p: Provider) -> Self {
+        match p {
+            Provider::OpenRouter => proto::Provider::Openrouter,
+            Provider::Ollama => proto::Provider::Ollama,
+            #[cfg(test)]
+            Provider::InMemory => proto::Provider::Unspecified,
+        }
+    }
+}
+
+impl TryFrom<proto::Provider> for Provider {
+    type Error = String;
+
+    fn try_from(p: proto::Provider) -> Result<Self, Self::Error> {
+        match p {
+            proto::Provider::Openrouter => Ok(Provider::OpenRouter),
+            proto::Provider::Ollama => Ok(Provider::Ollama),
+            proto::Provider::Unspecified => Err("unspecified provider".into()),
+        }
+    }
+}
+
+// =============================================================================
+// Protocol
+// =============================================================================
+
+impl From<Protocol> for proto::Protocol {
+    fn from(p: Protocol) -> Self {
+        match p {
+            Protocol::OpenAi => proto::Protocol::Openai,
+            Protocol::Anthropic => proto::Protocol::Anthropic,
+        }
+    }
+}
+
+impl TryFrom<proto::Protocol> for Protocol {
+    type Error = String;
+
+    fn try_from(p: proto::Protocol) -> Result<Self, Self::Error> {
+        match p {
+            proto::Protocol::Openai => Ok(Protocol::OpenAi),
+            proto::Protocol::Anthropic => Ok(Protocol::Anthropic),
+            proto::Protocol::Unspecified => Err("unspecified protocol".into()),
         }
     }
 }

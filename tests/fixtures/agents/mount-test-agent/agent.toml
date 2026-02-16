@@ -4,7 +4,6 @@ runtime = "container"
 executable = "localhost/mount-test-agent:latest"
 
 [requirements]
-services = []
 
 [[mounts]]
 host_path = "data"

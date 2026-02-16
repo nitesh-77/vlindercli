@@ -1,7 +1,7 @@
 //! Integration tests that require a running Ollama server.
 
 use vlindercli::catalog::OllamaCatalog;
-use vlindercli::domain::{EmbeddingEngine, EngineType, InferenceEngine, ModelCatalog};
+use vlindercli::domain::{EmbeddingEngine, Provider, InferenceEngine, ModelCatalog};
 use vlindercli::embedding::OllamaEmbeddingEngine;
 use vlindercli::inference::OllamaInferenceEngine;
 
@@ -20,7 +20,7 @@ fn resolves_model_from_ollama() {
     let model = catalog.resolve("phi3");
     assert!(model.is_ok());
     let model = model.unwrap();
-    assert_eq!(model.engine, EngineType::Ollama);
+    assert_eq!(model.provider, Provider::Ollama);
     assert!(model.id.as_str().starts_with("pending-registration://"));
 }
 

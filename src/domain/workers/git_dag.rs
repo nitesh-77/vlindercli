@@ -713,7 +713,7 @@ mod tests {
             runtime = "container"
             executable = "localhost/support-agent:latest"
             [requirements]
-            services = []
+
         "#).unwrap();
         registry.register_agent(agent).unwrap();
 

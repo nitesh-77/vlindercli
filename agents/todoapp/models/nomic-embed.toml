@@ -1,4 +1,4 @@
 name = "nomic-embed"
 type = "embedding"
-engine = "ollama"
+provider = "ollama"
 model_path = "ollama://localhost:11434/nomic-embed-text:latest"

@@ -4,7 +4,6 @@ runtime = "container"
 executable = "localhost/vlinder-code-analyst:latest"
 
 [requirements]
-services = []
 
 [[mounts]]
 host_path = "../.."

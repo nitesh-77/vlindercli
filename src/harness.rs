@@ -322,7 +322,7 @@ mod tests {
             runtime = "container"
             executable = "localhost/test-agent:latest"
             [requirements]
-            services = []
+
         "#;
         harness.deploy(manifest).unwrap()
     }

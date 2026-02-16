@@ -68,7 +68,7 @@ pub fn execute(cmd: ModelCommand) {
 
             println!("Added model '{}':", model.name);
             println!("  Type:   {:?}", model.model_type);
-            println!("  Engine: {:?}", model.engine);
+            println!("  Engine: {:?}", model.provider);
             println!("  Path:   {}", model.model_path);
         }
         ModelCommand::Available { filter, ref catalog, endpoint } => {
@@ -88,7 +88,7 @@ pub fn execute(cmd: ModelCommand) {
             }
             println!("Registered models:");
             for model in models {
-                println!("  {} ({:?}, {:?})", model.name, model.model_type, model.engine);
+                println!("  {} ({:?}, {:?})", model.name, model.model_type, model.provider);
             }
         }
         ModelCommand::Remove { name } => {

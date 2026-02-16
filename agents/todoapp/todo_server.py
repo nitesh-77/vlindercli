@@ -18,8 +18,8 @@ from vlinder import Agent
 
 agent = Agent()
 
-INFER_MODEL = "claude-sonnet"
-EMBED_MODEL = "nomic-embed"
+INFER_MODEL = "inference_model"
+EMBED_MODEL = "embedding_model"
 TODOS_PATH = "/todos.json"
 
 

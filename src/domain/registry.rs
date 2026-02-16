@@ -12,7 +12,7 @@
 //! - `PersistentRegistry` — `crate::registry`
 //! - `GrpcRegistryClient` — `crate::registry_service`
 
-use crate::domain::{Agent, EngineType, Model, ObjectStorageType, ResourceId, RuntimeType, VectorStorageType};
+use crate::domain::{Agent, Model, ObjectStorageType, Provider, ResourceId, RuntimeType, VectorStorageType};
 
 /// Unique identifier for a submitted job.
 ///
@@ -75,9 +75,17 @@ pub enum RegistrationError {
     /// Contains the agent's alias and the model_path URI.
     ModelNotRegistered(String, ResourceId),
     /// Agent requires an inference engine that is not available.
-    InferenceEngineUnavailable(EngineType, String),
+    InferenceEngineUnavailable(Provider, String),
     /// Agent requires an embedding engine that is not available.
-    EmbeddingEngineUnavailable(EngineType, String),
+    EmbeddingEngineUnavailable(Provider, String),
+    /// Agent uses an inference model but does not declare services.infer.
+    InferenceServiceNotDeclared(String),
+    /// Agent uses an embedding model but does not declare services.embed.
+    EmbeddingServiceNotDeclared(String),
+    /// Agent declares services.infer but has no inference model.
+    InferenceServiceWithoutModel,
+    /// Agent declares services.embed but has no embedding model.
+    EmbeddingServiceWithoutModel,
     /// Model cannot be removed because deployed agents depend on it.
     ModelInUse(String, Vec<String>),
     /// Identity provisioning failed (ADR 084).
@@ -104,11 +112,23 @@ impl std::fmt::Display for RegistrationError {
                 let hint = model_add_hint(uri.as_str());
                 write!(f, "model '{}' is not registered ({})\n\nAdd it first: {}", alias, uri, hint)
             }
-            RegistrationError::InferenceEngineUnavailable(engine, model) => {
-                write!(f, "no {} inference engine available for model '{}'\n\nIs the daemon running? Start it with: vlinder daemon", engine.as_backend_str(), model)
+            RegistrationError::InferenceEngineUnavailable(provider, model) => {
+                write!(f, "no {:?} inference engine available for model '{}'\n\nIs the daemon running? Start it with: vlinder daemon", provider, model)
             }
-            RegistrationError::EmbeddingEngineUnavailable(engine, model) => {
-                write!(f, "no {} embedding engine available for model '{}'\n\nIs the daemon running? Start it with: vlinder daemon", engine.as_backend_str(), model)
+            RegistrationError::EmbeddingEngineUnavailable(provider, model) => {
+                write!(f, "no {:?} embedding engine available for model '{}'\n\nIs the daemon running? Start it with: vlinder daemon", provider, model)
+            }
+            RegistrationError::InferenceServiceNotDeclared(model) => {
+                write!(f, "model '{}' is an inference model but agent does not declare [requirements.services.infer]", model)
+            }
+            RegistrationError::EmbeddingServiceNotDeclared(model) => {
+                write!(f, "model '{}' is an embedding model but agent does not declare [requirements.services.embed]", model)
+            }
+            RegistrationError::InferenceServiceWithoutModel => {
+                write!(f, "agent declares [requirements.services.infer] but has no inference model")
+            }
+            RegistrationError::EmbeddingServiceWithoutModel => {
+                write!(f, "agent declares [requirements.services.embed] but has no embedding model")
             }
             RegistrationError::ModelInUse(name, agents) => write!(f, "model '{}' is in use by agents: {}", name, agents.join(", ")),
             RegistrationError::IdentityFailed(msg) => write!(f, "identity provisioning failed: {}", msg),
@@ -197,6 +217,23 @@ pub trait Registry: Send + Sync {
             .collect()
     }
 
+    /// Resolve an agent's model alias to its provider backend string.
+    ///
+    /// The agent code calls infer/embed with a model name (the alias from
+    /// `[requirements.models]`). This method looks up that alias, finds the
+    /// registered model, and returns the provider as a routing string.
+    fn resolve_model_backend(&self, agent_id: &ResourceId, model: &str) -> Result<String, String> {
+        let agent = self.get_agent(agent_id)
+            .ok_or_else(|| format!("agent '{}' not found in registry", agent_id))?;
+        let model_uri = agent.requirements.models.get(model)
+            .ok_or_else(|| format!("agent called service with undeclared model '{}'\n\nDeclared models: {:?}",
+                model, agent.requirements.models.keys().collect::<Vec<_>>()))?;
+        let registered = self.get_model_by_path(model_uri)
+            .ok_or_else(|| format!("model '{}' (path: {}) not found in registry", model, model_uri))?;
+        Ok(serde_json::to_value(registered.provider)
+            .unwrap().as_str().unwrap().to_string())
+    }
+
     /// Get all agents whose model requirements reference the given model path.
     fn get_agents_requiring_model(&self, model_path: &ResourceId) -> Vec<Agent> {
         self.get_agents().into_iter()
@@ -243,15 +280,15 @@ pub trait Registry: Send + Sync {
     fn register_runtime(&self, runtime_type: RuntimeType);
     fn register_object_storage(&self, storage_type: ObjectStorageType);
     fn register_vector_storage(&self, storage_type: VectorStorageType);
-    fn register_inference_engine(&self, engine_type: EngineType);
-    fn register_embedding_engine(&self, engine_type: EngineType);
+    fn register_inference_engine(&self, engine_type: Provider);
+    fn register_embedding_engine(&self, engine_type: Provider);
 
     // --- Capability queries ---
 
     fn has_object_storage(&self, storage_type: ObjectStorageType) -> bool;
     fn has_vector_storage(&self, storage_type: VectorStorageType) -> bool;
-    fn has_inference_engine(&self, engine_type: EngineType) -> bool;
-    fn has_embedding_engine(&self, engine_type: EngineType) -> bool;
+    fn has_inference_engine(&self, engine_type: Provider) -> bool;
+    fn has_embedding_engine(&self, engine_type: Provider) -> bool;
 }
 
 #[cfg(test)]

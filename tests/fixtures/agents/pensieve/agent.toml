@@ -12,19 +12,20 @@ runtime = "container"
 executable = "localhost/pensieve:latest"
 
 [requirements]
-services = [
-    "infer",
-    "embed",
-    "get_file",
-    "put_file",
-    "list_files",
-    "store_embedding",
-    "search_by_vector",
-]
 
 [requirements.models]
 phi3 = "ollama://localhost:11434/phi3:latest"
 nomic-embed-text = "ollama://localhost:11434/nomic-embed-text:latest"
+
+[requirements.services.infer]
+provider = "openrouter"
+protocol = "anthropic"
+models = ["anthropic/claude-3.5-sonnet"]
+
+[requirements.services.embed]
+provider = "ollama"
+protocol = "openai"
+models = ["nomic-embed-text"]
 
 [[mounts]]
 host_path = "mnt"

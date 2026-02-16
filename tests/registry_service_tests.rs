@@ -18,7 +18,7 @@ fn test_secret_store() -> Arc<dyn SecretStore> {
 fn empty_requirements() -> Requirements {
     Requirements {
         models: HashMap::new(),
-        services: vec![],
+        services: HashMap::new(),
     }
 }
 

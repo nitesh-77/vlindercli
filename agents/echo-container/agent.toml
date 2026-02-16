@@ -4,4 +4,3 @@ runtime = "container"
 executable = "localhost/echo-container:latest"
 
 [requirements]
-services = []

@@ -4,8 +4,8 @@ use std::sync::Mutex;
 use tonic::transport::Channel;
 
 use crate::domain::{
-    Agent, EngineType, Job, JobId, JobStatus, Model, ObjectStorageType,
-    RegistrationError, Registry, ResourceId, RuntimeType, VectorStorageType,
+    Agent, Job, JobId, JobStatus, Model, ObjectStorageType,
+    Provider, RegistrationError, Registry, ResourceId, RuntimeType, VectorStorageType,
 };
 use super::proto::{self, registry_client::RegistryClient};
 
@@ -341,11 +341,11 @@ impl Registry for GrpcRegistryClient {
         // No-op
     }
 
-    fn register_inference_engine(&self, _engine_type: EngineType) {
+    fn register_inference_engine(&self, _engine_type: Provider) {
         // No-op
     }
 
-    fn register_embedding_engine(&self, _engine_type: EngineType) {
+    fn register_embedding_engine(&self, _engine_type: Provider) {
         // No-op
     }
 
@@ -359,11 +359,11 @@ impl Registry for GrpcRegistryClient {
         true
     }
 
-    fn has_inference_engine(&self, _engine_type: EngineType) -> bool {
+    fn has_inference_engine(&self, _engine_type: Provider) -> bool {
         true
     }
 
-    fn has_embedding_engine(&self, _engine_type: EngineType) -> bool {
+    fn has_embedding_engine(&self, _engine_type: Provider) -> bool {
         true
     }
 }

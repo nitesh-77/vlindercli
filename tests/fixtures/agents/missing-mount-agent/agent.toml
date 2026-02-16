@@ -4,7 +4,6 @@ runtime = "container"
 executable = "localhost/missing-mount-agent:latest"
 
 [requirements]
-services = []
 
 [[mounts]]
 host_path = "nonexistent"
