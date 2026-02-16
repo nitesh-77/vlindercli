@@ -33,7 +33,6 @@ mod session;
 mod model_manifest;
 mod path;
 mod resource_id;
-mod route;
 mod identity;
 mod secret_store;
 mod operation;
@@ -151,7 +150,6 @@ pub use runtime::{Runtime, RuntimeType};
 
 pub use harness::Harness;
 pub use session::{HistoryEntry, Session};
-pub use route::{Route, Stop};
 
 // ============================================================================
 // Secret Store (ADR 083)
