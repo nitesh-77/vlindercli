@@ -106,7 +106,12 @@ fn agent_proto_to_domain_round_trip() {
         id: Some(proto::ResourceId { uri: "http://localhost:9000/agents/echo".to_string() }),
         runtime: "container".to_string(),
         executable: "localhost/echo:latest".to_string(),
-        services: vec![],
+        services: vec![proto::ServiceEntry {
+            service_type: proto::ServiceType::Infer as i32,
+            provider: proto::Provider::Openrouter as i32,
+            protocol: proto::Protocol::Anthropic as i32,
+            models: vec!["anthropic/claude-3.5-sonnet".to_string()],
+        }],
         mounts: vec![],
         object_storage: None,
         vector_storage: None,
@@ -115,6 +120,10 @@ fn agent_proto_to_domain_round_trip() {
     let agent: Agent = proto_agent.try_into().unwrap();
     assert_eq!(agent.name, "echo");
     assert_eq!(agent.runtime, RuntimeType::Container);
+    let infer = &agent.requirements.services[&ServiceType::Infer];
+    assert_eq!(infer.provider, Provider::OpenRouter);
+    assert_eq!(infer.protocol, Protocol::Anthropic);
+    assert_eq!(infer.models, vec!["anthropic/claude-3.5-sonnet"]);
 }
 
 #[test]

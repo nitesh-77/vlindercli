@@ -394,6 +394,7 @@ mod tests {
         let infer = &restored.requirements.services[&ServiceType::Infer];
         assert_eq!(infer.provider, Provider::Ollama);
         assert_eq!(infer.protocol, Protocol::OpenAi);
+        assert_eq!(infer.models, vec!["phi3:latest"]);
 
         // Prompts
         let prompts = restored.prompts.unwrap();

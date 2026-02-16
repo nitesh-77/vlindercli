@@ -431,7 +431,10 @@ mod tests {
         assert_eq!(restored.vector_storage.as_ref().map(|r| r.as_str()), Some("sqlite:///data/vectors.db"));
         assert_eq!(restored.requirements.models.get("phi3").map(|r| r.as_str()), Some("ollama://localhost:11434/phi3:latest"));
         assert_eq!(restored.requirements.services.len(), 1);
-        assert!(restored.requirements.services.contains_key(&crate::domain::ServiceType::Infer));
+        let infer = &restored.requirements.services[&crate::domain::ServiceType::Infer];
+        assert_eq!(infer.provider, crate::domain::Provider::Ollama);
+        assert_eq!(infer.protocol, crate::domain::Protocol::OpenAi);
+        assert_eq!(infer.models, vec!["phi3:latest"]);
         assert!(restored.prompts.as_ref().unwrap().intent_recognition.is_some());
         assert_eq!(restored.mounts.len(), 1);
         assert!(restored.mounts[0].readonly);
