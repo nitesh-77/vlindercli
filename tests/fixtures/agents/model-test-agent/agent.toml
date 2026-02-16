@@ -3,8 +3,16 @@ description = "Test agent for model loading tests"
 runtime = "container"
 executable = "localhost/model-test-agent:latest"
 
-[requirements]
-
 [requirements.models]
 phi3 = "http://127.0.0.1:9000/models/phi3"
 nomic-embed = "http://127.0.0.1:9000/models/nomic-embed"
+
+[requirements.services.infer]
+provider = "ollama"
+protocol = "openai"
+models = ["phi3"]
+
+[requirements.services.embed]
+provider = "ollama"
+protocol = "openai"
+models = ["nomic-embed"]

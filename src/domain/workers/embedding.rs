@@ -212,11 +212,15 @@ mod tests {
             description = "Test agent"
             runtime = "container"
             executable = "localhost/test-agent:latest"
-            [requirements]
 
             [requirements.models]
             {} = "memory://test/{}"
-        "#, model_alias, model_alias);
+
+            [requirements.services.embed]
+            provider = "ollama"
+            protocol = "openai"
+            models = ["{}"]
+        "#, model_alias, model_alias, model_alias);
         Agent::from_toml(&manifest).unwrap()
     }
 

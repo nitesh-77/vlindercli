@@ -8,7 +8,7 @@ use std::sync::{Arc, RwLock};
 use crate::domain::{
     Agent, EngineType, Job, JobId, JobStatus, Model, ModelType,
     ObjectStorageType, RegistrationError, Registry, ResourceId, RuntimeType,
-    SecretStore, SubmissionId, VectorStorageType,
+    SecretStore, ServiceType, SubmissionId, VectorStorageType,
     ensure_agent_identity,
 };
 
@@ -147,6 +147,9 @@ impl Registry for InMemoryRegistry {
                             model.engine, model.name.clone(),
                         ));
                     }
+                    if !agent.requirements.services.contains_key(&ServiceType::Infer) {
+                        return Err(RegistrationError::InferenceServiceNotDeclared(model_alias.clone()));
+                    }
                 }
                 ModelType::Embedding => {
                     if !state.available_embedding_engines.contains(&model.engine) {
@@ -154,7 +157,28 @@ impl Registry for InMemoryRegistry {
                             model.engine, model.name.clone(),
                         ));
                     }
+                    if !agent.requirements.services.contains_key(&ServiceType::Embed) {
+                        return Err(RegistrationError::EmbeddingServiceNotDeclared(model_alias.clone()));
+                    }
                 }
+            }
+        }
+
+        // Validate services have corresponding models
+        if agent.requirements.services.contains_key(&ServiceType::Infer) {
+            let has_inference_model = agent.requirements.models.iter().any(|(_, uri)| {
+                state.models.values().any(|m| &m.model_path == uri && m.model_type == ModelType::Inference)
+            });
+            if !has_inference_model {
+                return Err(RegistrationError::InferenceServiceWithoutModel);
+            }
+        }
+        if agent.requirements.services.contains_key(&ServiceType::Embed) {
+            let has_embedding_model = agent.requirements.models.iter().any(|(_, uri)| {
+                state.models.values().any(|m| &m.model_path == uri && m.model_type == ModelType::Embedding)
+            });
+            if !has_embedding_model {
+                return Err(RegistrationError::EmbeddingServiceWithoutModel);
             }
         }
 

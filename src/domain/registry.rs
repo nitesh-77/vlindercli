@@ -78,6 +78,14 @@ pub enum RegistrationError {
     InferenceEngineUnavailable(EngineType, String),
     /// Agent requires an embedding engine that is not available.
     EmbeddingEngineUnavailable(EngineType, String),
+    /// Agent uses an inference model but does not declare services.infer.
+    InferenceServiceNotDeclared(String),
+    /// Agent uses an embedding model but does not declare services.embed.
+    EmbeddingServiceNotDeclared(String),
+    /// Agent declares services.infer but has no inference model.
+    InferenceServiceWithoutModel,
+    /// Agent declares services.embed but has no embedding model.
+    EmbeddingServiceWithoutModel,
     /// Model cannot be removed because deployed agents depend on it.
     ModelInUse(String, Vec<String>),
     /// Identity provisioning failed (ADR 084).
@@ -109,6 +117,18 @@ impl std::fmt::Display for RegistrationError {
             }
             RegistrationError::EmbeddingEngineUnavailable(engine, model) => {
                 write!(f, "no {} embedding engine available for model '{}'\n\nIs the daemon running? Start it with: vlinder daemon", engine.as_backend_str(), model)
+            }
+            RegistrationError::InferenceServiceNotDeclared(model) => {
+                write!(f, "model '{}' is an inference model but agent does not declare [requirements.services.infer]", model)
+            }
+            RegistrationError::EmbeddingServiceNotDeclared(model) => {
+                write!(f, "model '{}' is an embedding model but agent does not declare [requirements.services.embed]", model)
+            }
+            RegistrationError::InferenceServiceWithoutModel => {
+                write!(f, "agent declares [requirements.services.infer] but has no inference model")
+            }
+            RegistrationError::EmbeddingServiceWithoutModel => {
+                write!(f, "agent declares [requirements.services.embed] but has no embedding model")
             }
             RegistrationError::ModelInUse(name, agents) => write!(f, "model '{}' is in use by agents: {}", name, agents.join(", ")),
             RegistrationError::IdentityFailed(msg) => write!(f, "identity provisioning failed: {}", msg),
