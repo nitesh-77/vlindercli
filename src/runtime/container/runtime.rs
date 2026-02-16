@@ -68,16 +68,6 @@ impl ContainerRuntime {
         let vec_backend = agent.vector_storage.as_ref()
             .and_then(|uri| VectorStorageType::from_scheme(uri.scheme()));
 
-        // Build model→backend map from agent's declared models
-        let mut model_backends = HashMap::new();
-        for (model_alias, model_uri) in &agent.requirements.models {
-            if let Some(model) = self.registry.get_model_by_path(model_uri) {
-                let backend = serde_json::to_value(model.provider)
-                    .unwrap().as_str().unwrap().to_string();
-                model_backends.insert(model_alias.clone(), backend);
-            }
-        }
-
         // Create QueueBridge.
         // Bootstrap state to root ("") if agent uses KV but no prior state exists (ADR 055).
         let initial_state = invoke.state.clone()
@@ -89,7 +79,6 @@ impl ContainerRuntime {
             invoke: std::sync::RwLock::new(invoke.clone()),
             kv_backend,
             vec_backend,
-            model_backends,
             sequence: SequenceCounter::new(),
         })
     }

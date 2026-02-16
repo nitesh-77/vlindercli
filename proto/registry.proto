@@ -67,6 +67,12 @@ message Agent {
   string runtime = 8;     // Runtime type (e.g., "container")
   string executable = 9;  // Native artifact ref (e.g., OCI image)
   repeated Mount mounts = 10;  // Host→guest filesystem mounts (ADR 057)
+  repeated ModelAlias models = 11;  // Agent's model alias → URI map
+}
+
+message ModelAlias {
+  string alias = 1;     // Agent-local name (e.g., "embedding_model")
+  string uri = 2;       // Registry model_path (e.g., "ollama://localhost:11434/phi3:latest")
 }
 
 message ServiceEntry {

@@ -113,6 +113,7 @@ fn agent_proto_to_domain_round_trip() {
             models: vec!["anthropic/claude-3.5-sonnet".to_string()],
         }],
         mounts: vec![],
+        models: vec![],
         object_storage: None,
         vector_storage: None,
     };
@@ -127,6 +128,51 @@ fn agent_proto_to_domain_round_trip() {
 }
 
 #[test]
+fn agent_models_survive_proto_round_trip() {
+    let mut services = HashMap::new();
+    services.insert(ServiceType::Infer, ServiceConfig {
+        provider: Provider::Ollama,
+        protocol: Protocol::OpenAi,
+        models: vec!["phi3:latest".to_string()],
+    });
+
+    let agent = Agent {
+        name: "thinker".to_string(),
+        description: "Thinks".to_string(),
+        source: None,
+        id: ResourceId::new("http://localhost:9000/agents/thinker"),
+        runtime: RuntimeType::Container,
+        executable: "localhost/thinker:latest".to_string(),
+        image_digest: None,
+        public_key: None,
+        requirements: Requirements {
+            models: HashMap::from([
+                ("inference_model".to_string(), ResourceId::new("ollama://localhost:11434/phi3:latest")),
+                ("embedding_model".to_string(), ResourceId::new("ollama://localhost:11434/nomic-embed-text:latest")),
+            ]),
+            services,
+        },
+        prompts: None,
+        mounts: vec![],
+        object_storage: None,
+        vector_storage: None,
+    };
+
+    let proto_agent: proto::Agent = agent.into();
+    let back: Agent = proto_agent.try_into().unwrap();
+
+    assert_eq!(back.requirements.models.len(), 2, "models lost in proto round-trip");
+    assert_eq!(
+        back.requirements.models.get("inference_model").map(|r| r.as_str()),
+        Some("ollama://localhost:11434/phi3:latest"),
+    );
+    assert_eq!(
+        back.requirements.models.get("embedding_model").map(|r| r.as_str()),
+        Some("ollama://localhost:11434/nomic-embed-text:latest"),
+    );
+}
+
+#[test]
 fn agent_proto_missing_id_fails() {
     let proto_agent = proto::Agent {
         name: "bad".to_string(),
@@ -136,6 +182,7 @@ fn agent_proto_missing_id_fails() {
         executable: "x".to_string(),
         services: vec![],
         mounts: vec![],
+        models: vec![],
         object_storage: None,
         vector_storage: None,
     };

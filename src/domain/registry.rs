@@ -217,6 +217,23 @@ pub trait Registry: Send + Sync {
             .collect()
     }
 
+    /// Resolve an agent's model alias to its provider backend string.
+    ///
+    /// The agent code calls infer/embed with a model name (the alias from
+    /// `[requirements.models]`). This method looks up that alias, finds the
+    /// registered model, and returns the provider as a routing string.
+    fn resolve_model_backend(&self, agent_id: &ResourceId, model: &str) -> Result<String, String> {
+        let agent = self.get_agent(agent_id)
+            .ok_or_else(|| format!("agent '{}' not found in registry", agent_id))?;
+        let model_uri = agent.requirements.models.get(model)
+            .ok_or_else(|| format!("agent called service with undeclared model '{}'\n\nDeclared models: {:?}",
+                model, agent.requirements.models.keys().collect::<Vec<_>>()))?;
+        let registered = self.get_model_by_path(model_uri)
+            .ok_or_else(|| format!("model '{}' (path: {}) not found in registry", model, model_uri))?;
+        Ok(serde_json::to_value(registered.provider)
+            .unwrap().as_str().unwrap().to_string())
+    }
+
     /// Get all agents whose model requirements reference the given model path.
     fn get_agents_requiring_model(&self, model_path: &ResourceId) -> Vec<Agent> {
         self.get_agents().into_iter()

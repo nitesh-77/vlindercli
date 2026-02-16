@@ -107,6 +107,12 @@ impl From<Agent> for proto::Agent {
                 guest_path: m.guest_path.to_string_lossy().to_string(),
                 readonly: m.readonly,
             }).collect(),
+            models: agent.requirements.models.into_iter()
+                .map(|(alias, uri)| proto::ModelAlias {
+                    alias,
+                    uri: uri.to_string(),
+                })
+                .collect(),
         }
     }
 }
@@ -139,7 +145,9 @@ impl TryFrom<proto::Agent> for Agent {
             runtime,
             executable: agent.executable,
             requirements: Requirements {
-                models: HashMap::new(),
+                models: agent.models.into_iter()
+                    .map(|m| (m.alias, ResourceId::new(&m.uri)))
+                    .collect(),
                 services,
             },
             object_storage: agent.object_storage

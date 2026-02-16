@@ -8,7 +8,6 @@
 //! state hash into requests and extracts the new hash from kv-put
 //! responses. This makes the router the "state cursor" for each invocation.
 
-use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use super::{
@@ -36,8 +35,6 @@ pub struct QueueBridge {
     /// Resolved backends from agent config (None if agent didn't declare storage)
     pub(crate) kv_backend: Option<ObjectStorageType>,
     pub(crate) vec_backend: Option<VectorStorageType>,
-    /// Model name → backend string mapping (built from agent's declared models)
-    pub(crate) model_backends: HashMap<String, String>,
     /// Sequence counter — incremented per service call, reset per invocation
     pub(crate) sequence: SequenceCounter,
     /// Current state hash for the active invocation (ADR 055).
@@ -238,22 +235,22 @@ impl SdkContract for QueueBridge {
     }
 
     fn infer(&self, model: &str, prompt: &str, max_tokens: u32) -> Result<String, String> {
-        let backend = self.model_backends.get(model)
-            .ok_or_else(|| format!("agent called infer with undeclared model '{}'", model))?;
+        let agent_id = self.invoke.read().unwrap().agent_id.clone();
+        let backend = self.registry.resolve_model_backend(&agent_id, model)?;
         let req = InferRequest { model: model.to_string(), prompt: prompt.to_string(), max_tokens };
         let payload = serde_json::to_vec(&req).map_err(|e| format!("serialize error: {}", e))?;
-        let response = self.send_service_request(ServiceType::Infer, backend.clone(), Operation::Run, payload)?;
+        let response = self.send_service_request(ServiceType::Infer, backend, Operation::Run, payload)?;
         Self::check_worker_error(&response)?;
         String::from_utf8(response)
             .map_err(|e| format!("infer response not valid UTF-8: {}", e))
     }
 
     fn embed(&self, model: &str, text: &str) -> Result<Vec<f32>, String> {
-        let backend = self.model_backends.get(model)
-            .ok_or_else(|| format!("agent called embed with undeclared model '{}'", model))?;
+        let agent_id = self.invoke.read().unwrap().agent_id.clone();
+        let backend = self.registry.resolve_model_backend(&agent_id, model)?;
         let req = EmbedRequest { model: model.to_string(), text: text.to_string() };
         let payload = serde_json::to_vec(&req).map_err(|e| format!("serialize error: {}", e))?;
-        let response = self.send_service_request(ServiceType::Embed, backend.clone(), Operation::Run, payload)?;
+        let response = self.send_service_request(ServiceType::Embed, backend, Operation::Run, payload)?;
         Self::check_worker_error(&response)?;
         serde_json::from_slice(&response)
             .map_err(|e| format!("embed response parse error: {}", e))
@@ -366,7 +363,6 @@ mod tests {
             invoke: RwLock::new(invoke),
             kv_backend: kv,
             vec_backend: None,
-            model_backends: HashMap::new(),
             sequence: SequenceCounter::new(),
             current_state: RwLock::new(None),
         }

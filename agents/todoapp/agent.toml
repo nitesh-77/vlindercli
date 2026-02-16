@@ -15,5 +15,13 @@ vector_storage = "sqlite://data/vectors.db"
 [requirements]
 
 [requirements.models]
-claude-sonnet = "openrouter://anthropic/claude-sonnet-4"
-nomic-embed = "ollama://localhost:11434/nomic-embed-text:latest"
+inference_model = "openrouter://anthropic/claude-sonnet-4"
+embedding_model = "ollama://localhost:11434/nomic-embed-text:latest"
+
+[requirements.services.infer]
+provider = "openrouter"
+protocol = "openai"
+
+[requirements.services.embed]
+provider = "ollama"
+protocol = "openai"
