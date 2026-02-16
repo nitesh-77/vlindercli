@@ -72,7 +72,9 @@ impl ContainerRuntime {
         let mut model_backends = HashMap::new();
         for (model_alias, model_uri) in &agent.requirements.models {
             if let Some(model) = self.registry.get_model_by_path(model_uri) {
-                model_backends.insert(model_alias.clone(), model.engine.as_backend_str().to_string());
+                let backend = serde_json::to_value(model.provider)
+                    .unwrap().as_str().unwrap().to_string();
+                model_backends.insert(model_alias.clone(), backend);
             }
         }
 

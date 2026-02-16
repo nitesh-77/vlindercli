@@ -12,7 +12,7 @@
 //! - `PersistentRegistry` — `crate::registry`
 //! - `GrpcRegistryClient` — `crate::registry_service`
 
-use crate::domain::{Agent, EngineType, Model, ObjectStorageType, ResourceId, RuntimeType, VectorStorageType};
+use crate::domain::{Agent, Model, ObjectStorageType, Provider, ResourceId, RuntimeType, VectorStorageType};
 
 /// Unique identifier for a submitted job.
 ///
@@ -75,9 +75,9 @@ pub enum RegistrationError {
     /// Contains the agent's alias and the model_path URI.
     ModelNotRegistered(String, ResourceId),
     /// Agent requires an inference engine that is not available.
-    InferenceEngineUnavailable(EngineType, String),
+    InferenceEngineUnavailable(Provider, String),
     /// Agent requires an embedding engine that is not available.
-    EmbeddingEngineUnavailable(EngineType, String),
+    EmbeddingEngineUnavailable(Provider, String),
     /// Agent uses an inference model but does not declare services.infer.
     InferenceServiceNotDeclared(String),
     /// Agent uses an embedding model but does not declare services.embed.
@@ -112,11 +112,11 @@ impl std::fmt::Display for RegistrationError {
                 let hint = model_add_hint(uri.as_str());
                 write!(f, "model '{}' is not registered ({})\n\nAdd it first: {}", alias, uri, hint)
             }
-            RegistrationError::InferenceEngineUnavailable(engine, model) => {
-                write!(f, "no {} inference engine available for model '{}'\n\nIs the daemon running? Start it with: vlinder daemon", engine.as_backend_str(), model)
+            RegistrationError::InferenceEngineUnavailable(provider, model) => {
+                write!(f, "no {:?} inference engine available for model '{}'\n\nIs the daemon running? Start it with: vlinder daemon", provider, model)
             }
-            RegistrationError::EmbeddingEngineUnavailable(engine, model) => {
-                write!(f, "no {} embedding engine available for model '{}'\n\nIs the daemon running? Start it with: vlinder daemon", engine.as_backend_str(), model)
+            RegistrationError::EmbeddingEngineUnavailable(provider, model) => {
+                write!(f, "no {:?} embedding engine available for model '{}'\n\nIs the daemon running? Start it with: vlinder daemon", provider, model)
             }
             RegistrationError::InferenceServiceNotDeclared(model) => {
                 write!(f, "model '{}' is an inference model but agent does not declare [requirements.services.infer]", model)
@@ -263,15 +263,15 @@ pub trait Registry: Send + Sync {
     fn register_runtime(&self, runtime_type: RuntimeType);
     fn register_object_storage(&self, storage_type: ObjectStorageType);
     fn register_vector_storage(&self, storage_type: VectorStorageType);
-    fn register_inference_engine(&self, engine_type: EngineType);
-    fn register_embedding_engine(&self, engine_type: EngineType);
+    fn register_inference_engine(&self, engine_type: Provider);
+    fn register_embedding_engine(&self, engine_type: Provider);
 
     // --- Capability queries ---
 
     fn has_object_storage(&self, storage_type: ObjectStorageType) -> bool;
     fn has_vector_storage(&self, storage_type: VectorStorageType) -> bool;
-    fn has_inference_engine(&self, engine_type: EngineType) -> bool;
-    fn has_embedding_engine(&self, engine_type: EngineType) -> bool;
+    fn has_inference_engine(&self, engine_type: Provider) -> bool;
+    fn has_embedding_engine(&self, engine_type: Provider) -> bool;
 }
 
 #[cfg(test)]

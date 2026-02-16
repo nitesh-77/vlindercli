@@ -146,7 +146,7 @@ message Model {
   ResourceId id = 1;
   string name = 2;
   ModelType model_type = 3;
-  EngineType engine = 4;
+  Provider provider = 4;
   ResourceId model_path = 5;
   string digest = 6;
 }
@@ -155,14 +155,6 @@ enum ModelType {
   MODEL_TYPE_UNSPECIFIED = 0;
   MODEL_TYPE_INFERENCE = 1;
   MODEL_TYPE_EMBEDDING = 2;
-}
-
-enum EngineType {
-  ENGINE_TYPE_UNSPECIFIED = 0;
-  ENGINE_TYPE_LLAMA = 1;       // Deprecated: kept for wire compatibility
-  ENGINE_TYPE_OLLAMA = 2;
-  ENGINE_TYPE_IN_MEMORY = 3;
-  ENGINE_TYPE_OPENROUTER = 4;
 }
 
 message GetModelRequest {

@@ -1,6 +1,6 @@
 //! Model and ModelManifest tests.
 
-use vlindercli::domain::{Model, ModelManifest, ModelType, ModelTypeConfig, EngineType, ModelEngineConfig};
+use vlindercli::domain::{Model, ModelManifest, ModelType, ModelTypeConfig, Provider, ModelEngineConfig};
 
 // ============================================================================
 // ModelManifest Tests (inline TOML - no fixtures needed)
@@ -70,7 +70,7 @@ fn openrouter_model_loads_with_correct_engine_type() {
 
     let model = Model::load(&temp_dir.join("model.toml")).unwrap();
     assert_eq!(model.name, "anthropic/claude-sonnet-4-20250514");
-    assert_eq!(model.engine, EngineType::OpenRouter);
+    assert_eq!(model.provider, Provider::OpenRouter);
     assert_eq!(model.model_type, ModelType::Inference);
     assert_eq!(model.model_path.as_str(), "openrouter://anthropic/claude-sonnet-4-20250514");
 
@@ -119,7 +119,7 @@ fn model_load_parses_manifest() {
     let model = Model::load(&temp_dir.join("model.toml")).unwrap();
     assert_eq!(model.name, "phi3");
     assert_eq!(model.model_type, ModelType::Inference);
-    assert_eq!(model.engine, EngineType::Ollama);
+    assert_eq!(model.provider, Provider::Ollama);
 
     let _ = std::fs::remove_dir_all(&temp_dir);
 }
@@ -197,7 +197,7 @@ fn model_engine_is_ollama() {
     std::fs::write(temp_dir.join("model.toml"), manifest).unwrap();
 
     let model = Model::load(&temp_dir.join("model.toml")).unwrap();
-    assert_eq!(model.engine, EngineType::Ollama);
+    assert_eq!(model.provider, Provider::Ollama);
 
     let _ = std::fs::remove_dir_all(&temp_dir);
 }

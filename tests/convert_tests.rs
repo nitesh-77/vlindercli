@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use vlindercli::domain::{
-    Agent, EngineType, Job, JobId, JobStatus, Model, ModelType, Protocol, Provider,
+    Agent, Job, JobId, JobStatus, Model, ModelType, Protocol, Provider,
     Requirements, ResourceId, RuntimeType, ServiceConfig, ServiceType, SubmissionId,
 };
 use vlindercli::registry_service::proto;
@@ -154,7 +154,7 @@ fn model_domain_to_proto() {
         id: ResourceId::new("http://localhost:9000/models/phi3"),
         name: "phi3".to_string(),
         model_type: ModelType::Inference,
-        engine: EngineType::Ollama,
+        provider: Provider::Ollama,
         model_path: ResourceId::new("ollama://localhost:11434/phi3:latest"),
         digest: "sha256:abc".to_string(),
     };
@@ -162,7 +162,7 @@ fn model_domain_to_proto() {
     let proto_model: proto::Model = model.into();
     assert_eq!(proto_model.name, "phi3");
     assert_eq!(proto_model.digest, "sha256:abc");
-    assert_eq!(proto_model.engine, proto::EngineType::Ollama as i32);
+    assert_eq!(proto_model.provider, proto::Provider::Ollama as i32);
     assert_eq!(proto_model.model_type, proto::ModelType::Inference as i32);
 }
 
@@ -172,7 +172,7 @@ fn model_proto_to_domain_round_trip() {
         id: Some(proto::ResourceId { uri: "http://localhost/models/phi3".to_string() }),
         name: "phi3".to_string(),
         model_type: proto::ModelType::Embedding as i32,
-        engine: proto::EngineType::Ollama as i32,
+        provider: proto::Provider::Ollama as i32,
         model_path: Some(proto::ResourceId { uri: "ollama://localhost/phi3".to_string() }),
         digest: "sha256:abc".to_string(),
     };
@@ -180,32 +180,25 @@ fn model_proto_to_domain_round_trip() {
     let model: Model = proto_model.try_into().unwrap();
     assert_eq!(model.name, "phi3");
     assert_eq!(model.model_type, ModelType::Embedding);
-    assert_eq!(model.engine, EngineType::Ollama);
+    assert_eq!(model.provider, Provider::Ollama);
 }
 
 // ============================================================================
-// EngineType conversions
+// Provider round-trip
 // ============================================================================
 
 #[test]
-fn engine_type_round_trips() {
+fn provider_round_trips() {
     let cases = [
-        (EngineType::Ollama, proto::EngineType::Ollama),
-        (EngineType::OpenRouter, proto::EngineType::Openrouter),
-        (EngineType::InMemory, proto::EngineType::InMemory),
+        (Provider::Ollama, proto::Provider::Ollama),
+        (Provider::OpenRouter, proto::Provider::Openrouter),
     ];
     for (domain, proto_val) in cases {
-        let converted: proto::EngineType = domain.into();
+        let converted: proto::Provider = domain.into();
         assert_eq!(converted, proto_val);
-        let back: EngineType = converted.into();
+        let back: Provider = converted.try_into().unwrap();
         assert_eq!(back, domain);
     }
-}
-
-#[test]
-fn legacy_llama_maps_to_ollama() {
-    let engine: EngineType = proto::EngineType::Llama.into();
-    assert_eq!(engine, EngineType::Ollama);
 }
 
 // ============================================================================

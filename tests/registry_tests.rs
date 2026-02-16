@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use vlindercli::domain::{Agent, EngineType, Model, ModelType, Registry, RegistrationError, ResourceId, RuntimeType, SecretStore};
+use vlindercli::domain::{Agent, Provider, Model, ModelType, Registry, RegistrationError, ResourceId, RuntimeType, SecretStore};
 use vlindercli::registry::InMemoryRegistry;
 use vlindercli::secret_store::InMemorySecretStore;
 
@@ -82,7 +82,7 @@ fn register_model_test_agent(registry: &InMemoryRegistry) {
         id: Model::placeholder_id("phi3"),
         name: "phi3".to_string(),
         model_type: ModelType::Inference,
-        engine: EngineType::Ollama,
+        provider: Provider::Ollama,
         model_path: ResourceId::new("http://127.0.0.1:9000/models/phi3"),
         digest: String::new(),
     };
@@ -90,14 +90,14 @@ fn register_model_test_agent(registry: &InMemoryRegistry) {
         id: Model::placeholder_id("nomic-embed"),
         name: "nomic-embed".to_string(),
         model_type: ModelType::Embedding,
-        engine: EngineType::Ollama,
+        provider: Provider::Ollama,
         model_path: ResourceId::new("http://127.0.0.1:9000/models/nomic-embed"),
         digest: String::new(),
     };
 
     registry.register_runtime(RuntimeType::Container);
-    registry.register_inference_engine(EngineType::Ollama);
-    registry.register_embedding_engine(EngineType::Ollama);
+    registry.register_inference_engine(Provider::Ollama);
+    registry.register_embedding_engine(Provider::Ollama);
     registry.register_model(phi3).unwrap();
     registry.register_model(nomic).unwrap();
     registry.register_agent(load_agent("model-test-agent")).unwrap();
@@ -127,13 +127,13 @@ fn delete_model_blocked_by_deployed_agent() {
 #[test]
 fn delete_model_succeeds_without_dependent_agents() {
     let registry = InMemoryRegistry::new(test_secret_store());
-    registry.register_inference_engine(EngineType::Ollama);
+    registry.register_inference_engine(Provider::Ollama);
 
     let model = Model {
         id: Model::placeholder_id("unused"),
         name: "unused".to_string(),
         model_type: ModelType::Inference,
-        engine: EngineType::Ollama,
+        provider: Provider::Ollama,
         model_path: ResourceId::new("ollama://localhost:11434/unused"),
         digest: String::new(),
     };
@@ -157,7 +157,7 @@ fn register_model_rejected_without_inference_engine() {
         id: Model::placeholder_id("phi3"),
         name: "phi3".to_string(),
         model_type: ModelType::Inference,
-        engine: EngineType::Ollama,
+        provider: Provider::Ollama,
         model_path: ResourceId::new("http://127.0.0.1:9000/models/phi3"),
         digest: String::new(),
     };
@@ -165,8 +165,8 @@ fn register_model_rejected_without_inference_engine() {
     let result = registry.register_model(model);
     assert!(result.is_err());
     match result.unwrap_err() {
-        RegistrationError::InferenceEngineUnavailable(engine, model) => {
-            assert_eq!(engine, EngineType::Ollama);
+        RegistrationError::InferenceEngineUnavailable(prov, model) => {
+            assert_eq!(prov, Provider::Ollama);
             assert_eq!(model, "phi3");
         }
         other => panic!("expected InferenceEngineUnavailable, got: {}", other),
@@ -182,7 +182,7 @@ fn register_model_rejected_without_embedding_engine() {
         id: Model::placeholder_id("nomic-embed"),
         name: "nomic-embed".to_string(),
         model_type: ModelType::Embedding,
-        engine: EngineType::Ollama,
+        provider: Provider::Ollama,
         model_path: ResourceId::new("http://127.0.0.1:9000/models/nomic-embed"),
         digest: String::new(),
     };
@@ -190,8 +190,8 @@ fn register_model_rejected_without_embedding_engine() {
     let result = registry.register_model(model);
     assert!(result.is_err());
     match result.unwrap_err() {
-        RegistrationError::EmbeddingEngineUnavailable(engine, model) => {
-            assert_eq!(engine, EngineType::Ollama);
+        RegistrationError::EmbeddingEngineUnavailable(prov, model) => {
+            assert_eq!(prov, Provider::Ollama);
             assert_eq!(model, "nomic-embed");
         }
         other => panic!("expected EmbeddingEngineUnavailable, got: {}", other),
@@ -206,13 +206,13 @@ fn register_model_rejected_without_embedding_engine() {
 fn register_agent_rejected_when_inference_model_has_no_service() {
     let registry = InMemoryRegistry::new(test_secret_store());
     registry.register_runtime(RuntimeType::Container);
-    registry.register_inference_engine(EngineType::Ollama);
+    registry.register_inference_engine(Provider::Ollama);
 
     let model = Model {
         id: Model::placeholder_id("phi3"),
         name: "phi3".to_string(),
         model_type: ModelType::Inference,
-        engine: EngineType::Ollama,
+        provider: Provider::Ollama,
         model_path: ResourceId::new("ollama://localhost:11434/phi3:latest"),
         digest: String::new(),
     };
@@ -242,13 +242,13 @@ fn register_agent_rejected_when_inference_model_has_no_service() {
 fn register_agent_rejected_when_embedding_model_has_no_service() {
     let registry = InMemoryRegistry::new(test_secret_store());
     registry.register_runtime(RuntimeType::Container);
-    registry.register_embedding_engine(EngineType::Ollama);
+    registry.register_embedding_engine(Provider::Ollama);
 
     let model = Model {
         id: Model::placeholder_id("nomic-embed"),
         name: "nomic-embed".to_string(),
         model_type: ModelType::Embedding,
-        engine: EngineType::Ollama,
+        provider: Provider::Ollama,
         model_path: ResourceId::new("ollama://localhost:11434/nomic-embed-text:latest"),
         digest: String::new(),
     };

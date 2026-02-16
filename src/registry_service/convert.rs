@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use crate::domain::{
-    AbsolutePath, Agent, EngineType, Job, JobId, JobStatus, Model, ModelType, Mount,
+    AbsolutePath, Agent, Job, JobId, JobStatus, Model, ModelType, Mount,
     Protocol, Provider, Requirements, ResourceId, RuntimeType, ServiceConfig, ServiceType,
     SubmissionId,
 };
@@ -172,7 +172,7 @@ impl From<Model> for proto::Model {
             id: Some(model.id.into()),
             name: model.name,
             model_type: proto::ModelType::from(model.model_type).into(),
-            engine: proto::EngineType::from(model.engine).into(),
+            provider: proto::Provider::from(model.provider).into(),
             model_path: Some(model.model_path.into()),
             digest: model.digest,
         }
@@ -189,9 +189,9 @@ impl TryFrom<proto::Model> for Model {
             model_type: proto::ModelType::try_from(model.model_type)
                 .map_err(|_| "invalid model type")?
                 .into(),
-            engine: proto::EngineType::try_from(model.engine)
-                .map_err(|_| "invalid engine type")?
-                .into(),
+            provider: proto::Provider::try_from(model.provider)
+                .map_err(|_| "invalid provider")?
+                .try_into()?,
             model_path: model.model_path.ok_or("missing model path")?.into(),
             digest: model.digest,
         })
@@ -213,28 +213,6 @@ impl From<proto::ModelType> for ModelType {
             proto::ModelType::Inference => ModelType::Inference,
             proto::ModelType::Embedding => ModelType::Embedding,
             proto::ModelType::Unspecified => ModelType::Inference, // Default
-        }
-    }
-}
-
-impl From<EngineType> for proto::EngineType {
-    fn from(t: EngineType) -> Self {
-        match t {
-            EngineType::Ollama => proto::EngineType::Ollama,
-            EngineType::OpenRouter => proto::EngineType::Openrouter,
-            EngineType::InMemory => proto::EngineType::InMemory,
-        }
-    }
-}
-
-impl From<proto::EngineType> for EngineType {
-    fn from(t: proto::EngineType) -> Self {
-        match t {
-            proto::EngineType::Llama => EngineType::Ollama, // Legacy: treat as Ollama
-            proto::EngineType::Ollama => EngineType::Ollama,
-            proto::EngineType::Openrouter => EngineType::OpenRouter,
-            proto::EngineType::InMemory => EngineType::InMemory,
-            proto::EngineType::Unspecified => EngineType::InMemory, // Default
         }
     }
 }
@@ -349,6 +327,8 @@ impl From<Provider> for proto::Provider {
         match p {
             Provider::OpenRouter => proto::Provider::Openrouter,
             Provider::Ollama => proto::Provider::Ollama,
+            #[cfg(test)]
+            Provider::InMemory => proto::Provider::Unspecified,
         }
     }
 }

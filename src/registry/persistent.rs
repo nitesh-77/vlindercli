@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use crate::config::Config;
 use crate::domain::{
-    Agent, EngineType, Job, JobId, JobStatus, Model, ObjectStorageType, RegistrationError,
+    Agent, Job, JobId, JobStatus, Model, ObjectStorageType, Provider, RegistrationError,
     Registry, RegistryRepository, ResourceId, RuntimeType, SecretStore, SubmissionId, VectorStorageType,
 };
 use crate::storage::SqliteRegistryRepository;
@@ -43,13 +43,13 @@ impl PersistentRegistry {
 
         // Register engine capabilities BEFORE loading models so validation works
         if config.distributed.workers.inference.ollama > 0 {
-            inner.register_inference_engine(EngineType::Ollama);
+            inner.register_inference_engine(Provider::Ollama);
         }
         if config.distributed.workers.inference.openrouter > 0 {
-            inner.register_inference_engine(EngineType::OpenRouter);
+            inner.register_inference_engine(Provider::OpenRouter);
         }
         if config.distributed.workers.embedding.ollama > 0 {
-            inner.register_embedding_engine(EngineType::Ollama);
+            inner.register_embedding_engine(Provider::Ollama);
         }
 
         // Load persisted models (each validated against registered engines)
@@ -203,11 +203,11 @@ impl Registry for PersistentRegistry {
         self.inner.register_vector_storage(storage_type)
     }
 
-    fn register_inference_engine(&self, engine_type: EngineType) {
+    fn register_inference_engine(&self, engine_type: Provider) {
         self.inner.register_inference_engine(engine_type)
     }
 
-    fn register_embedding_engine(&self, engine_type: EngineType) {
+    fn register_embedding_engine(&self, engine_type: Provider) {
         self.inner.register_embedding_engine(engine_type)
     }
 
@@ -221,11 +221,11 @@ impl Registry for PersistentRegistry {
         self.inner.has_vector_storage(storage_type)
     }
 
-    fn has_inference_engine(&self, engine_type: EngineType) -> bool {
+    fn has_inference_engine(&self, engine_type: Provider) -> bool {
         self.inner.has_inference_engine(engine_type)
     }
 
-    fn has_embedding_engine(&self, engine_type: EngineType) -> bool {
+    fn has_embedding_engine(&self, engine_type: Provider) -> bool {
         self.inner.has_embedding_engine(engine_type)
     }
 }
@@ -246,7 +246,7 @@ mod tests {
             id: Model::placeholder_id(name),
             name: name.to_string(),
             model_type: ModelType::Inference,
-            engine: EngineType::Ollama,
+            provider: Provider::Ollama,
             model_path: ResourceId::new(format!("ollama://localhost:11434/{}", name)),
             digest: String::new(),
         }

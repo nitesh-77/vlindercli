@@ -9,22 +9,19 @@ pub use ollama::OllamaEmbeddingEngine;
 use std::sync::Arc;
 
 use crate::config::Config;
-use crate::domain::{EmbeddingEngine, EngineType, Model};
+use crate::domain::{EmbeddingEngine, Provider, Model};
 
 /// Open an embedding engine for the given model.
 pub fn open_embedding_engine(model: &Model) -> Result<Arc<dyn EmbeddingEngine>, String> {
-    match model.engine {
-        EngineType::Ollama => {
+    match model.provider {
+        Provider::Ollama => {
             let endpoint = model.model_path.authority()
                 .map(|a| format!("http://{}", a))
                 .unwrap_or_else(|| Config::load().ollama.endpoint);
             Ok(Arc::new(OllamaEmbeddingEngine::new(endpoint, model.name.clone())))
         }
-        EngineType::OpenRouter => {
-            Err("OpenRouter does not support embeddings".to_string())
-        }
-        EngineType::InMemory => {
-            Err("InMemory engine should be injected directly in tests".to_string())
+        other => {
+            Err(format!("{:?} does not support embeddings", other))
         }
     }
 }

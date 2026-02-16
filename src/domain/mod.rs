@@ -26,6 +26,7 @@ mod fleet_manifest;
 pub mod harness;
 mod inference;
 mod model;
+mod provider;
 mod registry;
 mod registry_repository;
 mod runtime;
@@ -88,7 +89,8 @@ pub(crate) use state::sorted_entries_json;
 // ============================================================================
 
 pub use path::{AbsolutePath, AbsoluteUri};
-pub use agent_manifest::{AgentManifest, ServiceConfig, Provider, Protocol};
+pub use agent_manifest::{AgentManifest, ServiceConfig, Protocol};
+pub use provider::Provider;
 pub use fleet::{Fleet, LoadError as FleetLoadError};
 pub use fleet_manifest::FleetManifest;
 
@@ -126,10 +128,10 @@ pub use embedding::{
 };
 
 // ============================================================================
-// Model & EngineType
+// Model
 // ============================================================================
 
-pub use model::{Model, ModelType, EngineType, LoadError as ModelLoadError};
+pub use model::{Model, ModelType, LoadError as ModelLoadError};
 pub use model_manifest::{ModelManifest, ModelTypeConfig, ModelEngineConfig};
 
 // ============================================================================

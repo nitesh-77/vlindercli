@@ -3,6 +3,8 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use super::provider::Provider;
+
 use super::resource_id::ResourceId;
 use super::service_type::ServiceType;
 
@@ -218,14 +220,6 @@ pub struct ServiceConfig {
     pub protocol: Protocol,
     #[serde(default)]
     pub models: Vec<String>,
-}
-
-/// Inference provider — where requests are forwarded.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Provider {
-    OpenRouter,
-    Ollama,
 }
 
 /// Wire protocol — the request/response shape the agent speaks.

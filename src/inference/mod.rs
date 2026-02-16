@@ -11,24 +11,25 @@ pub use openrouter::OpenRouterInferenceEngine;
 use std::sync::Arc;
 
 use crate::config::Config;
-use crate::domain::{EngineType, InferenceEngine, InferenceResult, Model};
+use crate::domain::{Provider, InferenceEngine, InferenceResult, Model};
 
 /// Open an inference engine for the given model.
 pub fn open_inference_engine(model: &Model) -> Result<Arc<dyn InferenceEngine>, String> {
-    match model.engine {
-        EngineType::Ollama => {
+    match model.provider {
+        Provider::Ollama => {
             let endpoint = model.model_path.authority()
                 .map(|a| format!("http://{}", a))
                 .unwrap_or_else(|| Config::load().ollama.endpoint);
             Ok(Arc::new(OllamaInferenceEngine::new(endpoint, model.name.clone())))
         }
-        EngineType::OpenRouter => {
+        Provider::OpenRouter => {
             let config = Config::load();
             let endpoint = config.openrouter.endpoint;
             let api_key = config.openrouter.api_key;
             Ok(Arc::new(OpenRouterInferenceEngine::new(endpoint, api_key, model.name.clone())))
         }
-        EngineType::InMemory => {
+        #[cfg(test)]
+        Provider::InMemory => {
             Err("InMemory engine should be injected directly in tests".to_string())
         }
     }

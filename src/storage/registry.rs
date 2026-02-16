@@ -5,7 +5,7 @@ use std::sync::Mutex;
 
 use rusqlite::Connection;
 
-use crate::domain::{Agent, Model, RegistryRepository, RepositoryError, StoredAgent, StoredModel};
+use crate::domain::{Agent, Model, ModelType, Provider, RegistryRepository, RepositoryError, StoredAgent, StoredModel};
 
 /// SQLite-backed registry repository.
 pub struct SqliteRegistryRepository {
@@ -45,7 +45,7 @@ impl SqliteRegistryRepository {
             "CREATE TABLE IF NOT EXISTS models (
                 name TEXT PRIMARY KEY,
                 model_type TEXT NOT NULL,
-                engine TEXT NOT NULL,
+                provider TEXT NOT NULL,
                 model_path TEXT NOT NULL,
                 digest TEXT NOT NULL
             )",
@@ -79,10 +79,17 @@ impl RegistryRepository for SqliteRegistryRepository {
         let stored = StoredModel::from_model(model);
         let conn = self.conn.lock().unwrap();
 
+        let model_type: String = serde_json::to_value(&stored.model_type)
+            .map_err(|e| RepositoryError::Serialization(e.to_string()))?
+            .as_str().unwrap().to_string();
+        let provider: String = serde_json::to_value(&stored.provider)
+            .map_err(|e| RepositoryError::Serialization(e.to_string()))?
+            .as_str().unwrap().to_string();
+
         conn.execute(
-            "INSERT OR REPLACE INTO models (name, model_type, engine, model_path, digest)
+            "INSERT OR REPLACE INTO models (name, model_type, provider, model_path, digest)
              VALUES (?1, ?2, ?3, ?4, ?5)",
-            [&stored.name, &stored.model_type, &stored.engine, &stored.model_path, &stored.digest],
+            [&stored.name, &model_type, &provider, &stored.model_path, &stored.digest],
         ).map_err(|e| RepositoryError::Database(e.to_string()))?;
 
         Ok(())
@@ -91,25 +98,37 @@ impl RegistryRepository for SqliteRegistryRepository {
     fn load_models(&self) -> Result<Vec<Model>, RepositoryError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
-            .prepare("SELECT name, model_type, engine, model_path, digest FROM models")
+            .prepare("SELECT name, model_type, provider, model_path, digest FROM models")
             .map_err(|e| RepositoryError::Database(e.to_string()))?;
 
         let rows = stmt
             .query_map([], |row| {
-                Ok(StoredModel {
-                    name: row.get(0)?,
-                    model_type: row.get(1)?,
-                    engine: row.get(2)?,
-                    model_path: row.get(3)?,
-                    digest: row.get(4)?,
-                })
+                let name: String = row.get(0)?;
+                let model_type_str: String = row.get(1)?;
+                let provider_str: String = row.get(2)?;
+                let model_path: String = row.get(3)?;
+                let digest: String = row.get(4)?;
+
+                let model_type: ModelType = serde_json::from_value(
+                    serde_json::Value::String(model_type_str)
+                ).map_err(|e| rusqlite::Error::FromSqlConversionFailure(
+                    1, rusqlite::types::Type::Text, Box::new(e)
+                ))?;
+
+                let provider: Provider = serde_json::from_value(
+                    serde_json::Value::String(provider_str)
+                ).map_err(|e| rusqlite::Error::FromSqlConversionFailure(
+                    2, rusqlite::types::Type::Text, Box::new(e)
+                ))?;
+
+                Ok(StoredModel { name, model_type, provider, model_path, digest })
             })
             .map_err(|e| RepositoryError::Database(e.to_string()))?;
 
         let mut models = Vec::new();
         for row in rows {
             let stored = row.map_err(|e| RepositoryError::Database(e.to_string()))?;
-            models.push(stored.to_model()?);
+            models.push(stored.to_model());
         }
         Ok(models)
     }
@@ -226,7 +245,7 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
     use crate::domain::{
-        Agent, EngineType, ImageDigest, ModelType, Mount, Prompts,
+        Agent, ImageDigest, ModelType, Mount, Prompts, Provider,
         Requirements, ResourceId, RuntimeType,
     };
     use crate::domain::AbsolutePath;
@@ -236,7 +255,7 @@ mod tests {
             id: Model::placeholder_id(name),
             name: name.to_string(),
             model_type: ModelType::Inference,
-            engine: EngineType::Ollama,
+            provider: Provider::Ollama,
             model_path: ResourceId::new(format!("ollama://localhost:11434/{}", name)),
             digest: format!("sha256:test-digest-{}", name),
         }
@@ -252,7 +271,7 @@ mod tests {
         let models = repo.load_models().unwrap();
         assert_eq!(models.len(), 1);
         assert_eq!(models[0].name, "llama3");
-        assert_eq!(models[0].engine, EngineType::Ollama);
+        assert_eq!(models[0].provider, Provider::Ollama);
     }
 
     #[test]
@@ -286,12 +305,12 @@ mod tests {
         repo.save_model(&model).unwrap();
 
         // Update engine type
-        model.engine = EngineType::OpenRouter;
+        model.provider = Provider::OpenRouter;
         repo.save_model(&model).unwrap();
 
         let models = repo.load_models().unwrap();
         assert_eq!(models.len(), 1);
-        assert_eq!(models[0].engine, EngineType::OpenRouter);
+        assert_eq!(models[0].provider, Provider::OpenRouter);
     }
 
     // --- Agent tests ---

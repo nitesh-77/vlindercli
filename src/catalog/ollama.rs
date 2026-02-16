@@ -4,7 +4,7 @@ use serde::Deserialize;
 
 use crate::config::Config;
 use crate::domain::{
-    CatalogError, EngineType, Model, ModelCatalog, ModelInfo, ModelType, ResourceId,
+    CatalogError, Provider, Model, ModelCatalog, ModelInfo, ModelType, ResourceId,
 };
 
 /// Catalog that queries Ollama's API for available models.
@@ -52,7 +52,7 @@ impl ModelCatalog for OllamaCatalog {
             id: Model::placeholder_id(&info.name),
             name: info.name.clone(),
             model_type,
-            engine: EngineType::Ollama,
+            provider: Provider::Ollama,
             model_path: ResourceId::new(format!("ollama://{}/{}", host, info.name)),
             digest,
         })

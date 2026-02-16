@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use super::{Agent, ImageDigest, Model, EngineType, ModelType, Mount, Prompts, Requirements, ResourceId, ServiceConfig, ServiceType};
+use super::{Agent, ImageDigest, Model, ModelType, Mount, Prompts, Provider, Requirements, ResourceId, ServiceConfig, ServiceType};
 use super::path::AbsolutePath;
 use super::runtime::RuntimeType;
 
@@ -60,8 +60,8 @@ impl std::error::Error for RepositoryError {}
 #[derive(Debug)]
 pub struct StoredModel {
     pub name: String,
-    pub model_type: String,
-    pub engine: String,
+    pub model_type: ModelType,
+    pub provider: Provider,
     pub model_path: String,
     pub digest: String,
 }
@@ -70,46 +70,22 @@ impl StoredModel {
     pub fn from_model(model: &Model) -> Self {
         Self {
             name: model.name.clone(),
-            model_type: match model.model_type {
-                ModelType::Inference => "inference".to_string(),
-                ModelType::Embedding => "embedding".to_string(),
-            },
-            engine: match model.engine {
-                EngineType::Ollama => "ollama".to_string(),
-                EngineType::OpenRouter => "openrouter".to_string(),
-                EngineType::InMemory => "inmemory".to_string(),
-            },
+            model_type: model.model_type.clone(),
+            provider: model.provider,
             model_path: model.model_path.as_str().to_string(),
             digest: model.digest.clone(),
         }
     }
 
-    pub fn to_model(&self) -> Result<Model, RepositoryError> {
-        let model_type = match self.model_type.as_str() {
-            "inference" => ModelType::Inference,
-            "embedding" => ModelType::Embedding,
-            other => return Err(RepositoryError::Serialization(
-                format!("unknown model type: {}", other)
-            )),
-        };
-
-        let engine = match self.engine.as_str() {
-            "ollama" => EngineType::Ollama,
-            "openrouter" => EngineType::OpenRouter,
-            "inmemory" => EngineType::InMemory,
-            other => return Err(RepositoryError::Serialization(
-                format!("unknown engine type: {}", other)
-            )),
-        };
-
-        Ok(Model {
+    pub fn to_model(&self) -> Model {
+        Model {
             id: Model::placeholder_id(&self.name),
             name: self.name.clone(),
-            model_type,
-            engine,
+            model_type: self.model_type.clone(),
+            provider: self.provider,
             model_path: ResourceId::new(&self.model_path),
             digest: self.digest.clone(),
-        })
+        }
     }
 }
 
