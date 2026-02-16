@@ -232,7 +232,7 @@ mod tests {
             executable = "localhost/test-agent:latest"
             vector_storage = "memory://"
             [requirements]
-            services = []
+
         "#;
         Agent::from_toml(manifest).unwrap()
     }

@@ -88,7 +88,7 @@ pub(crate) use state::sorted_entries_json;
 // ============================================================================
 
 pub use path::{AbsolutePath, AbsoluteUri};
-pub use agent_manifest::AgentManifest;
+pub use agent_manifest::{AgentManifest, ServiceConfig, Provider, Protocol};
 pub use fleet::{Fleet, LoadError as FleetLoadError};
 pub use fleet_manifest::FleetManifest;
 

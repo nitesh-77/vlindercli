@@ -26,7 +26,7 @@ fn manifest_parses_required_fields() {
         executable = "localhost/test-agent:latest"
 
         [requirements]
-        services = []
+
     "#).unwrap();
 
     assert_eq!(manifest.name, "test-agent");
@@ -45,7 +45,7 @@ fn manifest_parses_optional_source() {
         source = "https://github.com/example/agent"
 
         [requirements]
-        services = []
+
     "#).unwrap();
 
     assert_eq!(manifest.source, Some("https://github.com/example/agent".to_string()));
@@ -53,23 +53,34 @@ fn manifest_parses_optional_source() {
 
 #[test]
 fn manifest_parses_requirements() {
+    use vlindercli::domain::{ServiceType, Provider, Protocol};
+
     let manifest: AgentManifest = parse_manifest(r#"
         name = "test-agent"
         description = "A test agent"
         runtime = "container"
         executable = "localhost/test-agent:latest"
 
-        [requirements]
-        services = ["infer", "embed"]
-
         [requirements.models]
         phi3 = "file://./models/phi3.toml"
         nomic-embed = "file://./models/nomic.toml"
+
+        [requirements.services.infer]
+        provider = "openrouter"
+        protocol = "openai"
+        models = ["phi3"]
+
+        [requirements.services.embed]
+        provider = "ollama"
+        protocol = "openai"
+        models = ["nomic-embed"]
     "#).unwrap();
 
     assert!(manifest.requirements.models.contains_key("phi3"));
     assert!(manifest.requirements.models.contains_key("nomic-embed"));
-    assert!(manifest.requirements.services.contains(&"infer".to_string()));
+    assert!(manifest.requirements.services.contains_key(&ServiceType::Infer));
+    assert_eq!(manifest.requirements.services[&ServiceType::Infer].provider, Provider::OpenRouter);
+    assert_eq!(manifest.requirements.services[&ServiceType::Embed].protocol, Protocol::OpenAi);
 }
 
 #[test]
@@ -81,7 +92,7 @@ fn manifest_parses_mounts() {
         executable = "localhost/test-agent:latest"
 
         [requirements]
-        services = []
+
 
         [[mounts]]
         host_path = "data"
@@ -110,7 +121,7 @@ fn manifest_defaults_empty_optional_fields() {
         executable = "localhost/minimal:latest"
 
         [requirements]
-        services = []
+
     "#).unwrap();
 
     assert!(manifest.source.is_none());
@@ -132,7 +143,7 @@ fn manifest_fails_for_missing_required_field() {
         description = "Missing runtime and executable"
 
         [requirements]
-        services = []
+
     "#);
     assert!(result.is_err());
 }
@@ -215,7 +226,7 @@ fn manifest_executable_passes_through_for_containers() {
         executable = "ghcr.io/user/my-agent:v1.2.3"
 
         [requirements]
-        services = []
+
     "#).unwrap();
 
     assert_eq!(manifest.executable, "ghcr.io/user/my-agent:v1.2.3");
@@ -235,7 +246,7 @@ fn agent_load_fails_for_missing_executable() {
         executable = "nonexistent.wasm"
 
         [requirements]
-        services = []
+
     "#;
     std::fs::write(temp_dir.join("agent.toml"), manifest).unwrap();
 

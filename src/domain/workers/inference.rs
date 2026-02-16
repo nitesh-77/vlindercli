@@ -202,7 +202,7 @@ mod tests {
             runtime = "container"
             executable = "localhost/test-agent:latest"
             [requirements]
-            services = []
+
             [requirements.models]
             {} = "memory://test/{}"
         "#, model_alias, model_alias);

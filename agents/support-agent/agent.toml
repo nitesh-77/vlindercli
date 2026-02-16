@@ -4,7 +4,6 @@ runtime = "container"
 executable = "localhost/vlinder-support:latest"
 
 [requirements]
-services = ["infer"]
 
 [requirements.models]
 default = "ollama://localhost:11434/phi3:latest"

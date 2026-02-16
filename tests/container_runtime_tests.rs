@@ -31,7 +31,7 @@ fn container_runtime_executes_echo_agent() {
         runtime = "container"
         executable = "localhost/echo-container:latest"
         [requirements]
-        services = []
+
     "#).unwrap();
     registry.register_agent(agent).unwrap();
     let agent_id = registry.agent_id("echo-container");

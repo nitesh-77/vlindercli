@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use vlindercli::domain::{
-    Agent, EngineType, Job, JobId, JobStatus, Model, ModelType, Requirements,
-    ResourceId, RuntimeType, SubmissionId,
+    Agent, EngineType, Job, JobId, JobStatus, Model, ModelType, Protocol, Provider,
+    Requirements, ResourceId, RuntimeType, ServiceConfig, ServiceType, SubmissionId,
 };
 use vlindercli::registry_service::proto;
 
@@ -57,6 +57,13 @@ fn submission_id_round_trip() {
 
 #[test]
 fn agent_domain_to_proto_preserves_fields() {
+    let mut services = HashMap::new();
+    services.insert(ServiceType::Infer, ServiceConfig {
+        provider: Provider::Ollama,
+        protocol: Protocol::OpenAi,
+        models: vec!["phi3:latest".to_string()],
+    });
+
     let agent = Agent {
         name: "echo".to_string(),
         description: "Echoes input".to_string(),
@@ -70,7 +77,7 @@ fn agent_domain_to_proto_preserves_fields() {
             models: HashMap::from([
                 ("phi3".to_string(), ResourceId::new("ollama://localhost/phi3")),
             ]),
-            services: vec!["inference".to_string()],
+            services,
         },
         prompts: None,
         mounts: vec![],
@@ -83,7 +90,10 @@ fn agent_domain_to_proto_preserves_fields() {
     assert_eq!(proto_agent.description, "Echoes input");
     assert_eq!(proto_agent.runtime, "container");
     assert_eq!(proto_agent.executable, "localhost/echo:latest");
-    assert_eq!(proto_agent.required_services, vec!["inference"]);
+    assert_eq!(proto_agent.services.len(), 1);
+    assert_eq!(proto_agent.services[0].service_type, proto::ServiceType::Infer as i32);
+    assert_eq!(proto_agent.services[0].provider, proto::Provider::Ollama as i32);
+    assert_eq!(proto_agent.services[0].protocol, proto::Protocol::Openai as i32);
     assert!(proto_agent.object_storage.is_some());
     assert!(proto_agent.vector_storage.is_none());
 }
@@ -96,8 +106,7 @@ fn agent_proto_to_domain_round_trip() {
         id: Some(proto::ResourceId { uri: "http://localhost:9000/agents/echo".to_string() }),
         runtime: "container".to_string(),
         executable: "localhost/echo:latest".to_string(),
-        required_services: vec![],
-        models: HashMap::new(),
+        services: vec![],
         mounts: vec![],
         object_storage: None,
         vector_storage: None,
@@ -116,8 +125,7 @@ fn agent_proto_missing_id_fails() {
         id: None,
         runtime: "container".to_string(),
         executable: "x".to_string(),
-        required_services: vec![],
-        models: HashMap::new(),
+        services: vec![],
         mounts: vec![],
         object_storage: None,
         vector_storage: None,

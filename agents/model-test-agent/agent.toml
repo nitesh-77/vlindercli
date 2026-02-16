@@ -4,7 +4,6 @@ runtime = "container"
 executable = "localhost/model-test-agent:latest"
 
 [requirements]
-services = []
 
 [requirements.models]
 phi3 = "http://127.0.0.1:9000/models/phi3"

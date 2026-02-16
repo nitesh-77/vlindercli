@@ -75,6 +75,42 @@ The change point is `QueueBridge.send_service_request()`, which accepts `payload
 
 No enum wrapping all cases. No refactoring existing call sites. The typed path is new code alongside old code.
 
+### Protocol and provider are orthogonal
+
+The routing triple has three dimensions: `(service, backend, operation)`. The `backend` dimension identifies a provider — where the request is forwarded (OpenRouter, Ollama, Azure). The payload carries a protocol — the wire shape of the request (OpenAI Chat Completion, Anthropic Messages, AWS Bedrock Invoke). These are independent dimensions. An agent can call an Anthropic model via OpenRouter using the Anthropic Messages protocol.
+
+Most inference providers converge on the OpenAI Chat Completion protocol (`CreateChatCompletionRequest` / `CreateChatCompletionResponse`). The genuinely distinct protocols are few:
+
+- **OpenAI Chat Completion** — OpenRouter, Ollama, Azure, Mistral, Google (de facto standard)
+- **Anthropic Messages** — different request/response shape
+- **AWS Bedrock** — own envelope format
+
+Provider determines URL, authentication, and error shapes. Protocol determines the request/response structure. The two vary independently.
+
+### The orthogonality extends beyond inference
+
+The same protocol/provider split applies to every service type: object storage (S3, Redis, Azure Blob), vector storage (Pinecone, Qdrant, pgvector), embeddings (OpenAI, Cohere), SQL (Postgres, MySQL). Each has typed libraries with real request/response structs. The `Vec<u8>` payload erases all of them equally. Whatever pattern emerges here informs typed payloads for all service types.
+
+### Worker topology is orthogonal to typing
+
+Once payloads are strongly typed, worker organization is a deployment decision. A worker subscribes to subject filters. One worker per protocol, one per provider, one handling everything — just change the filter. Worker topology doesn't constrain the type system design.
+
+### A provider can serve multiple protocols
+
+A single provider can support multiple wire protocols. OpenRouter serves both OpenAI Chat Completion (`/v1/chat/completions`) and Anthropic Messages (`/v1/messages`) — same URL base, same API key, same error shapes, different request/response structures. The protocol the agent uses determines which endpoints are available inside the container.
+
+### The manifest must declare the protocol
+
+The agent manifest currently declares services and models but not which protocol the agent speaks. This is a missing dimension. An agent that uses OpenRouter with the Anthropic Messages protocol needs to express: I use the **Infer** service, via **OpenRouter** backend, speaking **Anthropic Messages** protocol. The protocol declaration constrains the bridge proxy — it determines which HTTP paths are available inside the container.
+
+### The bridge proxy uses the manifest as its route table
+
+The bridge proxy is the HTTP server that receives SDK requests from inside the container. The HTTP path discriminates the protocol: `/v1/chat/completions` is OpenAI Chat Completion, `/v1/messages` is Anthropic Messages. The bridge proxy registers route handlers only for protocols declared in the manifest. Undeclared protocols are not routed — they 404. The illegal state isn't caught by a runtime validation check; the endpoint doesn't exist.
+
+### Scoping: one provider, two protocols
+
+To reveal the real tensions without overbuilding, the first typed payloads target a single provider (OpenRouter) with two distinct protocols: OpenAI Chat Completion and Anthropic Messages. Same provider — same URL base, same API key, same error shapes — but different request/response wire formats. This holds the provider constant and isolates the protocol dimension. The `Vec<u8>` fallback is preserved for everything else.
+
 ## Decision
 
 Deferred.

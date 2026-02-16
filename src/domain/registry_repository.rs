@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use super::{Agent, ImageDigest, Model, EngineType, ModelType, Mount, Prompts, Requirements, ResourceId};
+use super::{Agent, ImageDigest, Model, EngineType, ModelType, Mount, Prompts, Requirements, ResourceId, ServiceConfig, ServiceType};
 use super::path::AbsolutePath;
 use super::runtime::RuntimeType;
 
@@ -256,7 +256,7 @@ impl StoredAgent {
 #[derive(serde::Serialize, serde::Deserialize)]
 struct RequirementsJson {
     models: HashMap<String, String>,
-    services: Vec<String>,
+    services: HashMap<ServiceType, ServiceConfig>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -279,6 +279,7 @@ struct MountJson {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::{Provider, Protocol};
 
     fn minimal_agent() -> Agent {
         Agent {
@@ -294,7 +295,7 @@ mod tests {
             vector_storage: None,
             requirements: Requirements {
                 models: HashMap::new(),
-                services: vec![],
+                services: HashMap::new(),
             },
             prompts: None,
             mounts: vec![],
@@ -305,6 +306,13 @@ mod tests {
         let mut models = HashMap::new();
         models.insert("phi3".to_string(), ResourceId::new("ollama://localhost:11434/phi3:latest"));
         models.insert("nomic".to_string(), ResourceId::new("ollama://localhost:11434/nomic-embed-text:latest"));
+
+        let mut services = HashMap::new();
+        services.insert(ServiceType::Infer, ServiceConfig {
+            provider: Provider::Ollama,
+            protocol: Protocol::OpenAi,
+            models: vec!["phi3:latest".to_string()],
+        });
 
         Agent {
             id: Agent::placeholder_id("thinker"),
@@ -319,7 +327,7 @@ mod tests {
             vector_storage: Some(ResourceId::new("sqlite:///data/vectors.db")),
             requirements: Requirements {
                 models,
-                services: vec!["inference".to_string()],
+                services,
             },
             prompts: Some(Prompts {
                 intent_recognition: Some("Classify intent".to_string()),
@@ -382,7 +390,10 @@ mod tests {
         );
 
         // Services
-        assert_eq!(restored.requirements.services, vec!["inference"]);
+        assert_eq!(restored.requirements.services.len(), 1);
+        let infer = &restored.requirements.services[&ServiceType::Infer];
+        assert_eq!(infer.provider, Provider::Ollama);
+        assert_eq!(infer.protocol, Protocol::OpenAi);
 
         // Prompts
         let prompts = restored.prompts.unwrap();

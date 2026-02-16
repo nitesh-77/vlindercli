@@ -374,7 +374,7 @@ mod tests {
             vector_storage: None,
             requirements: Requirements {
                 models: HashMap::new(),
-                services: vec![],
+                services: HashMap::new(),
             },
             prompts: None,
             mounts: vec![],

@@ -3,7 +3,8 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-use super::agent_manifest::{AgentManifest, MountConfig, ParseError, PromptsConfig, RequirementsConfig};
+use super::agent_manifest::{AgentManifest, MountConfig, ParseError, PromptsConfig, RequirementsConfig, ServiceConfig};
+use super::service_type::ServiceType;
 use super::image_digest::ImageDigest;
 use super::path::AbsolutePath;
 use super::resource_id::ResourceId;
@@ -150,7 +151,7 @@ impl From<ParseError> for LoadError {
 pub struct Requirements {
     /// Model name → ResourceId mapping
     pub models: HashMap<String, ResourceId>,
-    pub services: Vec<String>,
+    pub services: HashMap<ServiceType, ServiceConfig>,
 }
 
 impl Requirements {
@@ -239,7 +240,7 @@ mod tests {
             executable = "localhost/echo:latest"
 
             [requirements]
-            services = []
+
         "#).unwrap();
 
         assert_eq!(agent.name, "echo");
@@ -260,9 +261,6 @@ mod tests {
             description = "Thinks"
             runtime = "container"
             executable = "localhost/thinker:latest"
-
-            [requirements]
-            services = ["inference"]
 
             [requirements.models]
             phi3 = "ollama://localhost:11434/phi3:latest"
@@ -289,7 +287,7 @@ mod tests {
             vector_storage = "sqlite:///data/vectors.db"
 
             [requirements]
-            services = []
+
         "#).unwrap();
 
         assert_eq!(
@@ -311,7 +309,7 @@ mod tests {
             executable = "agent.wasm"
 
             [requirements]
-            services = []
+
         "#);
 
         assert!(result.is_err());
@@ -338,7 +336,7 @@ mod tests {
             executable = "localhost/simple:latest"
 
             [requirements]
-            services = []
+
         "#).unwrap();
 
         assert!(agent.model_uri("nonexistent").is_none());

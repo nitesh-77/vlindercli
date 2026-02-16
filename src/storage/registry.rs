@@ -310,7 +310,7 @@ mod tests {
             vector_storage: None,
             requirements: Requirements {
                 models: HashMap::new(),
-                services: vec![],
+                services: HashMap::new(),
             },
             prompts: None,
             mounts: vec![],
@@ -319,8 +319,16 @@ mod tests {
 
     fn full_test_agent() -> Agent {
         use std::path::Path;
+        use crate::domain::{Provider, Protocol, ServiceConfig, ServiceType};
         let mut models = HashMap::new();
         models.insert("phi3".to_string(), ResourceId::new("ollama://localhost:11434/phi3:latest"));
+
+        let mut services = HashMap::new();
+        services.insert(ServiceType::Infer, ServiceConfig {
+            provider: Provider::Ollama,
+            protocol: Protocol::OpenAi,
+            models: vec!["phi3:latest".to_string()],
+        });
 
         Agent {
             id: Agent::placeholder_id("full"),
@@ -335,7 +343,7 @@ mod tests {
             vector_storage: Some(ResourceId::new("sqlite:///data/vectors.db")),
             requirements: Requirements {
                 models,
-                services: vec!["inference".to_string()],
+                services,
             },
             prompts: Some(Prompts {
                 intent_recognition: Some("Classify".to_string()),
@@ -422,7 +430,8 @@ mod tests {
         assert_eq!(restored.object_storage.as_ref().map(|r| r.as_str()), Some("sqlite:///data/objects.db"));
         assert_eq!(restored.vector_storage.as_ref().map(|r| r.as_str()), Some("sqlite:///data/vectors.db"));
         assert_eq!(restored.requirements.models.get("phi3").map(|r| r.as_str()), Some("ollama://localhost:11434/phi3:latest"));
-        assert_eq!(restored.requirements.services, vec!["inference"]);
+        assert_eq!(restored.requirements.services.len(), 1);
+        assert!(restored.requirements.services.contains_key(&crate::domain::ServiceType::Infer));
         assert!(restored.prompts.as_ref().unwrap().intent_recognition.is_some());
         assert_eq!(restored.mounts.len(), 1);
         assert!(restored.mounts[0].readonly);

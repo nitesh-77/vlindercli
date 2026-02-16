@@ -61,13 +61,39 @@ message Agent {
   string name = 1;
   string description = 2;
   ResourceId id = 3;
-  repeated string required_services = 4;
-  map<string, string> models = 5;  // name -> uri
+  repeated ServiceEntry services = 4;
   ObjectStorageConfig object_storage = 6;
   VectorStorageConfig vector_storage = 7;
   string runtime = 8;     // Runtime type (e.g., "container")
   string executable = 9;  // Native artifact ref (e.g., OCI image)
   repeated Mount mounts = 10;  // Host→guest filesystem mounts (ADR 057)
+}
+
+message ServiceEntry {
+  ServiceType service_type = 1;
+  Provider provider = 2;
+  Protocol protocol = 3;
+  repeated string models = 4;
+}
+
+enum ServiceType {
+  SERVICE_TYPE_UNSPECIFIED = 0;
+  SERVICE_TYPE_INFER = 1;
+  SERVICE_TYPE_EMBED = 2;
+  SERVICE_TYPE_KV = 3;
+  SERVICE_TYPE_VEC = 4;
+}
+
+enum Provider {
+  PROVIDER_UNSPECIFIED = 0;
+  PROVIDER_OPENROUTER = 1;
+  PROVIDER_OLLAMA = 2;
+}
+
+enum Protocol {
+  PROTOCOL_UNSPECIFIED = 0;
+  PROTOCOL_OPENAI = 1;
+  PROTOCOL_ANTHROPIC = 2;
 }
 
 message Mount {

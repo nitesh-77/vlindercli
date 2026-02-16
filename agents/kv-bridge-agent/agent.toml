@@ -5,4 +5,3 @@ executable = "localhost/kv-bridge-agent:latest"
 object_storage = "memory://"
 
 [requirements]
-services = ["kv"]

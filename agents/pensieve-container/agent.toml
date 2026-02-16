@@ -12,15 +12,6 @@ object_storage = "sqlite://data/objects.db"
 vector_storage = "sqlite://data/vectors.db"
 
 [requirements]
-services = [
-    "infer",
-    "embed",
-    "get_file",
-    "put_file",
-    "list_files",
-    "store_embedding",
-    "search_by_vector",
-]
 
 [requirements.models]
 phi3 = "ollama://localhost:11434/phi3:latest"

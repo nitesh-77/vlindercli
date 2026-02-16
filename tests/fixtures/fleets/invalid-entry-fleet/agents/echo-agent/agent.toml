@@ -4,4 +4,3 @@ runtime = "container"
 executable = "localhost/echo-agent:latest"
 
 [requirements]
-services = []

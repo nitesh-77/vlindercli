@@ -13,7 +13,6 @@ object_storage = "sqlite://data/objects.db"
 vector_storage = "sqlite://data/vectors.db"
 
 [requirements]
-services = ["infer", "embed", "kv", "store_embedding", "search_by_vector"]
 
 [requirements.models]
 claude-sonnet = "openrouter://anthropic/claude-sonnet-4"

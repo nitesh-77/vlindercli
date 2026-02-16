@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use super::resource_id::ResourceId;
+use super::service_type::ServiceType;
 
 /// Agent manifest as read from agent.toml.
 ///
@@ -202,7 +203,39 @@ pub struct RequirementsConfig {
     /// Model name → URI mapping (e.g., "phi3" = "file://./models/phi3.toml")
     #[serde(default)]
     pub models: HashMap<String, String>,
-    pub services: Vec<String>,
+    #[serde(default)]
+    pub services: HashMap<ServiceType, ServiceConfig>,
+}
+
+/// Service declaration as declared in agent.toml
+///
+/// Ties together the three dimensions: which service, which provider, which protocol.
+/// The service type is the map key. Provider and protocol are typed enums —
+/// invalid values fail at parse time.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ServiceConfig {
+    pub provider: Provider,
+    pub protocol: Protocol,
+    #[serde(default)]
+    pub models: Vec<String>,
+}
+
+/// Inference provider — where requests are forwarded.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Provider {
+    OpenRouter,
+    Ollama,
+}
+
+/// Wire protocol — the request/response shape the agent speaks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Protocol {
+    /// OpenAI-compatible Chat Completion / Embeddings
+    OpenAi,
+    /// Anthropic Messages API
+    Anthropic,
 }
 
 /// Prompt overrides as declared in agent.toml
@@ -244,7 +277,7 @@ mod tests {
             vector_storage = "sqlite:///data/vectors.db"
 
             [requirements]
-            services = ["inference"]
+
         "#;
 
         let manifest: AgentManifest = toml::from_str(toml).unwrap();
@@ -271,7 +304,7 @@ mod tests {
             executable = "localhost/test-agent:latest"
 
             [requirements]
-            services = ["inference"]
+
         "#;
 
         let manifest: AgentManifest = toml::from_str(toml).unwrap();
@@ -291,7 +324,7 @@ mod tests {
             object_storage = "s3://my-bucket/agents/test"
 
             [requirements]
-            services = []
+
         "#;
 
         let manifest: AgentManifest = toml::from_str(toml).unwrap();
@@ -301,6 +334,38 @@ mod tests {
             Some("s3://my-bucket/agents/test")
         );
         assert!(manifest.vector_storage.is_none());
+    }
+
+    #[test]
+    fn parse_manifest_with_service_protocol() {
+        let toml = r#"
+            name = "finqa"
+            description = "Financial Q&A agent"
+            runtime = "container"
+            executable = "localhost/finqa:latest"
+
+            [requirements.services.infer]
+            provider = "openrouter"
+            protocol = "anthropic"
+            models = ["anthropic/claude-3.5-sonnet"]
+
+            [requirements.services.embed]
+            provider = "ollama"
+            protocol = "openai"
+            models = ["nomic-embed-text:latest"]
+        "#;
+
+        let manifest: AgentManifest = toml::from_str(toml).unwrap();
+
+        let infer = &manifest.requirements.services[&ServiceType::Infer];
+        assert_eq!(infer.provider, Provider::OpenRouter);
+        assert_eq!(infer.protocol, Protocol::Anthropic);
+        assert_eq!(infer.models, vec!["anthropic/claude-3.5-sonnet"]);
+
+        let embed = &manifest.requirements.services[&ServiceType::Embed];
+        assert_eq!(embed.provider, Provider::Ollama);
+        assert_eq!(embed.protocol, Protocol::OpenAi);
+        assert_eq!(embed.models, vec!["nomic-embed-text:latest"]);
     }
 
     #[test]
@@ -314,7 +379,7 @@ mod tests {
             vector_storage = "pinecone://my-index"
 
             [requirements]
-            services = []
+
         "#;
 
         let manifest: AgentManifest = toml::from_str(toml).unwrap();

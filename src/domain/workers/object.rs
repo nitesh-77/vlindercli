@@ -440,7 +440,7 @@ mod tests {
             executable = "localhost/test-agent:latest"
             object_storage = "memory://"
             [requirements]
-            services = []
+
         "#;
         Agent::from_toml(manifest).unwrap()
     }
