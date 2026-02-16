@@ -263,3 +263,27 @@ fn agent_with_empty_models_list() {
     let agent = Agent::load(&agent_fixture("echo-agent")).unwrap();
     assert!(agent.requirements.models.is_empty());
 }
+
+#[test]
+fn agent_services_from_fixture() {
+    use vlindercli::domain::{ServiceType, Provider, Protocol};
+
+    let agent = Agent::load(&agent_fixture("pensieve")).unwrap();
+
+    // Pensieve declares both infer and embed services
+    let infer = &agent.requirements.services[&ServiceType::Infer];
+    assert_eq!(infer.provider, Provider::OpenRouter);
+    assert_eq!(infer.protocol, Protocol::Anthropic);
+    assert_eq!(infer.models, vec!["anthropic/claude-3.5-sonnet"]);
+
+    let embed = &agent.requirements.services[&ServiceType::Embed];
+    assert_eq!(embed.provider, Provider::Ollama);
+    assert_eq!(embed.protocol, Protocol::OpenAi);
+    assert_eq!(embed.models, vec!["nomic-embed-text"]);
+}
+
+#[test]
+fn agent_no_services_when_none_declared() {
+    let agent = Agent::load(&agent_fixture("echo-agent")).unwrap();
+    assert!(agent.requirements.services.is_empty());
+}

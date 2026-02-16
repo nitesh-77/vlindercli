@@ -393,4 +393,55 @@ mod tests {
             Some("pinecone")
         );
     }
+
+    #[test]
+    fn invalid_provider_fails_at_parse() {
+        let toml = r#"
+            name = "bad"
+            description = "Bad provider"
+            runtime = "container"
+            executable = "localhost/bad:latest"
+
+            [requirements.services.infer]
+            provider = "banana"
+            protocol = "openai"
+        "#;
+
+        let result: Result<AgentManifest, _> = toml::from_str(toml);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn invalid_protocol_fails_at_parse() {
+        let toml = r#"
+            name = "bad"
+            description = "Bad protocol"
+            runtime = "container"
+            executable = "localhost/bad:latest"
+
+            [requirements.services.infer]
+            provider = "openrouter"
+            protocol = "grpc-nonsense"
+        "#;
+
+        let result: Result<AgentManifest, _> = toml::from_str(toml);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn invalid_service_type_fails_at_parse() {
+        let toml = r#"
+            name = "bad"
+            description = "Bad service type"
+            runtime = "container"
+            executable = "localhost/bad:latest"
+
+            [requirements.services.teleport]
+            provider = "openrouter"
+            protocol = "openai"
+        "#;
+
+        let result: Result<AgentManifest, _> = toml::from_str(toml);
+        assert!(result.is_err());
+    }
 }
