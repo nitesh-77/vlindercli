@@ -47,7 +47,8 @@ impl MessageQueue for InMemoryQueue {
 
     fn send_invoke(&self, msg: InvokeMessage) -> Result<(), QueueError> {
         let subject = format!(
-            "vlinder.{}.invoke.{}.{}.{}",
+            "vlinder.{}.{}.invoke.{}.{}.{}",
+            msg.timeline,
             msg.submission,
             msg.harness,
             msg.runtime.as_str(),
@@ -65,7 +66,8 @@ impl MessageQueue for InMemoryQueue {
 
     fn send_request(&self, msg: RequestMessage) -> Result<(), QueueError> {
         let subject = format!(
-            "vlinder.{}.req.{}.{}.{}.{}.{}",
+            "vlinder.{}.{}.req.{}.{}.{}.{}.{}",
+            msg.timeline,
             msg.submission,
             agent_short_name(&msg.agent_id),
             msg.service,
@@ -85,7 +87,8 @@ impl MessageQueue for InMemoryQueue {
 
     fn send_response(&self, msg: ResponseMessage) -> Result<(), QueueError> {
         let subject = format!(
-            "vlinder.{}.res.{}.{}.{}.{}.{}",
+            "vlinder.{}.{}.res.{}.{}.{}.{}.{}",
+            msg.timeline,
             msg.submission,
             msg.service,
             msg.backend,
@@ -105,7 +108,8 @@ impl MessageQueue for InMemoryQueue {
 
     fn send_complete(&self, msg: CompleteMessage) -> Result<(), QueueError> {
         let subject = format!(
-            "vlinder.{}.complete.{}.{}",
+            "vlinder.{}.{}.complete.{}.{}",
+            msg.timeline,
             msg.submission,
             agent_short_name(&msg.agent_id),
             msg.harness,
@@ -200,8 +204,8 @@ impl MessageQueue for InMemoryQueue {
 
     fn send_delegate(&self, msg: DelegateMessage) -> Result<(), QueueError> {
         let subject = format!(
-            "vlinder.{}.delegate.{}.{}",
-            msg.submission, msg.caller_agent, msg.target_agent,
+            "vlinder.{}.{}.delegate.{}.{}",
+            msg.timeline, msg.submission, msg.caller_agent, msg.target_agent,
         );
 
         let mut typed = self.typed_queues.lock().unwrap();
@@ -264,7 +268,7 @@ use crate::domain::agent_routing_key as agent_short_name;
 mod tests {
     use super::*;
     use crate::domain::{Operation, ResourceId, RuntimeType, ServiceType};
-    use crate::domain::{ExpectsReply, HarnessType, Sequence, SessionId, SubmissionId};
+    use crate::domain::{ExpectsReply, HarnessType, Sequence, SessionId, SubmissionId, TimelineId};
 
     fn test_agent_id() -> ResourceId {
         ResourceId::new("http://127.0.0.1:9000/agents/echo-agent")
@@ -283,6 +287,7 @@ mod tests {
         let queue = InMemoryQueue::new();
 
         let invoke = InvokeMessage::new(
+            TimelineId::main(),
             test_submission(),
             SessionId::new(),
             HarnessType::Cli,
@@ -310,6 +315,7 @@ mod tests {
         let queue = InMemoryQueue::new();
 
         let request = RequestMessage::new(
+            TimelineId::main(),
             test_submission(),
             SessionId::new(),
             test_agent_id(),
@@ -328,7 +334,7 @@ mod tests {
         let (subject, _) = typed.iter().next().unwrap();
 
         // Subject follows ADR 044 pattern
-        assert_eq!(subject, "vlinder.sub-test-123.req.echo-agent.kv.sqlite.get.1");
+        assert_eq!(subject, "vlinder.1.sub-test-123.req.echo-agent.kv.sqlite.get.1");
     }
 
     #[test]
@@ -336,6 +342,7 @@ mod tests {
         let queue = InMemoryQueue::new();
 
         let request = RequestMessage::new(
+            TimelineId::main(),
             test_submission(),
             SessionId::new(),
             test_agent_id(),
@@ -355,7 +362,7 @@ mod tests {
         let (subject, _) = typed.iter().next().unwrap();
 
         // Response subject has service.backend before agent (per ADR 044)
-        assert_eq!(subject, "vlinder.sub-test-123.res.kv.sqlite.echo-agent.get.3");
+        assert_eq!(subject, "vlinder.1.sub-test-123.res.kv.sqlite.echo-agent.get.3");
     }
 
     #[test]
@@ -363,6 +370,7 @@ mod tests {
         let queue = InMemoryQueue::new();
 
         let invoke = InvokeMessage::new(
+            TimelineId::main(),
             test_submission(),
             SessionId::new(),
             HarnessType::Web,
@@ -379,7 +387,7 @@ mod tests {
         let typed = queue.typed_queues.lock().unwrap();
         let (subject, _) = typed.iter().next().unwrap();
 
-        assert_eq!(subject, "vlinder.sub-test-123.complete.echo-agent.web");
+        assert_eq!(subject, "vlinder.1.sub-test-123.complete.echo-agent.web");
     }
 
     #[test]
@@ -403,6 +411,7 @@ mod tests {
         let queue = InMemoryQueue::new();
 
         let invoke = InvokeMessage::new(
+            TimelineId::main(),
             test_submission(),
             SessionId::new(),
             HarnessType::Cli,
@@ -435,6 +444,7 @@ mod tests {
         let agent_id = test_agent_id();
 
         let invoke = InvokeMessage::new(
+            TimelineId::main(),
             submission.clone(),
             SessionId::new(),
             HarnessType::Web,
@@ -460,6 +470,7 @@ mod tests {
         let queue = InMemoryQueue::new();
 
         let request = RequestMessage::new(
+            TimelineId::main(),
             test_submission(),
             SessionId::new(),
             test_agent_id(),
@@ -495,6 +506,7 @@ mod tests {
         let agent_id = test_agent_id();
 
         let request = RequestMessage::new(
+            TimelineId::main(),
             submission.clone(),
             SessionId::new(),
             agent_id.clone(),
@@ -522,6 +534,7 @@ mod tests {
         let queue = InMemoryQueue::new();
 
         let request = RequestMessage::new(
+            TimelineId::main(),
             test_submission(),
             SessionId::new(),
             test_agent_id(),
@@ -568,6 +581,7 @@ mod tests {
         let queue = InMemoryQueue::new();
 
         let delegate = DelegateMessage::new(
+            TimelineId::main(),
             test_submission(),
             SessionId::new(),
             "coordinator",
@@ -583,7 +597,7 @@ mod tests {
         let typed = queue.typed_queues.lock().unwrap();
         assert_eq!(typed.len(), 1);
         let (subject, _) = typed.iter().next().unwrap();
-        assert_eq!(subject, "vlinder.sub-test-123.delegate.coordinator.summarizer");
+        assert_eq!(subject, "vlinder.1.sub-test-123.delegate.coordinator.summarizer");
     }
 
     #[test]
@@ -591,6 +605,7 @@ mod tests {
         let queue = InMemoryQueue::new();
 
         let delegate = DelegateMessage::new(
+            TimelineId::main(),
             test_submission(),
             SessionId::new(),
             "coordinator",
@@ -620,6 +635,7 @@ mod tests {
         let queue = InMemoryQueue::new();
 
         let delegate = DelegateMessage::new(
+            TimelineId::main(),
             test_submission(),
             SessionId::new(),
             "coordinator",
@@ -641,6 +657,7 @@ mod tests {
         let queue = InMemoryQueue::new();
 
         let complete = CompleteMessage::new(
+            TimelineId::main(),
             test_submission(),
             SessionId::new(),
             test_agent_id(),
@@ -663,6 +680,7 @@ mod tests {
         let queue = InMemoryQueue::new();
 
         let complete = CompleteMessage::new(
+            TimelineId::main(),
             test_submission(),
             SessionId::new(),
             test_agent_id(),

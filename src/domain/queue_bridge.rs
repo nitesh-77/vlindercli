@@ -89,6 +89,7 @@ impl QueueBridge {
 
         let state = self.current_state.read().unwrap().clone();
         let request = RequestMessage::new(
+            invoke.timeline.clone(),
             invoke.submission.clone(),
             invoke.session.clone(),
             invoke.agent_id.clone(),
@@ -269,6 +270,7 @@ impl SdkContract for QueueBridge {
 
         let state = self.current_state.read().unwrap().clone();
         let delegate = DelegateMessage::new(
+            invoke.timeline.clone(),
             invoke.submission.clone(),
             invoke.session.clone(),
             &caller_agent,
@@ -334,7 +336,7 @@ mod tests {
     use crate::queue::InMemoryQueue;
     use crate::registry::InMemoryRegistry;
     use crate::domain::{
-        HarnessType, InvokeDiagnostics, RuntimeType, ResourceId, SessionId, SubmissionId,
+        HarnessType, InvokeDiagnostics, RuntimeType, ResourceId, SessionId, SubmissionId, TimelineId,
         SecretStore,
     };
     use crate::secret_store::InMemorySecretStore;
@@ -348,6 +350,7 @@ mod tests {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
         let registry: Arc<dyn Registry> = Arc::new(InMemoryRegistry::new(test_secret_store()));
         let invoke = InvokeMessage::new(
+            TimelineId::main(),
             SubmissionId::new(),
             SessionId::new(),
             HarnessType::Cli,
@@ -432,6 +435,7 @@ mod tests {
         let bridge = test_bridge(Some(ObjectStorageType::Sqlite));
 
         let invoke = InvokeMessage::new(
+            TimelineId::main(),
             SubmissionId::new(),
             SessionId::new(),
             HarnessType::Cli,
@@ -454,6 +458,7 @@ mod tests {
         let bridge = test_bridge(Some(ObjectStorageType::Sqlite));
 
         let invoke = InvokeMessage::new(
+            TimelineId::main(),
             SubmissionId::new(),
             SessionId::new(),
             HarnessType::Cli,
@@ -477,6 +482,7 @@ mod tests {
         let bridge = test_bridge(None); // No KV backend
 
         let invoke = InvokeMessage::new(
+            TimelineId::main(),
             SubmissionId::new(),
             SessionId::new(),
             HarnessType::Cli,

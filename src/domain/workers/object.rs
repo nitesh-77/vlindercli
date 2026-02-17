@@ -405,7 +405,7 @@ mod tests {
     use super::*;
     use crate::domain::Agent;
     use crate::registry::InMemoryRegistry;
-    use crate::domain::{Operation, RequestDiagnostics, Sequence, ServiceType, SessionId, SubmissionId};
+    use crate::domain::{Operation, RequestDiagnostics, Sequence, ServiceType, SessionId, SubmissionId, TimelineId};
     use crate::domain::SecretStore;
     use crate::secret_store::InMemorySecretStore;
     use crate::queue::InMemoryQueue;
@@ -465,6 +465,7 @@ mod tests {
             "content": base64::engine::general_purpose::STANDARD.encode(b"hello world")
         });
         let put_request = RequestMessage::new(
+            TimelineId::main(),
             test_submission(),
             test_session(),
             test_agent_id(),
@@ -490,6 +491,7 @@ mod tests {
             "path": "/hello.txt"
         });
         let get_request = RequestMessage::new(
+            TimelineId::main(),
             test_submission(),
             test_session(),
             test_agent_id(),
@@ -528,6 +530,7 @@ mod tests {
             "state": ""  // root state
         });
         let put_request = RequestMessage::new(
+            TimelineId::main(),
             test_submission(), test_session(), test_agent_id(),
             ServiceType::Kv, "memory", Operation::Put, Sequence::first(),
             serde_json::to_vec(&put_payload).unwrap(),
@@ -567,6 +570,7 @@ mod tests {
             "state": ""
         });
         let put_request = RequestMessage::new(
+            TimelineId::main(),
             test_submission(), test_session(), test_agent_id(),
             ServiceType::Kv, "memory", Operation::Put, Sequence::first(),
             serde_json::to_vec(&put_payload).unwrap(),
@@ -586,6 +590,7 @@ mod tests {
             "state": state_hash
         });
         let get_request = RequestMessage::new(
+            TimelineId::main(),
             test_submission(), test_session(), test_agent_id(),
             ServiceType::Kv, "memory", Operation::Get, Sequence::from(2),
             serde_json::to_vec(&get_payload).unwrap(),
@@ -618,6 +623,7 @@ mod tests {
             "state": ""
         });
         let req1 = RequestMessage::new(
+            TimelineId::main(),
             test_submission(), test_session(), test_agent_id(),
             ServiceType::Kv, "memory", Operation::Put, Sequence::first(),
             serde_json::to_vec(&put1).unwrap(),
@@ -638,6 +644,7 @@ mod tests {
             "state": hash1
         });
         let req2 = RequestMessage::new(
+            TimelineId::main(),
             test_submission(), test_session(), test_agent_id(),
             ServiceType::Kv, "memory", Operation::Put, Sequence::from(2),
             serde_json::to_vec(&put2).unwrap(),
@@ -657,6 +664,7 @@ mod tests {
         // Reading /a.txt from state2 should still work (inherited from snapshot)
         let get = serde_json::json!({"path": "/a.txt", "state": hash2});
         let get_req = RequestMessage::new(
+            TimelineId::main(),
             test_submission(), test_session(), test_agent_id(),
             ServiceType::Kv, "memory", Operation::Get, Sequence::from(3),
             serde_json::to_vec(&get).unwrap(),
@@ -688,6 +696,7 @@ mod tests {
             "state": ""
         });
         let put_req = RequestMessage::new(
+            TimelineId::main(),
             test_submission(), test_session(), test_agent_id(),
             ServiceType::Kv, "memory", Operation::Put, Sequence::first(),
             serde_json::to_vec(&put).unwrap(),
@@ -704,6 +713,7 @@ mod tests {
         // Get non-existent path from that state
         let get = serde_json::json!({"path": "/nope.txt", "state": state_hash});
         let get_req = RequestMessage::new(
+            TimelineId::main(),
             test_submission(), test_session(), test_agent_id(),
             ServiceType::Kv, "memory", Operation::Get, Sequence::from(2),
             serde_json::to_vec(&get).unwrap(),
@@ -734,6 +744,7 @@ mod tests {
             "content": base64::engine::general_purpose::STANDARD.encode(b"hello")
         });
         let put_request = RequestMessage::new(
+            TimelineId::main(),
             test_submission(), test_session(), test_agent_id(),
             ServiceType::Kv, "memory", Operation::Put, Sequence::first(),
             serde_json::to_vec(&put_payload).unwrap(),
@@ -748,6 +759,7 @@ mod tests {
         // Now send a get request with state
         let get_payload = serde_json::json!({"path": "/hello.txt"});
         let get_request = RequestMessage::new(
+            TimelineId::main(),
             test_submission(), test_session(), test_agent_id(),
             ServiceType::Kv, "memory", Operation::Get, Sequence::from(2),
             serde_json::to_vec(&get_payload).unwrap(),
@@ -779,6 +791,7 @@ mod tests {
             "content": base64::engine::general_purpose::STANDARD.encode(b"plain data")
         });
         let put_req = RequestMessage::new(
+            TimelineId::main(),
             test_submission(), test_session(), test_agent_id(),
             ServiceType::Kv, "memory", Operation::Put, Sequence::first(),
             serde_json::to_vec(&put_payload).unwrap(),
@@ -793,6 +806,7 @@ mod tests {
 
         let get_payload = serde_json::json!({"path": "/test.txt"});
         let get_req = RequestMessage::new(
+            TimelineId::main(),
             test_submission(), test_session(), test_agent_id(),
             ServiceType::Kv, "memory", Operation::Get, Sequence::from(2),
             serde_json::to_vec(&get_payload).unwrap(),

@@ -3,7 +3,7 @@
 use std::sync::Mutex;
 use tonic::transport::Channel;
 
-use crate::domain::{DagNode, DagStore};
+use crate::domain::{DagNode, DagStore, Timeline};
 use super::proto::{self, state_service_client::StateServiceClient};
 
 /// DagStore implementation that makes gRPC calls to a remote State Service.
@@ -168,5 +168,99 @@ impl DagStore for GrpcStateClient {
         } else {
             Err(resp.error.unwrap_or_else(|| "unknown error".to_string()))
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // Timeline methods (ADR 093)
+    // -------------------------------------------------------------------------
+
+    fn ensure_main_timeline(&self) -> Result<i64, String> {
+        let response = self.runtime.block_on(async {
+            self.client.lock().unwrap()
+                .ensure_main_timeline(proto::EnsureMainTimelineRequest {})
+                .await
+        }).map_err(|e| e.to_string())?;
+        Ok(response.into_inner().id)
+    }
+
+    fn create_timeline(&self, branch_name: &str, parent_id: Option<i64>, fork_point: Option<&str>) -> Result<i64, String> {
+        let request = proto::CreateTimelineRequest {
+            branch_name: branch_name.to_string(),
+            parent_id,
+            fork_point: fork_point.map(|s| s.to_string()),
+        };
+        let response = self.runtime.block_on(async {
+            self.client.lock().unwrap()
+                .create_timeline(request)
+                .await
+        }).map_err(|e| e.to_string())?;
+        Ok(response.into_inner().id)
+    }
+
+    fn get_timeline_by_branch(&self, branch_name: &str) -> Result<Option<Timeline>, String> {
+        let request = proto::GetTimelineByBranchRequest {
+            branch_name: branch_name.to_string(),
+        };
+        let response = self.runtime.block_on(async {
+            self.client.lock().unwrap()
+                .get_timeline_by_branch(request)
+                .await
+        }).map_err(|e| e.to_string())?;
+
+        match response.into_inner().timeline {
+            Some(tl) => Ok(Some(tl.try_into()?)),
+            None => Ok(None),
+        }
+    }
+
+    fn get_timeline(&self, id: i64) -> Result<Option<Timeline>, String> {
+        let request = proto::GetTimelineByIdRequest { id };
+        let response = self.runtime.block_on(async {
+            self.client.lock().unwrap()
+                .get_timeline(request)
+                .await
+        }).map_err(|e| e.to_string())?;
+
+        match response.into_inner().timeline {
+            Some(tl) => Ok(Some(tl.try_into()?)),
+            None => Ok(None),
+        }
+    }
+
+    fn seal_timeline(&self, id: i64) -> Result<(), String> {
+        let request = proto::SealTimelineRequest { id };
+        let response = self.runtime.block_on(async {
+            self.client.lock().unwrap()
+                .seal_timeline(request)
+                .await
+        }).map_err(|e| e.to_string())?;
+
+        let resp = response.into_inner();
+        if resp.success { Ok(()) } else { Err(resp.error.unwrap_or_else(|| "unknown error".to_string())) }
+    }
+
+    fn rename_timeline(&self, id: i64, new_name: &str) -> Result<(), String> {
+        let request = proto::RenameTimelineRequest {
+            id,
+            new_name: new_name.to_string(),
+        };
+        let response = self.runtime.block_on(async {
+            self.client.lock().unwrap()
+                .rename_timeline(request)
+                .await
+        }).map_err(|e| e.to_string())?;
+
+        let resp = response.into_inner();
+        if resp.success { Ok(()) } else { Err(resp.error.unwrap_or_else(|| "unknown error".to_string())) }
+    }
+
+    fn is_timeline_sealed(&self, id: i64) -> Result<bool, String> {
+        let request = proto::IsTimelineSealedRequest { id };
+        let response = self.runtime.block_on(async {
+            self.client.lock().unwrap()
+                .is_timeline_sealed(request)
+                .await
+        }).map_err(|e| e.to_string())?;
+        Ok(response.into_inner().sealed)
     }
 }

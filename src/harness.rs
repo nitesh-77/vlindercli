@@ -11,7 +11,7 @@ use std::sync::Arc;
 use crate::domain::{
     Agent, Harness, HarnessType, InvokeDiagnostics, InvokeMessage,
     JobId, JobStatus, MessageQueue, Registry, ResourceId, RuntimeType,
-    SessionId, SubmissionId,
+    SessionId, SubmissionId, TimelineId,
 };
 use crate::domain::Session;
 
@@ -33,6 +33,11 @@ pub struct CliHarness {
     last_state: Option<String>,
     /// Pending state from a just-completed invocation, not yet committed.
     pending_state: Option<String>,
+    /// Timeline ID for branch-scoped subjects (ADR 093).
+    timeline: TimelineId,
+    /// Whether the current timeline is sealed (ADR 093).
+    /// Sealed timelines reject new invocations.
+    timeline_sealed: bool,
 }
 
 impl CliHarness {
@@ -48,6 +53,8 @@ impl CliHarness {
             last_submission_id: None,
             last_state: None,
             pending_state: None,
+            timeline: TimelineId::main(),
+            timeline_sealed: false,
         }
     }
 
@@ -84,6 +91,14 @@ impl CliHarness {
     /// Used by `--from` to fork from a historical state.
     pub fn set_initial_state(&mut self, state: String) {
         self.last_state = Some(state);
+    }
+
+    /// Set the timeline for branch-scoped subjects (ADR 093).
+    ///
+    /// If `sealed` is true, subsequent `invoke()` calls will be rejected.
+    pub fn set_timeline(&mut self, timeline: TimelineId, sealed: bool) {
+        self.timeline = timeline;
+        self.timeline_sealed = sealed;
     }
 
     /// Deploy an agent from a local directory path (CLI-specific).
@@ -209,6 +224,13 @@ impl Harness for CliHarness {
     }
 
     fn invoke(&mut self, agent_id: &ResourceId, input: &str) -> Result<JobId, String> {
+        // Reject invocations on sealed timelines (ADR 093)
+        if self.timeline_sealed {
+            return Err(
+                "Timeline is sealed. Use `vlinder timeline repair` to fork a new timeline.".to_string()
+            );
+        }
+
         // Verify agent is deployed and get runtime type
         let agent = self.registry.get_agent(agent_id)
             .ok_or_else(|| format!("agent not deployed: {}", agent_id))?;
@@ -257,8 +279,9 @@ impl Harness for CliHarness {
             history_turns,
         };
 
-        // Build and send typed InvokeMessage (ADR 044, ADR 054, ADR 055)
+        // Build and send typed InvokeMessage (ADR 044, ADR 054, ADR 055, ADR 093)
         let invoke = InvokeMessage::new(
+            self.timeline.clone(),
             submission.clone(),
             session_id,
             HarnessType::Cli,
@@ -570,5 +593,38 @@ mod tests {
         let sub1 = registry.get_job(&job1).unwrap().submission_id;
         let sub2 = registry.get_job(&job2).unwrap().submission_id;
         assert_ne!(sub1, sub2, "second invoke should have different submission");
+    }
+
+    // --- Timeline enforcement tests (ADR 093) ---
+
+    #[test]
+    fn sealed_timeline_rejects_invocation() {
+        let queue = Arc::new(InMemoryQueue::new());
+        let registry = test_registry();
+        let mut harness = CliHarness::new(queue, registry);
+
+        let agent_id = deploy_test_agent(&harness);
+
+        // Seal the timeline
+        harness.set_timeline(TimelineId::from(42), true);
+
+        let result = harness.invoke(&agent_id, "hello");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("sealed"));
+    }
+
+    #[test]
+    fn unsealed_timeline_allows_invocation() {
+        let queue = Arc::new(InMemoryQueue::new());
+        let registry = test_registry();
+        let mut harness = CliHarness::new(queue, registry);
+
+        let agent_id = deploy_test_agent(&harness);
+
+        // Set non-sealed timeline
+        harness.set_timeline(TimelineId::from(2), false);
+
+        let result = harness.invoke(&agent_id, "hello");
+        assert!(result.is_ok());
     }
 }

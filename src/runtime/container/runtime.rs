@@ -260,6 +260,7 @@ impl ContainerRuntime {
 
                 // Build a synthetic InvokeMessage so the container sees a normal invocation
                 let invoke = InvokeMessage::new(
+                    delegate.timeline.clone(),
                     delegate.submission.clone(),
                     delegate.session.clone(),
                     HarnessType::Cli,  // placeholder — delegated work doesn't route to harness

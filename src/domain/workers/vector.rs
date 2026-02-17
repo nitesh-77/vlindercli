@@ -201,7 +201,7 @@ mod tests {
     use super::*;
     use crate::domain::{Agent, Registry};
     use crate::registry::InMemoryRegistry;
-    use crate::domain::{Operation, RequestDiagnostics, Sequence, ServiceType, SessionId, SubmissionId};
+    use crate::domain::{Operation, RequestDiagnostics, Sequence, ServiceType, SessionId, SubmissionId, TimelineId};
     use crate::domain::SecretStore;
     use crate::secret_store::InMemorySecretStore;
     use crate::queue::InMemoryQueue;
@@ -256,6 +256,7 @@ mod tests {
             "metadata": "test"
         });
         let store_request = RequestMessage::new(
+            TimelineId::main(),
             test_submission(), SessionId::new(), test_agent_id(),
             ServiceType::Vec, "memory", Operation::Store, Sequence::first(),
             serde_json::to_vec(&store_payload).unwrap(),
@@ -274,6 +275,7 @@ mod tests {
             "limit": 1
         });
         let search_request = RequestMessage::new(
+            TimelineId::main(),
             test_submission(), SessionId::new(), test_agent_id(),
             ServiceType::Vec, "memory", Operation::Search, Sequence::from(2),
             serde_json::to_vec(&search_payload).unwrap(),
@@ -309,6 +311,7 @@ mod tests {
             "metadata": "test document"
         });
         let store_request = RequestMessage::new(
+            TimelineId::main(),
             test_submission(),
             SessionId::new(),
             test_agent_id(),
@@ -334,6 +337,7 @@ mod tests {
             "limit": 1
         });
         let search_request = RequestMessage::new(
+            TimelineId::main(),
             test_submission(),
             SessionId::new(),
             test_agent_id(),

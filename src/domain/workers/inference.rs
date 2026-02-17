@@ -158,7 +158,7 @@ mod tests {
     use super::*;
     use crate::domain::{Agent, Provider, Model, ModelType, ResourceId};
     use crate::registry::InMemoryRegistry;
-    use crate::domain::{Operation, RequestDiagnostics, Sequence, ServiceType, SessionId, SubmissionId};
+    use crate::domain::{Operation, RequestDiagnostics, Sequence, ServiceType, SessionId, SubmissionId, TimelineId};
     use crate::domain::SecretStore;
     use crate::secret_store::InMemorySecretStore;
     use crate::queue::InMemoryQueue;
@@ -238,6 +238,7 @@ mod tests {
             "prompt": "Hello"
         });
         let request = RequestMessage::new(
+            TimelineId::main(),
             test_submission(),
             SessionId::new(),
             test_agent_id(),
@@ -275,6 +276,7 @@ mod tests {
             "prompt": "Hello"
         });
         let request = RequestMessage::new(
+            TimelineId::main(),
             test_submission(),
             SessionId::new(),
             test_agent_id(),
@@ -311,6 +313,7 @@ mod tests {
             "prompt": "Hello"
         });
         let request = RequestMessage::new(
+            TimelineId::main(),
             test_submission(),
             SessionId::new(),
             test_agent_id(),
@@ -349,6 +352,7 @@ mod tests {
             "prompt": "Hello"
         });
         let request = RequestMessage::new(
+            TimelineId::main(),
             test_submission(),
             SessionId::new(),
             ResourceId::new("http://127.0.0.1:9000/agents/unknown-agent"),

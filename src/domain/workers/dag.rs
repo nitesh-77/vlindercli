@@ -16,7 +16,7 @@ use crate::domain::{
     CompleteMessage, ContainerDiagnostics, DagNode, DelegateDiagnostics,
     DelegateMessage, HarnessType, InvokeDiagnostics, InvokeMessage, MessageId, MessageType,
     Operation, RequestDiagnostics, RequestMessage, ResourceId, ResponseMessage, RuntimeType,
-    Sequence, ServiceDiagnostics, ServiceType, SessionId, SubmissionId, hash_dag_node,
+    Sequence, ServiceDiagnostics, ServiceType, SessionId, SubmissionId, TimelineId, hash_dag_node,
 };
 use crate::domain::message::ObservableMessage;
 
@@ -39,12 +39,12 @@ pub fn reconstruct_observable_message(
 ) -> Option<ObservableMessage> {
     let segments: Vec<&str> = subject.split('.').collect();
 
-    // Minimum: vlinder.<submission>.<type>...
-    if segments.len() < 3 || segments[0] != "vlinder" {
+    // Minimum: vlinder.<timeline>.<submission>.<type>...
+    if segments.len() < 4 || segments[0] != "vlinder" {
         return None;
     }
 
-    let msg_type_str = segments[2];
+    let msg_type_str = segments[3];
 
     match msg_type_str {
         "invoke" => reconstruct_invoke(headers, payload),
@@ -70,6 +70,7 @@ fn reconstruct_invoke(
     Some(ObservableMessage::Invoke(InvokeMessage {
         id: MessageId::from(headers.get("msg-id")?.clone()),
         protocol_version: headers.get("protocol-version").cloned().unwrap_or_default(),
+        timeline: headers.get("timeline-id").map(|s| TimelineId::from(s.clone())).unwrap_or_else(TimelineId::main),
         submission: SubmissionId::from(headers.get("submission-id")?.clone()),
         session: SessionId::from(headers.get("session-id")?.clone()),
         harness: parse_harness(headers.get("harness")?)?,
@@ -97,6 +98,7 @@ fn reconstruct_request(
     Some(ObservableMessage::Request(RequestMessage {
         id: MessageId::from(headers.get("msg-id")?.clone()),
         protocol_version: headers.get("protocol-version").cloned().unwrap_or_default(),
+        timeline: headers.get("timeline-id").map(|s| TimelineId::from(s.clone())).unwrap_or_else(TimelineId::main),
         submission: SubmissionId::from(headers.get("submission-id")?.clone()),
         session: SessionId::from(headers.get("session-id")?.clone()),
         agent_id: ResourceId::new(headers.get("agent-id")?),
@@ -123,6 +125,7 @@ fn reconstruct_response(
     Some(ObservableMessage::Response(ResponseMessage {
         id: MessageId::from(headers.get("msg-id")?.clone()),
         protocol_version: headers.get("protocol-version").cloned().unwrap_or_default(),
+        timeline: headers.get("timeline-id").map(|s| TimelineId::from(s.clone())).unwrap_or_else(TimelineId::main),
         submission: SubmissionId::from(headers.get("submission-id")?.clone()),
         session: SessionId::from(headers.get("session-id")?.clone()),
         agent_id: ResourceId::new(headers.get("agent-id")?),
@@ -150,6 +153,7 @@ fn reconstruct_complete(
     Some(ObservableMessage::Complete(CompleteMessage {
         id: MessageId::from(headers.get("msg-id")?.clone()),
         protocol_version: headers.get("protocol-version").cloned().unwrap_or_default(),
+        timeline: headers.get("timeline-id").map(|s| TimelineId::from(s.clone())).unwrap_or_else(TimelineId::main),
         submission: SubmissionId::from(headers.get("submission-id")?.clone()),
         session: SessionId::from(headers.get("session-id")?.clone()),
         agent_id: ResourceId::new(headers.get("agent-id")?),
@@ -173,6 +177,7 @@ fn reconstruct_delegate(
     Some(ObservableMessage::Delegate(DelegateMessage {
         id: MessageId::from(headers.get("msg-id")?.clone()),
         protocol_version: headers.get("protocol-version").cloned().unwrap_or_default(),
+        timeline: headers.get("timeline-id").map(|s| TimelineId::from(s.clone())).unwrap_or_else(TimelineId::main),
         submission: SubmissionId::from(headers.get("submission-id")?.clone()),
         session: SessionId::from(headers.get("session-id")?.clone()),
         caller_agent: headers.get("caller-agent")?.clone(),
@@ -327,6 +332,7 @@ mod tests {
         let mut h = HashMap::new();
         h.insert("msg-id".to_string(), "msg-001".to_string());
         h.insert("protocol-version".to_string(), "0.1.0".to_string());
+        h.insert("timeline-id".to_string(), "1".to_string());
         h.insert("submission-id".to_string(), "sub-1".to_string());
         h.insert("session-id".to_string(), "sess-1".to_string());
         h.insert("harness".to_string(), "cli".to_string());
@@ -339,6 +345,7 @@ mod tests {
         let mut h = HashMap::new();
         h.insert("msg-id".to_string(), "msg-002".to_string());
         h.insert("protocol-version".to_string(), "0.1.0".to_string());
+        h.insert("timeline-id".to_string(), "1".to_string());
         h.insert("submission-id".to_string(), "sub-1".to_string());
         h.insert("session-id".to_string(), "sess-1".to_string());
         h.insert("agent-id".to_string(), "http://127.0.0.1:9000/agents/myagent".to_string());
@@ -360,6 +367,7 @@ mod tests {
         let mut h = HashMap::new();
         h.insert("msg-id".to_string(), "msg-004".to_string());
         h.insert("protocol-version".to_string(), "0.1.0".to_string());
+        h.insert("timeline-id".to_string(), "1".to_string());
         h.insert("submission-id".to_string(), "sub-1".to_string());
         h.insert("session-id".to_string(), "sess-1".to_string());
         h.insert("agent-id".to_string(), "http://127.0.0.1:9000/agents/myagent".to_string());
@@ -371,6 +379,7 @@ mod tests {
         let mut h = HashMap::new();
         h.insert("msg-id".to_string(), "msg-005".to_string());
         h.insert("protocol-version".to_string(), "0.1.0".to_string());
+        h.insert("timeline-id".to_string(), "1".to_string());
         h.insert("submission-id".to_string(), "sub-1".to_string());
         h.insert("session-id".to_string(), "sess-1".to_string());
         h.insert("caller-agent".to_string(), "coordinator".to_string());
@@ -384,7 +393,7 @@ mod tests {
     #[test]
     fn reconstruct_invoke() {
         let msg = reconstruct_observable_message(
-            "vlinder.sub-1.invoke.cli.container.myagent",
+            "vlinder.1.sub-1.invoke.cli.container.myagent",
             &invoke_headers(),
             b"invoke-payload",
         ).unwrap();
@@ -403,7 +412,7 @@ mod tests {
     #[test]
     fn reconstruct_request_msg() {
         let msg = reconstruct_observable_message(
-            "vlinder.sub-1.req.myagent.infer.ollama.run.1",
+            "vlinder.1.sub-1.req.myagent.infer.ollama.run.1",
             &request_headers(),
             b"request-payload",
         ).unwrap();
@@ -421,7 +430,7 @@ mod tests {
     #[test]
     fn reconstruct_response_msg() {
         let msg = reconstruct_observable_message(
-            "vlinder.sub-1.res.infer.ollama.myagent.run.1",
+            "vlinder.1.sub-1.res.infer.ollama.myagent.run.1",
             &response_headers(),
             b"response-payload",
         ).unwrap();
@@ -438,7 +447,7 @@ mod tests {
     #[test]
     fn reconstruct_complete_msg() {
         let msg = reconstruct_observable_message(
-            "vlinder.sub-1.complete.myagent.cli",
+            "vlinder.1.sub-1.complete.myagent.cli",
             &complete_headers(),
             b"complete-payload",
         ).unwrap();
@@ -453,7 +462,7 @@ mod tests {
     #[test]
     fn reconstruct_delegate_msg() {
         let msg = reconstruct_observable_message(
-            "vlinder.sub-1.delegate.coordinator.summarizer",
+            "vlinder.1.sub-1.delegate.coordinator.summarizer",
             &delegate_headers(),
             b"delegate-payload",
         ).unwrap();
@@ -470,7 +479,7 @@ mod tests {
     #[test]
     fn unknown_message_type_returns_none() {
         let msg = reconstruct_observable_message(
-            "vlinder.sub-1.foobar.something",
+            "vlinder.1.sub-1.foobar.something",
             &invoke_headers(),
             b"payload",
         );
@@ -483,7 +492,7 @@ mod tests {
         let mut h = invoke_headers();
         h.remove("session-id");
         let msg = reconstruct_observable_message(
-            "vlinder.sub-1.invoke.cli.container.agent",
+            "vlinder.1.sub-1.invoke.cli.container.agent",
             &h,
             b"payload",
         );
@@ -495,7 +504,7 @@ mod tests {
         let mut h = invoke_headers();
         h.insert("state".to_string(), "abc123state".to_string());
         let msg = reconstruct_observable_message(
-            "vlinder.sub-1.invoke.cli.container.myagent",
+            "vlinder.1.sub-1.invoke.cli.container.myagent",
             &h,
             b"payload",
         ).unwrap();
@@ -510,7 +519,7 @@ mod tests {
     #[test]
     fn missing_state_gives_none() {
         let msg = reconstruct_observable_message(
-            "vlinder.sub-1.invoke.cli.container.myagent",
+            "vlinder.1.sub-1.invoke.cli.container.myagent",
             &invoke_headers(),
             b"payload",
         ).unwrap();
@@ -527,7 +536,7 @@ mod tests {
     #[test]
     fn build_dag_node_from_invoke() {
         let msg = reconstruct_observable_message(
-            "vlinder.sub-1.invoke.cli.container.myagent",
+            "vlinder.1.sub-1.invoke.cli.container.myagent",
             &invoke_headers(),
             b"invoke-payload",
         ).unwrap();
@@ -546,7 +555,7 @@ mod tests {
     #[test]
     fn build_dag_node_from_request() {
         let msg = reconstruct_observable_message(
-            "vlinder.sub-1.req.myagent.infer.ollama.run.1",
+            "vlinder.1.sub-1.req.myagent.infer.ollama.run.1",
             &request_headers(),
             b"request-payload",
         ).unwrap();
@@ -561,7 +570,7 @@ mod tests {
     #[test]
     fn build_dag_node_from_response() {
         let msg = reconstruct_observable_message(
-            "vlinder.sub-1.res.infer.ollama.myagent.run.1",
+            "vlinder.1.sub-1.res.infer.ollama.myagent.run.1",
             &response_headers(),
             b"response-payload",
         ).unwrap();
@@ -575,7 +584,7 @@ mod tests {
     #[test]
     fn build_dag_node_from_delegate() {
         let msg = reconstruct_observable_message(
-            "vlinder.sub-1.delegate.coordinator.summarizer",
+            "vlinder.1.sub-1.delegate.coordinator.summarizer",
             &delegate_headers(),
             b"delegate-payload",
         ).unwrap();
@@ -591,7 +600,7 @@ mod tests {
         let mut h = complete_headers();
         h.insert("state".to_string(), "state-hash".to_string());
         let msg = reconstruct_observable_message(
-            "vlinder.sub-1.complete.myagent.cli",
+            "vlinder.1.sub-1.complete.myagent.cli",
             &h,
             b"done",
         ).unwrap();
@@ -613,7 +622,7 @@ mod tests {
     fn reconstruct_and_store_invoke() {
         let (writer, reader) = test_store_pair();
         let msg = reconstruct_observable_message(
-            "vlinder.sub-1.invoke.cli.container.myagent",
+            "vlinder.1.sub-1.invoke.cli.container.myagent",
             &invoke_headers(),
             b"invoke-payload",
         ).unwrap();
@@ -634,7 +643,7 @@ mod tests {
         let mut last_hash = String::new();
 
         let msg1 = reconstruct_observable_message(
-            "vlinder.sub-1.invoke.cli.container.agent-a",
+            "vlinder.1.sub-1.invoke.cli.container.agent-a",
             &invoke_headers(),
             b"first",
         ).unwrap();
@@ -643,7 +652,7 @@ mod tests {
         writer.insert_node(&node1).unwrap();
 
         let msg2 = reconstruct_observable_message(
-            "vlinder.sub-1.req.myagent.infer.ollama.run.1",
+            "vlinder.1.sub-1.req.myagent.infer.ollama.run.1",
             &request_headers(),
             b"second",
         ).unwrap();
@@ -652,7 +661,7 @@ mod tests {
         writer.insert_node(&node2).unwrap();
 
         let msg3 = reconstruct_observable_message(
-            "vlinder.sub-1.res.infer.ollama.myagent.run.1",
+            "vlinder.1.sub-1.res.infer.ollama.myagent.run.1",
             &response_headers(),
             b"third",
         ).unwrap();
@@ -671,7 +680,7 @@ mod tests {
         let (writer, reader) = test_store_pair();
 
         let msg1 = reconstruct_observable_message(
-            "vlinder.sub-1.invoke.cli.container.agent-a",
+            "vlinder.1.sub-1.invoke.cli.container.agent-a",
             &invoke_headers(),
             b"sess1-first",
         ).unwrap();
@@ -682,7 +691,7 @@ mod tests {
         h2.insert("session-id".to_string(), "sess-2".to_string());
         h2.insert("msg-id".to_string(), "msg-099".to_string());
         let msg2 = reconstruct_observable_message(
-            "vlinder.sub-2.invoke.cli.container.agent-b",
+            "vlinder.1.sub-2.invoke.cli.container.agent-b",
             &h2,
             b"sess2-first",
         ).unwrap();
@@ -690,7 +699,7 @@ mod tests {
         writer.insert_node(&node2).unwrap();
 
         let msg3 = reconstruct_observable_message(
-            "vlinder.sub-1.complete.myagent.cli",
+            "vlinder.1.sub-1.complete.myagent.cli",
             &complete_headers(),
             b"sess1-second",
         ).unwrap();

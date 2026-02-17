@@ -11,7 +11,7 @@ use chrono::{DateTime, Utc};
 use vlindercli::domain::workers::GitDagWorker;
 use vlindercli::domain::{
     CompleteMessage, ContainerDiagnostics, HarnessType, InvokeDiagnostics, InvokeMessage,
-    ObservableMessage, ResourceId, RuntimeType, SessionId, SubmissionId,
+    ObservableMessage, ResourceId, RuntimeType, SessionId, SubmissionId, TimelineId,
 };
 
 /// Create an isolated VLINDER_DIR for this test.
@@ -92,6 +92,7 @@ pub fn make_invoke(
     epoch_secs: i64,
 ) -> (ObservableMessage, DateTime<Utc>) {
     let msg = InvokeMessage::new(
+        TimelineId::main(),
         SubmissionId::from(submission.to_string()),
         SessionId::from(session.to_string()),
         HarnessType::Cli,
@@ -117,6 +118,7 @@ pub fn make_complete(
     epoch_secs: i64,
 ) -> (ObservableMessage, DateTime<Utc>) {
     let msg = CompleteMessage::new(
+        TimelineId::main(),
         SubmissionId::from(submission.to_string()),
         SessionId::from(session.to_string()),
         test_agent_id(),

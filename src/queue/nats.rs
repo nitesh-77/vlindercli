@@ -19,7 +19,7 @@ use crate::domain::{
     CompleteMessage, ContainerDiagnostics, DelegateMessage, DelegateDiagnostics,
     HarnessType, InvokeDiagnostics, InvokeMessage, MessageId, MessageQueue,
     Operation, QueueError, RequestDiagnostics, RequestMessage, ResourceId, ResponseMessage,
-    RuntimeType, Sequence, ServiceDiagnostics, ServiceType, SessionId, SubmissionId,
+    RuntimeType, Sequence, ServiceDiagnostics, ServiceType, SessionId, SubmissionId, TimelineId,
 };
 
 /// NATS queue with JetStream durability.
@@ -215,7 +215,8 @@ impl MessageQueue for NatsQueue {
 
     fn send_invoke(&self, msg: InvokeMessage) -> Result<(), QueueError> {
         let subject = format!(
-            "vlinder.{}.invoke.{}.{}.{}",
+            "vlinder.{}.{}.invoke.{}.{}.{}",
+            msg.timeline,
             msg.submission,
             msg.harness,
             msg.runtime.as_str(),
@@ -226,6 +227,7 @@ impl MessageQueue for NatsQueue {
             let mut headers = async_nats::HeaderMap::new();
             headers.insert("msg-id", msg.id.as_str());
             headers.insert("protocol-version", msg.protocol_version.as_str());
+            headers.insert("timeline-id", msg.timeline.as_str());
             headers.insert("submission-id", msg.submission.as_str());
             headers.insert("session-id", msg.session.as_str());
             headers.insert("harness", msg.harness.as_str());
@@ -252,7 +254,8 @@ impl MessageQueue for NatsQueue {
 
     fn send_request(&self, msg: RequestMessage) -> Result<(), QueueError> {
         let subject = format!(
-            "vlinder.{}.req.{}.{}.{}.{}.{}",
+            "vlinder.{}.{}.req.{}.{}.{}.{}.{}",
+            msg.timeline,
             msg.submission,
             agent_short_name(&msg.agent_id),
             msg.service,
@@ -265,6 +268,7 @@ impl MessageQueue for NatsQueue {
             let mut headers = async_nats::HeaderMap::new();
             headers.insert("msg-id", msg.id.as_str());
             headers.insert("protocol-version", msg.protocol_version.as_str());
+            headers.insert("timeline-id", msg.timeline.as_str());
             headers.insert("submission-id", msg.submission.as_str());
             headers.insert("session-id", msg.session.as_str());
             headers.insert("agent-id", msg.agent_id.as_str());
@@ -293,7 +297,8 @@ impl MessageQueue for NatsQueue {
 
     fn send_response(&self, msg: ResponseMessage) -> Result<(), QueueError> {
         let subject = format!(
-            "vlinder.{}.res.{}.{}.{}.{}.{}",
+            "vlinder.{}.{}.res.{}.{}.{}.{}.{}",
+            msg.timeline,
             msg.submission,
             msg.service,
             msg.backend,
@@ -306,6 +311,7 @@ impl MessageQueue for NatsQueue {
             let mut headers = async_nats::HeaderMap::new();
             headers.insert("msg-id", msg.id.as_str());
             headers.insert("protocol-version", msg.protocol_version.as_str());
+            headers.insert("timeline-id", msg.timeline.as_str());
             headers.insert("submission-id", msg.submission.as_str());
             headers.insert("session-id", msg.session.as_str());
             headers.insert("agent-id", msg.agent_id.as_str());
@@ -335,7 +341,8 @@ impl MessageQueue for NatsQueue {
 
     fn send_complete(&self, msg: CompleteMessage) -> Result<(), QueueError> {
         let subject = format!(
-            "vlinder.{}.complete.{}.{}",
+            "vlinder.{}.{}.complete.{}.{}",
+            msg.timeline,
             msg.submission,
             agent_short_name(&msg.agent_id),
             msg.harness,
@@ -345,6 +352,7 @@ impl MessageQueue for NatsQueue {
             let mut headers = async_nats::HeaderMap::new();
             headers.insert("msg-id", msg.id.as_str());
             headers.insert("protocol-version", msg.protocol_version.as_str());
+            headers.insert("timeline-id", msg.timeline.as_str());
             headers.insert("submission-id", msg.submission.as_str());
             headers.insert("session-id", msg.session.as_str());
             headers.insert("agent-id", msg.agent_id.as_str());
@@ -369,8 +377,8 @@ impl MessageQueue for NatsQueue {
     }
 
     fn receive_invoke(&self, subject_pattern: &str) -> Result<(InvokeMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
-        // Build filter: vlinder.*.invoke.*.*.{agent_pattern}
-        let filter = format!("vlinder.*.invoke.*.*.{}", subject_pattern);
+        // Build filter: vlinder.{timeline}.{submission}.invoke.{harness}.{runtime}.{agent}
+        let filter = format!("vlinder.*.*.invoke.*.*.{}", subject_pattern);
 
         self.inner.runtime.block_on(async {
             let (js_msg, ack_fn) = self.fetch_one(&filter).await?;
@@ -386,6 +394,7 @@ impl MessageQueue for NatsQueue {
             let msg = InvokeMessage {
                 id: MessageId::from(get_header(headers, "msg-id")?),
                 protocol_version: get_header(headers, "protocol-version").unwrap_or_default(),
+                timeline: get_header(headers, "timeline-id").map(TimelineId::from).unwrap_or_else(|_| TimelineId::main()),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
                 session: SessionId::from(get_header(headers, "session-id")?),
                 harness: parse_harness_type(&get_header(headers, "harness")?)?,
@@ -401,8 +410,8 @@ impl MessageQueue for NatsQueue {
     }
 
     fn receive_request(&self, service: ServiceType, backend: &str, operation: Operation) -> Result<(RequestMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
-        // Build filter: vlinder.*.req.*.{service}.{backend}.{operation}.{sequence}
-        let filter = format!("vlinder.*.req.*.{}.{}.{}.*", service, backend, operation);
+        // Build filter: vlinder.{timeline}.{submission}.req.{agent}.{service}.{backend}.{op}.{seq}
+        let filter = format!("vlinder.*.*.req.*.{}.{}.{}.*", service, backend, operation);
 
         self.inner.runtime.block_on(async {
             let (js_msg, ack_fn) = self.fetch_one(&filter).await?;
@@ -417,6 +426,7 @@ impl MessageQueue for NatsQueue {
             let msg = RequestMessage {
                 id: MessageId::from(get_header(headers, "msg-id")?),
                 protocol_version: get_header(headers, "protocol-version").unwrap_or_default(),
+                timeline: get_header(headers, "timeline-id").map(TimelineId::from).unwrap_or_else(|_| TimelineId::main()),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
                 session: SessionId::from(get_header(headers, "session-id")?),
                 agent_id: ResourceId::new(&get_header(headers, "agent-id")?),
@@ -435,8 +445,8 @@ impl MessageQueue for NatsQueue {
 
     fn receive_response(&self, request: &RequestMessage) -> Result<(ResponseMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
         // Build filter from request dimensions
-        // Three wildcards match: {agent}.{operation}.{sequence}
-        let filter = format!("vlinder.{}.res.{}.{}.*.*.*", request.submission, request.service, request.backend);
+        // Wildcards match: {timeline}, {agent}.{operation}.{sequence}
+        let filter = format!("vlinder.*.{}.res.{}.{}.*.*.*", request.submission, request.service, request.backend);
 
         self.inner.runtime.block_on(async {
             let (js_msg, ack_fn) = self.fetch_one(&filter).await?;
@@ -451,6 +461,7 @@ impl MessageQueue for NatsQueue {
             let msg = ResponseMessage {
                 id: MessageId::from(get_header(headers, "msg-id")?),
                 protocol_version: get_header(headers, "protocol-version").unwrap_or_default(),
+                timeline: get_header(headers, "timeline-id").map(TimelineId::from).unwrap_or_else(|_| TimelineId::main()),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
                 session: SessionId::from(get_header(headers, "session-id")?),
                 agent_id: ResourceId::new(&get_header(headers, "agent-id")?),
@@ -469,8 +480,8 @@ impl MessageQueue for NatsQueue {
     }
 
     fn receive_complete(&self, submission: &SubmissionId, harness: &str) -> Result<(CompleteMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
-        // Build filter: submission-scoped consumer (ADR 052)
-        let filter = format!("vlinder.{}.complete.*.{}", submission, harness);
+        // Build filter: submission-scoped consumer (ADR 052) with timeline wildcard
+        let filter = format!("vlinder.*.{}.complete.*.{}", submission, harness);
 
         self.inner.runtime.block_on(async {
             let (js_msg, ack_fn) = self.fetch_one(&filter).await?;
@@ -485,6 +496,7 @@ impl MessageQueue for NatsQueue {
             let msg = CompleteMessage {
                 id: MessageId::from(get_header(headers, "msg-id")?),
                 protocol_version: get_header(headers, "protocol-version").unwrap_or_default(),
+                timeline: get_header(headers, "timeline-id").map(TimelineId::from).unwrap_or_else(|_| TimelineId::main()),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
                 session: SessionId::from(get_header(headers, "session-id")?),
                 agent_id: ResourceId::new(&get_header(headers, "agent-id")?),
@@ -505,14 +517,15 @@ impl MessageQueue for NatsQueue {
 
     fn send_delegate(&self, msg: DelegateMessage) -> Result<(), QueueError> {
         let subject = format!(
-            "vlinder.{}.delegate.{}.{}",
-            msg.submission, msg.caller_agent, msg.target_agent,
+            "vlinder.{}.{}.delegate.{}.{}",
+            msg.timeline, msg.submission, msg.caller_agent, msg.target_agent,
         );
 
         self.inner.runtime.block_on(async {
             let mut headers = async_nats::HeaderMap::new();
             headers.insert("msg-id", msg.id.as_str());
             headers.insert("protocol-version", msg.protocol_version.as_str());
+            headers.insert("timeline-id", msg.timeline.as_str());
             headers.insert("submission-id", msg.submission.as_str());
             headers.insert("session-id", msg.session.as_str());
             headers.insert("caller-agent", msg.caller_agent.as_str());
@@ -538,7 +551,7 @@ impl MessageQueue for NatsQueue {
     }
 
     fn receive_delegate(&self, target_agent: &str) -> Result<(DelegateMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
-        let filter = format!("vlinder.*.delegate.*.{}", target_agent);
+        let filter = format!("vlinder.*.*.delegate.*.{}", target_agent);
 
         self.inner.runtime.block_on(async {
             let (js_msg, ack_fn) = self.fetch_one(&filter).await?;
@@ -553,6 +566,7 @@ impl MessageQueue for NatsQueue {
             let msg = DelegateMessage {
                 id: MessageId::from(get_header(headers, "msg-id")?),
                 protocol_version: get_header(headers, "protocol-version").unwrap_or_default(),
+                timeline: get_header(headers, "timeline-id").map(TimelineId::from).unwrap_or_else(|_| TimelineId::main()),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
                 session: SessionId::from(get_header(headers, "session-id")?),
                 caller_agent: get_header(headers, "caller-agent")?,
@@ -574,6 +588,7 @@ impl MessageQueue for NatsQueue {
             let mut headers = async_nats::HeaderMap::new();
             headers.insert("msg-id", msg.id.as_str());
             headers.insert("protocol-version", msg.protocol_version.as_str());
+            headers.insert("timeline-id", msg.timeline.as_str());
             headers.insert("submission-id", msg.submission.as_str());
             headers.insert("session-id", msg.session.as_str());
             headers.insert("agent-id", msg.agent_id.as_str());
@@ -613,6 +628,7 @@ impl MessageQueue for NatsQueue {
             let msg = CompleteMessage {
                 id: MessageId::from(get_header(headers, "msg-id")?),
                 protocol_version: get_header(headers, "protocol-version").unwrap_or_default(),
+                timeline: get_header(headers, "timeline-id").map(TimelineId::from).unwrap_or_else(|_| TimelineId::main()),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
                 session: SessionId::from(get_header(headers, "session-id")?),
                 agent_id: ResourceId::new(&get_header(headers, "agent-id")?),

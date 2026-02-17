@@ -2,7 +2,7 @@
 
 use chrono::{DateTime, Utc};
 
-use crate::domain::{DagNode, MessageType};
+use crate::domain::{DagNode, MessageType, Timeline};
 use super::proto;
 
 // =============================================================================
@@ -77,6 +77,49 @@ impl TryFrom<proto::DagNode> for DagNode {
             created_at,
             state: node.state,
             protocol_version: node.protocol_version,
+        })
+    }
+}
+
+// =============================================================================
+// Timeline → proto::Timeline
+// =============================================================================
+
+impl From<Timeline> for proto::Timeline {
+    fn from(tl: Timeline) -> Self {
+        Self {
+            id: tl.id,
+            branch_name: tl.branch_name,
+            parent_timeline_id: tl.parent_timeline_id,
+            fork_point: tl.fork_point,
+            created_at: tl.created_at.to_rfc3339(),
+            broken_at: tl.broken_at.map(|dt| dt.to_rfc3339()),
+        }
+    }
+}
+
+// =============================================================================
+// proto::Timeline → Timeline
+// =============================================================================
+
+impl TryFrom<proto::Timeline> for Timeline {
+    type Error = String;
+
+    fn try_from(tl: proto::Timeline) -> Result<Self, Self::Error> {
+        let created_at: DateTime<Utc> = tl.created_at.parse()
+            .map_err(|e| format!("invalid created_at: {}", e))?;
+        let broken_at = tl.broken_at
+            .map(|s| s.parse::<DateTime<Utc>>())
+            .transpose()
+            .map_err(|e| format!("invalid broken_at: {}", e))?;
+
+        Ok(Self {
+            id: tl.id,
+            branch_name: tl.branch_name,
+            parent_timeline_id: tl.parent_timeline_id,
+            fork_point: tl.fork_point,
+            created_at,
+            broken_at,
         })
     }
 }

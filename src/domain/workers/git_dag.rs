@@ -588,6 +588,7 @@ mod tests {
 
     fn test_invoke(payload: &[u8], epoch_secs: i64) -> (ObservableMessage, DateTime<Utc>) {
         let msg = InvokeMessage::new(
+            TimelineId::main(),
             SubmissionId::from("sub-1".to_string()),
             SessionId::from("sess-1".to_string()),
             HarnessType::Cli,
@@ -606,6 +607,7 @@ mod tests {
 
     fn test_request(payload: &[u8], epoch_secs: i64) -> (ObservableMessage, DateTime<Utc>) {
         let msg = RequestMessage::new(
+            TimelineId::main(),
             SubmissionId::from("sub-1".to_string()),
             SessionId::from("sess-1".to_string()),
             test_agent_id(),
@@ -629,6 +631,7 @@ mod tests {
     fn test_response(payload: &[u8], epoch_secs: i64) -> (ObservableMessage, DateTime<Utc>) {
         // Build a request first to derive the response
         let request = RequestMessage::new(
+            TimelineId::main(),
             SubmissionId::from("sub-1".to_string()),
             SessionId::from("sess-1".to_string()),
             test_agent_id(),
@@ -665,6 +668,7 @@ mod tests {
 
     fn test_complete(payload: &[u8], epoch_secs: i64) -> (ObservableMessage, DateTime<Utc>) {
         let msg = CompleteMessage::new(
+            TimelineId::main(),
             SubmissionId::from("sub-1".to_string()),
             SessionId::from("sess-1".to_string()),
             test_agent_id(),
@@ -679,6 +683,7 @@ mod tests {
 
     fn test_delegate(payload: &[u8], epoch_secs: i64) -> (ObservableMessage, DateTime<Utc>) {
         let msg = DelegateMessage::new(
+            TimelineId::main(),
             SubmissionId::from("sub-1".to_string()),
             SessionId::from("sess-1".to_string()),
             "coordinator",
@@ -878,6 +883,7 @@ mod tests {
     fn complete_directory_has_harness_and_stderr() {
         let (mut worker, _tmp) = test_worker();
         let msg_inner = CompleteMessage::new(
+            TimelineId::main(),
             SubmissionId::from("sub-1".to_string()),
             SessionId::from("sess-1".to_string()),
             test_agent_id(),
@@ -932,6 +938,7 @@ mod tests {
     fn state_file_present_when_state_set() {
         let (mut worker, _tmp) = test_worker();
         let invoke = InvokeMessage::new(
+            TimelineId::main(),
             SubmissionId::from("sub-1".to_string()),
             SessionId::from("sess-1".to_string()),
             HarnessType::Cli,

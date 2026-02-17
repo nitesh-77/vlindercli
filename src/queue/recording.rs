@@ -161,7 +161,7 @@ mod tests {
     use crate::domain::{
         ContainerDiagnostics, DagNode, DelegateDiagnostics, HarnessType,
         InvokeDiagnostics, MessageType, Operation, RequestDiagnostics, ResourceId,
-        RuntimeType, Sequence, ServiceDiagnostics, ServiceType, SessionId, SubmissionId,
+        RuntimeType, Sequence, ServiceDiagnostics, ServiceType, SessionId, SubmissionId, TimelineId,
     };
     use crate::queue::InMemoryQueue;
     use crate::storage::dag_store::SqliteDagStore;
@@ -190,6 +190,7 @@ mod tests {
 
     fn test_invoke() -> InvokeMessage {
         InvokeMessage::new(
+            TimelineId::main(),
             test_submission(),
             test_session(),
             HarnessType::Cli,
@@ -206,6 +207,7 @@ mod tests {
 
     fn test_request() -> RequestMessage {
         RequestMessage::new(
+            TimelineId::main(),
             test_submission(),
             test_session(),
             test_agent_id(),
@@ -234,6 +236,7 @@ mod tests {
 
     fn test_complete() -> CompleteMessage {
         CompleteMessage::new(
+            TimelineId::main(),
             test_submission(),
             test_session(),
             test_agent_id(),
@@ -246,6 +249,7 @@ mod tests {
 
     fn test_delegate() -> DelegateMessage {
         DelegateMessage::new(
+            TimelineId::main(),
             test_submission(),
             test_session(),
             "echo",
@@ -395,8 +399,8 @@ mod tests {
         // Send a message through the inner queue directly
         let msg = test_invoke();
         let subject = format!(
-            "vlinder.{}.invoke.{}.{}.{}",
-            msg.submission, msg.harness, msg.runtime.as_str(), "echo"
+            "vlinder.{}.{}.invoke.{}.{}.{}",
+            msg.timeline, msg.submission, msg.harness, msg.runtime.as_str(), "echo"
         );
 
         // Push directly to inner queue
@@ -425,6 +429,13 @@ mod tests {
             fn latest_state(&self, _: &str) -> Result<Option<String>, String> { Ok(None) }
             fn latest_node_hash(&self, _: &str) -> Result<Option<String>, String> { Ok(None) }
             fn set_checkout_state(&self, _: &str, _: &str) -> Result<(), String> { Ok(()) }
+            fn ensure_main_timeline(&self) -> Result<i64, String> { Ok(1) }
+            fn create_timeline(&self, _: &str, _: Option<i64>, _: Option<&str>) -> Result<i64, String> { Ok(0) }
+            fn get_timeline_by_branch(&self, _: &str) -> Result<Option<crate::domain::Timeline>, String> { Ok(None) }
+            fn get_timeline(&self, _: i64) -> Result<Option<crate::domain::Timeline>, String> { Ok(None) }
+            fn seal_timeline(&self, _: i64) -> Result<(), String> { Ok(()) }
+            fn rename_timeline(&self, _: i64, _: &str) -> Result<(), String> { Ok(()) }
+            fn is_timeline_sealed(&self, _: i64) -> Result<bool, String> { Ok(false) }
         }
 
         let store: Arc<dyn DagStore> = Arc::new(FailStore);

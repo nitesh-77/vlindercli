@@ -61,7 +61,7 @@ pub use queue_bridge::QueueBridge;
 
 pub use message::{
     PROTOCOL_VERSION,
-    MessageId, SubmissionId, SessionId, Sequence, SequenceCounter, HarnessType,
+    MessageId, SubmissionId, SessionId, TimelineId, Sequence, SequenceCounter, HarnessType,
     InvokeMessage, RequestMessage, ResponseMessage, CompleteMessage, DelegateMessage,
     ExpectsReply, ObservableMessage,
 };
@@ -75,7 +75,7 @@ pub use diagnostics::{
 // DAG (content-addressed Merkle DAG)
 // ============================================================================
 
-pub use dag::{DagStore, DagNode, MessageType, hash_dag_node};
+pub use dag::{DagStore, DagNode, MessageType, Timeline, hash_dag_node};
 
 // ============================================================================
 // State (versioned agent state)

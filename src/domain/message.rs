@@ -161,6 +161,48 @@ impl From<String> for SessionId {
     }
 }
 
+// --- TimelineId (ADR 093) ---
+
+/// Immutable identifier for a timeline (branch-scoped subjects).
+///
+/// Value is the integer primary key from the `timelines` table in the DAG store.
+/// Carried as a string in NATS headers and message subjects.
+///
+/// `TimelineId::main()` returns `"1"` — row 1 is always the main timeline.
+/// Timeline IDs never change, even when branch names are renamed during promote.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct TimelineId(String);
+
+impl TimelineId {
+    /// The main timeline (row 1 in the timelines table).
+    pub fn main() -> Self {
+        Self("1".to_string())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for TimelineId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<String> for TimelineId {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
+
+impl From<i64> for TimelineId {
+    fn from(id: i64) -> Self {
+        Self(id.to_string())
+    }
+}
+
 // --- Sequence (ADR 044) ---
 
 /// Sequence number for ordering interactions within a submission.
@@ -292,6 +334,7 @@ pub trait ExpectsReply {
 pub struct InvokeMessage {
     pub id: MessageId,
     pub protocol_version: String,
+    pub timeline: TimelineId,
     pub submission: SubmissionId,
     pub session: SessionId,
     pub harness: HarnessType,
@@ -310,6 +353,7 @@ pub struct InvokeMessage {
 
 impl InvokeMessage {
     pub fn new(
+        timeline: TimelineId,
         submission: SubmissionId,
         session: SessionId,
         harness: HarnessType,
@@ -322,6 +366,7 @@ impl InvokeMessage {
         Self {
             id: MessageId::new(),
             protocol_version: PROTOCOL_VERSION.to_string(),
+            timeline,
             submission,
             session,
             harness,
@@ -342,6 +387,7 @@ impl InvokeMessage {
 pub struct RequestMessage {
     pub id: MessageId,
     pub protocol_version: String,
+    pub timeline: TimelineId,
     pub submission: SubmissionId,
     pub session: SessionId,
     pub agent_id: ResourceId,
@@ -362,6 +408,7 @@ pub struct RequestMessage {
 
 impl RequestMessage {
     pub fn new(
+        timeline: TimelineId,
         submission: SubmissionId,
         session: SessionId,
         agent_id: ResourceId,
@@ -376,6 +423,7 @@ impl RequestMessage {
         Self {
             id: MessageId::new(),
             protocol_version: PROTOCOL_VERSION.to_string(),
+            timeline,
             submission,
             session,
             agent_id,
@@ -397,6 +445,7 @@ impl RequestMessage {
 pub struct ResponseMessage {
     pub id: MessageId,
     pub protocol_version: String,
+    pub timeline: TimelineId,
     pub submission: SubmissionId,
     pub session: SessionId,
     pub agent_id: ResourceId,
@@ -435,6 +484,7 @@ impl ResponseMessage {
         Self {
             id: MessageId::new(),
             protocol_version: PROTOCOL_VERSION.to_string(),
+            timeline: request.timeline.clone(),
             submission: request.submission.clone(),
             session: request.session.clone(),
             agent_id: request.agent_id.clone(),
@@ -460,6 +510,7 @@ impl ResponseMessage {
 pub struct DelegateMessage {
     pub id: MessageId,
     pub protocol_version: String,
+    pub timeline: TimelineId,
     pub submission: SubmissionId,
     pub session: SessionId,
     pub caller_agent: String,
@@ -479,6 +530,7 @@ pub struct DelegateMessage {
 
 impl DelegateMessage {
     pub fn new(
+        timeline: TimelineId,
         submission: SubmissionId,
         session: SessionId,
         caller_agent: impl Into<String>,
@@ -491,6 +543,7 @@ impl DelegateMessage {
         Self {
             id: MessageId::new(),
             protocol_version: PROTOCOL_VERSION.to_string(),
+            timeline,
             submission,
             session,
             caller_agent: caller_agent.into(),
@@ -510,6 +563,7 @@ impl DelegateMessage {
 pub struct CompleteMessage {
     pub id: MessageId,
     pub protocol_version: String,
+    pub timeline: TimelineId,
     pub submission: SubmissionId,
     pub session: SessionId,
     pub agent_id: ResourceId,
@@ -527,6 +581,7 @@ pub struct CompleteMessage {
 
 impl CompleteMessage {
     pub fn new(
+        timeline: TimelineId,
         submission: SubmissionId,
         session: SessionId,
         agent_id: ResourceId,
@@ -538,6 +593,7 @@ impl CompleteMessage {
         Self {
             id: MessageId::new(),
             protocol_version: PROTOCOL_VERSION.to_string(),
+            timeline,
             submission,
             session,
             agent_id,
@@ -563,6 +619,7 @@ impl ExpectsReply for InvokeMessage {
 
     fn create_reply(&self, payload: Vec<u8>) -> CompleteMessage {
         CompleteMessage::new(
+            self.timeline.clone(),
             self.submission.clone(),
             self.session.clone(),
             self.agent_id.clone(),
@@ -581,6 +638,7 @@ impl InvokeMessage {
     /// QueueBridge after the agent finishes.
     pub fn create_reply_with_state(&self, payload: Vec<u8>, state: Option<String>) -> CompleteMessage {
         CompleteMessage::new(
+            self.timeline.clone(),
             self.submission.clone(),
             self.session.clone(),
             self.agent_id.clone(),
@@ -602,6 +660,7 @@ impl InvokeMessage {
         diagnostics: ContainerDiagnostics,
     ) -> CompleteMessage {
         CompleteMessage::new(
+            self.timeline.clone(),
             self.submission.clone(),
             self.session.clone(),
             self.agent_id.clone(),
@@ -674,6 +733,17 @@ impl ObservableMessage {
             ObservableMessage::Response(m) => &m.submission,
             ObservableMessage::Complete(m) => &m.submission,
             ObservableMessage::Delegate(m) => &m.submission,
+        }
+    }
+
+    /// Get the timeline ID (ADR 093: branch-scoped subjects).
+    pub fn timeline(&self) -> &TimelineId {
+        match self {
+            ObservableMessage::Invoke(m) => &m.timeline,
+            ObservableMessage::Request(m) => &m.timeline,
+            ObservableMessage::Response(m) => &m.timeline,
+            ObservableMessage::Complete(m) => &m.timeline,
+            ObservableMessage::Delegate(m) => &m.timeline,
         }
     }
 
@@ -865,6 +935,47 @@ mod tests {
         assert_eq!(format!("{}", id), "ses-abc123");
     }
 
+    // --- TimelineId tests (ADR 093) ---
+
+    #[test]
+    fn timeline_id_main_is_one() {
+        let id = TimelineId::main();
+        assert_eq!(id.as_str(), "1");
+    }
+
+    #[test]
+    fn timeline_id_display() {
+        let id = TimelineId::main();
+        assert_eq!(format!("{}", id), "1");
+    }
+
+    #[test]
+    fn timeline_id_from_string() {
+        let id = TimelineId::from("42".to_string());
+        assert_eq!(id.as_str(), "42");
+    }
+
+    #[test]
+    fn timeline_id_from_i64() {
+        let id = TimelineId::from(7i64);
+        assert_eq!(id.as_str(), "7");
+    }
+
+    #[test]
+    fn timeline_id_equality_and_hashing() {
+        let id1 = TimelineId::from("3".to_string());
+        let id2 = TimelineId::from("3".to_string());
+        let id3 = TimelineId::from("5".to_string());
+
+        assert_eq!(id1, id2);
+        assert_ne!(id1, id3);
+
+        let mut set = HashSet::new();
+        set.insert(id1.clone());
+        assert!(set.contains(&id2));
+        assert!(!set.contains(&id3));
+    }
+
     // --- Sequence tests ---
 
     #[test]
@@ -960,6 +1071,7 @@ mod tests {
         let session = SessionId::new();
         let agent_id = test_agent_id();
         let msg = InvokeMessage::new(
+            TimelineId::main(),
             submission.clone(),
             session.clone(),
             HarnessType::Cli,
@@ -985,6 +1097,7 @@ mod tests {
         let session = SessionId::new();
         let agent_id = test_agent_id();
         let msg = RequestMessage::new(
+            TimelineId::main(),
             submission.clone(),
             session.clone(),
             agent_id.clone(),
@@ -1013,6 +1126,7 @@ mod tests {
         let session = SessionId::new();
         let agent_id = test_agent_id();
         let request = RequestMessage::new(
+            TimelineId::main(),
             submission.clone(),
             session.clone(),
             agent_id.clone(),
@@ -1050,6 +1164,7 @@ mod tests {
         let session = SessionId::new();
         let agent_id = test_agent_id();
         let msg = CompleteMessage::new(
+            TimelineId::main(),
             submission.clone(),
             session.clone(),
             agent_id.clone(),
@@ -1072,6 +1187,7 @@ mod tests {
     #[test]
     fn invoke_create_reply_returns_complete() {
         let invoke = InvokeMessage::new(
+            TimelineId::main(),
             test_submission(),
             SessionId::new(),
             HarnessType::Cli,
@@ -1097,6 +1213,7 @@ mod tests {
     #[test]
     fn request_create_reply_returns_response() {
         let request = RequestMessage::new(
+            TimelineId::main(),
             test_submission(),
             SessionId::new(),
             test_agent_id(),
@@ -1138,6 +1255,7 @@ mod tests {
     #[test]
     fn observable_message_from_invoke() {
         let invoke = InvokeMessage::new(
+            TimelineId::main(),
             test_submission(),
             SessionId::new(),
             HarnessType::Cli,
@@ -1160,6 +1278,7 @@ mod tests {
     #[test]
     fn observable_message_from_request() {
         let request = RequestMessage::new(
+            TimelineId::main(),
             test_submission(),
             SessionId::new(),
             test_agent_id(),
@@ -1185,6 +1304,7 @@ mod tests {
         let session = SessionId::new();
         let agent_id = test_agent_id();
         let invoke = InvokeMessage::new(
+            TimelineId::main(),
             submission.clone(),
             session.clone(),
             HarnessType::Cli,
@@ -1210,6 +1330,7 @@ mod tests {
         let submission = test_submission();
         let session = SessionId::new();
         let msg = DelegateMessage::new(
+            TimelineId::main(),
             submission.clone(),
             session.clone(),
             "coordinator",
@@ -1232,6 +1353,7 @@ mod tests {
     fn observable_message_from_delegate() {
         let submission = test_submission();
         let delegate = DelegateMessage::new(
+            TimelineId::main(),
             submission.clone(),
             SessionId::new(),
             "coordinator",

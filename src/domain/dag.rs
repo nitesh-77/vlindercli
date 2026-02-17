@@ -95,6 +95,22 @@ pub fn hash_dag_node(payload: &[u8], parent_hash: &str, message_type: &MessageTy
     format!("{:x}", hasher.finalize())
 }
 
+/// A timeline row — represents a named branch of execution.
+///
+/// Timeline 1 is always "main". Fork creates a new timeline pointing
+/// back to its parent. Sealed timelines reject new invocations.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Timeline {
+    pub id: i64,
+    pub branch_name: String,
+    pub parent_timeline_id: Option<i64>,
+    /// Submission hash at the fork point (if forked from a parent).
+    pub fork_point: Option<String>,
+    pub created_at: DateTime<Utc>,
+    /// When this timeline was sealed (broken). None = still active.
+    pub broken_at: Option<DateTime<Utc>>,
+}
+
 /// Persistence layer for DAG nodes.
 pub trait DagStore: Send + Sync {
     /// Insert a node. Idempotent (content-addressed, INSERT OR IGNORE).
@@ -127,6 +143,36 @@ pub trait DagStore: Send + Sync {
     /// the dag_nodes table. Cleared automatically when a Complete message
     /// with state is recorded via `insert_node()`.
     fn set_checkout_state(&self, agent_name: &str, state: &str) -> Result<(), String>;
+
+    // -------------------------------------------------------------------------
+    // Timeline methods (ADR 093)
+    // -------------------------------------------------------------------------
+
+    /// Ensure timeline row 1 ("main") exists. Returns its ID (always 1).
+    fn ensure_main_timeline(&self) -> Result<i64, String>;
+
+    /// Create a new timeline. Returns the auto-generated ID.
+    fn create_timeline(
+        &self,
+        branch_name: &str,
+        parent_id: Option<i64>,
+        fork_point: Option<&str>,
+    ) -> Result<i64, String>;
+
+    /// Look up a timeline by its branch name.
+    fn get_timeline_by_branch(&self, branch_name: &str) -> Result<Option<Timeline>, String>;
+
+    /// Look up a timeline by its integer ID.
+    fn get_timeline(&self, id: i64) -> Result<Option<Timeline>, String>;
+
+    /// Seal a timeline: set `broken_at` to now. Sealed timelines reject invocations.
+    fn seal_timeline(&self, id: i64) -> Result<(), String>;
+
+    /// Rename a timeline's branch name.
+    fn rename_timeline(&self, id: i64, new_name: &str) -> Result<(), String>;
+
+    /// Check whether a timeline has been sealed.
+    fn is_timeline_sealed(&self, id: i64) -> Result<bool, String>;
 }
 
 #[cfg(test)]

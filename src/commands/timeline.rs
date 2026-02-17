@@ -16,7 +16,7 @@ use std::sync::Arc;
 use clap::Subcommand;
 
 use vlindercli::config::{Config, conversations_dir};
-use vlindercli::domain::{DagStore, Harness, MessageQueue, Registry, agent_routing_key};
+use vlindercli::domain::{DagStore, Harness, MessageQueue, Registry, TimelineId, agent_routing_key};
 use vlindercli::harness::CliHarness;
 
 #[derive(Subcommand, Debug, PartialEq)]
@@ -270,9 +270,29 @@ fn repair(dir: &Path, path: Option<PathBuf>) {
         return;
     }
 
-    // 4. Create repair branch
+    // 4. Create repair branch with unique name (repair-YYYY-MM-DD-N)
     let date = chrono::Utc::now().format("%Y-%m-%d").to_string();
-    let branch_name = format!("repair-{}", date);
+    let dag_store = open_dag_store();
+
+    // Count existing repair branches for today to generate unique suffix
+    let counter = dag_store.as_ref()
+        .and_then(|store| {
+            // Count timelines with branch_name like repair-{date}-%
+            // We don't have a count method, so iterate by trying names
+            let mut n = 0;
+            loop {
+                n += 1;
+                let name = format!("repair-{}-{}", date, n);
+                match store.get_timeline_by_branch(&name) {
+                    Ok(Some(_)) => continue,
+                    _ => break,
+                }
+            }
+            Some(n)
+        })
+        .unwrap_or(1);
+
+    let branch_name = format!("repair-{}-{}", date, counter);
     let status = Command::new("git")
         .arg("-C")
         .arg(dir)
@@ -290,6 +310,25 @@ fn repair(dir: &Path, path: Option<PathBuf>) {
         }
         _ => {}
     }
+
+    // Insert timeline row (ADR 093)
+    let timeline_id = if let Some(ref store) = dag_store {
+        if let Err(e) = store.ensure_main_timeline() {
+            eprintln!("Warning: failed to ensure main timeline: {}", e);
+        }
+        match store.create_timeline(&branch_name, Some(1), Some(&head_sha)) {
+            Ok(id) => {
+                println!("Timeline {} created for branch '{}'.", id, branch_name);
+                Some(id)
+            }
+            Err(e) => {
+                eprintln!("Warning: failed to create timeline row: {}", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
 
     println!("Created branch '{}' from {}", branch_name, &head_sha[..8.min(head_sha.len())]);
 
@@ -349,6 +388,11 @@ fn repair(dir: &Path, path: Option<PathBuf>) {
         };
 
     let mut harness = CliHarness::new(queue, registry);
+
+    // Set timeline on harness so invocations use the correct branch-scoped subjects (ADR 093)
+    if let Some(id) = timeline_id {
+        harness.set_timeline(TimelineId::from(id), false);
+    }
 
     let agent_id = match harness.deploy_from_path(&absolute_path) {
         Ok(id) => id,
@@ -417,6 +461,26 @@ fn promote(dir: &Path) {
 
     let date = chrono::Utc::now().format("%Y-%m-%d").to_string();
     let broken_name = format!("broken-{}", date);
+
+    // Update timeline rows (ADR 093): seal old main, rename both
+    if let Some(store) = open_dag_store() {
+        let _ = store.ensure_main_timeline();
+
+        if let Ok(Some(old_main)) = store.get_timeline_by_branch("main") {
+            if let Err(e) = store.seal_timeline(old_main.id) {
+                eprintln!("Warning: failed to seal old main timeline: {}", e);
+            }
+            if let Err(e) = store.rename_timeline(old_main.id, &broken_name) {
+                eprintln!("Warning: failed to rename old main timeline: {}", e);
+            }
+        }
+
+        if let Ok(Some(promoted)) = store.get_timeline_by_branch(&current_branch) {
+            if let Err(e) = store.rename_timeline(promoted.id, "main") {
+                eprintln!("Warning: failed to rename promoted timeline to main: {}", e);
+            }
+        }
+    }
 
     // 3. Label old main as broken-YYYY-MM-DD
     let status = Command::new("git")
@@ -506,7 +570,7 @@ mod tests {
     use vlindercli::domain::workers::GitDagWorker;
     use vlindercli::domain::{
         InvokeMessage, CompleteMessage, ObservableMessage,
-        SubmissionId, SessionId, HarnessType,
+        SubmissionId, SessionId, HarnessType, TimelineId,
         InvokeDiagnostics, ContainerDiagnostics,
         RuntimeType, ResourceId,
     };
@@ -519,6 +583,7 @@ mod tests {
         let agent_id = ResourceId::new("http://127.0.0.1:9000/agents/agent-a");
 
         let invoke = InvokeMessage::new(
+            TimelineId::main(),
             SubmissionId::from("sub-1".to_string()),
             SessionId::from("sess-1".to_string()),
             HarnessType::Cli,
@@ -532,6 +597,7 @@ mod tests {
         worker.on_observable_message(&ObservableMessage::Invoke(invoke), ts1);
 
         let complete = CompleteMessage::new(
+            TimelineId::main(),
             SubmissionId::from("sub-1".to_string()),
             SessionId::from("sess-1".to_string()),
             agent_id,
