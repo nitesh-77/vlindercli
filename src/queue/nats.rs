@@ -18,8 +18,9 @@ use tokio::runtime::Runtime;
 use crate::domain::{
     CompleteMessage, ContainerDiagnostics, DelegateMessage, DelegateDiagnostics,
     HarnessType, InvokeDiagnostics, InvokeMessage, MessageId, MessageQueue,
-    Operation, QueueError, RequestDiagnostics, RequestMessage, ResourceId, ResponseMessage,
-    RuntimeType, Sequence, ServiceDiagnostics, ServiceType, SessionId, SubmissionId, TimelineId,
+    Operation, QueueError, RequestDiagnostics, RequestMessage, RequestPayload, ResourceId,
+    ResponseMessage, ResponsePayload, RuntimeType, Sequence, ServiceDiagnostics, ServiceType,
+    SessionId, SubmissionId, TimelineId,
 };
 
 /// NATS queue with JetStream durability.
@@ -285,7 +286,7 @@ impl MessageQueue for NatsQueue {
 
             self.inner
                 .jetstream
-                .publish_with_headers(subject, headers, msg.payload.into())
+                .publish_with_headers(subject, headers, msg.payload.legacy_bytes().to_vec().into())
                 .await
                 .map_err(|e| QueueError::SendFailed(e.to_string()))?
                 .await
@@ -329,7 +330,7 @@ impl MessageQueue for NatsQueue {
 
             self.inner
                 .jetstream
-                .publish_with_headers(subject, headers, msg.payload.into())
+                .publish_with_headers(subject, headers, msg.payload.legacy_bytes().to_vec().into())
                 .await
                 .map_err(|e| QueueError::SendFailed(e.to_string()))?
                 .await
@@ -434,7 +435,7 @@ impl MessageQueue for NatsQueue {
                 backend: get_header(headers, "backend")?,
                 operation: parse_operation(&get_header(headers, "operation")?)?,
                 sequence: Sequence::from(get_header(headers, "sequence")?.parse::<u32>().unwrap_or(1)),
-                payload: js_msg.payload.to_vec(),
+                payload: RequestPayload::Legacy(js_msg.payload.to_vec()),
                 state: get_header(headers, "state").ok(),
                 diagnostics,
             };
@@ -469,7 +470,7 @@ impl MessageQueue for NatsQueue {
                 backend: get_header(headers, "backend")?,
                 operation: parse_operation(&get_header(headers, "operation")?)?,
                 sequence: Sequence::from(get_header(headers, "sequence")?.parse::<u32>().unwrap_or(1)),
-                payload: js_msg.payload.to_vec(),
+                payload: ResponsePayload::Legacy(js_msg.payload.to_vec()),
                 correlation_id: MessageId::from(get_header(headers, "correlation-id")?),
                 state: get_header(headers, "state").ok(),
                 diagnostics,

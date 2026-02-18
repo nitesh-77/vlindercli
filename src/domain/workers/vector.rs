@@ -141,7 +141,7 @@ impl VectorServiceWorker {
     }
 
     fn handle_store(&self, request: &RequestMessage) -> Vec<u8> {
-        let req: VectorStoreRequest = match serde_json::from_slice(&request.payload) {
+        let req: VectorStoreRequest = match serde_json::from_slice(request.payload.legacy_bytes()) {
             Ok(r) => r,
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
@@ -159,7 +159,7 @@ impl VectorServiceWorker {
     }
 
     fn handle_search(&self, request: &RequestMessage) -> Vec<u8> {
-        let req: VectorSearchRequest = match serde_json::from_slice(&request.payload) {
+        let req: VectorSearchRequest = match serde_json::from_slice(request.payload.legacy_bytes()) {
             Ok(r) => r,
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
@@ -177,7 +177,7 @@ impl VectorServiceWorker {
     }
 
     fn handle_delete(&self, request: &RequestMessage) -> Vec<u8> {
-        let req: VectorDeleteRequest = match serde_json::from_slice(&request.payload) {
+        let req: VectorDeleteRequest = match serde_json::from_slice(request.payload.legacy_bytes()) {
             Ok(r) => r,
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
@@ -328,7 +328,7 @@ mod tests {
 
         assert!(handler.tick());
         let (response, ack) = queue.receive_response(&store_request).unwrap();
-        assert_eq!(response.payload, b"ok");
+        assert_eq!(response.payload.legacy_bytes(), b"ok");
         ack().unwrap();
 
         // Search
@@ -354,7 +354,7 @@ mod tests {
 
         assert!(handler.tick());
         let (response, ack) = queue.receive_response(&search_request).unwrap();
-        let results: Vec<serde_json::Value> = serde_json::from_slice(&response.payload).unwrap();
+        let results: Vec<serde_json::Value> = serde_json::from_slice(response.payload.legacy_bytes()).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0]["key"], "doc1");
         ack().unwrap();

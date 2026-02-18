@@ -119,7 +119,7 @@ impl QueueBridge {
                     if let Some(ref state) = response.state {
                         *self.current_state.write().unwrap() = Some(state.clone());
                     }
-                    let response_payload = response.payload.clone();
+                    let response_payload = response.payload.legacy_bytes().to_vec();
                     let _ = ack();
                     tracing::debug!(
                         sha = %sha, event = "service.response",

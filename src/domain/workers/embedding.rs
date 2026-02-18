@@ -86,13 +86,13 @@ impl EmbeddingServiceWorker {
 
     /// Best-effort extraction of model name from request payload.
     fn extract_model_name(&self, request: &RequestMessage) -> String {
-        serde_json::from_slice::<EmbedRequest>(&request.payload)
+        serde_json::from_slice::<EmbedRequest>(request.payload.legacy_bytes())
             .map(|r| r.model)
             .unwrap_or_default()
     }
 
     fn handle_embed(&self, request: &RequestMessage) -> Vec<u8> {
-        let req: EmbedRequest = match serde_json::from_slice(&request.payload) {
+        let req: EmbedRequest = match serde_json::from_slice(request.payload.legacy_bytes()) {
             Ok(r) => r,
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
@@ -269,7 +269,7 @@ mod tests {
         assert!(handler.tick());
 
         let (response, ack) = queue.receive_response(&request).unwrap();
-        let vector: Vec<f32> = serde_json::from_slice(&response.payload).unwrap();
+        let vector: Vec<f32> = serde_json::from_slice(response.payload.legacy_bytes()).unwrap();
         assert_eq!(vector.len(), 768);
         assert_eq!(vector, canned);
         ack().unwrap();
@@ -345,7 +345,7 @@ mod tests {
 
         assert!(handler.tick());
         let (response, ack) = queue.receive_response(&request).unwrap();
-        let text = String::from_utf8(response.payload.clone()).unwrap();
+        let text = String::from_utf8(response.payload.legacy_bytes().to_vec()).unwrap();
         assert!(text.contains("[error]"));
         assert!(text.contains("did not declare model"));
         ack().unwrap();
@@ -385,7 +385,7 @@ mod tests {
 
         assert!(handler.tick());
         let (response, ack) = queue.receive_response(&request).unwrap();
-        let text = String::from_utf8(response.payload.clone()).unwrap();
+        let text = String::from_utf8(response.payload.legacy_bytes().to_vec()).unwrap();
         assert!(text.contains("[error]"));
         assert!(text.contains("agent not found"));
         ack().unwrap();

@@ -215,7 +215,7 @@ impl ObjectServiceWorker {
     }
 
     fn handle_get(&self, request: &RequestMessage) -> Vec<u8> {
-        let req: KvGetRequest = match serde_json::from_slice(&request.payload) {
+        let req: KvGetRequest = match serde_json::from_slice(request.payload.legacy_bytes()) {
             Ok(r) => r,
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
@@ -246,7 +246,7 @@ impl ObjectServiceWorker {
     }
 
     fn handle_put(&self, request: &RequestMessage) -> Vec<u8> {
-        let req: KvPutRequest = match serde_json::from_slice(&request.payload) {
+        let req: KvPutRequest = match serde_json::from_slice(request.payload.legacy_bytes()) {
             Ok(r) => r,
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
@@ -283,7 +283,7 @@ impl ObjectServiceWorker {
     }
 
     fn handle_list(&self, request: &RequestMessage) -> Vec<u8> {
-        let req: KvListRequest = match serde_json::from_slice(&request.payload) {
+        let req: KvListRequest = match serde_json::from_slice(request.payload.legacy_bytes()) {
             Ok(r) => r,
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
@@ -301,7 +301,7 @@ impl ObjectServiceWorker {
     }
 
     fn handle_delete(&self, request: &RequestMessage) -> Vec<u8> {
-        let req: KvDeleteRequest = match serde_json::from_slice(&request.payload) {
+        let req: KvDeleteRequest = match serde_json::from_slice(request.payload.legacy_bytes()) {
             Ok(r) => r,
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
@@ -483,7 +483,7 @@ mod tests {
         // Process
         assert!(handler.tick());
         let (response, ack) = queue.receive_response(&put_request).unwrap();
-        assert_eq!(response.payload, b"ok");
+        assert_eq!(response.payload.legacy_bytes(), b"ok");
         ack().unwrap();
 
         // Send typed get request
@@ -509,7 +509,7 @@ mod tests {
         // Process
         assert!(handler.tick());
         let (response, ack) = queue.receive_response(&get_request).unwrap();
-        assert_eq!(response.payload, b"hello world");
+        assert_eq!(response.payload.legacy_bytes(), b"hello world");
         ack().unwrap();
     }
 
@@ -545,7 +545,7 @@ mod tests {
         ack().unwrap();
 
         // Response should be JSON with a state field
-        let resp: serde_json::Value = serde_json::from_slice(&response.payload).unwrap();
+        let resp: serde_json::Value = serde_json::from_slice(response.payload.legacy_bytes()).unwrap();
         let state = resp["state"].as_str().unwrap();
         assert!(!state.is_empty());
         // SHA-256 hash is 64 hex chars
@@ -581,7 +581,7 @@ mod tests {
         assert!(handler.tick());
         let (response, ack) = queue.receive_response(&put_request).unwrap();
         ack().unwrap();
-        let resp: serde_json::Value = serde_json::from_slice(&response.payload).unwrap();
+        let resp: serde_json::Value = serde_json::from_slice(response.payload.legacy_bytes()).unwrap();
         let state_hash = resp["state"].as_str().unwrap().to_string();
 
         // Get with state
@@ -602,7 +602,7 @@ mod tests {
         let (response, ack) = queue.receive_response(&get_request).unwrap();
         ack().unwrap();
 
-        assert_eq!(response.payload, b"versioned content");
+        assert_eq!(response.payload.legacy_bytes(), b"versioned content");
     }
 
     #[test]
@@ -634,7 +634,7 @@ mod tests {
         handler.tick();
         let (resp1, ack) = queue.receive_response(&req1).unwrap();
         ack().unwrap();
-        let state1: serde_json::Value = serde_json::from_slice(&resp1.payload).unwrap();
+        let state1: serde_json::Value = serde_json::from_slice(resp1.payload.legacy_bytes()).unwrap();
         let hash1 = state1["state"].as_str().unwrap().to_string();
 
         // Second put chained from first
@@ -655,7 +655,7 @@ mod tests {
         handler.tick();
         let (resp2, ack) = queue.receive_response(&req2).unwrap();
         ack().unwrap();
-        let state2: serde_json::Value = serde_json::from_slice(&resp2.payload).unwrap();
+        let state2: serde_json::Value = serde_json::from_slice(resp2.payload.legacy_bytes()).unwrap();
         let hash2 = state2["state"].as_str().unwrap().to_string();
 
         // Hashes should differ
@@ -675,7 +675,7 @@ mod tests {
         handler.tick();
         let (resp, ack) = queue.receive_response(&get_req).unwrap();
         ack().unwrap();
-        assert_eq!(resp.payload, b"aaa");
+        assert_eq!(resp.payload.legacy_bytes(), b"aaa");
     }
 
     #[test]
@@ -707,7 +707,7 @@ mod tests {
         handler.tick();
         let (resp, ack) = queue.receive_response(&put_req).unwrap();
         ack().unwrap();
-        let state: serde_json::Value = serde_json::from_slice(&resp.payload).unwrap();
+        let state: serde_json::Value = serde_json::from_slice(resp.payload.legacy_bytes()).unwrap();
         let state_hash = state["state"].as_str().unwrap().to_string();
 
         // Get non-existent path from that state
@@ -724,7 +724,7 @@ mod tests {
         handler.tick();
         let (resp, ack) = queue.receive_response(&get_req).unwrap();
         ack().unwrap();
-        assert!(resp.payload.is_empty());
+        assert!(resp.payload.legacy_bytes().is_empty());
     }
 
     #[test]
@@ -802,7 +802,7 @@ mod tests {
         handler.tick();
         let (resp, ack) = queue.receive_response(&put_req).unwrap();
         ack().unwrap();
-        assert_eq!(resp.payload, b"ok");
+        assert_eq!(resp.payload.legacy_bytes(), b"ok");
 
         let get_payload = serde_json::json!({"path": "/test.txt"});
         let get_req = RequestMessage::new(
@@ -817,6 +817,6 @@ mod tests {
         handler.tick();
         let (resp, ack) = queue.receive_response(&get_req).unwrap();
         ack().unwrap();
-        assert_eq!(resp.payload, b"plain data");
+        assert_eq!(resp.payload.legacy_bytes(), b"plain data");
     }
 }

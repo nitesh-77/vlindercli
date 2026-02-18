@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use super::{ResourceId, RuntimeType};
 use super::operation::Operation;
 use super::service_type::ServiceType;
+use super::service_payloads::{RequestPayload, ResponsePayload};
 use super::diagnostics::{
     InvokeDiagnostics, RequestDiagnostics, ServiceDiagnostics,
     ContainerDiagnostics, DelegateDiagnostics,
@@ -396,7 +397,7 @@ pub struct RequestMessage {
     pub operation: Operation,
     pub sequence: Sequence,
     #[serde(skip)]
-    pub payload: Vec<u8>,
+    pub payload: RequestPayload,
     /// State hash at the time this request was made (ADR 055).
     /// Records the state context before the service processes the request.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -431,7 +432,7 @@ impl RequestMessage {
             backend: backend.into(),
             operation,
             sequence,
-            payload,
+            payload: RequestPayload::Legacy(payload),
             state,
             diagnostics,
         }
@@ -454,7 +455,7 @@ pub struct ResponseMessage {
     pub operation: Operation,
     pub sequence: Sequence,
     #[serde(skip)]
-    pub payload: Vec<u8>,
+    pub payload: ResponsePayload,
     pub correlation_id: MessageId,
     /// State hash after this response (ADR 055).
     /// Present when the operation changed state (e.g. kv-put returns new hash).
@@ -492,7 +493,7 @@ impl ResponseMessage {
             backend: request.backend.clone(),
             operation: request.operation,
             sequence: request.sequence,
-            payload,
+            payload: ResponsePayload::Legacy(payload),
             correlation_id: request.id.clone(),
             state: None,
             diagnostics,
@@ -758,12 +759,16 @@ impl ObservableMessage {
         }
     }
 
-    /// Get the payload.
+    /// Get the payload as raw bytes.
+    ///
+    /// For Request and Response messages, delegates to `legacy_bytes()` on
+    /// the typed payload enum. For all other message types, returns the
+    /// raw `Vec<u8>` directly.
     pub fn payload(&self) -> &[u8] {
         match self {
             ObservableMessage::Invoke(m) => &m.payload,
-            ObservableMessage::Request(m) => &m.payload,
-            ObservableMessage::Response(m) => &m.payload,
+            ObservableMessage::Request(m) => m.payload.legacy_bytes(),
+            ObservableMessage::Response(m) => m.payload.legacy_bytes(),
             ObservableMessage::Complete(m) => &m.payload,
             ObservableMessage::Delegate(m) => &m.payload,
         }
@@ -1117,7 +1122,7 @@ mod tests {
         assert_eq!(msg.backend, "sqlite");
         assert_eq!(msg.operation, Operation::Get);
         assert_eq!(msg.sequence.as_u32(), 1);
-        assert_eq!(msg.payload, b"key");
+        assert_eq!(msg.payload.legacy_bytes(), b"key");
     }
 
     #[test]
@@ -1155,7 +1160,7 @@ mod tests {
         assert_eq!(response.correlation_id, request.id);
 
         // And its own payload
-        assert_eq!(response.payload, b"value");
+        assert_eq!(response.payload.legacy_bytes(), b"value");
     }
 
     #[test]
@@ -1240,7 +1245,7 @@ mod tests {
         // Correlation links reply to original
         assert_eq!(response.correlation_id, request.id);
         // Payload is the reply payload
-        assert_eq!(response.payload, b"value");
+        assert_eq!(response.payload.legacy_bytes(), b"value");
     }
 
     // Note: These would NOT compile (uncomment to verify):

@@ -15,8 +15,9 @@ use chrono::Utc;
 use crate::domain::{
     CompleteMessage, ContainerDiagnostics, DagNode, DelegateDiagnostics,
     DelegateMessage, HarnessType, InvokeDiagnostics, InvokeMessage, MessageId, MessageType,
-    Operation, RequestDiagnostics, RequestMessage, ResourceId, ResponseMessage, RuntimeType,
-    Sequence, ServiceDiagnostics, ServiceType, SessionId, SubmissionId, TimelineId, hash_dag_node,
+    Operation, RequestDiagnostics, RequestMessage, RequestPayload, ResourceId, ResponseMessage,
+    ResponsePayload, RuntimeType, Sequence, ServiceDiagnostics, ServiceType, SessionId,
+    SubmissionId, TimelineId, hash_dag_node,
 };
 use crate::domain::message::ObservableMessage;
 
@@ -108,7 +109,7 @@ fn reconstruct_request(
         sequence: Sequence::from(
             headers.get("sequence")?.parse::<u32>().ok()?
         ),
-        payload: payload.to_vec(),
+        payload: RequestPayload::Legacy(payload.to_vec()),
         state: headers.get("state").cloned(),
         diagnostics,
     }))
@@ -135,7 +136,7 @@ fn reconstruct_response(
         sequence: Sequence::from(
             headers.get("sequence")?.parse::<u32>().ok()?
         ),
-        payload: payload.to_vec(),
+        payload: ResponsePayload::Legacy(payload.to_vec()),
         correlation_id: MessageId::from(headers.get("correlation-id")?.clone()),
         state: headers.get("state").cloned(),
         diagnostics,
@@ -423,7 +424,7 @@ mod tests {
             assert_eq!(m.backend, "ollama");
             assert_eq!(m.operation, Operation::Run);
             assert_eq!(m.sequence.as_u32(), 1);
-            assert_eq!(m.payload, b"request-payload");
+            assert_eq!(m.payload.legacy_bytes(), b"request-payload");
         }
     }
 
@@ -440,7 +441,7 @@ mod tests {
             assert_eq!(m.service, ServiceType::Infer);
             assert_eq!(m.backend, "ollama");
             assert_eq!(m.correlation_id.as_str(), "msg-002");
-            assert_eq!(m.payload, b"response-payload");
+            assert_eq!(m.payload.legacy_bytes(), b"response-payload");
         }
     }
 

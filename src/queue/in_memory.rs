@@ -493,7 +493,7 @@ mod tests {
         assert_eq!(received.service, ServiceType::Kv);
         assert_eq!(received.backend, "sqlite");
         assert_eq!(received.operation, Operation::Get);
-        assert_eq!(received.payload, b"key");
+        assert_eq!(received.payload.legacy_bytes(), b"key");
 
         ack().unwrap();
     }
