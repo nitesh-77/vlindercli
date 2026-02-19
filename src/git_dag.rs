@@ -256,8 +256,8 @@ impl GitDagWorker {
             }
             ObservableMessage::Delegate(m) => {
                 entries.push(self.write_field("type", "delegate")?);
-                entries.push(self.write_field("caller_agent", &m.caller_agent)?);
-                entries.push(self.write_field("target_agent", &m.target_agent)?);
+                entries.push(self.write_field("caller_agent", m.caller.as_str())?);
+                entries.push(self.write_field("target_agent", m.target.as_str())?);
                 entries.push(self.write_field("reply_subject", &m.reply_subject)?);
                 if let Some(ref state) = m.state {
                     entries.push(self.write_field("state", state)?);
@@ -540,8 +540,8 @@ fn message_routing(msg: &ObservableMessage) -> (String, String, &'static str) {
             "complete",
         ),
         ObservableMessage::Delegate(m) => (
-            m.caller_agent.clone(),
-            m.target_agent.clone(),
+            m.caller.to_string(),
+            m.target.to_string(),
             "delegate",
         ),
     }
@@ -558,7 +558,7 @@ fn message_agent_name(msg: &ObservableMessage) -> String {
             m.agent_id.as_str().rsplit('/').next().unwrap_or(m.agent_id.as_str()).to_string(),
         ObservableMessage::Complete(m) =>
             m.agent_id.as_str().rsplit('/').next().unwrap_or(m.agent_id.as_str()).to_string(),
-        ObservableMessage::Delegate(m) => m.target_agent.clone(),
+        ObservableMessage::Delegate(m) => m.target.to_string(),
     }
 }
 
@@ -577,7 +577,7 @@ fn message_state(msg: &ObservableMessage) -> Option<&str> {
 mod tests {
     use super::*;
     use crate::domain::{
-        InvokeMessage, RequestMessage, ResponseMessage, CompleteMessage, DelegateMessage,
+        AgentId, InvokeMessage, RequestMessage, ResponseMessage, CompleteMessage, DelegateMessage,
         ObservableMessage, HarnessType, TimelineId, SubmissionId, SessionId, Sequence,
         InvokeDiagnostics, RequestDiagnostics, ServiceDiagnostics, ServiceMetrics,
         ContainerDiagnostics, ContainerRuntimeInfo, DelegateDiagnostics,
@@ -689,8 +689,8 @@ mod tests {
             TimelineId::main(),
             SubmissionId::from("sub-1".to_string()),
             SessionId::from("sess-1".to_string()),
-            "coordinator",
-            "summarizer",
+            AgentId::new("coordinator"),
+            AgentId::new("summarizer"),
             payload.to_vec(),
             "vlinder.sub-1.delegate-reply",
             None,

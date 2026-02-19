@@ -6,7 +6,7 @@ use crate::domain::{
 };
 #[cfg(test)]
 use crate::domain::{
-    ContainerDiagnostics, DelegateDiagnostics, InvokeDiagnostics, RequestDiagnostics,
+    AgentId, ContainerDiagnostics, DelegateDiagnostics, InvokeDiagnostics, RequestDiagnostics,
 };
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
@@ -205,7 +205,7 @@ impl MessageQueue for InMemoryQueue {
     fn send_delegate(&self, msg: DelegateMessage) -> Result<(), QueueError> {
         let subject = format!(
             "vlinder.{}.{}.delegate.{}.{}",
-            msg.timeline, msg.submission, msg.caller_agent, msg.target_agent,
+            msg.timeline, msg.submission, msg.caller, msg.target,
         );
 
         let mut typed = self.typed_queues.lock().unwrap();
@@ -584,8 +584,8 @@ mod tests {
             TimelineId::main(),
             test_submission(),
             SessionId::new(),
-            "coordinator",
-            "summarizer",
+            AgentId::new("coordinator"),
+            AgentId::new("summarizer"),
             b"summarize this".to_vec(),
             "vlinder.sub.reply.coordinator.summarizer.abc",
             None,
@@ -608,8 +608,8 @@ mod tests {
             TimelineId::main(),
             test_submission(),
             SessionId::new(),
-            "coordinator",
-            "summarizer",
+            AgentId::new("coordinator"),
+            AgentId::new("summarizer"),
             b"payload".to_vec(),
             "reply.subject",
             None,
@@ -622,8 +622,8 @@ mod tests {
         let (received, ack) = queue.receive_delegate("summarizer").unwrap();
 
         assert_eq!(received.id, original_id);
-        assert_eq!(received.caller_agent, "coordinator");
-        assert_eq!(received.target_agent, "summarizer");
+        assert_eq!(received.caller, AgentId::new("coordinator"));
+        assert_eq!(received.target, AgentId::new("summarizer"));
         assert_eq!(received.payload, b"payload");
         assert_eq!(received.reply_subject, "reply.subject");
 
@@ -638,8 +638,8 @@ mod tests {
             TimelineId::main(),
             test_submission(),
             SessionId::new(),
-            "coordinator",
-            "summarizer",
+            AgentId::new("coordinator"),
+            AgentId::new("summarizer"),
             b"payload".to_vec(),
             "reply.subject",
             None,

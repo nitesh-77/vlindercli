@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use chrono::Utc;
 
 use crate::domain::{
-    CompleteMessage, ContainerDiagnostics, DagNode, DelegateDiagnostics,
+    AgentId, CompleteMessage, ContainerDiagnostics, DagNode, DelegateDiagnostics,
     DelegateMessage, HarnessType, InvokeDiagnostics, InvokeMessage, MessageId, MessageType,
     Operation, RequestDiagnostics, RequestMessage, RequestPayload, ResourceId, ResponseMessage,
     ResponsePayload, RuntimeType, Sequence, ServiceDiagnostics, ServiceType, SessionId,
@@ -181,8 +181,8 @@ fn reconstruct_delegate(
         timeline: headers.get("timeline-id").map(|s| TimelineId::from(s.clone())).unwrap_or_else(TimelineId::main),
         submission: SubmissionId::from(headers.get("submission-id")?.clone()),
         session: SessionId::from(headers.get("session-id")?.clone()),
-        caller_agent: headers.get("caller-agent")?.clone(),
-        target_agent: headers.get("target-agent")?.clone(),
+        caller: AgentId::new(headers.get("caller-agent")?.clone()),
+        target: AgentId::new(headers.get("target-agent")?.clone()),
         payload: payload.to_vec(),
         reply_subject: headers.get("reply-subject")?.clone(),
         state: headers.get("state").cloned(),
@@ -242,8 +242,8 @@ pub fn observable_from_to(msg: &ObservableMessage) -> (String, String) {
             m.harness.as_str().to_string(),
         ),
         ObservableMessage::Delegate(m) => (
-            m.caller_agent.clone(),
-            m.target_agent.clone(),
+            m.caller.to_string(),
+            m.target.to_string(),
         ),
     }
 }
@@ -469,8 +469,8 @@ mod tests {
 
         assert!(matches!(msg, ObservableMessage::Delegate(_)));
         if let ObservableMessage::Delegate(m) = &msg {
-            assert_eq!(m.caller_agent, "coordinator");
-            assert_eq!(m.target_agent, "summarizer");
+            assert_eq!(m.caller, AgentId::new("coordinator"));
+            assert_eq!(m.target, AgentId::new("summarizer"));
             assert_eq!(m.reply_subject, "vlinder.sub-1.delegate-reply");
             assert_eq!(m.payload, b"delegate-payload");
         }

@@ -16,7 +16,7 @@ use futures::StreamExt;
 use tokio::runtime::Runtime;
 
 use crate::domain::{
-    CompleteMessage, ContainerDiagnostics, DelegateMessage, DelegateDiagnostics,
+    AgentId, CompleteMessage, ContainerDiagnostics, DelegateMessage, DelegateDiagnostics,
     HarnessType, InvokeDiagnostics, InvokeMessage, MessageId, MessageQueue,
     Operation, QueueError, RequestDiagnostics, RequestMessage, RequestPayload, ResourceId,
     ResponseMessage, ResponsePayload, RuntimeType, Sequence, ServiceDiagnostics, ServiceType,
@@ -519,7 +519,7 @@ impl MessageQueue for NatsQueue {
     fn send_delegate(&self, msg: DelegateMessage) -> Result<(), QueueError> {
         let subject = format!(
             "vlinder.{}.{}.delegate.{}.{}",
-            msg.timeline, msg.submission, msg.caller_agent, msg.target_agent,
+            msg.timeline, msg.submission, msg.caller, msg.target,
         );
 
         self.inner.runtime.block_on(async {
@@ -529,8 +529,8 @@ impl MessageQueue for NatsQueue {
             headers.insert("timeline-id", msg.timeline.as_str());
             headers.insert("submission-id", msg.submission.as_str());
             headers.insert("session-id", msg.session.as_str());
-            headers.insert("caller-agent", msg.caller_agent.as_str());
-            headers.insert("target-agent", msg.target_agent.as_str());
+            headers.insert("caller-agent", msg.caller.as_str());
+            headers.insert("target-agent", msg.target.as_str());
             headers.insert("reply-subject", msg.reply_subject.as_str());
             if let Some(ref state) = msg.state {
                 headers.insert("state", state.as_str());
@@ -570,8 +570,8 @@ impl MessageQueue for NatsQueue {
                 timeline: get_header(headers, "timeline-id").map(TimelineId::from).unwrap_or_else(|_| TimelineId::main()),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
                 session: SessionId::from(get_header(headers, "session-id")?),
-                caller_agent: get_header(headers, "caller-agent")?,
-                target_agent: get_header(headers, "target-agent")?,
+                caller: AgentId::new(get_header(headers, "caller-agent")?),
+                target: AgentId::new(get_header(headers, "target-agent")?),
                 payload: js_msg.payload.to_vec(),
                 reply_subject: get_header(headers, "reply-subject")?,
                 state: get_header(headers, "state").ok(),

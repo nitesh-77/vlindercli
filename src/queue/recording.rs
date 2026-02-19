@@ -159,7 +159,7 @@ impl MessageQueue for RecordingQueue {
 mod tests {
     use super::*;
     use crate::domain::{
-        ContainerDiagnostics, DagNode, DelegateDiagnostics, HarnessType,
+        AgentId, ContainerDiagnostics, DagNode, DelegateDiagnostics, HarnessType,
         InMemoryDagStore, InvokeDiagnostics, MessageType, Operation, RequestDiagnostics,
         ResourceId, RuntimeType, Sequence, ServiceDiagnostics, ServiceType, SessionId,
         SubmissionId, TimelineId,
@@ -251,8 +251,8 @@ mod tests {
             TimelineId::main(),
             test_submission(),
             test_session(),
-            "echo",
-            "summarizer",
+            AgentId::new("echo"),
+            AgentId::new("summarizer"),
             b"delegate this".to_vec(),
             "reply-subject",
             None,

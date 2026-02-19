@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{ResourceId, RuntimeType};
 use super::operation::Operation;
+use super::routing_key::AgentId;
 use super::service_type::ServiceType;
 use super::service_payloads::{RequestPayload, ResponsePayload};
 use super::diagnostics::{
@@ -514,8 +515,8 @@ pub struct DelegateMessage {
     pub timeline: TimelineId,
     pub submission: SubmissionId,
     pub session: SessionId,
-    pub caller_agent: String,
-    pub target_agent: String,
+    pub caller: AgentId,
+    pub target: AgentId,
     #[serde(skip)]
     pub payload: Vec<u8>,
     /// The "handle" — caller polls this for result.
@@ -534,8 +535,8 @@ impl DelegateMessage {
         timeline: TimelineId,
         submission: SubmissionId,
         session: SessionId,
-        caller_agent: impl Into<String>,
-        target_agent: impl Into<String>,
+        caller: AgentId,
+        target: AgentId,
         payload: Vec<u8>,
         reply_subject: impl Into<String>,
         state: Option<String>,
@@ -547,8 +548,8 @@ impl DelegateMessage {
             timeline,
             submission,
             session,
-            caller_agent: caller_agent.into(),
-            target_agent: target_agent.into(),
+            caller,
+            target,
             payload,
             reply_subject: reply_subject.into(),
             state,
@@ -1338,8 +1339,8 @@ mod tests {
             TimelineId::main(),
             submission.clone(),
             session.clone(),
-            "coordinator",
-            "summarizer",
+            AgentId::new("coordinator"),
+            AgentId::new("summarizer"),
             b"summarize this".to_vec(),
             "vlinder.sub.delegate-reply.coordinator.summarizer.abc123",
             None,
@@ -1348,8 +1349,8 @@ mod tests {
 
         assert_eq!(msg.submission, submission);
         assert_eq!(msg.session, session);
-        assert_eq!(msg.caller_agent, "coordinator");
-        assert_eq!(msg.target_agent, "summarizer");
+        assert_eq!(msg.caller, AgentId::new("coordinator"));
+        assert_eq!(msg.target, AgentId::new("summarizer"));
         assert_eq!(msg.payload, b"summarize this");
         assert!(msg.reply_subject.contains("delegate-reply"));
     }
@@ -1361,8 +1362,8 @@ mod tests {
             TimelineId::main(),
             submission.clone(),
             SessionId::new(),
-            "coordinator",
-            "summarizer",
+            AgentId::new("coordinator"),
+            AgentId::new("summarizer"),
             b"test".to_vec(),
             "reply.subject",
             None,

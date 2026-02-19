@@ -11,8 +11,8 @@
 use std::sync::{Arc, RwLock};
 
 use super::{
-    SdkContract, ObjectStorageType, Operation, Registry, ServiceType, VectorMatch, VectorStorageType,
-    DelegateMessage, DelegateDiagnostics, ContainerDiagnostics, InvokeMessage,
+    AgentId, SdkContract, ObjectStorageType, Operation, Registry, ServiceType, VectorMatch,
+    VectorStorageType, DelegateMessage, DelegateDiagnostics, ContainerDiagnostics, InvokeMessage,
     MessageQueue, RequestMessage, RequestDiagnostics, SequenceCounter,
 };
 
@@ -232,10 +232,11 @@ impl SdkContract for QueueBridge {
             .ok_or_else(|| format!("delegate: target agent '{}' not found", target_agent))?;
 
         let invoke = self.invoke.read().unwrap();
-        let caller_agent = super::agent_routing_key(&invoke.agent_id);
+        let caller = AgentId::new(super::agent_routing_key(&invoke.agent_id));
+        let target = AgentId::new(target_agent);
         let sha = invoke.submission.to_string();
         let reply_subject = self.queue.create_reply_address(
-            &invoke.submission, &caller_agent, target_agent,
+            &invoke.submission, caller.as_str(), target.as_str(),
         );
 
         let state = self.current_state.read().unwrap().clone();
@@ -243,8 +244,8 @@ impl SdkContract for QueueBridge {
             invoke.timeline.clone(),
             invoke.submission.clone(),
             invoke.session.clone(),
-            &caller_agent,
-            target_agent,
+            caller.clone(),
+            target.clone(),
             input.as_bytes().to_vec(),
             &reply_subject,
             state,
@@ -254,7 +255,7 @@ impl SdkContract for QueueBridge {
 
         tracing::info!(
             sha = %sha, event = "delegation.sent",
-            caller = %caller_agent, target = %target_agent,
+            caller = %caller, target = %target,
             reply = %reply_subject, "Delegating to agent"
         );
 

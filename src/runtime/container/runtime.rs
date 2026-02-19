@@ -254,7 +254,7 @@ impl ContainerRuntime {
                     sha = %delegate.submission,
                     session = %delegate.session,
                     agent = %agent.name,
-                    caller = %delegate.caller_agent,
+                    caller = %delegate.caller,
                     "Dispatching delegated work"
                 );
 
