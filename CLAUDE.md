@@ -55,6 +55,25 @@ Claude should:
 - Read TODO.md when deciding what to do next (don't rely only on conversation memory)
 - Update TODO.md as work progresses, decisions are made, or new questions arise
 
+## Troubleshooting running of agents
+
+- We are developing a runtime that makes agents highly observable.
+- When agents fail, we should dogfood platform capabilities.
+- Here is how
+    - ~/.vlinder directory has all the config, state and logs.
+    - ~/.vlinder/conversations has the entire state of an agent run
+    - The human who is testing the agent always tries to test it with a clean slate.
+        - see `just reset` (the human has likely run that before testing the agent)
+    - So when an agent fails, all the events leading up to the failure, and the states the system went through should be present in ~/.vlinder/conversations
+    - Use that information first, before trying to analyse the code
+    - If that doesn't work look at the logs in ~/.vlinder/logs
+    - If that also doesn't work, then add code to make the observability richer
+      - add code to capture more state in conversations
+      - add logs
+      - ask the human to run it again
+    - the more we dogfood, better the product becomes
+    - observability gets better every time agents fail. That is a good thing.
+
 ## Build & Setup
 
 - Always use `justfile` for build, setup, and fixture operations
