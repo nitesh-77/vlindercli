@@ -38,6 +38,7 @@ mod resource_id;
 mod identity;
 mod secret_store;
 mod operation;
+mod routing_key;
 mod service_type;
 mod storage;
 pub mod service_payloads;
@@ -68,6 +69,7 @@ pub use message::{
 };
 pub use service_payloads::{RequestPayload, ResponsePayload};
 pub use message_queue::{Acknowledgement, MessageQueue, QueueError, agent_routing_key};
+pub use routing_key::{RoutingKey, AgentId, Nonce, ServiceBackend, InferenceBackendType, EmbeddingBackendType};
 pub use diagnostics::{
     InvokeDiagnostics, RequestDiagnostics, ServiceDiagnostics, ServiceMetrics,
     ContainerDiagnostics, ContainerRuntimeInfo, DelegateDiagnostics,
