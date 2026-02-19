@@ -165,15 +165,6 @@ mod tests {
     }
 
     #[test]
-    fn name_from_memory_uri_strips_authority() {
-        let name = pfname_from_path(
-            "memory://test/my-model",
-            Provider::InMemory,
-        );
-        assert_eq!(name, "my-model");
-    }
-
-    #[test]
     fn name_from_bare_string_returns_as_is() {
         let name = pfname_from_path("phi3", Provider::Ollama);
         assert_eq!(name, "phi3");

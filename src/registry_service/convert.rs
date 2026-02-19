@@ -335,8 +335,6 @@ impl From<Provider> for proto::Provider {
         match p {
             Provider::OpenRouter => proto::Provider::Openrouter,
             Provider::Ollama => proto::Provider::Ollama,
-            #[cfg(test)]
-            Provider::InMemory => proto::Provider::Unspecified,
         }
     }
 }

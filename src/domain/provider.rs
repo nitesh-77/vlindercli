@@ -14,7 +14,4 @@ pub enum Provider {
     Ollama,
     /// OpenRouter API (cloud LLMs via OpenAI-compatible endpoint).
     OpenRouter,
-    /// In-memory provider (for testing).
-    #[cfg(test)]
-    InMemory,
 }

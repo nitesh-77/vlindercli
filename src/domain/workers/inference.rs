@@ -192,8 +192,8 @@ mod tests {
             id: crate::domain::ResourceId::new(format!("http://127.0.0.1:9000/models/{}", name)),
             name: name.to_string(),
             model_type: ModelType::Inference,
-            provider: Provider::InMemory,
-            model_path: crate::domain::ResourceId::new(format!("memory://test/{}", name)),
+            provider: Provider::Ollama,
+            model_path: crate::domain::ResourceId::new(format!("ollama://localhost:11434/{}", name)),
             digest: format!("sha256:test-digest-{}", name),
         }
     }
@@ -220,7 +220,7 @@ mod tests {
     fn test_registry_with_agent_and_model(agent: Agent, model_name: &str) -> Arc<dyn Registry> {
         let registry = InMemoryRegistry::new(test_secret_store());
         registry.register_runtime(crate::domain::RuntimeType::Container);
-        registry.register_inference_engine(Provider::InMemory);
+        registry.register_inference_engine(Provider::Ollama);
         registry.register_model(test_model(model_name)).unwrap();
         registry.register_agent(agent).unwrap();
         Arc::new(registry)

@@ -502,17 +502,17 @@ mod tests {
 
         // Initially nothing available
         assert!(!registry.has_inference_engine(Provider::Ollama));
-        assert!(!registry.has_inference_engine(Provider::InMemory));
+        assert!(!registry.has_inference_engine(Provider::OpenRouter));
 
         // Register Ollama
         registry.register_inference_engine(Provider::Ollama);
         assert!(registry.has_inference_engine(Provider::Ollama));
-        assert!(!registry.has_inference_engine(Provider::InMemory));
+        assert!(!registry.has_inference_engine(Provider::OpenRouter));
 
-        // Register InMemory
-        registry.register_inference_engine(Provider::InMemory);
+        // Register OpenRouter
+        registry.register_inference_engine(Provider::OpenRouter);
         assert!(registry.has_inference_engine(Provider::Ollama));
-        assert!(registry.has_inference_engine(Provider::InMemory));
+        assert!(registry.has_inference_engine(Provider::OpenRouter));
     }
 
     // --- Embedding engine tests ---
@@ -523,17 +523,17 @@ mod tests {
 
         // Initially nothing available
         assert!(!registry.has_embedding_engine(Provider::Ollama));
-        assert!(!registry.has_embedding_engine(Provider::InMemory));
+        assert!(!registry.has_embedding_engine(Provider::OpenRouter));
 
         // Register Ollama
         registry.register_embedding_engine(Provider::Ollama);
         assert!(registry.has_embedding_engine(Provider::Ollama));
-        assert!(!registry.has_embedding_engine(Provider::InMemory));
+        assert!(!registry.has_embedding_engine(Provider::OpenRouter));
 
-        // Register InMemory
-        registry.register_embedding_engine(Provider::InMemory);
+        // Register OpenRouter
+        registry.register_embedding_engine(Provider::OpenRouter);
         assert!(registry.has_embedding_engine(Provider::Ollama));
-        assert!(registry.has_embedding_engine(Provider::InMemory));
+        assert!(registry.has_embedding_engine(Provider::OpenRouter));
     }
 
     // --- restore_agent tests ---

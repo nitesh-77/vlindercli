@@ -28,10 +28,6 @@ pub fn open_inference_engine(model: &Model) -> Result<Arc<dyn InferenceEngine>, 
             let api_key = config.openrouter.api_key;
             Ok(Arc::new(OpenRouterInferenceEngine::new(endpoint, api_key, model.pfname())))
         }
-        #[cfg(test)]
-        Provider::InMemory => {
-            Err("InMemory engine should be injected directly in tests".to_string())
-        }
     }
 }
 
