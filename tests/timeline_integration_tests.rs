@@ -12,7 +12,7 @@ mod common;
 use common::*;
 
 use vlindercli::domain::workers::dag::build_dag_node;
-use vlindercli::domain::DagStore;
+use vlindercli::domain::{DagStore, DagWorker};
 use vlindercli::storage::dag_store::SqliteDagStore;
 
 // ============================================================================

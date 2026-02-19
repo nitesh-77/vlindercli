@@ -559,6 +559,7 @@ mod tests {
     use super::*;
     use chrono::DateTime;
     use vlindercli::domain::workers::GitDagWorker;
+    use vlindercli::domain::DagWorker;
     use vlindercli::domain::{
         InvokeMessage, CompleteMessage, ObservableMessage,
         SubmissionId, SessionId, HarnessType, TimelineId,

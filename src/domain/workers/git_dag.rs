@@ -57,6 +57,7 @@ use chrono::{DateTime, Utc};
 
 use crate::domain::message::ObservableMessage;
 use crate::domain::registry::Registry;
+use crate::domain::DagWorker;
 
 /// DAG worker that writes commits to a git repository.
 pub struct GitDagWorker {
@@ -106,67 +107,6 @@ impl GitDagWorker {
             registry,
             last_commit,
         })
-    }
-
-    /// Process a typed message — the primary entry point (ADR 078).
-    pub fn on_observable_message(&mut self, msg: &ObservableMessage, created_at: DateTime<Utc>) {
-        let result = (|| -> Result<(), String> {
-            let (from, to, msg_type) = message_routing(msg);
-
-            // 1. Build accumulated tree (all previous messages + new one)
-            let tree_hash = self.build_accumulated_tree(msg, created_at, &from, &to, msg_type)?;
-
-            // 2. Parent is the previous commit (chronological order)
-            let parent = self.last_commit.as_deref();
-
-            // 3. Build commit message with trailers for filtering
-            let mut message = format!(
-                "{}: {} \u{2192} {}\n\nSession: {}\nSubmission: {}",
-                msg_type,
-                from,
-                to,
-                msg.session(),
-                msg.submission(),
-            );
-            if let Some(state) = message_state(msg) {
-                message.push_str(&format!("\nState: {}", state));
-            }
-            let pv = msg.protocol_version();
-            if !pv.is_empty() {
-                message.push_str(&format!("\nProtocol-Version: {}", pv));
-            }
-
-            // 4. Author = message sender (ADR 069)
-            let author_email = format!("{}@{}", from, self.registry_host);
-
-            // 5. Create commit
-            let commit_hash = self.commit_tree(
-                &tree_hash,
-                parent,
-                &message,
-                &from,
-                &author_email,
-                &created_at,
-            )?;
-
-            // 6. Advance current branch (HEAD follows the symbolic ref)
-            self.update_ref("HEAD", &commit_hash)?;
-
-            // 7. Sync working tree so files are visible in the directory
-            let _ = Command::new("git")
-                .args(["checkout", "-f"])
-                .current_dir(&self.repo_path)
-                .output();
-
-            // 8. Track last commit
-            self.last_commit = Some(commit_hash);
-
-            Ok(())
-        })();
-
-        if let Err(e) = result {
-            tracing::error!(error = %e, "Failed to write git commit");
-        }
     }
 
     /// Write a blob to the git object store. Returns the blob hash.
@@ -513,6 +453,68 @@ impl GitDagWorker {
         }
 
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    }
+}
+
+impl DagWorker for GitDagWorker {
+    fn on_observable_message(&mut self, msg: &ObservableMessage, created_at: DateTime<Utc>) {
+        let result = (|| -> Result<(), String> {
+            let (from, to, msg_type) = message_routing(msg);
+
+            // 1. Build accumulated tree (all previous messages + new one)
+            let tree_hash = self.build_accumulated_tree(msg, created_at, &from, &to, msg_type)?;
+
+            // 2. Parent is the previous commit (chronological order)
+            let parent = self.last_commit.as_deref();
+
+            // 3. Build commit message with trailers for filtering
+            let mut message = format!(
+                "{}: {} \u{2192} {}\n\nSession: {}\nSubmission: {}",
+                msg_type,
+                from,
+                to,
+                msg.session(),
+                msg.submission(),
+            );
+            if let Some(state) = message_state(msg) {
+                message.push_str(&format!("\nState: {}", state));
+            }
+            let pv = msg.protocol_version();
+            if !pv.is_empty() {
+                message.push_str(&format!("\nProtocol-Version: {}", pv));
+            }
+
+            // 4. Author = message sender (ADR 069)
+            let author_email = format!("{}@{}", from, self.registry_host);
+
+            // 5. Create commit
+            let commit_hash = self.commit_tree(
+                &tree_hash,
+                parent,
+                &message,
+                &from,
+                &author_email,
+                &created_at,
+            )?;
+
+            // 6. Advance current branch (HEAD follows the symbolic ref)
+            self.update_ref("HEAD", &commit_hash)?;
+
+            // 7. Sync working tree so files are visible in the directory
+            let _ = Command::new("git")
+                .args(["checkout", "-f"])
+                .current_dir(&self.repo_path)
+                .output();
+
+            // 8. Track last commit
+            self.last_commit = Some(commit_hash);
+
+            Ok(())
+        })();
+
+        if let Err(e) = result {
+            tracing::error!(error = %e, "Failed to write git commit");
+        }
     }
 }
 

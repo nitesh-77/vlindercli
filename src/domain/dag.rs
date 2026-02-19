@@ -111,6 +111,15 @@ pub struct Timeline {
     pub broken_at: Option<DateTime<Utc>>,
 }
 
+/// A worker that persists observable messages to a DAG structure.
+///
+/// Git is one implementation (GitDagWorker). Any backend that can
+/// preserve the chronological message stream would implement this.
+pub trait DagWorker: Send {
+    /// Persist a single observable message.
+    fn on_observable_message(&mut self, msg: &super::ObservableMessage, created_at: DateTime<Utc>);
+}
+
 /// Persistence layer for DAG nodes.
 pub trait DagStore: Send + Sync {
     /// Insert a node. Idempotent (content-addressed, INSERT OR IGNORE).

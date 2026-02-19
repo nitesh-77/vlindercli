@@ -408,6 +408,7 @@ fn run_dag_git_worker(_config: &Config, shutdown: &AtomicBool) {
     use crate::config::conversations_dir;
     use crate::domain::workers::dag::reconstruct_observable_message;
     use crate::domain::workers::GitDagWorker;
+    use crate::domain::DagWorker;
     use crate::queue::NatsQueue;
 
     let nats = NatsQueue::localhost()
