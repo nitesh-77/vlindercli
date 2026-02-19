@@ -431,13 +431,13 @@ mod tests {
 
     fn test_open_storage() -> OpenObjectStorage {
         Box::new(|_uri: &ResourceId| {
-            Ok(Arc::new(crate::storage::InMemoryObjectStorage::new()) as Arc<dyn ObjectStorage>)
+            Ok(Arc::new(crate::domain::InMemoryObjectStorage::new()) as Arc<dyn ObjectStorage>)
         })
     }
 
     fn test_open_state_store() -> OpenStateStore {
         Box::new(|_agent_id: &str| {
-            Ok(Arc::new(crate::storage::InMemoryStateStore::new()) as Arc<dyn StateStore>)
+            Ok(Arc::new(crate::domain::InMemoryStateStore::new()) as Arc<dyn StateStore>)
         })
     }
 

@@ -7,7 +7,6 @@ use crate::config;
 use crate::domain::VectorStorage;
 use rusqlite::{params, Connection};
 use sqlite_vec::sqlite3_vec_init;
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use zerocopy::AsBytes;
 
@@ -117,74 +116,9 @@ impl VectorStorage for SqliteVectorStorage {
     }
 }
 
-// ============================================================================
-// In-Memory Implementation
-// ============================================================================
-
-/// In-memory vector storage. Useful for testing.
-/// Uses brute-force euclidean distance for similarity search.
-pub struct InMemoryVectorStorage {
-    items: Mutex<HashMap<String, (Vec<f32>, String)>>,
-}
-
-impl InMemoryVectorStorage {
-    pub fn new() -> Self {
-        InMemoryVectorStorage {
-            items: Mutex::new(HashMap::new()),
-        }
-    }
-}
-
-impl VectorStorage for InMemoryVectorStorage {
-    fn store_embedding(&self, key: &str, vector: &[f32], metadata: &str) -> Result<(), String> {
-        if vector.len() != 768 {
-            return Err(format!("expected 768 dimensions, got {}", vector.len()));
-        }
-
-        let mut items = self.items.lock().map_err(|e| e.to_string())?;
-        items.insert(key.to_string(), (vector.to_vec(), metadata.to_string()));
-        Ok(())
-    }
-
-    fn search_by_vector(&self, query_vector: &[f32], limit: u32) -> Result<Vec<(String, String, f64)>, String> {
-        if query_vector.len() != 768 {
-            return Err(format!("expected 768 dimensions, got {}", query_vector.len()));
-        }
-
-        let items = self.items.lock().map_err(|e| e.to_string())?;
-
-        // Calculate distances and sort
-        let mut results: Vec<(String, String, f64)> = items.iter()
-            .map(|(key, (vector, metadata))| {
-                let distance = euclidean_distance(query_vector, vector);
-                (key.clone(), metadata.clone(), distance)
-            })
-            .collect();
-
-        results.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
-        results.truncate(limit as usize);
-
-        Ok(results)
-    }
-
-    fn delete_embedding(&self, key: &str) -> Result<bool, String> {
-        let mut items = self.items.lock().map_err(|e| e.to_string())?;
-        Ok(items.remove(key).is_some())
-    }
-}
-
-fn euclidean_distance(a: &[f32], b: &[f32]) -> f64 {
-    a.iter()
-        .zip(b.iter())
-        .map(|(x, y)| (x - y).powi(2) as f64)
-        .sum::<f64>()
-        .sqrt()
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::domain::VectorStorage;
+    use crate::domain::{VectorStorage, InMemoryVectorStorage};
 
     /// Create a 768-dim test vector
     fn make_test_vector(seed: f32) -> Vec<f32> {

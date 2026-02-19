@@ -253,7 +253,7 @@ mod tests {
 
     fn test_open_vector_storage() -> OpenVectorStorage {
         Box::new(|_uri: &ResourceId| {
-            Ok(Arc::new(crate::storage::InMemoryVectorStorage::new()) as Arc<dyn VectorStorage>)
+            Ok(Arc::new(crate::domain::InMemoryVectorStorage::new()) as Arc<dyn VectorStorage>)
         })
     }
 

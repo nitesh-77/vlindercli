@@ -149,3 +149,123 @@ pub enum VectorStorageManifest {
     Sqlite { path: PathBuf },
 }
 
+// ============================================================================
+// In-Memory test doubles
+// ============================================================================
+
+#[cfg(test)]
+use std::collections::HashMap;
+#[cfg(test)]
+use std::sync::Mutex;
+
+/// In-memory object storage for tests.
+#[cfg(test)]
+pub struct InMemoryObjectStorage {
+    files: Mutex<HashMap<String, Vec<u8>>>,
+}
+
+#[cfg(test)]
+impl InMemoryObjectStorage {
+    pub fn new() -> Self {
+        InMemoryObjectStorage {
+            files: Mutex::new(HashMap::new()),
+        }
+    }
+}
+
+#[cfg(test)]
+impl ObjectStorage for InMemoryObjectStorage {
+    fn put_file(&self, path: &str, content: &[u8]) -> Result<(), String> {
+        let mut files = self.files.lock().map_err(|e| e.to_string())?;
+        files.insert(path.to_string(), content.to_vec());
+        Ok(())
+    }
+
+    fn get_file(&self, path: &str) -> Result<Option<Vec<u8>>, String> {
+        let files = self.files.lock().map_err(|e| e.to_string())?;
+        Ok(files.get(path).cloned())
+    }
+
+    fn delete_file(&self, path: &str) -> Result<bool, String> {
+        let mut files = self.files.lock().map_err(|e| e.to_string())?;
+        Ok(files.remove(path).is_some())
+    }
+
+    fn list_files(&self, dir_path: &str) -> Result<Vec<String>, String> {
+        let files = self.files.lock().map_err(|e| e.to_string())?;
+        let prefix = if dir_path == "/" || dir_path.is_empty() {
+            "/".to_string()
+        } else {
+            format!("{}/", dir_path.trim_end_matches('/'))
+        };
+
+        Ok(files.keys()
+            .filter(|p| p.starts_with(&prefix))
+            .cloned()
+            .collect())
+    }
+}
+
+/// In-memory vector storage for tests.
+/// Uses brute-force euclidean distance for similarity search.
+#[cfg(test)]
+pub struct InMemoryVectorStorage {
+    items: Mutex<HashMap<String, (Vec<f32>, String)>>,
+}
+
+#[cfg(test)]
+impl InMemoryVectorStorage {
+    pub fn new() -> Self {
+        InMemoryVectorStorage {
+            items: Mutex::new(HashMap::new()),
+        }
+    }
+}
+
+#[cfg(test)]
+impl VectorStorage for InMemoryVectorStorage {
+    fn store_embedding(&self, key: &str, vector: &[f32], metadata: &str) -> Result<(), String> {
+        if vector.len() != 768 {
+            return Err(format!("expected 768 dimensions, got {}", vector.len()));
+        }
+
+        let mut items = self.items.lock().map_err(|e| e.to_string())?;
+        items.insert(key.to_string(), (vector.to_vec(), metadata.to_string()));
+        Ok(())
+    }
+
+    fn search_by_vector(&self, query_vector: &[f32], limit: u32) -> Result<Vec<(String, String, f64)>, String> {
+        if query_vector.len() != 768 {
+            return Err(format!("expected 768 dimensions, got {}", query_vector.len()));
+        }
+
+        let items = self.items.lock().map_err(|e| e.to_string())?;
+
+        let mut results: Vec<(String, String, f64)> = items.iter()
+            .map(|(key, (vector, metadata))| {
+                let distance = euclidean_distance(query_vector, vector);
+                (key.clone(), metadata.clone(), distance)
+            })
+            .collect();
+
+        results.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
+        results.truncate(limit as usize);
+
+        Ok(results)
+    }
+
+    fn delete_embedding(&self, key: &str) -> Result<bool, String> {
+        let mut items = self.items.lock().map_err(|e| e.to_string())?;
+        Ok(items.remove(key).is_some())
+    }
+}
+
+#[cfg(test)]
+fn euclidean_distance(a: &[f32], b: &[f32]) -> f64 {
+    a.iter()
+        .zip(b.iter())
+        .map(|(x, y)| (x - y).powi(2) as f64)
+        .sum::<f64>()
+        .sqrt()
+}
+

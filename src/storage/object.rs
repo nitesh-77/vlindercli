@@ -52,57 +52,6 @@ impl SqliteObjectStorage {
     }
 }
 
-// ============================================================================
-// In-Memory Implementation
-// ============================================================================
-
-use std::collections::HashMap;
-
-/// In-memory object storage. Useful for testing.
-pub struct InMemoryObjectStorage {
-    files: Mutex<HashMap<String, Vec<u8>>>,
-}
-
-impl InMemoryObjectStorage {
-    pub fn new() -> Self {
-        InMemoryObjectStorage {
-            files: Mutex::new(HashMap::new()),
-        }
-    }
-}
-
-impl ObjectStorage for InMemoryObjectStorage {
-    fn put_file(&self, path: &str, content: &[u8]) -> Result<(), String> {
-        let mut files = self.files.lock().map_err(|e| e.to_string())?;
-        files.insert(path.to_string(), content.to_vec());
-        Ok(())
-    }
-
-    fn get_file(&self, path: &str) -> Result<Option<Vec<u8>>, String> {
-        let files = self.files.lock().map_err(|e| e.to_string())?;
-        Ok(files.get(path).cloned())
-    }
-
-    fn delete_file(&self, path: &str) -> Result<bool, String> {
-        let mut files = self.files.lock().map_err(|e| e.to_string())?;
-        Ok(files.remove(path).is_some())
-    }
-
-    fn list_files(&self, dir_path: &str) -> Result<Vec<String>, String> {
-        let files = self.files.lock().map_err(|e| e.to_string())?;
-        let prefix = if dir_path == "/" || dir_path.is_empty() {
-            "/".to_string()
-        } else {
-            format!("{}/", dir_path.trim_end_matches('/'))
-        };
-
-        Ok(files.keys()
-            .filter(|p| p.starts_with(&prefix))
-            .cloned()
-            .collect())
-    }
-}
-
 impl ObjectStorage for SqliteObjectStorage {
     fn put_file(&self, path: &str, content: &[u8]) -> Result<(), String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
@@ -161,6 +110,7 @@ impl ObjectStorage for SqliteObjectStorage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::InMemoryObjectStorage;
 
     #[test]
     fn put_and_get_file() {

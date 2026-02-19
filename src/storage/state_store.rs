@@ -141,62 +141,6 @@ impl crate::domain::StateStore for SqliteStateStore {
 }
 
 // ============================================================================
-// In-memory implementation (tests)
-// ============================================================================
-
-use std::sync::RwLock;
-
-/// Ephemeral in-memory state store for tests.
-pub struct InMemoryStateStore {
-    values: RwLock<HashMap<String, Vec<u8>>>,
-    snapshots: RwLock<HashMap<String, HashMap<String, String>>>,
-    commits: RwLock<HashMap<String, StateCommit>>,
-}
-
-impl InMemoryStateStore {
-    pub fn new() -> Self {
-        Self {
-            values: RwLock::new(HashMap::new()),
-            snapshots: RwLock::new(HashMap::new()),
-            commits: RwLock::new(HashMap::new()),
-        }
-    }
-}
-
-impl crate::domain::StateStore for InMemoryStateStore {
-    fn put_value(&self, hash: &str, content: &[u8]) -> Result<(), String> {
-        self.values.write().unwrap().entry(hash.to_string()).or_insert_with(|| content.to_vec());
-        Ok(())
-    }
-
-    fn get_value(&self, hash: &str) -> Result<Option<Vec<u8>>, String> {
-        Ok(self.values.read().unwrap().get(hash).cloned())
-    }
-
-    fn put_snapshot(&self, hash: &str, entries: &HashMap<String, String>) -> Result<(), String> {
-        self.snapshots.write().unwrap().entry(hash.to_string()).or_insert_with(|| entries.clone());
-        Ok(())
-    }
-
-    fn get_snapshot(&self, hash: &str) -> Result<Option<HashMap<String, String>>, String> {
-        Ok(self.snapshots.read().unwrap().get(hash).cloned())
-    }
-
-    fn put_state_commit(&self, hash: &str, snapshot_hash: &str, parent_hash: &str) -> Result<(), String> {
-        self.commits.write().unwrap().entry(hash.to_string()).or_insert_with(|| StateCommit {
-            hash: hash.to_string(),
-            snapshot_hash: snapshot_hash.to_string(),
-            parent_hash: parent_hash.to_string(),
-        });
-        Ok(())
-    }
-
-    fn get_state_commit(&self, hash: &str) -> Result<Option<StateCommit>, String> {
-        Ok(self.commits.read().unwrap().get(hash).cloned())
-    }
-}
-
-// ============================================================================
 // SQLite helpers
 // ============================================================================
 

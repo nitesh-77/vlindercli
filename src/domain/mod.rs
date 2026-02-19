@@ -85,6 +85,8 @@ pub use dag::{DagStore, DagNode, MessageType, Timeline, hash_dag_node, InMemoryD
 
 pub use state::{StateCommit, StateStore, hash_value, hash_snapshot, hash_state_commit};
 pub(crate) use state::sorted_entries_json;
+#[cfg(test)]
+pub use state::InMemoryStateStore;
 
 // ============================================================================
 // Paths
@@ -104,6 +106,8 @@ pub use storage::{
     ObjectStorage, ObjectStorageType, VectorStorage, VectorStorageType,
     ObjectStorageManifest, VectorStorageManifest,
 };
+#[cfg(test)]
+pub use storage::{InMemoryObjectStorage, InMemoryVectorStorage};
 
 // ============================================================================
 // Resource ID (registry key)

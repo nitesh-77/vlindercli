@@ -18,9 +18,9 @@ mod vector;
 pub use crate::domain::{ObjectStorage, VectorStorage};
 pub use crate::domain::{DagStore, DagNode, MessageType, hash_dag_node};
 pub use crate::domain::{StateCommit, StateStore, hash_value, hash_snapshot, hash_state_commit};
-pub use state_store::{InMemoryStateStore, SqliteStateStore};
+pub use state_store::SqliteStateStore;
 
 // Re-export concrete implementations
-pub use object::{InMemoryObjectStorage, SqliteObjectStorage};
+pub use object::SqliteObjectStorage;
 pub use registry::SqliteRegistryRepository;
-pub use vector::{InMemoryVectorStorage, SqliteVectorStorage};
+pub use vector::SqliteVectorStorage;
