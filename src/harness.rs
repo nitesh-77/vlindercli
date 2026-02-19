@@ -147,6 +147,83 @@ impl CliHarness {
         Ok(self.registry.agent_id(&name))
     }
 
+    /// Build an InvokeMessage from session state and register a job.
+    ///
+    /// Shared by `invoke()` (non-blocking) and `run_agent()` (blocking).
+    /// Returns the message and the job ID.
+    fn build_invoke(&mut self, agent_id: &ResourceId, input: &str) -> Result<(InvokeMessage, JobId), String> {
+        // Reject invocations on sealed timelines (ADR 093)
+        if self.timeline_sealed {
+            return Err(
+                "Timeline is sealed. Use `vlinder timeline repair` to fork a new timeline.".to_string()
+            );
+        }
+
+        let agent = self.registry.get_agent(agent_id)
+            .ok_or_else(|| format!("agent not deployed: {}", agent_id))?;
+        let runtime = self.registry.select_runtime(&agent)
+            .ok_or_else(|| format!("no runtime available for agent: {}", agent_id))?;
+
+        let (submission, session_id, payload) = if let Some(session) = self.session.as_mut() {
+            let enriched_payload = session.build_payload(input);
+            let parent = self.last_submission_id.as_deref().unwrap_or("");
+            let submission = SubmissionId::content_addressed(
+                enriched_payload.as_bytes(),
+                session.session.as_str(),
+                parent,
+            );
+            session.record_user_input(input, submission.clone());
+            self.last_submission_id = Some(submission.as_str().to_string());
+            (submission, session.session.clone(), enriched_payload)
+        } else {
+            (SubmissionId::new(), SessionId::new(), input.to_string())
+        };
+
+        let job_id = self.registry.create_job(submission.clone(), agent_id.clone(), input.to_string());
+
+        let history_turns = self.session.as_ref()
+            .map(|s| s.history.len() as u32)
+            .unwrap_or(0);
+        let invoke_diag = InvokeDiagnostics {
+            harness_version: env!("CARGO_PKG_VERSION").to_string(),
+            history_turns,
+        };
+
+        let invoke = InvokeMessage::new(
+            self.timeline.clone(),
+            submission,
+            session_id,
+            HarnessType::Cli,
+            runtime,
+            agent_id.clone(),
+            payload.as_bytes().to_vec(),
+            self.last_state.clone(),
+            invoke_diag,
+        );
+
+        Ok((invoke, job_id))
+    }
+
+    /// Run an agent to completion (ADR 092).
+    ///
+    /// Builds the invocation, sends it, and blocks until the CompleteMessage
+    /// arrives. Returns the agent's output as a string.
+    pub fn run_agent(&mut self, agent_id: &ResourceId, input: &str) -> Result<String, String> {
+        let (invoke_msg, job_id) = self.build_invoke(agent_id, input)?;
+        self.registry.update_job_status(&job_id, JobStatus::Running);
+
+        let complete = self.queue.run_agent(invoke_msg)
+            .map_err(|e| format!("queue error: {}", e))?;
+
+        let result = String::from_utf8_lossy(&complete.payload).to_string();
+        self.registry.update_job_status(&job_id, JobStatus::Completed(result.clone()));
+        if complete.state.is_some() {
+            self.pending_state = complete.state;
+        }
+        self.record_response(&result);
+        Ok(result)
+    }
+
     /// Tick: monitor reply queue and update completed jobs in registry.
     ///
     /// CLI-specific: runs until no more messages or shutdown signal.
@@ -224,79 +301,13 @@ impl Harness for CliHarness {
     }
 
     fn invoke(&mut self, agent_id: &ResourceId, input: &str) -> Result<JobId, String> {
-        // Reject invocations on sealed timelines (ADR 093)
-        if self.timeline_sealed {
-            return Err(
-                "Timeline is sealed. Use `vlinder timeline repair` to fork a new timeline.".to_string()
-            );
-        }
-
-        // Verify agent is deployed and get runtime type
-        let agent = self.registry.get_agent(agent_id)
-            .ok_or_else(|| format!("agent not deployed: {}", agent_id))?;
-        let runtime = self.registry.select_runtime(&agent)
-            .ok_or_else(|| format!("no runtime available for agent: {}", agent_id))?;
-
-        // Derive submission and payload from session state (ADR 054, ADR 081)
-        let (submission, session_id, payload) = if let Some(session) = self.session.as_mut() {
-            // Session mode: content-addressed SubmissionId (ADR 081)
-            let enriched_payload = session.build_payload(input);
-            let parent = self.last_submission_id.as_deref().unwrap_or("");
-
-            let submission = SubmissionId::content_addressed(
-                enriched_payload.as_bytes(),
-                session.session.as_str(),
-                parent,
-            );
-
-            session.record_user_input(input, submission.clone());
-            self.last_submission_id = Some(submission.as_str().to_string());
-
-            (submission, session.session.clone(), enriched_payload)
-        } else {
-            // No session: fallback to UUID-based submission
-            (SubmissionId::new(), SessionId::new(), input.to_string())
-        };
-
-        let span = tracing::debug_span!(
-            "invoke",
-            sha = %submission,
-            session = %session_id,
-            agent = %agent.name,
-        );
-        let _guard = span.enter();
-        tracing::debug!(event = "invoke.started", "Invoking agent");
-
-        // Create job in registry with submission tracking
-        let job_id = self.registry.create_job(submission.clone(), agent_id.clone(), input.to_string());
-
-        // Build diagnostics (ADR 071)
-        let history_turns = self.session.as_ref()
-            .map(|s| s.history.len() as u32)
-            .unwrap_or(0);
-        let invoke_diag = InvokeDiagnostics {
-            harness_version: env!("CARGO_PKG_VERSION").to_string(),
-            history_turns,
-        };
-
-        // Build and send typed InvokeMessage (ADR 044, ADR 054, ADR 055, ADR 093)
-        let invoke = InvokeMessage::new(
-            self.timeline.clone(),
-            submission.clone(),
-            session_id,
-            HarnessType::Cli,
-            runtime,
-            agent_id.clone(),
-            payload.as_bytes().to_vec(),
-            self.last_state.clone(),
-            invoke_diag,
-        );
+        let (invoke_msg, job_id) = self.build_invoke(agent_id, input)?;
+        let submission = invoke_msg.submission.clone();
 
         self.queue
-            .send_invoke(invoke)
+            .send_invoke(invoke_msg)
             .map_err(|e| format!("failed to queue: {}", e))?;
 
-        // Track submission → job for completion reconciliation (ADR 052)
         self.inflight.insert(submission, job_id.clone());
         self.registry.update_job_status(&job_id, JobStatus::Running);
 
