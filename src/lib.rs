@@ -7,6 +7,7 @@ pub mod harness;
 pub mod inference;
 pub mod loader;
 pub mod queue;
+pub mod queue_factory;
 pub mod registry;
 pub mod secret_store;
 pub mod registry_service;

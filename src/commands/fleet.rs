@@ -6,7 +6,7 @@ use clap::Subcommand;
 use vlindercli::config::Config;
 use vlindercli::domain::{DagStore, Fleet, Registry, agent_routing_key, MessageQueue};
 use vlindercli::harness::{CliHarness, read_latest_state};
-use vlindercli::queue;
+use vlindercli::queue_factory;
 use vlindercli::registry_service::{GrpcRegistryClient, ping_registry};
 use vlindercli::state_service::GrpcStateClient;
 
@@ -125,7 +125,7 @@ pub fn run(path: Option<PathBuf>) {
 
     // Connect to queue with synchronous DAG recording
     let queue: Arc<dyn MessageQueue + Send + Sync> =
-        queue::recording_from_config()
+        queue_factory::recording_from_config()
             .expect("Failed to create queue");
 
     // Create harness with remote backends (no daemon, no workers)

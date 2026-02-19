@@ -379,7 +379,7 @@ fn repair(dir: &Path, path: Option<PathBuf>) {
     );
 
     let queue: Arc<dyn MessageQueue + Send + Sync> =
-        match vlindercli::queue::recording_from_config() {
+        match vlindercli::queue_factory::recording_from_config() {
             Ok(q) => q,
             Err(e) => {
                 eprintln!("Failed to create queue: {}", e);
