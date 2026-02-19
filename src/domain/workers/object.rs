@@ -21,8 +21,7 @@ use crate::domain::{ObjectStorage, ResourceId};
 use crate::domain::{MessageQueue, Operation, RequestMessage, ResponseMessage, ServiceDiagnostics, ServiceType};
 use crate::services::object_storage;
 use crate::storage::dispatch::open_object_storage_from_uri;
-use crate::domain::{hash_snapshot, hash_state_commit, hash_value};
-use crate::storage::state_store::StateStore;
+use crate::domain::{hash_snapshot, hash_state_commit, hash_value, StateStore};
 
 // ============================================================================
 // Handler
@@ -32,7 +31,7 @@ pub struct ObjectServiceWorker {
     queue: Arc<dyn MessageQueue + Send + Sync>,
     registry: Arc<dyn Registry>,
     stores: RwLock<HashMap<String, Arc<dyn ObjectStorage>>>,
-    state_stores: RwLock<HashMap<String, Arc<StateStore>>>,
+    state_stores: RwLock<HashMap<String, Arc<dyn StateStore>>>,
     backend: String,
 }
 
@@ -80,7 +79,7 @@ impl ObjectServiceWorker {
     }
 
     /// Get or open a StateStore for an agent, derived from the object_storage URI.
-    fn get_or_open_state_store(&self, agent_id: &str) -> Result<Arc<StateStore>, String> {
+    fn get_or_open_state_store(&self, agent_id: &str) -> Result<Arc<dyn StateStore>, String> {
         if let Some(store) = self.state_stores.read().unwrap().get(agent_id) {
             return Ok(store.clone());
         }
@@ -111,8 +110,9 @@ impl ObjectServiceWorker {
             _ => return Err("unsupported storage scheme for state store".to_string()),
         };
 
-        let store = StateStore::open(&path)?;
-        let store = Arc::new(store);
+        let store: Arc<dyn StateStore> = Arc::new(
+            crate::storage::state_store::SqliteStateStore::open(&path)?
+        );
         self.state_stores.write().unwrap().insert(agent_id.to_string(), store.clone());
         Ok(store)
     }

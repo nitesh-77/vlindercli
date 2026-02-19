@@ -24,6 +24,37 @@ pub struct StateCommit {
     pub parent_hash: String,
 }
 
+// ============================================================================
+// StateStore trait
+// ============================================================================
+
+/// Persistence layer for versioned agent state (ADR 055).
+///
+/// Mirrors git's object model: values (blobs), snapshots (trees),
+/// and state commits (commit objects with parent pointers).
+///
+/// Implementations must be thread-safe. All writes are idempotent
+/// (content-addressed, insert-or-ignore).
+pub trait StateStore: Send + Sync {
+    /// Store a value blob. Idempotent (content-addressed).
+    fn put_value(&self, hash: &str, content: &[u8]) -> Result<(), String>;
+
+    /// Retrieve a value blob by hash.
+    fn get_value(&self, hash: &str) -> Result<Option<Vec<u8>>, String>;
+
+    /// Store a snapshot (set of path → value_hash entries). Idempotent.
+    fn put_snapshot(&self, hash: &str, entries: &HashMap<String, String>) -> Result<(), String>;
+
+    /// Retrieve a snapshot's entries by hash.
+    fn get_snapshot(&self, hash: &str) -> Result<Option<HashMap<String, String>>, String>;
+
+    /// Store a state commit. Idempotent.
+    fn put_state_commit(&self, hash: &str, snapshot_hash: &str, parent_hash: &str) -> Result<(), String>;
+
+    /// Retrieve a state commit by hash.
+    fn get_state_commit(&self, hash: &str) -> Result<Option<StateCommit>, String>;
+}
+
 /// Compute SHA-256 hash of content bytes.
 pub fn hash_value(content: &[u8]) -> String {
     let mut hasher = Sha256::new();

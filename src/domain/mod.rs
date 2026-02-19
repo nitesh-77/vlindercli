@@ -82,7 +82,7 @@ pub use dag::{DagStore, DagNode, MessageType, Timeline, hash_dag_node};
 // State (versioned agent state)
 // ============================================================================
 
-pub use state::{StateCommit, hash_value, hash_snapshot, hash_state_commit};
+pub use state::{StateCommit, StateStore, hash_value, hash_snapshot, hash_state_commit};
 pub(crate) use state::sorted_entries_json;
 
 // ============================================================================

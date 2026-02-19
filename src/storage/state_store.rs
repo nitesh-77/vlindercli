@@ -1,7 +1,8 @@
-//! StateStore — SQLite-backed persistence for versioned agent state (ADR 055).
+//! SqliteStateStore — SQLite-backed persistence for versioned agent state (ADR 055).
 //!
-//! Domain types (`StateCommit`, `hash_value`, `hash_snapshot`, `hash_state_commit`)
-//! live in `crate::domain`. This module provides the SQLite implementation.
+//! Domain types (`StateCommit`, `StateStore` trait, `hash_value`, `hash_snapshot`,
+//! `hash_state_commit`) live in `crate::domain`. This module provides the SQLite
+//! implementation.
 //!
 //! Three tables mirror git's object model:
 //! - `state_values`: Content blobs keyed by SHA-256 hash
@@ -17,11 +18,11 @@ use rusqlite::Connection;
 use crate::domain::{StateCommit, sorted_entries_json};
 
 /// Content-addressed append-only SQLite store for versioned agent state.
-pub struct StateStore {
+pub struct SqliteStateStore {
     conn: Arc<Mutex<Connection>>,
 }
 
-impl StateStore {
+impl SqliteStateStore {
     /// Open (or create) a state store at the given path.
     pub fn open(path: &Path) -> Result<Self, String> {
         if let Some(parent) = path.parent() {
@@ -54,10 +55,10 @@ impl StateStore {
         })
     }
 
-    // --- Values (blobs) ---
+}
 
-    /// Store a value blob. Idempotent (content-addressed).
-    pub fn put_value(&self, hash: &str, content: &[u8]) -> Result<(), String> {
+impl crate::domain::StateStore for SqliteStateStore {
+    fn put_value(&self, hash: &str, content: &[u8]) -> Result<(), String> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "INSERT OR IGNORE INTO state_values (hash, content) VALUES (?1, ?2)",
@@ -66,8 +67,7 @@ impl StateStore {
         Ok(())
     }
 
-    /// Retrieve a value blob by hash.
-    pub fn get_value(&self, hash: &str) -> Result<Option<Vec<u8>>, String> {
+    fn get_value(&self, hash: &str) -> Result<Option<Vec<u8>>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare("SELECT content FROM state_values WHERE hash = ?1")
             .map_err(|e| format!("get_value prepare failed: {}", e))?;
@@ -77,10 +77,7 @@ impl StateStore {
         Ok(result)
     }
 
-    // --- Snapshots (path → value_hash mappings) ---
-
-    /// Store a snapshot (set of path → value_hash entries). Idempotent.
-    pub fn put_snapshot(&self, hash: &str, entries: &HashMap<String, String>) -> Result<(), String> {
+    fn put_snapshot(&self, hash: &str, entries: &HashMap<String, String>) -> Result<(), String> {
         let json = sorted_entries_json(entries);
         let conn = self.conn.lock().unwrap();
         conn.execute(
@@ -90,8 +87,7 @@ impl StateStore {
         Ok(())
     }
 
-    /// Retrieve a snapshot's entries by hash.
-    pub fn get_snapshot(&self, hash: &str) -> Result<Option<HashMap<String, String>>, String> {
+    fn get_snapshot(&self, hash: &str) -> Result<Option<HashMap<String, String>>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare("SELECT entries FROM state_snapshots WHERE hash = ?1")
             .map_err(|e| format!("get_snapshot prepare failed: {}", e))?;
@@ -109,10 +105,7 @@ impl StateStore {
         }
     }
 
-    // --- State commits (snapshot + parent) ---
-
-    /// Store a state commit. Idempotent.
-    pub fn put_state_commit(
+    fn put_state_commit(
         &self,
         hash: &str,
         snapshot_hash: &str,
@@ -126,8 +119,7 @@ impl StateStore {
         Ok(())
     }
 
-    /// Retrieve a state commit by hash.
-    pub fn get_state_commit(&self, hash: &str) -> Result<Option<StateCommit>, String> {
+    fn get_state_commit(&self, hash: &str) -> Result<Option<StateCommit>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT hash, snapshot_hash, parent_hash FROM state_commits WHERE hash = ?1"
@@ -165,11 +157,11 @@ impl<T> OptionalExt<T> for Result<T, rusqlite::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{hash_value, hash_snapshot, hash_state_commit};
+    use crate::domain::{hash_value, hash_snapshot, hash_state_commit, StateStore};
 
-    fn test_store() -> StateStore {
+    fn test_store() -> SqliteStateStore {
         let tmp = tempfile::NamedTempFile::new().unwrap();
-        StateStore::open(tmp.path()).unwrap()
+        SqliteStateStore::open(tmp.path()).unwrap()
     }
 
     #[test]
