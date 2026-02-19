@@ -138,6 +138,64 @@ pub enum RoutingKey {
     },
 }
 
+impl RoutingKey {
+    /// Produce the reply routing key for this request routing key.
+    ///
+    /// Every request variant deterministically maps to its reply variant
+    /// (ADR 096 §3). Delegate requires a nonce to distinguish multiple
+    /// delegations to the same target within one submission.
+    ///
+    /// Reply variants (Complete, Response, DelegateReply) return None —
+    /// hops are one level deep (reply asymmetry).
+    pub fn reply_key(&self, nonce: Option<Nonce>) -> Option<RoutingKey> {
+        match self {
+            RoutingKey::Invoke {
+                timeline,
+                submission,
+                harness,
+                agent,
+                ..
+            } => Some(RoutingKey::Complete {
+                timeline: timeline.clone(),
+                submission: submission.clone(),
+                agent: agent.clone(),
+                harness: *harness,
+            }),
+            RoutingKey::Request {
+                timeline,
+                submission,
+                agent,
+                service,
+                operation,
+                sequence,
+            } => Some(RoutingKey::Response {
+                timeline: timeline.clone(),
+                submission: submission.clone(),
+                service: *service,
+                agent: agent.clone(),
+                operation: *operation,
+                sequence: *sequence,
+            }),
+            RoutingKey::Delegate {
+                timeline,
+                submission,
+                caller,
+                target,
+            } => nonce.map(|n| RoutingKey::DelegateReply {
+                timeline: timeline.clone(),
+                submission: submission.clone(),
+                caller: caller.clone(),
+                target: target.clone(),
+                nonce: n,
+            }),
+            // Reply variants don't produce further replies.
+            RoutingKey::Complete { .. }
+            | RoutingKey::Response { .. }
+            | RoutingKey::DelegateReply { .. } => None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -441,5 +499,112 @@ mod tests {
     #[test]
     fn delegate_and_delegate_reply_never_equal() {
         assert_ne!(base_delegate(), base_delegate_reply());
+    }
+
+    // ========================================================================
+    // Reply pairing (invariant 2): request → reply is deterministic
+    // ========================================================================
+
+    #[test]
+    fn invoke_reply_is_complete() {
+        let reply = base_invoke().reply_key(None).unwrap();
+        assert_eq!(reply, base_complete());
+    }
+
+    #[test]
+    fn invoke_reply_ignores_nonce() {
+        let with = base_invoke().reply_key(Some(Nonce::new("ignored"))).unwrap();
+        let without = base_invoke().reply_key(None).unwrap();
+        assert_eq!(with, without);
+    }
+
+    #[test]
+    fn invoke_reply_drops_runtime() {
+        // Complete doesn't carry RuntimeType — it goes back to harness, not runtime
+        let reply = base_invoke().reply_key(None).unwrap();
+        match reply {
+            RoutingKey::Complete { .. } => {}
+            other => panic!("expected Complete, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn request_reply_is_response() {
+        let reply = base_request().reply_key(None).unwrap();
+        assert_eq!(reply, base_response());
+    }
+
+    #[test]
+    fn request_reply_preserves_all_dimensions() {
+        let reply = base_request().reply_key(None).unwrap();
+        match reply {
+            RoutingKey::Response {
+                timeline,
+                submission,
+                service,
+                agent,
+                operation,
+                sequence,
+            } => {
+                assert_eq!(timeline, self::timeline());
+                assert_eq!(submission, self::submission());
+                assert_eq!(service, ServiceBackend::Kv(ObjectStorageType::Sqlite));
+                assert_eq!(agent, self::agent());
+                assert_eq!(operation, Operation::Get);
+                assert_eq!(sequence, Sequence::first());
+            }
+            other => panic!("expected Response, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn delegate_reply_is_delegate_reply_with_nonce() {
+        let nonce = Nonce::new("abc123");
+        let reply = base_delegate().reply_key(Some(nonce)).unwrap();
+        assert_eq!(reply, base_delegate_reply());
+    }
+
+    #[test]
+    fn delegate_without_nonce_returns_none() {
+        assert!(base_delegate().reply_key(None).is_none());
+    }
+
+    #[test]
+    fn reply_key_is_deterministic() {
+        // Same inputs → same reply key, always
+        let a = base_request().reply_key(None).unwrap();
+        let b = base_request().reply_key(None).unwrap();
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn different_nonces_produce_different_delegate_replies() {
+        let reply_a = base_delegate().reply_key(Some(Nonce::new("nonce-1"))).unwrap();
+        let reply_b = base_delegate().reply_key(Some(Nonce::new("nonce-2"))).unwrap();
+        assert_ne!(reply_a, reply_b);
+    }
+
+    // ========================================================================
+    // Reply asymmetry (invariant 3): reply variants have no replies
+    // ========================================================================
+
+    #[test]
+    fn complete_has_no_reply() {
+        assert!(base_complete().reply_key(None).is_none());
+    }
+
+    #[test]
+    fn response_has_no_reply() {
+        assert!(base_response().reply_key(None).is_none());
+    }
+
+    #[test]
+    fn delegate_reply_has_no_reply() {
+        assert!(base_delegate_reply().reply_key(None).is_none());
+    }
+
+    #[test]
+    fn delegate_reply_has_no_reply_even_with_nonce() {
+        assert!(base_delegate_reply().reply_key(Some(Nonce::new("wont-help"))).is_none());
     }
 }
