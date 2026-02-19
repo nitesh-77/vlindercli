@@ -62,8 +62,8 @@ fn manifest_parses_requirements() {
         executable = "localhost/test-agent:latest"
 
         [requirements.models]
-        phi3 = "file://./models/phi3.toml"
-        nomic-embed = "file://./models/nomic.toml"
+        phi3 = "phi3"
+        nomic-embed = "nomic-embed"
 
         [requirements.services.infer]
         provider = "openrouter"

@@ -340,7 +340,7 @@ mod tests {
         use std::path::Path;
         use crate::domain::{Provider, Protocol, ServiceConfig, ServiceType};
         let mut models = HashMap::new();
-        models.insert("phi3".to_string(), ResourceId::new("ollama://localhost:11434/phi3:latest"));
+        models.insert("phi3".to_string(), "phi3:latest".to_string());
 
         let mut services = HashMap::new();
         services.insert(ServiceType::Infer, ServiceConfig {
@@ -448,7 +448,7 @@ mod tests {
         assert_eq!(restored.image_digest.as_ref().map(|d| d.as_str()), Some("sha256:abc123"));
         assert_eq!(restored.object_storage.as_ref().map(|r| r.as_str()), Some("sqlite:///data/objects.db"));
         assert_eq!(restored.vector_storage.as_ref().map(|r| r.as_str()), Some("sqlite:///data/vectors.db"));
-        assert_eq!(restored.requirements.models.get("phi3").map(|r| r.as_str()), Some("ollama://localhost:11434/phi3:latest"));
+        assert_eq!(restored.requirements.models.get("phi3").map(|s| s.as_str()), Some("phi3:latest"));
         assert_eq!(restored.requirements.services.len(), 1);
         let infer = &restored.requirements.services[&crate::domain::ServiceType::Infer];
         assert_eq!(infer.provider, crate::domain::Provider::Ollama);

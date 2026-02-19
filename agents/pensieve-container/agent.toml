@@ -14,5 +14,5 @@ vector_storage = "sqlite://data/vectors.db"
 [requirements]
 
 [requirements.models]
-phi3 = "ollama://localhost:11434/phi3:latest"
-nomic-embed = "ollama://localhost:11434/nomic-embed-text:latest"
+phi3 = "phi3:latest"
+nomic-embed = "nomic-embed"

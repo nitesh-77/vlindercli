@@ -72,8 +72,8 @@ pub enum RegistrationError {
     /// Agent declares vector storage type not available.
     VectorStorageUnavailable(VectorStorageType),
     /// Agent requires a model that is not registered.
-    /// Contains the agent's alias and the model_path URI.
-    ModelNotRegistered(String, ResourceId),
+    /// Contains the agent's alias and the registry name.
+    ModelNotRegistered(String, String),
     /// Agent requires an inference engine that is not available.
     InferenceEngineUnavailable(Provider, String),
     /// Agent requires an embedding engine that is not available.
@@ -108,9 +108,8 @@ impl std::fmt::Display for RegistrationError {
             RegistrationError::ObjectStorageUnavailable(t) => write!(f, "object storage not available: {:?}", t),
             RegistrationError::UnknownVectorStorageScheme(s) => write!(f, "unknown vector storage scheme: {}", s),
             RegistrationError::VectorStorageUnavailable(t) => write!(f, "vector storage not available: {:?}", t),
-            RegistrationError::ModelNotRegistered(alias, uri) => {
-                let hint = model_add_hint(uri.as_str());
-                write!(f, "model '{}' is not registered ({})\n\nAdd it first: {}", alias, uri, hint)
+            RegistrationError::ModelNotRegistered(alias, name) => {
+                write!(f, "model '{}' (registry name: '{}') is not registered\n\nAdd it first: vlinder model add {}", alias, name, name)
             }
             RegistrationError::InferenceEngineUnavailable(provider, model) => {
                 write!(f, "no {:?} inference engine available for model '{}'\n\nIs the daemon running? Start it with: vlinder daemon", provider, model)
@@ -138,42 +137,6 @@ impl std::fmt::Display for RegistrationError {
     }
 }
 
-/// Build a complete `vlinder model add` command from a model_path URI.
-///
-/// The scheme determines the catalog and how to extract the model name:
-/// - `ollama://host:port/name:tag` → `vlinder model add name`
-/// - `openrouter://provider/model`  → `vlinder model add provider/model --catalog openrouter`
-///
-/// Examples:
-/// - `ollama://localhost:11434/nomic-embed-text:latest` → `"vlinder model add nomic-embed-text"`
-/// - `openrouter://anthropic/claude-sonnet-4` → `"vlinder model add anthropic/claude-sonnet-4 --catalog openrouter"`
-fn model_add_hint(uri: &str) -> String {
-    let (scheme, after_scheme) = match uri.split_once("://") {
-        Some((s, rest)) => (s, rest),
-        None => return format!("vlinder model add {}", uri),
-    };
-
-    match scheme {
-        "ollama" => {
-            // Strip authority (host:port) to get the model name, then strip :tag
-            let name = after_scheme
-                .split_once('/')
-                .map(|(_, path)| path)
-                .unwrap_or(after_scheme);
-            let name = name.split(':').next().unwrap_or(name);
-            format!("vlinder model add {}", name)
-        }
-        "openrouter" => {
-            // The entire after-scheme part is the model id (e.g. "anthropic/claude-sonnet-4")
-            format!("vlinder model add {} --catalog openrouter", after_scheme)
-        }
-        _ => {
-            // Unknown scheme — best effort: last path segment
-            let name = after_scheme.rsplit('/').next().unwrap_or(after_scheme);
-            format!("vlinder model add {}", name)
-        }
-    }
-}
 
 // ============================================================================
 // Registry Trait
@@ -221,23 +184,24 @@ pub trait Registry: Send + Sync {
     ///
     /// The agent code calls infer/embed with a model name (the alias from
     /// `[requirements.models]`). This method looks up that alias, finds the
-    /// registered model, and returns the provider as a routing string.
+    /// registered model by registry name (ADR 094), and returns the provider
+    /// as a routing string.
     fn resolve_model_backend(&self, agent_id: &ResourceId, model: &str) -> Result<String, String> {
         let agent = self.get_agent(agent_id)
             .ok_or_else(|| format!("agent '{}' not found in registry", agent_id))?;
-        let model_uri = agent.requirements.models.get(model)
+        let model_name = agent.requirements.models.get(model)
             .ok_or_else(|| format!("agent called service with undeclared model '{}'\n\nDeclared models: {:?}",
                 model, agent.requirements.models.keys().collect::<Vec<_>>()))?;
-        let registered = self.get_model_by_path(model_uri)
-            .ok_or_else(|| format!("model '{}' (path: {}) not found in registry", model, model_uri))?;
+        let registered = self.get_model(model_name)
+            .ok_or_else(|| format!("model '{}' (registry name: '{}') not found in registry", model, model_name))?;
         Ok(serde_json::to_value(registered.provider)
             .unwrap().as_str().unwrap().to_string())
     }
 
-    /// Get all agents whose model requirements reference the given model path.
-    fn get_agents_requiring_model(&self, model_path: &ResourceId) -> Vec<Agent> {
+    /// Get all agents whose model requirements reference the given model name.
+    fn get_agents_requiring_model(&self, model_name: &str) -> Vec<Agent> {
         self.get_agents().into_iter()
-            .filter(|a| a.requirements.models.values().any(|uri| uri == model_path))
+            .filter(|a| a.requirements.models.values().any(|name| name == model_name))
             .collect()
     }
 
@@ -296,34 +260,6 @@ mod tests {
     use super::*;
 
     // ========================================================================
-    // model_add_hint
-    // ========================================================================
-
-    #[test]
-    fn hint_for_ollama_strips_host_and_tag() {
-        let hint = model_add_hint("ollama://localhost:11434/nomic-embed-text:latest");
-        assert_eq!(hint, "vlinder model add nomic-embed-text");
-    }
-
-    #[test]
-    fn hint_for_openrouter_includes_catalog_flag() {
-        let hint = model_add_hint("openrouter://anthropic/claude-sonnet-4");
-        assert_eq!(hint, "vlinder model add anthropic/claude-sonnet-4 --catalog openrouter");
-    }
-
-    #[test]
-    fn hint_for_unknown_scheme_uses_last_segment() {
-        let hint = model_add_hint("custom://host/path/model-name");
-        assert_eq!(hint, "vlinder model add model-name");
-    }
-
-    #[test]
-    fn hint_for_bare_string_uses_whole_string() {
-        let hint = model_add_hint("phi3");
-        assert_eq!(hint, "vlinder model add phi3");
-    }
-
-    // ========================================================================
     // JobId
     // ========================================================================
 
@@ -372,11 +308,11 @@ mod tests {
     #[test]
     fn display_model_not_registered_includes_hint() {
         let err = RegistrationError::ModelNotRegistered(
-            "phi3".into(),
-            ResourceId::new("ollama://localhost:11434/phi3:latest"),
+            "inference_model".into(),
+            "claude-sonnet".into(),
         );
         let msg = format!("{}", err);
-        assert!(msg.contains("phi3"));
+        assert!(msg.contains("claude-sonnet"));
         assert!(msg.contains("vlinder model add"));
     }
 

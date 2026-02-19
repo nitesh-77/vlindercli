@@ -4,8 +4,8 @@ runtime = "container"
 executable = "localhost/model-test-agent:latest"
 
 [requirements.models]
-phi3 = "http://127.0.0.1:9000/models/phi3"
-nomic-embed = "http://127.0.0.1:9000/models/nomic-embed"
+phi3 = "phi3"
+nomic-embed = "nomic-embed"
 
 [requirements.services.infer]
 provider = "ollama"

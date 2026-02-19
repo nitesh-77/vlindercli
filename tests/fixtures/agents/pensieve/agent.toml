@@ -14,8 +14,8 @@ executable = "localhost/pensieve:latest"
 [requirements]
 
 [requirements.models]
-phi3 = "ollama://localhost:11434/phi3:latest"
-nomic-embed-text = "ollama://localhost:11434/nomic-embed-text:latest"
+phi3 = "phi3:latest"
+nomic-embed-text = "nomic-embed"
 
 [requirements.services.infer]
 provider = "openrouter"

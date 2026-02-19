@@ -75,7 +75,7 @@ fn agent_domain_to_proto_preserves_fields() {
         public_key: None,
         requirements: Requirements {
             models: HashMap::from([
-                ("phi3".to_string(), ResourceId::new("ollama://localhost/phi3")),
+                ("phi3".to_string(), "phi3".to_string()),
             ]),
             services,
         },
@@ -147,8 +147,8 @@ fn agent_models_survive_proto_round_trip() {
         public_key: None,
         requirements: Requirements {
             models: HashMap::from([
-                ("inference_model".to_string(), ResourceId::new("ollama://localhost:11434/phi3:latest")),
-                ("embedding_model".to_string(), ResourceId::new("ollama://localhost:11434/nomic-embed-text:latest")),
+                ("inference_model".to_string(), "phi3:latest".to_string()),
+                ("embedding_model".to_string(), "nomic-embed".to_string()),
             ]),
             services,
         },
@@ -163,12 +163,12 @@ fn agent_models_survive_proto_round_trip() {
 
     assert_eq!(back.requirements.models.len(), 2, "models lost in proto round-trip");
     assert_eq!(
-        back.requirements.models.get("inference_model").map(|r| r.as_str()),
-        Some("ollama://localhost:11434/phi3:latest"),
+        back.requirements.models.get("inference_model").map(|s| s.as_str()),
+        Some("phi3:latest"),
     );
     assert_eq!(
-        back.requirements.models.get("embedding_model").map(|r| r.as_str()),
-        Some("ollama://localhost:11434/nomic-embed-text:latest"),
+        back.requirements.models.get("embedding_model").map(|s| s.as_str()),
+        Some("nomic-embed"),
     );
 }
 

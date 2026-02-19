@@ -6,4 +6,4 @@ executable = "localhost/vlinder-support:latest"
 [requirements]
 
 [requirements.models]
-default = "ollama://localhost:11434/phi3:latest"
+default = "phi3:latest"

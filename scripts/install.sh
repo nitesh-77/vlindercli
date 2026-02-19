@@ -464,7 +464,7 @@ executable = "ghcr.io/vlindercli/vlinder-support:latest"
 services = ["infer"]
 
 [requirements.models]
-default = "ollama://localhost:11434/phi3:latest"
+default = "phi3:latest"
 AGENT
 
     cat > "${SUPPORT_FLEET_DIR}/agents/code-analyst/agent.toml" << 'AGENT'

@@ -20,13 +20,13 @@ pub fn open_inference_engine(model: &Model) -> Result<Arc<dyn InferenceEngine>, 
             let endpoint = model.model_path.authority()
                 .map(|a| format!("http://{}", a))
                 .unwrap_or_else(|| Config::load().ollama.endpoint);
-            Ok(Arc::new(OllamaInferenceEngine::new(endpoint, model.name.clone())))
+            Ok(Arc::new(OllamaInferenceEngine::new(endpoint, model.pfname())))
         }
         Provider::OpenRouter => {
             let config = Config::load();
             let endpoint = config.openrouter.endpoint;
             let api_key = config.openrouter.api_key;
-            Ok(Arc::new(OpenRouterInferenceEngine::new(endpoint, api_key, model.name.clone())))
+            Ok(Arc::new(OpenRouterInferenceEngine::new(endpoint, api_key, model.pfname())))
         }
         #[cfg(test)]
         Provider::InMemory => {

@@ -97,14 +97,14 @@ impl EmbeddingServiceWorker {
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
 
-        // Resolve model alias to model_path via agent's manifest
-        let model_path = match self.resolve_model_uri(request.agent_id.as_str(), &req.model) {
-            Ok(uri) => uri,
+        // Resolve model alias to registry name via agent's manifest (ADR 094)
+        let model_name = match self.resolve_model_name(request.agent_id.as_str(), &req.model) {
+            Ok(name) => name,
             Err(e) => return format!("[error] {}", e).into_bytes(),
         };
 
         // Try to get cached engine, or lazy-load from registry
-        let engine = match self.get_or_load_engine(&req.model, &model_path) {
+        let engine = match self.get_or_load_engine(&req.model, &model_name) {
             Ok(e) => e,
             Err(e) => return format!("[error] {}", e).into_bytes(),
         };
@@ -122,22 +122,22 @@ impl EmbeddingServiceWorker {
         }
     }
 
-    /// Validate that an agent declared the model and return its URI.
-    fn resolve_model_uri(&self, agent_id: &str, model_alias: &str) -> Result<crate::domain::ResourceId, String> {
+    /// Validate that an agent declared the model and return its registry name.
+    fn resolve_model_name(&self, agent_id: &str, model_alias: &str) -> Result<String, String> {
         let agent_rid = crate::domain::ResourceId::new(agent_id);
         let agent = self.registry.get_agent(&agent_rid)
             .ok_or_else(|| format!("agent not found: {}", agent_id))?;
 
-        agent.model_uri(model_alias)
-            .cloned()
+        agent.model_name(model_alias)
+            .map(|s| s.to_string())
             .ok_or_else(|| format!(
                 "agent '{}' did not declare model '{}' in requirements",
                 agent.name, model_alias
             ))
     }
 
-    /// Get cached engine or lazy-load from registry using model_path.
-    fn get_or_load_engine(&self, model_alias: &str, model_path: &crate::domain::ResourceId) -> Result<Arc<dyn EmbeddingEngine>, String> {
+    /// Get cached engine or lazy-load from registry using model name.
+    fn get_or_load_engine(&self, model_alias: &str, model_name: &str) -> Result<Arc<dyn EmbeddingEngine>, String> {
         // Check cache first (keyed by alias for this agent's usage)
         {
             let engines = self.engines.read().unwrap();
@@ -146,9 +146,9 @@ impl EmbeddingServiceWorker {
             }
         }
 
-        // Not cached - look up in registry by model_path
-        let model = self.registry.get_model_by_path(model_path)
-            .ok_or_else(|| format!("model not registered with path: {}", model_path))?;
+        // Not cached - look up in registry by name (ADR 094)
+        let model = self.registry.get_model(model_name)
+            .ok_or_else(|| format!("model not registered: {}", model_name))?;
 
         // Load engine
         let engine = open_embedding_engine(&model)
@@ -205,8 +205,8 @@ mod tests {
         }
     }
 
-    fn test_agent_with_model(model_alias: &str) -> Agent {
-        // The RHS URI must match test_model's model_path
+    fn test_agent_with_model(alias: &str, registry_name: &str) -> Agent {
+        // alias → registry_name: the three-name chain (ADR 094)
         let manifest = format!(r#"
             name = "test-agent"
             description = "Test agent"
@@ -214,13 +214,13 @@ mod tests {
             executable = "localhost/test-agent:latest"
 
             [requirements.models]
-            {} = "memory://test/{}"
+            {} = "{}"
 
             [requirements.services.embed]
             provider = "ollama"
             protocol = "openai"
             models = ["{}"]
-        "#, model_alias, model_alias, model_alias);
+        "#, alias, registry_name, registry_name);
         Agent::from_toml(&manifest).unwrap()
     }
 
@@ -236,17 +236,20 @@ mod tests {
     #[test]
     fn handles_embed_request() {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
-        let registry = test_registry_with_agent_and_model(test_agent_with_model("test-model"), "test-model");
+        // alias "embedding_model" → registry name "nomic-embed" (ADR 094)
+        let registry = test_registry_with_agent_and_model(
+            test_agent_with_model("embedding_model", "nomic-embed"), "nomic-embed",
+        );
         let handler = EmbeddingServiceWorker::new(Arc::clone(&queue), registry, "memory");
 
-        // Register mock engine
+        // Register mock engine (keyed by alias, how agents address it)
         let canned: Vec<f32> = (0..768).map(|i| i as f32 * 0.001).collect();
         let engine = Arc::new(InMemoryEmbedding::new(canned.clone()));
-        handler.register("test-model", engine);
+        handler.register("embedding_model", engine);
 
-        // Send typed RequestMessage (ADR 044)
+        // Agent sends alias in request payload (ADR 094)
         let payload = serde_json::json!({
-            "model": "test-model",
+            "model": "embedding_model",
             "text": "hello world"
         });
         let request = RequestMessage::new(
@@ -278,15 +281,17 @@ mod tests {
     #[test]
     fn embed_response_echoes_state() {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
-        let registry = test_registry_with_agent_and_model(test_agent_with_model("test-model"), "test-model");
+        let registry = test_registry_with_agent_and_model(
+            test_agent_with_model("embedding_model", "nomic-embed"), "nomic-embed",
+        );
         let handler = EmbeddingServiceWorker::new(Arc::clone(&queue), registry, "memory");
 
         let canned: Vec<f32> = (0..768).map(|i| i as f32 * 0.001).collect();
         let engine = Arc::new(InMemoryEmbedding::new(canned));
-        handler.register("test-model", engine);
+        handler.register("embedding_model", engine);
 
         let payload = serde_json::json!({
-            "model": "test-model",
+            "model": "embedding_model",
             "text": "hello world"
         });
         let request = RequestMessage::new(
@@ -314,17 +319,19 @@ mod tests {
     #[test]
     fn rejects_undeclared_model() {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
-        // Agent declares "allowed-model" but we'll request "other-model"
-        let registry = test_registry_with_agent_and_model(test_agent_with_model("allowed-model"), "allowed-model");
+        // Agent declares alias "embedding_model" but we'll request alias "other_model"
+        let registry = test_registry_with_agent_and_model(
+            test_agent_with_model("embedding_model", "nomic-embed"), "nomic-embed",
+        );
         let handler = EmbeddingServiceWorker::new(Arc::clone(&queue), registry, "memory");
 
-        // Register mock engine (the model exists, but agent didn't declare it)
+        // Register mock engine under alias agent didn't declare
         let canned: Vec<f32> = (0..768).map(|i| i as f32 * 0.001).collect();
         let engine = Arc::new(InMemoryEmbedding::new(canned));
-        handler.register("other-model", engine);
+        handler.register("other_model", engine);
 
         let payload = serde_json::json!({
-            "model": "other-model",
+            "model": "other_model",
             "text": "hello"
         });
         let request = RequestMessage::new(

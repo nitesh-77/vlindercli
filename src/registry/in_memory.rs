@@ -132,12 +132,12 @@ impl Registry for InMemoryRegistry {
             }
         }
 
-        // Validate all declared models are registered and their engines are available
-        for (model_alias, manifest_uri) in &agent.requirements.models {
+        // Validate all declared models are registered and their engines are available (ADR 094)
+        for (model_alias, model_name) in &agent.requirements.models {
             let model = state.models.values()
-                .find(|m| &m.model_path == manifest_uri);
+                .find(|m| m.name == *model_name);
             let Some(model) = model else {
-                return Err(RegistrationError::ModelNotRegistered(model_alias.clone(), manifest_uri.clone()));
+                return Err(RegistrationError::ModelNotRegistered(model_alias.clone(), model_name.clone()));
             };
 
             match model.model_type {
@@ -166,16 +166,16 @@ impl Registry for InMemoryRegistry {
 
         // Validate services have corresponding models
         if agent.requirements.services.contains_key(&ServiceType::Infer) {
-            let has_inference_model = agent.requirements.models.iter().any(|(_, uri)| {
-                state.models.values().any(|m| &m.model_path == uri && m.model_type == ModelType::Inference)
+            let has_inference_model = agent.requirements.models.values().any(|name| {
+                state.models.values().any(|m| m.name == *name && m.model_type == ModelType::Inference)
             });
             if !has_inference_model {
                 return Err(RegistrationError::InferenceServiceWithoutModel);
             }
         }
         if agent.requirements.services.contains_key(&ServiceType::Embed) {
-            let has_embedding_model = agent.requirements.models.iter().any(|(_, uri)| {
-                state.models.values().any(|m| &m.model_path == uri && m.model_type == ModelType::Embedding)
+            let has_embedding_model = agent.requirements.models.values().any(|name| {
+                state.models.values().any(|m| m.name == *name && m.model_type == ModelType::Embedding)
             });
             if !has_embedding_model {
                 return Err(RegistrationError::EmbeddingServiceWithoutModel);
@@ -272,7 +272,7 @@ impl Registry for InMemoryRegistry {
         };
 
         let dependent: Vec<String> = state.agents.values()
-            .filter(|a| a.requirements.models.values().any(|uri| uri == &model.model_path))
+            .filter(|a| a.requirements.models.values().any(|n| n == &model.name))
             .map(|a| a.name.clone())
             .collect();
 

@@ -113,9 +113,7 @@ pub struct StoredAgent {
 impl StoredAgent {
     pub fn from_agent(agent: &Agent) -> Result<Self, RepositoryError> {
         let requirements = RequirementsJson {
-            models: agent.requirements.models.iter()
-                .map(|(k, v)| (k.clone(), v.as_str().to_string()))
-                .collect(),
+            models: agent.requirements.models.clone(),
             services: agent.requirements.services.clone(),
         };
 
@@ -182,9 +180,7 @@ impl StoredAgent {
         let mount_jsons: Vec<MountJson> = serde_json::from_str(&self.mounts_json)
             .map_err(|e| RepositoryError::Serialization(e.to_string()))?;
 
-        let models = requirements.models.into_iter()
-            .map(|(k, v)| (k, ResourceId::new(v)))
-            .collect();
+        let models = requirements.models;
 
         let mounts = mount_jsons.into_iter().map(|m| {
             let host_path = AbsolutePath::from_absolute(Path::new(&m.host_path))
@@ -280,8 +276,8 @@ mod tests {
 
     fn full_agent() -> Agent {
         let mut models = HashMap::new();
-        models.insert("phi3".to_string(), ResourceId::new("ollama://localhost:11434/phi3:latest"));
-        models.insert("nomic".to_string(), ResourceId::new("ollama://localhost:11434/nomic-embed-text:latest"));
+        models.insert("phi3".to_string(), "phi3:latest".to_string());
+        models.insert("nomic".to_string(), "nomic-embed".to_string());
 
         let mut services = HashMap::new();
         services.insert(ServiceType::Infer, ServiceConfig {
@@ -358,11 +354,11 @@ mod tests {
         assert_eq!(restored.object_storage.as_ref().map(|r| r.as_str()), Some("sqlite:///data/objects.db"));
         assert_eq!(restored.vector_storage.as_ref().map(|r| r.as_str()), Some("sqlite:///data/vectors.db"));
 
-        // Models
+        // Models (ADR 094: values are registry names, not URIs)
         assert_eq!(restored.requirements.models.len(), 2);
         assert_eq!(
-            restored.requirements.models.get("phi3").map(|r| r.as_str()),
-            Some("ollama://localhost:11434/phi3:latest")
+            restored.requirements.models.get("phi3").map(|s| s.as_str()),
+            Some("phi3:latest")
         );
 
         // Services

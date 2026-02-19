@@ -420,12 +420,12 @@ impl GitDagWorker {
     fn build_models_subtree(
         &self,
         registry: &Arc<dyn Registry>,
-        models: &std::collections::HashMap<String, crate::domain::ResourceId>,
+        models: &std::collections::HashMap<String, String>,
     ) -> Result<String, String> {
         let mut entries = String::new();
 
-        for alias in models.keys() {
-            if let Some(model) = registry.get_model(alias) {
+        for (alias, model_name) in models {
+            if let Some(model) = registry.get_model(model_name) {
                 if let Ok(model_toml) = toml::to_string_pretty(&model) {
                     let blob = self.write_blob(model_toml.as_bytes())?;
                     let filename = format!("{}.toml", alias.replace('/', "-"));

@@ -40,12 +40,24 @@ impl Model {
         ResourceId::new(format!("pending-registration://models/{}", name))
     }
 
+    /// Provider-friendly name — the model identifier providers expect in API calls (ADR 094).
+    ///
+    /// Derived from `model_path`. `name` is the registry identity (e.g., "claude-sonnet").
+    /// `pfname` is what the provider expects (e.g., "anthropic/claude-sonnet-4").
+    pub fn pfname(&self) -> String {
+        pfname_from_path(self.model_path.as_str(), self.provider)
+    }
+
     /// Create a model from a manifest with a pre-computed digest.
     ///
     /// The `id` field is set to a placeholder. The registry assigns the real
     /// id (`<registry_id>/models/<name>`) during registration.
+    ///
+    /// If the manifest has a `name` field, it becomes the registry name.
+    /// Otherwise, the name is derived from `model_path` (legacy behavior).
     pub fn from_manifest(manifest: ModelManifest, digest: String) -> Model {
-        let name = name_from_model_path(&manifest.model_path, manifest.provider);
+        let name = manifest.name.clone()
+            .unwrap_or_else(|| pfname_from_path(&manifest.model_path, manifest.provider));
         Model {
             id: Self::placeholder_id(&name),
             name,
@@ -63,15 +75,13 @@ impl Model {
     }
 }
 
-/// Extract the backend-native model name from a `model_path` URI.
-///
-/// The `model_path` is the canonical source of the model's name.
+/// Extract the provider-friendly name from a `model_path` URI.
 ///
 /// Examples:
 /// - `ollama://localhost:11434/nomic-embed-text:latest` → `"nomic-embed-text:latest"`
 /// - `openrouter://anthropic/claude-sonnet-4` → `"anthropic/claude-sonnet-4"`
 /// - `memory://test/my-model` → `"my-model"`
-fn name_from_model_path(model_path: &str, provider: Provider) -> String {
+fn pfname_from_path(model_path: &str, provider: Provider) -> String {
     if let Some(after_scheme) = model_path.split("://").nth(1) {
         // For openrouter:// the entire after-scheme part IS the model id
         if provider == Provider::OpenRouter {
@@ -133,12 +143,12 @@ mod tests {
     use crate::domain::model_manifest::{ModelManifest, ModelTypeConfig};
 
     // ========================================================================
-    // name_from_model_path
+    // pfname_from_path
     // ========================================================================
 
     #[test]
     fn name_from_ollama_uri_strips_authority() {
-        let name = name_from_model_path(
+        let name = pfname_from_path(
             "ollama://localhost:11434/nomic-embed-text:latest",
             Provider::Ollama,
         );
@@ -147,7 +157,7 @@ mod tests {
 
     #[test]
     fn name_from_openrouter_uri_keeps_full_path() {
-        let name = name_from_model_path(
+        let name = pfname_from_path(
             "openrouter://anthropic/claude-sonnet-4",
             Provider::OpenRouter,
         );
@@ -156,7 +166,7 @@ mod tests {
 
     #[test]
     fn name_from_memory_uri_strips_authority() {
-        let name = name_from_model_path(
+        let name = pfname_from_path(
             "memory://test/my-model",
             Provider::InMemory,
         );
@@ -165,13 +175,13 @@ mod tests {
 
     #[test]
     fn name_from_bare_string_returns_as_is() {
-        let name = name_from_model_path("phi3", Provider::Ollama);
+        let name = pfname_from_path("phi3", Provider::Ollama);
         assert_eq!(name, "phi3");
     }
 
     #[test]
     fn name_from_ollama_uri_without_path_falls_back() {
-        let name = name_from_model_path("ollama://localhost:11434", Provider::Ollama);
+        let name = pfname_from_path("ollama://localhost:11434", Provider::Ollama);
         assert_eq!(name, "ollama://localhost:11434");
     }
 
@@ -181,7 +191,21 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn model_from_manifest_ollama() {
+    fn from_manifest_uses_name_field() {
+        let manifest = ModelManifest {
+            name: Some("claude-sonnet".to_string()),
+            model_type: ModelTypeConfig::Inference,
+            provider: Provider::OpenRouter,
+            model_path: "openrouter://anthropic/claude-sonnet-4".to_string(),
+        };
+        let model = Model::from_manifest(manifest, String::new());
+
+        assert_eq!(model.name, "claude-sonnet");
+        assert_eq!(model.pfname(), "anthropic/claude-sonnet-4");
+    }
+
+    #[test]
+    fn from_manifest_falls_back_to_pfname_when_no_name() {
         let manifest = ModelManifest {
             name: None,
             model_type: ModelTypeConfig::Inference,
@@ -191,14 +215,12 @@ mod tests {
         let model = Model::from_manifest(manifest, "sha256:abc123".to_string());
 
         assert_eq!(model.name, "phi3:latest");
-        assert_eq!(model.provider, Provider::Ollama);
-        assert_eq!(model.model_type, ModelType::Inference);
+        assert_eq!(model.pfname(), "phi3:latest");
         assert_eq!(model.digest, "sha256:abc123");
-        assert_eq!(model.model_path.as_str(), "ollama://localhost:11434/phi3:latest");
     }
 
     #[test]
-    fn model_from_manifest_openrouter() {
+    fn from_manifest_openrouter_pfname() {
         let manifest = ModelManifest {
             name: None,
             model_type: ModelTypeConfig::Inference,
@@ -212,17 +234,18 @@ mod tests {
     }
 
     #[test]
-    fn model_from_manifest_embedding() {
+    fn from_manifest_embedding() {
         let manifest = ModelManifest {
-            name: None,
+            name: Some("nomic-embed".to_string()),
             model_type: ModelTypeConfig::Embedding,
             provider: Provider::Ollama,
             model_path: "ollama://localhost:11434/nomic-embed-text:latest".to_string(),
         };
         let model = Model::from_manifest(manifest, String::new());
 
+        assert_eq!(model.name, "nomic-embed");
         assert_eq!(model.model_type, ModelType::Embedding);
-        assert_eq!(model.name, "nomic-embed-text:latest");
+        assert_eq!(model.pfname(), "nomic-embed-text:latest");
     }
 
     // ========================================================================

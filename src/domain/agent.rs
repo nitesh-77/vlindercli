@@ -112,14 +112,14 @@ impl Agent {
         Self::from_manifest(manifest)
     }
 
-    /// Check if this agent declares a model by name.
-    pub fn has_model(&self, model_name: &str) -> bool {
-        self.requirements.models.contains_key(model_name)
+    /// Check if this agent declares a model by alias.
+    pub fn has_model(&self, alias: &str) -> bool {
+        self.requirements.models.contains_key(alias)
     }
 
-    /// Get the URI for a model by name.
-    pub fn model_uri(&self, model_name: &str) -> Option<&ResourceId> {
-        self.requirements.models.get(model_name)
+    /// Get the registry name for a model alias (ADR 094).
+    pub fn model_name(&self, alias: &str) -> Option<&str> {
+        self.requirements.models.get(alias).map(|s| s.as_str())
     }
 }
 
@@ -149,22 +149,17 @@ impl From<ParseError> for LoadError {
 /// Agent runtime requirements (validated)
 #[derive(Clone, Debug, Serialize)]
 pub struct Requirements {
-    /// Model name → ResourceId mapping
-    pub models: HashMap<String, ResourceId>,
+    /// Model alias → registry name (ADR 094).
+    /// e.g., "inference_model" → "claude-sonnet"
+    pub models: HashMap<String, String>,
     pub services: HashMap<ServiceType, ServiceConfig>,
 }
 
 impl Requirements {
     /// Create Requirements from config.
-    /// All model URIs are already resolved to absolute by AgentManifest::load().
     fn from_config(config: RequirementsConfig) -> Self {
-        let models = config.models
-            .into_iter()
-            .map(|(name, uri)| (name, ResourceId::new(uri)))
-            .collect();
-
         Requirements {
-            models,
+            models: config.models,
             services: config.services,
         }
     }
@@ -263,17 +258,14 @@ mod tests {
             executable = "localhost/thinker:latest"
 
             [requirements.models]
-            phi3 = "ollama://localhost:11434/phi3:latest"
-            nomic = "ollama://localhost:11434/nomic-embed-text:latest"
+            inference_model = "claude-sonnet"
+            embedding_model = "nomic-embed"
         "#).unwrap();
 
-        assert!(agent.has_model("phi3"));
-        assert!(agent.has_model("nomic"));
+        assert!(agent.has_model("inference_model"));
+        assert!(agent.has_model("embedding_model"));
         assert!(!agent.has_model("gpt4"));
-        assert_eq!(
-            agent.model_uri("phi3").map(|r| r.as_str()),
-            Some("ollama://localhost:11434/phi3:latest"),
-        );
+        assert_eq!(agent.model_name("inference_model"), Some("claude-sonnet"));
     }
 
     #[test]
@@ -328,7 +320,7 @@ mod tests {
     }
 
     #[test]
-    fn model_uri_returns_none_for_undeclared() {
+    fn model_name_returns_none_for_undeclared() {
         let agent = make_agent(r#"
             name = "simple"
             description = "No models"
@@ -339,6 +331,6 @@ mod tests {
 
         "#).unwrap();
 
-        assert!(agent.model_uri("nonexistent").is_none());
+        assert!(agent.model_name("nonexistent").is_none());
     }
 }

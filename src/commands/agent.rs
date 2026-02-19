@@ -227,8 +227,8 @@ fn get(name: &str) {
     }
     if !agent.requirements.models.is_empty() {
         println!("Models:");
-        for (alias, uri) in &agent.requirements.models {
-            println!("  {} -> {}", alias, uri);
+        for (alias, name) in &agent.requirements.models {
+            println!("  {} -> {}", alias, name);
         }
     }
 }

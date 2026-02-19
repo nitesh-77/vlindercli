@@ -69,7 +69,8 @@ fn openrouter_model_loads_with_correct_engine_type() {
     std::fs::write(temp_dir.join("model.toml"), manifest).unwrap();
 
     let model = Model::load(&temp_dir.join("model.toml")).unwrap();
-    assert_eq!(model.name, "anthropic/claude-sonnet-4-20250514");
+    assert_eq!(model.name, "claude-sonnet");
+    assert_eq!(model.pfname(), "anthropic/claude-sonnet-4-20250514");
     assert_eq!(model.provider, Provider::OpenRouter);
     assert_eq!(model.model_type, ModelType::Inference);
     assert_eq!(model.model_path.as_str(), "openrouter://anthropic/claude-sonnet-4-20250514");
@@ -203,12 +204,13 @@ fn model_engine_is_ollama() {
 }
 
 // ============================================================================
-// Name derivation — model.name is the backend name from model_path
+// Name vs pfname (ADR 094)
+// model.name = registry name (from manifest `name` field)
+// model.pfname() = provider-friendly name (derived from model_path)
 // ============================================================================
 
 #[test]
-fn name_derived_from_ollama_path() {
-    // Manifest alias "nomic-embed" is ignored; name comes from model_path
+fn name_from_manifest_pfname_from_path_ollama() {
     let temp_dir = std::env::temp_dir().join("vlinder-test-name-ollama");
     let _ = std::fs::remove_dir_all(&temp_dir);
     std::fs::create_dir_all(&temp_dir).unwrap();
@@ -222,13 +224,14 @@ fn name_derived_from_ollama_path() {
     std::fs::write(temp_dir.join("model.toml"), manifest).unwrap();
 
     let model = Model::load(&temp_dir.join("model.toml")).unwrap();
-    assert_eq!(model.name, "nomic-embed-text:latest");
+    assert_eq!(model.name, "nomic-embed");
+    assert_eq!(model.pfname(), "nomic-embed-text:latest");
 
     let _ = std::fs::remove_dir_all(&temp_dir);
 }
 
 #[test]
-fn name_derived_from_openrouter_path() {
+fn name_from_manifest_pfname_from_path_openrouter() {
     let temp_dir = std::env::temp_dir().join("vlinder-test-name-openrouter");
     let _ = std::fs::remove_dir_all(&temp_dir);
     std::fs::create_dir_all(&temp_dir).unwrap();
@@ -242,13 +245,14 @@ fn name_derived_from_openrouter_path() {
     std::fs::write(temp_dir.join("model.toml"), manifest).unwrap();
 
     let model = Model::load(&temp_dir.join("model.toml")).unwrap();
-    assert_eq!(model.name, "anthropic/claude-sonnet-4");
+    assert_eq!(model.name, "claude-sonnet");
+    assert_eq!(model.pfname(), "anthropic/claude-sonnet-4");
 
     let _ = std::fs::remove_dir_all(&temp_dir);
 }
 
 #[test]
-fn name_derived_when_manifest_name_matches_path() {
+fn name_and_pfname_when_manifest_name_matches_path() {
     let temp_dir = std::env::temp_dir().join("vlinder-test-name-match");
     let _ = std::fs::remove_dir_all(&temp_dir);
     std::fs::create_dir_all(&temp_dir).unwrap();
@@ -263,6 +267,7 @@ fn name_derived_when_manifest_name_matches_path() {
 
     let model = Model::load(&temp_dir.join("model.toml")).unwrap();
     assert_eq!(model.name, "phi3:latest");
+    assert_eq!(model.pfname(), "phi3:latest");
 
     let _ = std::fs::remove_dir_all(&temp_dir);
 }

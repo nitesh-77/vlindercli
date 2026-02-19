@@ -108,9 +108,9 @@ impl From<Agent> for proto::Agent {
                 readonly: m.readonly,
             }).collect(),
             models: agent.requirements.models.into_iter()
-                .map(|(alias, uri)| proto::ModelAlias {
+                .map(|(alias, name)| proto::ModelAlias {
                     alias,
-                    uri: uri.to_string(),
+                    uri: name,
                 })
                 .collect(),
         }
@@ -146,7 +146,7 @@ impl TryFrom<proto::Agent> for Agent {
             executable: agent.executable,
             requirements: Requirements {
                 models: agent.models.into_iter()
-                    .map(|m| (m.alias, ResourceId::new(&m.uri)))
+                    .map(|m| (m.alias, m.uri))
                     .collect(),
                 services,
             },

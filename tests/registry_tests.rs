@@ -226,7 +226,7 @@ fn register_agent_rejected_when_inference_model_has_no_service() {
         executable = "localhost/no-infer:latest"
 
         [requirements.models]
-        phi3 = "ollama://localhost:11434/phi3:latest"
+        phi3 = "phi3"
     "#).unwrap();
 
     let result = registry.register_agent(agent);
@@ -262,7 +262,7 @@ fn register_agent_rejected_when_embedding_model_has_no_service() {
         executable = "localhost/no-embed:latest"
 
         [requirements.models]
-        nomic-embed = "ollama://localhost:11434/nomic-embed-text:latest"
+        nomic-embed = "nomic-embed"
     "#).unwrap();
 
     let result = registry.register_agent(agent);

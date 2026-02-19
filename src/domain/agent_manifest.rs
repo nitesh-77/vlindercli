@@ -42,7 +42,6 @@ impl AgentManifest {
     ///
     /// Resolves relative paths to absolute:
     /// - `executable` → resolved only for file-based runtimes
-    /// - `requirements.models` values → file:// URIs
     /// - `mounts[].host_path` → absolute paths
     pub fn load(path: &Path) -> Result<AgentManifest, ParseError> {
         let content = std::fs::read_to_string(path)?;
@@ -61,11 +60,7 @@ impl AgentManifest {
             manifest.executable = resolve_executable_path(&manifest.executable, &agent_dir)?;
         }
 
-        // Resolve model URIs
-        manifest.requirements.models = manifest.requirements.models
-            .into_iter()
-            .map(|(name, uri)| (name, resolve_uri(&uri, &agent_dir)))
-            .collect();
+        // Models are registry names (ADR 094) — no URI resolution needed.
 
         // Resolve mount host paths to absolute
         for mount in &mut manifest.mounts {
@@ -127,27 +122,6 @@ fn resolve_executable_path(executable: &str, agent_dir: &Path) -> Result<String,
     Ok(format!("file://{}", exe_path.display()))
 }
 
-/// Resolve a URI, making relative file:// URIs absolute.
-///
-/// - Non-file URIs (http://, etc.) are returned as-is
-/// - Absolute file:// URIs are returned as-is
-/// - Relative file:// URIs are resolved against agent_dir
-fn resolve_uri(uri: &str, agent_dir: &Path) -> String {
-    // Non-file URIs pass through unchanged (e.g., http://127.0.0.1:9000/models/phi3)
-    if uri.contains("://") && !uri.starts_with("file://") {
-        return uri.to_string();
-    }
-
-    if let Some(path) = uri.strip_prefix("file://") {
-        if path.starts_with("./") || !Path::new(path).is_absolute() {
-            let clean_path = path.strip_prefix("./").unwrap_or(path);
-            let resolved = agent_dir.join(clean_path);
-            return format!("file://{}", resolved.display());
-        }
-    }
-    uri.to_string()
-}
-
 /// Resolve a host path, making relative paths absolute.
 ///
 /// Handles tilde expansion: `~/foo` → `/home/user/foo`.
@@ -202,11 +176,32 @@ impl From<toml::de::Error> for ParseError {
 /// Requirements as declared in agent.toml
 #[derive(Clone, Debug, Deserialize)]
 pub struct RequirementsConfig {
-    /// Model name → URI mapping (e.g., "phi3" = "file://./models/phi3.toml")
-    #[serde(default)]
+    /// Model alias → registry name (ADR 094).
+    ///
+    /// Table form: `inference_model = "claude-sonnet"` (alias differs from name)
+    /// Array form: `models = ["claude-sonnet"]` (alias == name)
+    #[serde(default, deserialize_with = "deserialize_models")]
     pub models: HashMap<String, String>,
     #[serde(default)]
     pub services: HashMap<ServiceType, ServiceConfig>,
+}
+
+/// Deserialize models from either table or array form.
+fn deserialize_models<'de, D>(deserializer: D) -> Result<HashMap<String, String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum ModelsConfig {
+        Table(HashMap<String, String>),
+        Array(Vec<String>),
+    }
+
+    match ModelsConfig::deserialize(deserializer)? {
+        ModelsConfig::Table(map) => Ok(map),
+        ModelsConfig::Array(names) => Ok(names.into_iter().map(|n| (n.clone(), n)).collect()),
+    }
 }
 
 /// Service declaration as declared in agent.toml
@@ -437,5 +432,60 @@ mod tests {
 
         let result: Result<AgentManifest, _> = toml::from_str(toml);
         assert!(result.is_err());
+    }
+
+    // ========================================================================
+    // Model form parsing (ADR 094)
+    // ========================================================================
+
+    #[test]
+    fn parse_models_table_form() {
+        let toml = r#"
+            name = "agent"
+            description = "Test"
+            runtime = "container"
+            executable = "localhost/agent:latest"
+
+            [requirements.models]
+            inference_model = "claude-sonnet"
+            embedding_model = "nomic-embed"
+        "#;
+
+        let manifest: AgentManifest = toml::from_str(toml).unwrap();
+        assert_eq!(manifest.requirements.models.get("inference_model").unwrap(), "claude-sonnet");
+        assert_eq!(manifest.requirements.models.get("embedding_model").unwrap(), "nomic-embed");
+    }
+
+    #[test]
+    fn parse_models_array_form() {
+        let toml = r#"
+            name = "agent"
+            description = "Test"
+            runtime = "container"
+            executable = "localhost/agent:latest"
+
+            [requirements]
+            models = ["claude-sonnet", "nomic-embed"]
+        "#;
+
+        let manifest: AgentManifest = toml::from_str(toml).unwrap();
+        // Array form: alias == name
+        assert_eq!(manifest.requirements.models.get("claude-sonnet").unwrap(), "claude-sonnet");
+        assert_eq!(manifest.requirements.models.get("nomic-embed").unwrap(), "nomic-embed");
+    }
+
+    #[test]
+    fn parse_models_empty_default() {
+        let toml = r#"
+            name = "agent"
+            description = "Test"
+            runtime = "container"
+            executable = "localhost/agent:latest"
+
+            [requirements]
+        "#;
+
+        let manifest: AgentManifest = toml::from_str(toml).unwrap();
+        assert!(manifest.requirements.models.is_empty());
     }
 }
