@@ -324,8 +324,7 @@ fn last_path_segment(s: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::DagStore;
-    use crate::storage::dag_store::SqliteDagStore;
+    use crate::domain::{DagStore, InMemoryDagStore};
 
     // --- Header construction helpers ---
 
@@ -612,16 +611,13 @@ mod tests {
 
     // --- Integration: reconstruct → DagNode → SQLite round-trip ---
 
-    fn test_store_pair() -> (SqliteDagStore, SqliteDagStore) {
-        let tmp = tempfile::NamedTempFile::new().unwrap();
-        let writer = SqliteDagStore::open(tmp.path()).unwrap();
-        let reader = SqliteDagStore::open(tmp.path()).unwrap();
-        (writer, reader)
+    fn test_store() -> InMemoryDagStore {
+        InMemoryDagStore::new()
     }
 
     #[test]
     fn reconstruct_and_store_invoke() {
-        let (writer, reader) = test_store_pair();
+        let store = test_store();
         let msg = reconstruct_observable_message(
             "vlinder.1.sub-1.invoke.cli.container.myagent",
             &invoke_headers(),
@@ -629,9 +625,9 @@ mod tests {
         ).unwrap();
 
         let node = build_dag_node(&msg, "");
-        writer.insert_node(&node).unwrap();
+        store.insert_node(&node).unwrap();
 
-        let nodes = reader.get_session_nodes("sess-1").unwrap();
+        let nodes = store.get_session_nodes("sess-1").unwrap();
         assert_eq!(nodes.len(), 1);
         assert_eq!(nodes[0].message_type, MessageType::Invoke);
         assert_eq!(nodes[0].from, "cli");
@@ -640,7 +636,7 @@ mod tests {
 
     #[test]
     fn messages_chain_in_session() {
-        let (writer, reader) = test_store_pair();
+        let store = test_store();
         let mut last_hash = String::new();
 
         let msg1 = reconstruct_observable_message(
@@ -650,7 +646,7 @@ mod tests {
         ).unwrap();
         let node1 = build_dag_node(&msg1, &last_hash);
         last_hash = node1.hash.clone();
-        writer.insert_node(&node1).unwrap();
+        store.insert_node(&node1).unwrap();
 
         let msg2 = reconstruct_observable_message(
             "vlinder.1.sub-1.req.myagent.infer.ollama.run.1",
@@ -659,7 +655,7 @@ mod tests {
         ).unwrap();
         let node2 = build_dag_node(&msg2, &last_hash);
         last_hash = node2.hash.clone();
-        writer.insert_node(&node2).unwrap();
+        store.insert_node(&node2).unwrap();
 
         let msg3 = reconstruct_observable_message(
             "vlinder.1.sub-1.res.infer.ollama.myagent.run.1",
@@ -667,9 +663,9 @@ mod tests {
             b"third",
         ).unwrap();
         let node3 = build_dag_node(&msg3, &last_hash);
-        writer.insert_node(&node3).unwrap();
+        store.insert_node(&node3).unwrap();
 
-        let nodes = reader.get_session_nodes("sess-1").unwrap();
+        let nodes = store.get_session_nodes("sess-1").unwrap();
         assert_eq!(nodes.len(), 3);
         assert_eq!(nodes[0].parent_hash, "");
         assert_eq!(nodes[1].parent_hash, nodes[0].hash);
@@ -678,7 +674,7 @@ mod tests {
 
     #[test]
     fn different_sessions_chain_independently() {
-        let (writer, reader) = test_store_pair();
+        let store = test_store();
 
         let msg1 = reconstruct_observable_message(
             "vlinder.1.sub-1.invoke.cli.container.agent-a",
@@ -686,7 +682,7 @@ mod tests {
             b"sess1-first",
         ).unwrap();
         let node1 = build_dag_node(&msg1, "");
-        writer.insert_node(&node1).unwrap();
+        store.insert_node(&node1).unwrap();
 
         let mut h2 = invoke_headers();
         h2.insert("session-id".to_string(), "sess-2".to_string());
@@ -697,7 +693,7 @@ mod tests {
             b"sess2-first",
         ).unwrap();
         let node2 = build_dag_node(&msg2, "");
-        writer.insert_node(&node2).unwrap();
+        store.insert_node(&node2).unwrap();
 
         let msg3 = reconstruct_observable_message(
             "vlinder.1.sub-1.complete.myagent.cli",
@@ -705,10 +701,10 @@ mod tests {
             b"sess1-second",
         ).unwrap();
         let node3 = build_dag_node(&msg3, &node1.hash);
-        writer.insert_node(&node3).unwrap();
+        store.insert_node(&node3).unwrap();
 
-        let sess1 = reader.get_session_nodes("sess-1").unwrap();
-        let sess2 = reader.get_session_nodes("sess-2").unwrap();
+        let sess1 = store.get_session_nodes("sess-1").unwrap();
+        let sess2 = store.get_session_nodes("sess-2").unwrap();
 
         assert_eq!(sess1.len(), 2);
         assert_eq!(sess2.len(), 1);

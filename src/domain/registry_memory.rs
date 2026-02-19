@@ -5,7 +5,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
 
-use crate::domain::{
+use super::{
     Agent, Job, JobId, JobStatus, Model, ModelType,
     ObjectStorageType, Provider, RegistrationError, Registry, ResourceId, RuntimeType,
     SecretStore, ServiceType, SubmissionId, VectorStorageType,
@@ -374,7 +374,7 @@ impl Registry for InMemoryRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::secret_store::InMemorySecretStore;
+    use super::super::secret_store::InMemorySecretStore;
 
     fn test_secret_store() -> Arc<dyn SecretStore> {
         Arc::new(InMemorySecretStore::new())
@@ -540,7 +540,7 @@ mod tests {
 
     fn minimal_agent(name: &str) -> Agent {
         use std::collections::HashMap;
-        use crate::domain::{Requirements, RuntimeType};
+        use super::super::{Requirements, RuntimeType};
 
         Agent {
             id: Agent::placeholder_id(name),

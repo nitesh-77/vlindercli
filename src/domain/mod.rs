@@ -12,6 +12,7 @@ mod sdk;
 mod queue_bridge;
 mod dag;
 mod state;
+pub mod registry_memory;
 mod container_id;
 mod diagnostics;
 mod image_digest;
@@ -76,7 +77,7 @@ pub use diagnostics::{
 // DAG (content-addressed Merkle DAG)
 // ============================================================================
 
-pub use dag::{DagStore, DagNode, MessageType, Timeline, hash_dag_node};
+pub use dag::{DagStore, DagNode, MessageType, Timeline, hash_dag_node, InMemoryDagStore};
 
 // ============================================================================
 // State (versioned agent state)
@@ -117,6 +118,7 @@ pub use resource_id::ResourceId;
 pub use inference::{
     InferenceEngine, InferenceResult,
     Inference, InferenceBackend, InferenceKind,
+    InMemoryInference,
 };
 
 // ============================================================================
@@ -126,6 +128,7 @@ pub use inference::{
 pub use embedding::{
     EmbeddingEngine,
     Embedding, EmbeddingBackend, EmbeddingKind, NomicConfig,
+    InMemoryEmbedding,
 };
 
 // ============================================================================
@@ -158,7 +161,7 @@ pub use session::{HistoryEntry, Session};
 // Secret Store (ADR 083)
 // ============================================================================
 
-pub use secret_store::{SecretStore, SecretStoreError};
+pub use secret_store::{SecretStore, SecretStoreError, InMemorySecretStore};
 pub use identity::{AgentIdentity, IdentityError, ensure_agent_identity};
 
 // ============================================================================
@@ -167,3 +170,4 @@ pub use identity::{AgentIdentity, IdentityError, ensure_agent_identity};
 
 pub use registry::{Job, JobId, JobStatus, RegistrationError, Registry};
 pub use registry_repository::{RegistryRepository, RepositoryError, StoredAgent, StoredModel};
+pub use registry_memory::InMemoryRegistry;

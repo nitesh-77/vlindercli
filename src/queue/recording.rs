@@ -160,15 +160,14 @@ mod tests {
     use super::*;
     use crate::domain::{
         ContainerDiagnostics, DagNode, DelegateDiagnostics, HarnessType,
-        InvokeDiagnostics, MessageType, Operation, RequestDiagnostics, ResourceId,
-        RuntimeType, Sequence, ServiceDiagnostics, ServiceType, SessionId, SubmissionId, TimelineId,
+        InMemoryDagStore, InvokeDiagnostics, MessageType, Operation, RequestDiagnostics,
+        ResourceId, RuntimeType, Sequence, ServiceDiagnostics, ServiceType, SessionId,
+        SubmissionId, TimelineId,
     };
     use crate::queue::InMemoryQueue;
-    use crate::storage::dag_store::SqliteDagStore;
 
     fn test_store() -> Arc<dyn DagStore> {
-        let tmp = tempfile::NamedTempFile::new().unwrap();
-        Arc::new(SqliteDagStore::open(tmp.path()).unwrap())
+        Arc::new(InMemoryDagStore::new())
     }
 
     fn test_queue(store: Arc<dyn DagStore>) -> RecordingQueue {

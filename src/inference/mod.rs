@@ -11,7 +11,7 @@ pub use openrouter::OpenRouterInferenceEngine;
 use std::sync::Arc;
 
 use crate::config::Config;
-use crate::domain::{Provider, InferenceEngine, InferenceResult, Model};
+use crate::domain::{Provider, InferenceEngine, Model};
 
 /// Open an inference engine for the given model.
 pub fn open_inference_engine(model: &Model) -> Result<Arc<dyn InferenceEngine>, String> {
@@ -35,27 +35,5 @@ pub fn open_inference_engine(model: &Model) -> Result<Arc<dyn InferenceEngine>, 
     }
 }
 
-// ============================================================================
-// In-Memory Implementation (for testing)
-// ============================================================================
-
-/// In-memory inference engine that returns canned responses.
-pub struct InMemoryInference {
-    response: String,
-}
-
-impl InMemoryInference {
-    pub fn new(response: impl Into<String>) -> Self {
-        Self { response: response.into() }
-    }
-}
-
-impl InferenceEngine for InMemoryInference {
-    fn infer(&self, _prompt: &str, _max_tokens: u32) -> Result<InferenceResult, String> {
-        Ok(InferenceResult {
-            text: self.response.clone(),
-            tokens_input: 0,
-            tokens_output: 0,
-        })
-    }
-}
+// Re-export from domain (canonical location) for backward compatibility
+pub use crate::domain::InMemoryInference;

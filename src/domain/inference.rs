@@ -41,3 +41,28 @@ impl Default for InferenceBackend {
 pub enum InferenceKind {
     Ollama,
 }
+
+// ============================================================================
+// In-Memory Implementation (for testing)
+// ============================================================================
+
+/// In-memory inference engine that returns canned responses.
+pub struct InMemoryInference {
+    response: String,
+}
+
+impl InMemoryInference {
+    pub fn new(response: impl Into<String>) -> Self {
+        Self { response: response.into() }
+    }
+}
+
+impl InferenceEngine for InMemoryInference {
+    fn infer(&self, _prompt: &str, _max_tokens: u32) -> Result<InferenceResult, String> {
+        Ok(InferenceResult {
+            text: self.response.clone(),
+            tokens_input: 0,
+            tokens_output: 0,
+        })
+    }
+}

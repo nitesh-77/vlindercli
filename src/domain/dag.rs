@@ -175,6 +175,158 @@ pub trait DagStore: Send + Sync {
     fn is_timeline_sealed(&self, id: i64) -> Result<bool, String>;
 }
 
+// ============================================================================
+// In-Memory Implementation (for testing)
+// ============================================================================
+
+/// In-memory DagStore for unit tests that don't need SQLite.
+pub struct InMemoryDagStore {
+    nodes: std::sync::Mutex<Vec<DagNode>>,
+    timelines: std::sync::Mutex<Vec<Timeline>>,
+    checkout_states: std::sync::Mutex<std::collections::HashMap<String, String>>,
+}
+
+impl InMemoryDagStore {
+    pub fn new() -> Self {
+        Self {
+            nodes: std::sync::Mutex::new(Vec::new()),
+            timelines: std::sync::Mutex::new(Vec::new()),
+            checkout_states: std::sync::Mutex::new(std::collections::HashMap::new()),
+        }
+    }
+}
+
+impl Default for InMemoryDagStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl DagStore for InMemoryDagStore {
+    fn insert_node(&self, node: &DagNode) -> Result<(), String> {
+        let mut nodes = self.nodes.lock().unwrap();
+        // Idempotent: skip if hash already exists
+        if !nodes.iter().any(|n| n.hash == node.hash) {
+            nodes.push(node.clone());
+        }
+        Ok(())
+    }
+
+    fn get_node(&self, hash: &str) -> Result<Option<DagNode>, String> {
+        let nodes = self.nodes.lock().unwrap();
+        Ok(nodes.iter().find(|n| n.hash == hash).cloned())
+    }
+
+    fn get_session_nodes(&self, session_id: &str) -> Result<Vec<DagNode>, String> {
+        let nodes = self.nodes.lock().unwrap();
+        let mut result: Vec<DagNode> = nodes.iter()
+            .filter(|n| n.session_id == session_id)
+            .cloned()
+            .collect();
+        result.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+        Ok(result)
+    }
+
+    fn get_children(&self, parent_hash: &str) -> Result<Vec<DagNode>, String> {
+        let nodes = self.nodes.lock().unwrap();
+        Ok(nodes.iter().filter(|n| n.parent_hash == parent_hash).cloned().collect())
+    }
+
+    fn latest_state(&self, agent_name: &str) -> Result<Option<String>, String> {
+        // Check checkout override first
+        let overrides = self.checkout_states.lock().unwrap();
+        if let Some(state) = overrides.get(agent_name) {
+            return Ok(Some(state.clone()));
+        }
+        drop(overrides);
+
+        let nodes = self.nodes.lock().unwrap();
+        Ok(nodes.iter()
+            .rev()
+            .filter(|n| n.from == agent_name || n.to == agent_name)
+            .find_map(|n| n.state.clone()))
+    }
+
+    fn latest_node_hash(&self, session_id: &str) -> Result<Option<String>, String> {
+        let nodes = self.nodes.lock().unwrap();
+        Ok(nodes.iter()
+            .rev()
+            .find(|n| n.session_id == session_id)
+            .map(|n| n.hash.clone()))
+    }
+
+    fn set_checkout_state(&self, agent_name: &str, state: &str) -> Result<(), String> {
+        self.checkout_states.lock().unwrap()
+            .insert(agent_name.to_string(), state.to_string());
+        Ok(())
+    }
+
+    fn ensure_main_timeline(&self) -> Result<i64, String> {
+        let mut timelines = self.timelines.lock().unwrap();
+        if !timelines.iter().any(|t| t.id == 1) {
+            timelines.push(Timeline {
+                id: 1,
+                branch_name: "main".to_string(),
+                parent_timeline_id: None,
+                fork_point: None,
+                created_at: Utc::now(),
+                broken_at: None,
+            });
+        }
+        Ok(1)
+    }
+
+    fn create_timeline(
+        &self,
+        branch_name: &str,
+        parent_id: Option<i64>,
+        fork_point: Option<&str>,
+    ) -> Result<i64, String> {
+        let mut timelines = self.timelines.lock().unwrap();
+        let id = timelines.len() as i64 + 1;
+        timelines.push(Timeline {
+            id,
+            branch_name: branch_name.to_string(),
+            parent_timeline_id: parent_id,
+            fork_point: fork_point.map(|s| s.to_string()),
+            created_at: Utc::now(),
+            broken_at: None,
+        });
+        Ok(id)
+    }
+
+    fn get_timeline_by_branch(&self, branch_name: &str) -> Result<Option<Timeline>, String> {
+        let timelines = self.timelines.lock().unwrap();
+        Ok(timelines.iter().find(|t| t.branch_name == branch_name).cloned())
+    }
+
+    fn get_timeline(&self, id: i64) -> Result<Option<Timeline>, String> {
+        let timelines = self.timelines.lock().unwrap();
+        Ok(timelines.iter().find(|t| t.id == id).cloned())
+    }
+
+    fn seal_timeline(&self, id: i64) -> Result<(), String> {
+        let mut timelines = self.timelines.lock().unwrap();
+        if let Some(t) = timelines.iter_mut().find(|t| t.id == id) {
+            t.broken_at = Some(Utc::now());
+        }
+        Ok(())
+    }
+
+    fn rename_timeline(&self, id: i64, new_name: &str) -> Result<(), String> {
+        let mut timelines = self.timelines.lock().unwrap();
+        if let Some(t) = timelines.iter_mut().find(|t| t.id == id) {
+            t.branch_name = new_name.to_string();
+        }
+        Ok(())
+    }
+
+    fn is_timeline_sealed(&self, id: i64) -> Result<bool, String> {
+        let timelines = self.timelines.lock().unwrap();
+        Ok(timelines.iter().find(|t| t.id == id).map(|t| t.broken_at.is_some()).unwrap_or(false))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

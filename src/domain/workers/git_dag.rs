@@ -579,8 +579,8 @@ mod tests {
     use crate::domain::message::*;
     use crate::domain::diagnostics::*;
     use crate::domain::{ContainerId, Operation, RuntimeType, ResourceId, ServiceType, Agent, SecretStore};
-    use crate::secret_store::InMemorySecretStore;
-    use crate::registry::InMemoryRegistry;
+    use crate::domain::InMemorySecretStore;
+    use crate::domain::InMemoryRegistry;
 
     fn test_agent_id() -> ResourceId {
         ResourceId::new("http://127.0.0.1:9000/agents/support-agent")

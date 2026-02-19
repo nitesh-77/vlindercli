@@ -304,12 +304,10 @@ impl SdkContract for QueueBridge {
 mod tests {
     use super::*;
     use crate::queue::InMemoryQueue;
-    use crate::registry::InMemoryRegistry;
     use crate::domain::{
         HarnessType, InvokeDiagnostics, RuntimeType, ResourceId, SessionId, SubmissionId, TimelineId,
-        SecretStore,
+        SecretStore, InMemoryRegistry, InMemorySecretStore,
     };
-    use crate::secret_store::InMemorySecretStore;
 
     fn test_secret_store() -> Arc<dyn SecretStore> {
         Arc::new(InMemorySecretStore::new())

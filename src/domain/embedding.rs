@@ -46,3 +46,24 @@ impl Default for NomicConfig {
         }
     }
 }
+
+// ============================================================================
+// In-Memory Implementation (for testing)
+// ============================================================================
+
+/// In-memory embedding engine that returns canned responses.
+pub struct InMemoryEmbedding {
+    embedding: Vec<f32>,
+}
+
+impl InMemoryEmbedding {
+    pub fn new(embedding: Vec<f32>) -> Self {
+        Self { embedding }
+    }
+}
+
+impl EmbeddingEngine for InMemoryEmbedding {
+    fn embed(&self, _text: &str) -> Result<Vec<f32>, String> {
+        Ok(self.embedding.clone())
+    }
+}

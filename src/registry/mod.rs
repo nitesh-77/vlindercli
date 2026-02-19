@@ -5,10 +5,10 @@
 //! - `InMemoryRegistry`: In-process with RwLock, used for tests and as read cache
 //! - `PersistentRegistry`: Write-through to SQLite via SqliteRegistryRepository
 
-mod in_memory;
 mod persistent;
 
-pub use in_memory::InMemoryRegistry;
+// Re-export from domain (canonical location) for backward compatibility
+pub use crate::domain::InMemoryRegistry;
 pub(crate) use persistent::PersistentRegistry;
 
 use std::sync::Arc;

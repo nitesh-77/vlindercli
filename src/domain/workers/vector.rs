@@ -214,10 +214,10 @@ impl VectorServiceWorker {
 mod tests {
     use super::*;
     use crate::domain::{Agent, Registry};
-    use crate::registry::InMemoryRegistry;
+    use crate::domain::InMemoryRegistry;
     use crate::domain::{Operation, RequestDiagnostics, Sequence, ServiceType, SessionId, SubmissionId, TimelineId};
     use crate::domain::SecretStore;
-    use crate::secret_store::InMemorySecretStore;
+    use crate::domain::InMemorySecretStore;
     use crate::queue::InMemoryQueue;
 
     fn test_secret_store() -> Arc<dyn SecretStore> {

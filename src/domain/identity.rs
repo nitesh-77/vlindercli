@@ -89,7 +89,7 @@ pub fn ensure_agent_identity(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::secret_store::InMemorySecretStore;
+    use super::super::InMemorySecretStore;
 
     #[test]
     fn private_key_name_convention() {

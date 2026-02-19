@@ -5,14 +5,14 @@
 //! - `InMemorySecretStore`: Single-process, for testing
 //! - `NatsSecretStore`: Distributed, with NATS KV persistence
 
-mod in_memory;
 mod nats;
 
 use std::sync::Arc;
 use crate::config::Config;
 use crate::domain::{SecretStore, SecretStoreError};
 
-pub use in_memory::InMemorySecretStore;
+// Re-export from domain (canonical location) for backward compatibility
+pub use crate::domain::InMemorySecretStore;
 pub use nats::NatsSecretStore;
 
 /// Create a secret store from configuration.

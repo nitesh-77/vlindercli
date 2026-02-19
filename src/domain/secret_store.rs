@@ -53,3 +53,62 @@ impl fmt::Display for SecretStoreError {
 }
 
 impl std::error::Error for SecretStoreError {}
+
+// ============================================================================
+// In-Memory Implementation (for testing)
+// ============================================================================
+
+/// In-memory secret store for single-process use and testing.
+///
+/// Secrets are stored in a `HashMap` behind a `Mutex` — same pattern
+/// as `InMemoryQueue`. No persistence, no encryption.
+pub struct InMemorySecretStore {
+    secrets: std::sync::Mutex<std::collections::HashMap<String, Vec<u8>>>,
+}
+
+impl InMemorySecretStore {
+    pub fn new() -> Self {
+        Self {
+            secrets: std::sync::Mutex::new(std::collections::HashMap::new()),
+        }
+    }
+}
+
+impl Default for InMemorySecretStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SecretStore for InMemorySecretStore {
+    fn put(&self, name: &str, value: &[u8]) -> Result<(), SecretStoreError> {
+        let mut secrets = self.secrets.lock().unwrap();
+        secrets.insert(name.to_string(), value.to_vec());
+        Ok(())
+    }
+
+    fn get(&self, name: &str) -> Result<Vec<u8>, SecretStoreError> {
+        let secrets = self.secrets.lock().unwrap();
+        secrets
+            .get(name)
+            .cloned()
+            .ok_or_else(|| SecretStoreError::NotFound(name.to_string()))
+    }
+
+    fn exists(&self, name: &str) -> Result<bool, SecretStoreError> {
+        let secrets = self.secrets.lock().unwrap();
+        Ok(secrets.contains_key(name))
+    }
+
+    fn delete(&self, name: &str) -> Result<(), SecretStoreError> {
+        let mut secrets = self.secrets.lock().unwrap();
+        if secrets.remove(name).is_some() {
+            Ok(())
+        } else {
+            Err(SecretStoreError::DeleteFailed(format!(
+                "secret not found: {}",
+                name
+            )))
+        }
+    }
+}
