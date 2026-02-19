@@ -66,7 +66,7 @@ pub use message::{
     ExpectsReply, ObservableMessage,
 };
 pub use service_payloads::{RequestPayload, ResponsePayload};
-pub use message_queue::{MessageQueue, QueueError, agent_routing_key};
+pub use message_queue::{Acknowledgement, MessageQueue, QueueError, agent_routing_key};
 pub use diagnostics::{
     InvokeDiagnostics, RequestDiagnostics, ServiceDiagnostics, ServiceMetrics,
     ContainerDiagnostics, ContainerRuntimeInfo, DelegateDiagnostics,

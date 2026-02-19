@@ -12,6 +12,9 @@
 use super::{Agent, CompleteMessage, DelegateMessage, InvokeMessage, Operation, RequestMessage, ResponseMessage, ResourceId, ServiceType, SubmissionId};
 use std::fmt;
 
+/// One-shot closure that acknowledges a received message was processed.
+pub type Acknowledgement = Box<dyn FnOnce() -> Result<(), QueueError> + Send>;
+
 // --- MessageQueue Trait ---
 
 /// A message queue for sending and receiving typed messages (ADR 044).
@@ -111,6 +114,57 @@ pub trait MessageQueue {
 
     /// Receive a CompleteMessage on a specific subject (for delegation replies).
     fn receive_complete_on_subject(&self, subject: &str) -> Result<(CompleteMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError>;
+
+    // -------------------------------------------------------------------------
+    // Request-reply facades (ADR 092)
+    // -------------------------------------------------------------------------
+
+    /// Send a service request and block until the response arrives.
+    ///
+    /// Used by agents (via sidecar/QueueBridge) for service calls.
+    fn call_service(&self, msg: RequestMessage) -> Result<ResponseMessage, QueueError> {
+        let msg_for_recv = msg.clone();
+        send_and_wait(
+            || self.send_request(msg),
+            || self.receive_response(&msg_for_recv),
+        )
+    }
+
+    /// Send an invocation and block until the agent completes.
+    ///
+    /// Used by the harness to run an agent to completion.
+    fn run_agent(&self, msg: InvokeMessage) -> Result<CompleteMessage, QueueError> {
+        let submission = msg.submission.clone();
+        let harness = msg.harness.as_str().to_string();
+        send_and_wait(
+            || self.send_invoke(msg),
+            || self.receive_complete(&submission, &harness),
+        )
+    }
+}
+
+// --- Request-reply internals ---
+
+/// Send a message and poll until the correlated reply arrives (ADR 092).
+///
+/// Single implementation behind `call_service()` and `run_agent()`.
+fn send_and_wait<T>(
+    send: impl FnOnce() -> Result<(), QueueError>,
+    receive: impl Fn() -> Result<(T, Acknowledgement), QueueError>,
+) -> Result<T, QueueError> {
+    send()?;
+    loop {
+        match receive() {
+            Ok((reply, ack)) => {
+                let _ = ack();
+                return Ok(reply);
+            }
+            Err(QueueError::Timeout) => {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            Err(e) => return Err(e),
+        }
+    }
 }
 
 // --- Errors ---
