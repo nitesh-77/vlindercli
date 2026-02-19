@@ -8,39 +8,44 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-use crate::domain::EmbeddingEngine;
+use crate::domain::{EmbeddingEngine, Model};
 use crate::domain::registry::Registry;
 use crate::domain::service_payloads::EmbedRequest;
-use crate::embedding::open_embedding_engine;
 use crate::domain::{MessageQueue, Operation, RequestMessage, ResponseMessage, ServiceDiagnostics, ServiceMetrics, ServiceType};
-use crate::services::embedding;
 
 // ============================================================================
 // Handler
 // ============================================================================
+
+/// Factory function that opens an embedding engine for a given model.
+pub type OpenEmbeddingEngine = Box<dyn Fn(&Model) -> Result<Arc<dyn EmbeddingEngine>, String> + Send + Sync>;
 
 pub struct EmbeddingServiceWorker {
     queue: Arc<dyn MessageQueue + Send + Sync>,
     registry: Arc<dyn Registry>,
     engines: RwLock<HashMap<String, Arc<dyn EmbeddingEngine>>>,
     backend: String,
+    open_engine: OpenEmbeddingEngine,
 }
 
 impl EmbeddingServiceWorker {
     /// Create a new embedding worker for a specific backend.
     ///
-    /// The backend determines which queue this worker subscribes to:
-    /// - "ollama" → `vlinder.svc.embed.ollama`
+    /// The `open_engine` factory is called to lazy-load engines from
+    /// registry model metadata. Injected so the worker doesn't depend
+    /// on concrete engine implementations.
     pub fn new(
         queue: Arc<dyn MessageQueue + Send + Sync>,
         registry: Arc<dyn Registry>,
         backend: &str,
+        open_engine: OpenEmbeddingEngine,
     ) -> Self {
         Self {
             queue,
             registry,
             engines: RwLock::new(HashMap::new()),
             backend: backend.to_string(),
+            open_engine,
         }
     }
 
@@ -109,8 +114,7 @@ impl EmbeddingServiceWorker {
             Err(e) => return format!("[error] {}", e).into_bytes(),
         };
 
-        // Call pure service function
-        match embedding::run_embed(engine.as_ref(), &req.text) {
+        match engine.embed(&req.text) {
             Ok(vector) => {
                 // Serialize to JSON for transport
                 match serde_json::to_vec(&vector) {
@@ -150,8 +154,8 @@ impl EmbeddingServiceWorker {
         let model = self.registry.get_model(model_name)
             .ok_or_else(|| format!("model not registered: {}", model_name))?;
 
-        // Load engine
-        let engine = open_embedding_engine(&model)
+        // Load engine via injected factory
+        let engine = (self.open_engine)(&model)
             .map_err(|e| format!("failed to load engine: {}", e))?;
 
         // Cache it (keyed by alias)
@@ -233,6 +237,10 @@ mod tests {
         Arc::new(registry)
     }
 
+    fn test_open_engine() -> OpenEmbeddingEngine {
+        Box::new(|_model: &Model| Err("not used in tests".to_string()))
+    }
+
     #[test]
     fn handles_embed_request() {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
@@ -240,7 +248,7 @@ mod tests {
         let registry = test_registry_with_agent_and_model(
             test_agent_with_model("embedding_model", "nomic-embed"), "nomic-embed",
         );
-        let handler = EmbeddingServiceWorker::new(Arc::clone(&queue), registry, "memory");
+        let handler = EmbeddingServiceWorker::new(Arc::clone(&queue), registry, "memory", test_open_engine());
 
         // Register mock engine (keyed by alias, how agents address it)
         let canned: Vec<f32> = (0..768).map(|i| i as f32 * 0.001).collect();
@@ -284,7 +292,7 @@ mod tests {
         let registry = test_registry_with_agent_and_model(
             test_agent_with_model("embedding_model", "nomic-embed"), "nomic-embed",
         );
-        let handler = EmbeddingServiceWorker::new(Arc::clone(&queue), registry, "memory");
+        let handler = EmbeddingServiceWorker::new(Arc::clone(&queue), registry, "memory", test_open_engine());
 
         let canned: Vec<f32> = (0..768).map(|i| i as f32 * 0.001).collect();
         let engine = Arc::new(InMemoryEmbedding::new(canned));
@@ -323,7 +331,7 @@ mod tests {
         let registry = test_registry_with_agent_and_model(
             test_agent_with_model("embedding_model", "nomic-embed"), "nomic-embed",
         );
-        let handler = EmbeddingServiceWorker::new(Arc::clone(&queue), registry, "memory");
+        let handler = EmbeddingServiceWorker::new(Arc::clone(&queue), registry, "memory", test_open_engine());
 
         // Register mock engine under alias agent didn't declare
         let canned: Vec<f32> = (0..768).map(|i| i as f32 * 0.001).collect();
@@ -363,7 +371,7 @@ mod tests {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
         // Registry with no agents registered
         let registry: Arc<dyn Registry> = Arc::new(InMemoryRegistry::new(test_secret_store()));
-        let handler = EmbeddingServiceWorker::new(Arc::clone(&queue), registry, "memory");
+        let handler = EmbeddingServiceWorker::new(Arc::clone(&queue), registry, "memory", test_open_engine());
 
         // Register mock engine
         let canned: Vec<f32> = (0..768).map(|i| i as f32 * 0.001).collect();

@@ -12,7 +12,7 @@ mod embedding;
 
 pub use dag::{reconstruct_observable_message, build_dag_node};
 pub use git_dag::GitDagWorker;
-pub use object::ObjectServiceWorker;
-pub use vector::VectorServiceWorker;
-pub use inference::InferenceServiceWorker;
-pub use embedding::EmbeddingServiceWorker;
+pub use object::{ObjectServiceWorker, OpenObjectStorage, OpenStateStore};
+pub use vector::{VectorServiceWorker, OpenVectorStorage};
+pub use inference::{InferenceServiceWorker, OpenInferenceEngine};
+pub use embedding::{EmbeddingServiceWorker, OpenEmbeddingEngine};

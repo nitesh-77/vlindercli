@@ -9,39 +9,44 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
 
-use crate::domain::{InferenceEngine, InferenceResult};
+use crate::domain::{InferenceEngine, InferenceResult, Model};
 use crate::domain::registry::Registry;
 use crate::domain::service_payloads::InferRequest;
-use crate::inference::open_inference_engine;
 use crate::domain::{MessageQueue, Operation, RequestMessage, ResponseMessage, ServiceDiagnostics, ServiceMetrics, ServiceType};
-use crate::services::inference;
 
 // ============================================================================
 // Handler
 // ============================================================================
+
+/// Factory function that opens an inference engine for a given model.
+pub type OpenInferenceEngine = Box<dyn Fn(&Model) -> Result<Arc<dyn InferenceEngine>, String> + Send + Sync>;
 
 pub struct InferenceServiceWorker {
     queue: Arc<dyn MessageQueue + Send + Sync>,
     registry: Arc<dyn Registry>,
     engines: RwLock<HashMap<String, Arc<dyn InferenceEngine>>>,
     backend: String,
+    open_engine: OpenInferenceEngine,
 }
 
 impl InferenceServiceWorker {
     /// Create a new inference worker for a specific backend.
     ///
-    /// The backend determines which queue this worker subscribes to:
-    /// - "ollama" → `vlinder.svc.infer.ollama`
+    /// The `open_engine` factory is called to lazy-load engines from
+    /// registry model metadata. Injected so the worker doesn't depend
+    /// on concrete engine implementations.
     pub fn new(
         queue: Arc<dyn MessageQueue + Send + Sync>,
         registry: Arc<dyn Registry>,
         backend: &str,
+        open_engine: OpenInferenceEngine,
     ) -> Self {
         Self {
             queue,
             registry,
             engines: RwLock::new(HashMap::new()),
             backend: backend.to_string(),
+            open_engine,
         }
     }
 
@@ -106,8 +111,7 @@ impl InferenceServiceWorker {
         let engine = self.get_or_load_engine(&req.model, &model_name)
             .map_err(|e| format!("[error] {}", e).into_bytes())?;
 
-        // Call pure service function
-        inference::run_infer(engine.as_ref(), &req.prompt, req.max_tokens)
+        engine.infer(&req.prompt, req.max_tokens)
             .map_err(|e| format!("[error] {}", e).into_bytes())
     }
 
@@ -139,8 +143,8 @@ impl InferenceServiceWorker {
         let model = self.registry.get_model(model_name)
             .ok_or_else(|| format!("model not registered: {}", model_name))?;
 
-        // Load engine
-        let engine = open_inference_engine(&model)
+        // Load engine via injected factory
+        let engine = (self.open_engine)(&model)
             .map_err(|e| format!("failed to load engine: {}", e))?;
 
         // Cache it (keyed by alias)
@@ -222,6 +226,10 @@ mod tests {
         Arc::new(registry)
     }
 
+    fn test_open_engine() -> OpenInferenceEngine {
+        Box::new(|_model: &Model| Err("not used in tests".to_string()))
+    }
+
     #[test]
     fn handles_infer_request() {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
@@ -229,7 +237,7 @@ mod tests {
         let registry = test_registry_with_agent_and_model(
             test_agent_with_model("inference_model", "phi3"), "phi3",
         );
-        let handler = InferenceServiceWorker::new(Arc::clone(&queue), registry, "memory");
+        let handler = InferenceServiceWorker::new(Arc::clone(&queue), registry, "memory", test_open_engine());
 
         // Register mock engine (keyed by alias, how agents address it)
         let engine = Arc::new(InMemoryInference::new("test response"));
@@ -271,7 +279,7 @@ mod tests {
         let registry = test_registry_with_agent_and_model(
             test_agent_with_model("inference_model", "phi3"), "phi3",
         );
-        let handler = InferenceServiceWorker::new(Arc::clone(&queue), registry, "memory");
+        let handler = InferenceServiceWorker::new(Arc::clone(&queue), registry, "memory", test_open_engine());
 
         let engine = Arc::new(InMemoryInference::new("test response"));
         handler.register("inference_model", engine);
@@ -309,7 +317,7 @@ mod tests {
         let registry = test_registry_with_agent_and_model(
             test_agent_with_model("inference_model", "phi3"), "phi3",
         );
-        let handler = InferenceServiceWorker::new(Arc::clone(&queue), registry, "memory");
+        let handler = InferenceServiceWorker::new(Arc::clone(&queue), registry, "memory", test_open_engine());
 
         // Register mock engine under alias agent didn't declare
         let engine = Arc::new(InMemoryInference::new("test response"));
@@ -348,7 +356,7 @@ mod tests {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
         // Registry with no agents registered
         let registry: Arc<dyn Registry> = Arc::new(InMemoryRegistry::new(test_secret_store()));
-        let handler = InferenceServiceWorker::new(Arc::clone(&queue), registry, "memory");
+        let handler = InferenceServiceWorker::new(Arc::clone(&queue), registry, "memory", test_open_engine());
 
         // Register mock engine
         let engine = Arc::new(InMemoryInference::new("test response"));

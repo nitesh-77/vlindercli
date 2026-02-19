@@ -19,9 +19,13 @@ use crate::domain::registry::Registry;
 use crate::domain::service_payloads::{KvGetRequest, KvPutRequest, KvListRequest, KvDeleteRequest};
 use crate::domain::{ObjectStorage, ResourceId};
 use crate::domain::{MessageQueue, Operation, RequestMessage, ResponseMessage, ServiceDiagnostics, ServiceType};
-use crate::services::object_storage;
-use crate::storage::dispatch::open_object_storage_from_uri;
 use crate::domain::{hash_snapshot, hash_state_commit, hash_value, StateStore};
+
+/// Factory function that opens object storage from a URI.
+pub type OpenObjectStorage = Box<dyn Fn(&ResourceId) -> Result<Arc<dyn ObjectStorage>, String> + Send + Sync>;
+
+/// Factory function that opens a state store for an agent.
+pub type OpenStateStore = Box<dyn Fn(&str) -> Result<Arc<dyn StateStore>, String> + Send + Sync>;
 
 // ============================================================================
 // Handler
@@ -33,18 +37,22 @@ pub struct ObjectServiceWorker {
     stores: RwLock<HashMap<String, Arc<dyn ObjectStorage>>>,
     state_stores: RwLock<HashMap<String, Arc<dyn StateStore>>>,
     backend: String,
+    open_storage: OpenObjectStorage,
+    open_state_store: OpenStateStore,
 }
 
 impl ObjectServiceWorker {
     /// Create a new object storage worker for a specific backend.
     ///
-    /// The backend determines which queues this worker subscribes to:
-    /// - "sqlite" → `vlinder.svc.kv.sqlite.*`
-    /// - "memory" → `vlinder.svc.kv.memory.*`
+    /// The `open_storage` and `open_state_store` factories are called
+    /// to lazy-load stores from agent metadata. Injected so the worker
+    /// doesn't depend on concrete storage implementations.
     pub fn new(
         queue: Arc<dyn MessageQueue + Send + Sync>,
         registry: Arc<dyn Registry>,
         backend: &str,
+        open_storage: OpenObjectStorage,
+        open_state_store: OpenStateStore,
     ) -> Self {
         Self {
             queue,
@@ -52,6 +60,8 @@ impl ObjectServiceWorker {
             stores: RwLock::new(HashMap::new()),
             state_stores: RwLock::new(HashMap::new()),
             backend: backend.to_string(),
+            open_storage,
+            open_state_store,
         }
     }
 
@@ -69,50 +79,21 @@ impl ObjectServiceWorker {
         let uri = agent.object_storage
             .ok_or_else(|| format!("agent has no object_storage declared: {}", agent_id))?;
 
-        // Open storage
-        let storage = open_object_storage_from_uri(&uri)
-            .map_err(|e| format!("failed to open object storage: {}", e))?;
+        // Open storage via injected factory
+        let storage = (self.open_storage)(&uri)?;
 
         // Cache and return
         self.stores.write().unwrap().insert(agent_id.to_string(), storage.clone());
         Ok(storage)
     }
 
-    /// Get or open a StateStore for an agent, derived from the object_storage URI.
+    /// Get or open a StateStore for an agent via the injected factory.
     fn get_or_open_state_store(&self, agent_id: &str) -> Result<Arc<dyn StateStore>, String> {
         if let Some(store) = self.state_stores.read().unwrap().get(agent_id) {
             return Ok(store.clone());
         }
 
-        let resource_id = ResourceId::new(agent_id);
-        let agent = self.registry.get_agent(&resource_id)
-            .ok_or_else(|| format!("unknown agent: {}", agent_id))?;
-        let uri = agent.object_storage
-            .ok_or_else(|| format!("agent has no object_storage declared: {}", agent_id))?;
-
-        // Derive state store path from the object storage URI.
-        // For sqlite:///path/to/data.db → /path/to/state.db
-        // For memory:// → use a temp file (tests only)
-        let path = match uri.scheme() {
-            Some("sqlite") => {
-                let db_path = uri.path()
-                    .ok_or_else(|| "sqlite URI has no path".to_string())?;
-                let parent = std::path::Path::new(db_path).parent()
-                    .ok_or_else(|| "sqlite path has no parent".to_string())?;
-                parent.join("state.db")
-            }
-            Some("memory") => {
-                // In-memory agents use a temp path for state (won't persist, but works for tests)
-                let dir = std::env::temp_dir().join("vlinder-state");
-                std::fs::create_dir_all(&dir).ok();
-                dir.join(format!("{}.db", agent_id.replace(['/', ':'], "_")))
-            }
-            _ => return Err("unsupported storage scheme for state store".to_string()),
-        };
-
-        let store: Arc<dyn StateStore> = Arc::new(
-            crate::storage::state_store::SqliteStateStore::open(&path)?
-        );
+        let store = (self.open_state_store)(agent_id)?;
         self.state_stores.write().unwrap().insert(agent_id.to_string(), store.clone());
         Ok(store)
     }
@@ -238,9 +219,9 @@ impl ObjectServiceWorker {
             Err(e) => return format!("[error] {}", e).into_bytes(),
         };
 
-        match object_storage::get_file(store.as_ref(), &req.path) {
-            Ok(content) => content,
-            Err(object_storage::Error::FileNotFound) => Vec::new(),
+        match store.get_file(&req.path) {
+            Ok(Some(content)) => content,
+            Ok(None) => Vec::new(),
             Err(e) => format!("[error] {}", e).into_bytes(),
         }
     }
@@ -263,7 +244,7 @@ impl ObjectServiceWorker {
         };
 
         // Always write to ObjectStorage (current-state access for unversioned reads)
-        if let Err(e) = object_storage::put_file(store.as_ref(), &req.path, &content) {
+        if let Err(e) = store.put_file(&req.path, &content) {
             return format!("[error] {}", e).into_bytes();
         }
 
@@ -293,9 +274,12 @@ impl ObjectServiceWorker {
             Err(e) => return format!("[error] {}", e).into_bytes(),
         };
 
-        // Call pure service function
-        match object_storage::list_files(store.as_ref(), &req.path) {
-            Ok(json) => json.into_bytes(),
+        match store.list_files(&req.path) {
+            Ok(files) => {
+                serde_json::to_string(&files)
+                    .map(|s| s.into_bytes())
+                    .unwrap_or_else(|e| format!("[error] {}", e).into_bytes())
+            }
             Err(e) => format!("[error] {}", e).into_bytes(),
         }
     }
@@ -311,9 +295,9 @@ impl ObjectServiceWorker {
             Err(e) => return format!("[error] {}", e).into_bytes(),
         };
 
-        // Call pure service function
-        match object_storage::delete_file(store.as_ref(), &req.path) {
-            Ok(result) => result.into_bytes(),
+        match store.delete_file(&req.path) {
+            Ok(true) => b"ok".to_vec(),
+            Ok(false) => b"not_found".to_vec(),
             Err(e) => format!("[error] {}", e).into_bytes(),
         }
     }
@@ -445,6 +429,18 @@ mod tests {
         Agent::from_toml(manifest).unwrap()
     }
 
+    fn test_open_storage() -> OpenObjectStorage {
+        Box::new(|_uri: &ResourceId| {
+            Ok(Arc::new(crate::storage::InMemoryObjectStorage::new()) as Arc<dyn ObjectStorage>)
+        })
+    }
+
+    fn test_open_state_store() -> OpenStateStore {
+        Box::new(|_agent_id: &str| {
+            Ok(Arc::new(crate::storage::InMemoryStateStore::new()) as Arc<dyn StateStore>)
+        })
+    }
+
     #[test]
     fn handles_put_and_get() {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
@@ -457,7 +453,7 @@ mod tests {
         registry.register_agent(agent).unwrap();
 
         let registry: Arc<dyn Registry> = Arc::new(registry);
-        let handler = ObjectServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry), "memory");
+        let handler = ObjectServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry), "memory", test_open_storage(), test_open_state_store());
 
         // Send typed put request (ADR 044)
         let put_payload = serde_json::json!({
@@ -522,7 +518,7 @@ mod tests {
         let agent = test_agent_with_object_storage();
         registry.register_agent(agent).unwrap();
         let registry: Arc<dyn Registry> = Arc::new(registry);
-        let handler = ObjectServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry), "memory");
+        let handler = ObjectServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry), "memory", test_open_storage(), test_open_state_store());
 
         let put_payload = serde_json::json!({
             "path": "/todos.json",
@@ -561,7 +557,7 @@ mod tests {
         let agent = test_agent_with_object_storage();
         registry.register_agent(agent).unwrap();
         let registry: Arc<dyn Registry> = Arc::new(registry);
-        let handler = ObjectServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry), "memory");
+        let handler = ObjectServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry), "memory", test_open_storage(), test_open_state_store());
 
         // Put with state
         let put_payload = serde_json::json!({
@@ -614,7 +610,7 @@ mod tests {
         let agent = test_agent_with_object_storage();
         registry.register_agent(agent).unwrap();
         let registry: Arc<dyn Registry> = Arc::new(registry);
-        let handler = ObjectServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry), "memory");
+        let handler = ObjectServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry), "memory", test_open_storage(), test_open_state_store());
 
         // First put
         let put1 = serde_json::json!({
@@ -687,7 +683,7 @@ mod tests {
         let agent = test_agent_with_object_storage();
         registry.register_agent(agent).unwrap();
         let registry: Arc<dyn Registry> = Arc::new(registry);
-        let handler = ObjectServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry), "memory");
+        let handler = ObjectServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry), "memory", test_open_storage(), test_open_state_store());
 
         // Put to create a state
         let put = serde_json::json!({
@@ -736,7 +732,7 @@ mod tests {
         let agent = test_agent_with_object_storage();
         registry.register_agent(agent).unwrap();
         let registry: Arc<dyn Registry> = Arc::new(registry);
-        let handler = ObjectServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry), "memory");
+        let handler = ObjectServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry), "memory", test_open_storage(), test_open_state_store());
 
         // First put a file so get has something to return
         let put_payload = serde_json::json!({
@@ -784,7 +780,7 @@ mod tests {
         let agent = test_agent_with_object_storage();
         registry.register_agent(agent).unwrap();
         let registry: Arc<dyn Registry> = Arc::new(registry);
-        let handler = ObjectServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry), "memory");
+        let handler = ObjectServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry), "memory", test_open_storage(), test_open_state_store());
 
         let put_payload = serde_json::json!({
             "path": "/test.txt",

@@ -12,8 +12,9 @@ use crate::domain::registry::Registry;
 use crate::domain::service_payloads::{VectorStoreRequest, VectorSearchRequest, VectorDeleteRequest};
 use crate::domain::{VectorStorage, ResourceId};
 use crate::domain::{MessageQueue, Operation, RequestMessage, ResponseMessage, ServiceDiagnostics, ServiceType};
-use crate::services::vector_storage;
-use crate::storage::dispatch::open_vector_storage_from_uri;
+
+/// Factory function that opens vector storage from a URI.
+pub type OpenVectorStorage = Box<dyn Fn(&ResourceId) -> Result<Arc<dyn VectorStorage>, String> + Send + Sync>;
 
 // ============================================================================
 // Handler
@@ -24,24 +25,27 @@ pub struct VectorServiceWorker {
     registry: Arc<dyn Registry>,
     stores: RwLock<HashMap<String, Arc<dyn VectorStorage>>>,
     backend: String,
+    open_storage: OpenVectorStorage,
 }
 
 impl VectorServiceWorker {
     /// Create a new vector storage worker for a specific backend.
     ///
-    /// The backend determines which queues this worker subscribes to:
-    /// - "sqlite-vec" → `vlinder.svc.vec.sqlite-vec.*`
-    /// - "memory" → `vlinder.svc.vec.memory.*`
+    /// The `open_storage` factory is called to lazy-load stores from
+    /// agent metadata. Injected so the worker doesn't depend on
+    /// concrete storage implementations.
     pub fn new(
         queue: Arc<dyn MessageQueue + Send + Sync>,
         registry: Arc<dyn Registry>,
         backend: &str,
+        open_storage: OpenVectorStorage,
     ) -> Self {
         Self {
             queue,
             registry,
             stores: RwLock::new(HashMap::new()),
             backend: backend.to_string(),
+            open_storage,
         }
     }
 
@@ -59,9 +63,8 @@ impl VectorServiceWorker {
         let uri = agent.vector_storage
             .ok_or_else(|| format!("agent has no vector_storage declared: {}", agent_id))?;
 
-        // Open storage
-        let storage = open_vector_storage_from_uri(&uri)
-            .map_err(|e| format!("failed to open vector storage: {}", e))?;
+        // Open storage via injected factory
+        let storage = (self.open_storage)(&uri)?;
 
         // Cache and return
         self.stores.write().unwrap().insert(agent_id.to_string(), storage.clone());
@@ -151,8 +154,7 @@ impl VectorServiceWorker {
             Err(e) => return format!("[error] {}", e).into_bytes(),
         };
 
-        // Call pure service function (vec variant)
-        match vector_storage::store_embedding_vec(store.as_ref(), &req.key, &req.vector, &req.metadata) {
+        match store.store_embedding(&req.key, &req.vector, &req.metadata) {
             Ok(_) => b"ok".to_vec(),
             Err(e) => format!("[error] {}", e).into_bytes(),
         }
@@ -169,9 +171,21 @@ impl VectorServiceWorker {
             Err(e) => return format!("[error] {}", e).into_bytes(),
         };
 
-        // Call pure service function (vec variant)
-        match vector_storage::search_by_vec(store.as_ref(), &req.vector, req.limit) {
-            Ok(json) => json.into_bytes(),
+        match store.search_by_vector(&req.vector, req.limit) {
+            Ok(results) => {
+                let formatted: Vec<serde_json::Value> = results.iter()
+                    .map(|(key, metadata, distance)| {
+                        serde_json::json!({
+                            "key": key,
+                            "metadata": metadata,
+                            "distance": distance
+                        })
+                    })
+                    .collect();
+                serde_json::to_string(&formatted)
+                    .map(|s| s.into_bytes())
+                    .unwrap_or_else(|e| format!("[error] {}", e).into_bytes())
+            }
             Err(e) => format!("[error] {}", e).into_bytes(),
         }
     }
@@ -237,6 +251,12 @@ mod tests {
         Agent::from_toml(manifest).unwrap()
     }
 
+    fn test_open_vector_storage() -> OpenVectorStorage {
+        Box::new(|_uri: &ResourceId| {
+            Ok(Arc::new(crate::storage::InMemoryVectorStorage::new()) as Arc<dyn VectorStorage>)
+        })
+    }
+
     #[test]
     fn vector_search_response_echoes_state() {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
@@ -246,7 +266,7 @@ mod tests {
         let agent = test_agent_with_vector_storage();
         registry.register_agent(agent).unwrap();
         let registry: Arc<dyn Registry> = Arc::new(registry);
-        let handler = VectorServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry), "memory");
+        let handler = VectorServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry), "memory", test_open_vector_storage());
 
         // Store an embedding first
         let embedding: Vec<f32> = (0..768).map(|i| i as f32 * 0.001).collect();
@@ -301,7 +321,7 @@ mod tests {
         registry.register_agent(agent).unwrap();
 
         let registry: Arc<dyn Registry> = Arc::new(registry);
-        let handler = VectorServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry), "memory");
+        let handler = VectorServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry), "memory", test_open_vector_storage());
 
         // Store embedding - worker will lazy-open storage from agent's URI
         let embedding: Vec<f32> = (0..768).map(|i| i as f32 * 0.001).collect();
