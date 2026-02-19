@@ -13,7 +13,6 @@ pub mod registry_service;
 pub mod state_service;
 pub mod runtime;
 pub mod session_server;
-pub mod services;
 pub mod storage;
 pub mod supervisor;
 pub mod worker;
