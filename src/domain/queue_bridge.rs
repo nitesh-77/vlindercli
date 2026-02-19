@@ -105,45 +105,15 @@ impl QueueBridge {
 
         tracing::debug!(sha = %sha, event = "service.request", service = %request.service, backend = %request.backend, seq = %seq, "sending service request");
 
-        self.queue.send_request(request.clone())
-            .map_err(|e| format!("send error: {}", e))?;
+        let response = self.queue.call_service(request)
+            .map_err(|e| format!("service call error: {}", e))?;
 
-        tracing::debug!(sha = %sha, event = "service.polling", service = %request.service, seq = %seq, "polling for response");
-        let poll_start = std::time::Instant::now();
-        let mut poll_count: u64 = 0;
-
-        loop {
-            match self.queue.receive_response(&request) {
-                Ok((response, ack)) => {
-                    // Update state cursor from response envelope (ADR 079)
-                    if let Some(ref state) = response.state {
-                        *self.current_state.write().unwrap() = Some(state.clone());
-                    }
-                    let response_payload = response.payload.legacy_bytes().to_vec();
-                    let _ = ack();
-                    tracing::debug!(
-                        sha = %sha, event = "service.response",
-                        service = %request.service, seq = %seq,
-                        polls = poll_count, elapsed = ?poll_start.elapsed(),
-                        "got response"
-                    );
-                    return Ok(response_payload);
-                }
-                Err(e) => {
-                    poll_count += 1;
-                    if poll_count % 5000 == 0 {
-                        tracing::warn!(
-                            sha = %sha,
-                            service = %request.service, seq = %seq,
-                            polls = poll_count, elapsed = ?poll_start.elapsed(),
-                            error = %e,
-                            "still waiting for response"
-                        );
-                    }
-                }
-            }
-            std::thread::sleep(std::time::Duration::from_millis(1));
+        // Update state cursor from response envelope (ADR 079)
+        if let Some(ref state) = response.state {
+            *self.current_state.write().unwrap() = Some(state.clone());
         }
+
+        Ok(response.payload.legacy_bytes().to_vec())
     }
 
     /// Check for `[error]` prefix in a worker response.
