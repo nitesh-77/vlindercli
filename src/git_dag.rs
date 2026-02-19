@@ -55,9 +55,7 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 
-use crate::domain::message::ObservableMessage;
-use crate::domain::registry::Registry;
-use crate::domain::DagWorker;
+use crate::domain::{DagWorker, ObservableMessage, Registry};
 
 /// DAG worker that writes commits to a git repository.
 pub struct GitDagWorker {
@@ -578,11 +576,14 @@ fn message_state(msg: &ObservableMessage) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::message::*;
-    use crate::domain::diagnostics::*;
-    use crate::domain::{ContainerId, Operation, RuntimeType, ResourceId, ServiceType, Agent, SecretStore};
-    use crate::domain::InMemorySecretStore;
-    use crate::domain::InMemoryRegistry;
+    use crate::domain::{
+        InvokeMessage, RequestMessage, ResponseMessage, CompleteMessage, DelegateMessage,
+        ObservableMessage, HarnessType, TimelineId, SubmissionId, SessionId, Sequence,
+        InvokeDiagnostics, RequestDiagnostics, ServiceDiagnostics, ServiceMetrics,
+        ContainerDiagnostics, ContainerRuntimeInfo, DelegateDiagnostics,
+        ContainerId, Operation, RuntimeType, ResourceId, ServiceType, Agent, SecretStore,
+        InMemorySecretStore, InMemoryRegistry,
+    };
 
     fn test_agent_id() -> ResourceId {
         ResourceId::new("http://127.0.0.1:9000/agents/support-agent")

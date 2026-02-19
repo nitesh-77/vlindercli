@@ -3,6 +3,7 @@ pub mod cli;
 pub mod config;
 pub mod domain;
 pub mod embedding;
+pub mod git_dag;
 pub mod harness;
 pub mod inference;
 pub mod loader;

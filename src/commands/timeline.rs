@@ -558,7 +558,7 @@ fn passthrough(dir: &Path, args: &[String]) {
 mod tests {
     use super::*;
     use chrono::DateTime;
-    use vlindercli::domain::workers::GitDagWorker;
+    use vlindercli::git_dag::GitDagWorker;
     use vlindercli::domain::DagWorker;
     use vlindercli::domain::{
         InvokeMessage, CompleteMessage, ObservableMessage,

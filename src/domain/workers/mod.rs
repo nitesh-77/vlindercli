@@ -4,14 +4,12 @@
 //! storage/inference/embedding backends.
 
 pub mod dag;
-mod git_dag;
 mod object;
 mod vector;
 mod inference;
 mod embedding;
 
 pub use dag::{reconstruct_observable_message, build_dag_node};
-pub use git_dag::GitDagWorker;
 pub use object::{ObjectServiceWorker, OpenObjectStorage, OpenStateStore};
 pub use vector::{VectorServiceWorker, OpenVectorStorage};
 pub use inference::{InferenceServiceWorker, OpenInferenceEngine};

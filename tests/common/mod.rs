@@ -8,7 +8,7 @@ use std::process::Command;
 
 use chrono::{DateTime, Utc};
 
-use vlindercli::domain::workers::GitDagWorker;
+use vlindercli::git_dag::GitDagWorker;
 use vlindercli::domain::{
     CompleteMessage, ContainerDiagnostics, HarnessType, InvokeDiagnostics, InvokeMessage,
     ObservableMessage, ResourceId, RuntimeType, SessionId, SubmissionId, TimelineId,

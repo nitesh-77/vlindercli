@@ -13,6 +13,7 @@ use common::*;
 
 use vlindercli::domain::workers::dag::build_dag_node;
 use vlindercli::domain::{DagStore, DagWorker};
+use vlindercli::git_dag::GitDagWorker;
 use vlindercli::storage::dag_store::SqliteDagStore;
 
 // ============================================================================
@@ -174,7 +175,7 @@ fn fork_creates_independent_branch() {
     // Write a new complete on the repair branch (different answer)
     // Re-open the worker on the repair branch
     let mut repair_worker =
-        vlindercli::domain::workers::GitDagWorker::open(&conv_dir, "test.local:9000", None)
+        GitDagWorker::open(&conv_dir, "test.local:9000", None)
             .unwrap();
     let (alt_complete, t3) = make_complete(
         "sess-1",
@@ -277,7 +278,7 @@ fn checkout_then_promote_full_workflow() {
 
     // Write a new alternative complete (different answer for turn 1)
     let mut repair_worker =
-        vlindercli::domain::workers::GitDagWorker::open(&conv_dir, "test.local:9000", None)
+        GitDagWorker::open(&conv_dir, "test.local:9000", None)
             .unwrap();
     let (alt_complete, t5) = make_complete(
         "sess-1",
