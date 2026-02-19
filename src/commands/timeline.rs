@@ -16,7 +16,7 @@ use std::sync::Arc;
 use clap::Subcommand;
 
 use vlindercli::config::{Config, conversations_dir};
-use vlindercli::domain::{DagStore, Harness, MessageQueue, Registry, TimelineId, agent_routing_key};
+use vlindercli::domain::{DagStore, MessageQueue, Registry, TimelineId, agent_routing_key};
 use vlindercli::harness::CliHarness;
 
 #[derive(Subcommand, Debug, PartialEq)]
@@ -413,19 +413,10 @@ fn repair(dir: &Path, path: Option<PathBuf>) {
 
     println!();
 
-    // Enter REPL
+    // Enter REPL with synchronous run_agent (ADR 092)
     super::repl::run(|input| {
-        match harness.invoke(&agent_id, input) {
-            Ok(job_id) => {
-                loop {
-                    harness.tick();
-                    if let Some(result) = harness.poll(&job_id) {
-                        harness.record_response(&result);
-                        return result;
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(10));
-                }
-            }
+        match harness.run_agent(&agent_id, input) {
+            Ok(result) => result,
             Err(e) => format!("[error] {}", e),
         }
     });

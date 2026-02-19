@@ -4,7 +4,7 @@ use std::sync::Arc;
 use clap::{Subcommand, ValueEnum};
 
 use vlindercli::config::Config;
-use vlindercli::domain::{DagStore, Harness, Registry, agent_routing_key, MessageQueue};
+use vlindercli::domain::{DagStore, Registry, agent_routing_key, MessageQueue};
 use vlindercli::harness::{CliHarness, read_latest_state};
 use vlindercli::queue;
 use vlindercli::registry_service::{GrpcRegistryClient, ping_registry};
@@ -129,19 +129,10 @@ fn run(path: Option<PathBuf>) {
     // Read state from state service (ADR 079)
     apply_latest_state(&config, &mut harness, &agent_name);
 
-    // Run REPL - harness ticks to process responses
+    // Run REPL with synchronous run_agent (ADR 092)
     repl::run(|input| {
-        match harness.invoke(&agent_id, input) {
-            Ok(job_id) => {
-                loop {
-                    harness.tick();
-                    if let Some(result) = harness.poll(&job_id) {
-                        harness.record_response(&result);
-                        return result;
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(10));
-                }
-            }
+        match harness.run_agent(&agent_id, input) {
+            Ok(result) => result,
             Err(e) => format!("[error] {}", e),
         }
     });

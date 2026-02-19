@@ -4,7 +4,7 @@ use std::sync::Arc;
 use clap::Subcommand;
 
 use vlindercli::config::Config;
-use vlindercli::domain::{DagStore, Fleet, Harness, Registry, agent_routing_key, MessageQueue};
+use vlindercli::domain::{DagStore, Fleet, Registry, agent_routing_key, MessageQueue};
 use vlindercli::harness::{CliHarness, read_latest_state};
 use vlindercli::queue;
 use vlindercli::registry_service::{GrpcRegistryClient, ping_registry};
@@ -162,20 +162,11 @@ pub fn run(path: Option<PathBuf>) {
 
     println!("Fleet '{}' ready. Entry agent: {}", fleet.name, fleet.entry);
 
-    // REPL loop: harness ticks to process responses (workers handle everything else)
+    // Run REPL with synchronous run_agent (ADR 092)
     repl::run(|input| {
         let enriched_input = format!("{}\n\n{}", fleet_context, input);
-        match harness.invoke(&entry_agent_id, &enriched_input) {
-            Ok(job_id) => {
-                loop {
-                    harness.tick();
-                    if let Some(result) = harness.poll(&job_id) {
-                        harness.record_response(&result);
-                        return result;
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(10));
-                }
-            }
+        match harness.run_agent(&entry_agent_id, &enriched_input) {
+            Ok(result) => result,
             Err(e) => format!("[error] {}", e),
         }
     });
