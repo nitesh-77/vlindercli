@@ -75,6 +75,14 @@ Protocol identities — values that appear in messages, routing keys, or
 the conversation DAG — must be content-addressed.
 
 
+## Deferred
+
+Content-addressed identity gives the platform its time-travel capability:
+determinism, traversal, comparison, forking. These properties should be
+a trait-level contract — not an emergent property of implementations
+that happen to hash correctly. See ADR 098.
+
+
 ## Consequences
 
 - The Merkle DAG is the platform's identity model, not just a storage
