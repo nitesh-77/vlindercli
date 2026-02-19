@@ -3,7 +3,6 @@
 //! Domain types (`StateCommit`, `StateStore` trait, `hash_value`, `hash_snapshot`,
 //! `hash_state_commit`) live in `crate::domain`. This module provides implementations:
 //! - `SqliteStateStore` — persistent, for production
-//! - `InMemoryStateStore` — ephemeral, for tests
 //!
 //! Three logical tables mirror git's object model:
 //! - values: Content blobs keyed by SHA-256 hash
