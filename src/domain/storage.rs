@@ -132,8 +132,6 @@ pub trait VectorStorage: Send + Sync {
 pub enum ObjectStorageManifest {
     /// SQLite-backed storage.
     Sqlite { path: PathBuf },
-    /// In-memory storage for testing.
-    InMemory,
 }
 
 // ============================================================================
@@ -149,7 +147,5 @@ pub enum ObjectStorageManifest {
 pub enum VectorStorageManifest {
     /// SQLite-backed storage with sqlite-vec.
     Sqlite { path: PathBuf },
-    /// In-memory storage for testing.
-    InMemory,
 }
 

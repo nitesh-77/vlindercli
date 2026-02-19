@@ -114,9 +114,7 @@ fn run_registry_worker(config: &Config, shutdown: &AtomicBool) {
     // Register non-engine capabilities (engines are registered by open())
     registry.register_runtime(RuntimeType::Container);
     registry.register_object_storage(ObjectStorageType::Sqlite);
-    registry.register_object_storage(ObjectStorageType::InMemory);
     registry.register_vector_storage(VectorStorageType::SqliteVec);
-    registry.register_vector_storage(VectorStorageType::InMemory);
 
     let registry: Arc<dyn Registry> = Arc::new(registry);
 

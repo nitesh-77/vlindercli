@@ -7,8 +7,8 @@ use crate::domain::{
     VectorStorage, VectorStorageManifest,
 };
 
-use super::object::{InMemoryObjectStorage, SqliteObjectStorage};
-use super::vector::{InMemoryVectorStorage, SqliteVectorStorage};
+use super::object::SqliteObjectStorage;
+use super::vector::SqliteVectorStorage;
 
 // ============================================================================
 // Manifest-based dispatch (new)
@@ -22,9 +22,6 @@ pub fn open_object_storage_from(manifest: &ObjectStorageManifest) -> Result<Arc<
                 .map(|s| Arc::new(s) as Arc<dyn ObjectStorage>)
                 .map_err(DispatchError::Sqlite)
         }
-        ObjectStorageManifest::InMemory => {
-            Ok(Arc::new(InMemoryObjectStorage::new()))
-        }
     }
 }
 
@@ -35,9 +32,6 @@ pub fn open_vector_storage_from(manifest: &VectorStorageManifest) -> Result<Arc<
             SqliteVectorStorage::open_at(path)
                 .map(|s| Arc::new(s) as Arc<dyn VectorStorage>)
                 .map_err(DispatchError::Sqlite)
-        }
-        VectorStorageManifest::InMemory => {
-            Ok(Arc::new(InMemoryVectorStorage::new()))
         }
     }
 }
@@ -53,7 +47,6 @@ use std::path::Path;
 ///
 /// Dispatches based on URI scheme:
 /// - `sqlite://path` → SQLite storage at path
-/// - `memory://` → In-memory storage
 pub fn open_object_storage_from_uri(uri: &ResourceId) -> Result<Arc<dyn ObjectStorage>, DispatchError> {
     match uri.scheme() {
         Some("sqlite") => {
@@ -64,7 +57,6 @@ pub fn open_object_storage_from_uri(uri: &ResourceId) -> Result<Arc<dyn ObjectSt
                 .map(|s| Arc::new(s) as Arc<dyn ObjectStorage>)
                 .map_err(DispatchError::Sqlite)
         }
-        Some("memory") => Ok(Arc::new(InMemoryObjectStorage::new())),
         Some(scheme) => Err(DispatchError::UnknownScheme(scheme.to_string())),
         None => Err(DispatchError::InvalidUri("missing scheme".to_string())),
     }
@@ -74,7 +66,6 @@ pub fn open_object_storage_from_uri(uri: &ResourceId) -> Result<Arc<dyn ObjectSt
 ///
 /// Dispatches based on URI scheme:
 /// - `sqlite://path` → SQLite storage at path
-/// - `memory://` → In-memory storage
 pub fn open_vector_storage_from_uri(uri: &ResourceId) -> Result<Arc<dyn VectorStorage>, DispatchError> {
     match uri.scheme() {
         Some("sqlite") => {
@@ -85,7 +76,6 @@ pub fn open_vector_storage_from_uri(uri: &ResourceId) -> Result<Arc<dyn VectorSt
                 .map(|s| Arc::new(s) as Arc<dyn VectorStorage>)
                 .map_err(DispatchError::Sqlite)
         }
-        Some("memory") => Ok(Arc::new(InMemoryVectorStorage::new())),
         Some(scheme) => Err(DispatchError::UnknownScheme(scheme.to_string())),
         None => Err(DispatchError::InvalidUri("missing scheme".to_string())),
     }
@@ -111,28 +101,6 @@ impl std::fmt::Display for DispatchError {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn object_storage_from_in_memory_manifest() {
-        let manifest = ObjectStorageManifest::InMemory;
-        let obj = open_object_storage_from(&manifest).unwrap();
-
-        obj.put_file("/test.txt", b"hello").unwrap();
-        assert_eq!(obj.get_file("/test.txt").unwrap(), Some(b"hello".to_vec()));
-    }
-
-    #[test]
-    fn vector_storage_from_in_memory_manifest() {
-        let manifest = VectorStorageManifest::InMemory;
-        let vec = open_vector_storage_from(&manifest).unwrap();
-
-        let embedding: Vec<f32> = (0..768).map(|i| i as f32 * 0.001).collect();
-        vec.store_embedding("doc1", &embedding, "test doc").unwrap();
-
-        let results = vec.search_by_vector(&embedding, 1).unwrap();
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].0, "doc1");
-    }
 
     #[test]
     fn object_storage_from_sqlite_manifest() {
