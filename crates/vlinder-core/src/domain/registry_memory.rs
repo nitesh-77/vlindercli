@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
 
 use super::{
-    Agent, Job, JobId, JobStatus, Model, ModelType,
+    Agent, AgentManifest, Job, JobId, JobStatus, Model, ModelType,
     ObjectStorageType, Provider, RegistrationError, Registry, ResourceId, RuntimeType,
     SecretStore, ServiceType, SubmissionId, VectorStorageType,
     ensure_agent_identity,
@@ -16,6 +16,8 @@ use super::{
 struct RegistryState {
     jobs: HashMap<JobId, Job>,
     agents: HashMap<ResourceId, Agent>,
+    /// Stored manifests keyed by agent name (ADR 102).
+    manifests: HashMap<String, AgentManifest>,
     models: HashMap<ResourceId, Model>,
     available_runtimes: HashSet<RuntimeType>,
     available_object_storage: HashSet<ObjectStorageType>,
@@ -40,6 +42,7 @@ impl InMemoryRegistry {
             state: RwLock::new(RegistryState {
                 jobs: HashMap::new(),
                 agents: HashMap::new(),
+                manifests: HashMap::new(),
                 models: HashMap::new(),
                 available_runtimes: HashSet::new(),
                 available_object_storage: HashSet::new(),
@@ -191,6 +194,33 @@ impl Registry for InMemoryRegistry {
         agent.id = agent_id.clone();
         state.agents.insert(agent_id, agent);
         Ok(())
+    }
+
+    fn register_manifest(&self, manifest: AgentManifest) -> Result<Agent, RegistrationError> {
+        let agent_id = self.agent_id_internal(&manifest.name);
+
+        // Check idempotency: does an agent with this name already exist?
+        {
+            let state = self.state.read().unwrap();
+            if let Some(stored_manifest) = state.manifests.get(&manifest.name) {
+                if *stored_manifest == manifest {
+                    // Same manifest → idempotent, return existing agent
+                    return Ok(state.agents.get(&agent_id).unwrap().clone());
+                } else {
+                    return Err(RegistrationError::ConfigMismatch(manifest.name.clone()));
+                }
+            }
+        }
+
+        // New agent: convert manifest → agent, validate via register_agent
+        let agent = Agent::from_manifest(manifest.clone())
+            .map_err(|e| RegistrationError::Persistence(format!("{:?}", e)))?;
+        self.register_agent(agent)?;
+
+        // Store manifest alongside the agent
+        let mut state = self.state.write().unwrap();
+        state.manifests.insert(manifest.name.clone(), manifest);
+        Ok(state.agents.get(&agent_id).unwrap().clone())
     }
 
     fn get_agent(&self, id: &ResourceId) -> Option<Agent> {
@@ -590,5 +620,68 @@ mod tests {
 
         let result = registry.restore_agent(minimal_agent("echo"));
         assert!(result.is_err());
+    }
+
+    // --- register_manifest tests (ADR 102) ---
+
+    fn minimal_manifest(name: &str) -> AgentManifest {
+        use super::super::agent_manifest::RequirementsConfig;
+
+        AgentManifest {
+            name: name.to_string(),
+            description: format!("{} agent", name),
+            source: None,
+            runtime: "container".to_string(),
+            executable: format!("localhost/{}:latest", name),
+            requirements: RequirementsConfig {
+                models: HashMap::new(),
+                services: HashMap::new(),
+            },
+            prompts: None,
+            mounts: vec![],
+            object_storage: None,
+            vector_storage: None,
+        }
+    }
+
+    #[test]
+    fn register_manifest_returns_agent_with_registry_id() {
+        let registry = InMemoryRegistry::new(test_secret_store());
+        registry.register_runtime(RuntimeType::Container);
+
+        let manifest = minimal_manifest("echo");
+        let agent = registry.register_manifest(manifest).unwrap();
+
+        assert_eq!(agent.name, "echo");
+        assert!(agent.id.as_str().contains("/agents/echo"));
+        assert!(agent.public_key.is_some());
+    }
+
+    #[test]
+    fn register_manifest_idempotent_same_manifest() {
+        let registry = InMemoryRegistry::new(test_secret_store());
+        registry.register_runtime(RuntimeType::Container);
+
+        let manifest = minimal_manifest("echo");
+        let agent1 = registry.register_manifest(manifest.clone()).unwrap();
+        let agent2 = registry.register_manifest(manifest).unwrap();
+
+        assert_eq!(agent1.id, agent2.id);
+        assert_eq!(agent1.name, agent2.name);
+    }
+
+    #[test]
+    fn register_manifest_rejects_different_manifest_same_name() {
+        let registry = InMemoryRegistry::new(test_secret_store());
+        registry.register_runtime(RuntimeType::Container);
+
+        let manifest1 = minimal_manifest("echo");
+        registry.register_manifest(manifest1).unwrap();
+
+        let mut manifest2 = minimal_manifest("echo");
+        manifest2.description = "different description".to_string();
+
+        let result = registry.register_manifest(manifest2);
+        assert!(matches!(result, Err(RegistrationError::ConfigMismatch(_))));
     }
 }

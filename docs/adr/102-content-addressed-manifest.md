@@ -23,8 +23,9 @@ This creates two problems:
 
 ## Decision
 
-The `AgentManifest` is a first-class entity with a content-addressed
-identity. The registry stores manifests alongside agents.
+Agent manifests are **immutable artifacts** with content-addressed
+identity. The registry stores manifests and treats them the same way
+a container registry treats images.
 
 ### Identity
 
@@ -33,36 +34,59 @@ content-addressing scheme used for submissions (ADR 044) and state
 (ADR 055). Two identical manifests produce the same ID regardless of
 when or where they were deployed.
 
-### Storage
+### Immutability
 
-The registry stores a mapping: `agent_name → manifest`. The `Agent`
-struct does not grow — it references the manifest by name (which is
-already a field). The manifest is persisted in `StoredAgent` /
-`SqliteRegistryRepository`.
+Once stored, a manifest never changes. A new deployment with different
+configuration produces a new manifest with a new content hash. The old
+manifest remains in the store.
+
+### Agent names as tags
+
+Agent names follow the container image convention: `name:tag`
+(e.g., `todoapp:latest`, `todoapp:v1`). A name is a tag pointing to
+an immutable manifest.
+
+The existing `ImagePolicy` (pinned vs unpinned) generalizes beyond
+container images to the entire deployment model:
+
+- **Unpinned** (e.g., `:latest`) — tag can be moved to a new manifest
+- **Pinned** (e.g., `:v1`) — tag is locked to its manifest
+
+### Registry API
+
+`register_agent()` accepts an `AgentManifest` and returns the resolved
+`Agent`:
+
+```rust
+fn register_agent(&self, manifest: AgentManifest) -> Result<Agent, RegistrationError>;
+```
+
+The registry owns the full lifecycle: validate → resolve → assign
+identity → store manifest + agent → return agent.
 
 ### Idempotency
 
-`register_agent()` becomes idempotent at the registry level:
+Idempotency follows naturally from content-addressing:
 
-- Look up existing agent by name
-- If found, compare incoming manifest with stored manifest (`==`)
-- Same manifest → `Ok(())` (no-op)
-- Different manifest → `ConfigMismatch` error
+- **Same content hash** → manifest already stored, return existing agent
+- **Different content hash** → new manifest (tag behavior depends on
+  pin policy; for now, treated as an error until tagging is implemented)
 
 No hand-rolled field comparison. `AgentManifest` and its sub-types
 derive `PartialEq`.
 
-### Deploy history
+### Storage
 
-Content-addressed manifests enable future deploy history: a log of
-`(timestamp, manifest_hash)` per agent. This is deferred — the
-immediate goal is idempotency and audit trail for the current deploy.
+The registry stores a mapping: `agent_name → (manifest, agent)`. The
+`Agent` struct does not grow — it references the manifest by name.
+The manifest is persisted in `StoredAgent` / `SqliteRegistryRepository`.
 
 ## Consequences
 
 - `AgentManifest`, `RequirementsConfig`, `PromptsConfig`, `MountConfig`
   derive `PartialEq`.
-- The registry stores the manifest — cheap storage, rich audit trail.
+- Manifests are immutable — cheap storage, rich audit trail.
 - Idempotency moves from the harness into the registry (ADR 101).
 - The `compare_agents()` function in `harness.rs` becomes dead code.
-- Future: deploy history, rollback, diff across deploys.
+- `ImagePolicy` becomes a platform-wide concept, not just for Podman.
+- Future: `name:tag` versioning, deploy history, rollback, diff.

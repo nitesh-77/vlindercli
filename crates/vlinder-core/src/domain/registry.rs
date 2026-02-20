@@ -12,7 +12,7 @@
 //! - `PersistentRegistry` — `crate::registry`
 //! - `GrpcRegistryClient` — `crate::registry_service`
 
-use crate::domain::{Agent, Model, ObjectStorageType, Provider, ResourceId, RuntimeType, VectorStorageType};
+use crate::domain::{Agent, AgentManifest, Model, ObjectStorageType, Provider, ResourceId, RuntimeType, VectorStorageType};
 
 /// Unique identifier for a submitted job.
 ///
@@ -61,6 +61,8 @@ pub enum JobStatus {
 pub enum RegistrationError {
     /// Agent with this name is already registered.
     DuplicateName(String),
+    /// Agent with this name exists but the manifest differs.
+    ConfigMismatch(String),
     /// No runtime available for this agent's executable scheme/extension.
     NoRuntime(ResourceId),
     /// Agent declares object storage with unknown scheme.
@@ -101,6 +103,7 @@ impl std::fmt::Display for RegistrationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             RegistrationError::DuplicateName(name) => write!(f, "agent already registered: {}", name),
+            RegistrationError::ConfigMismatch(name) => write!(f, "agent '{}' already registered with different configuration", name),
             RegistrationError::NoRuntime(id) => {
                 write!(f, "no runtime available for agent executable: {}\n\nIs the daemon running? Start it with: vlinder daemon", id)
             }
@@ -155,6 +158,24 @@ pub trait Registry: Send + Sync {
     /// Register an agent after validating requirements.
     /// Assigns registry identity `<registry_id>/agents/<name>`.
     fn register_agent(&self, agent: Agent) -> Result<(), RegistrationError>;
+
+    /// Register an agent from its manifest (ADR 102).
+    ///
+    /// Accepts a fully-resolved `AgentManifest`, validates, resolves identity,
+    /// stores the manifest, and returns the registered `Agent`.
+    ///
+    /// Idempotent: same manifest → returns existing agent.
+    /// Different manifest for same name → `ConfigMismatch` error.
+    fn register_manifest(&self, manifest: AgentManifest) -> Result<Agent, RegistrationError> {
+        let name = manifest.name.clone();
+        let agent = Agent::from_manifest(manifest)
+            .map_err(|e| RegistrationError::Persistence(format!("{:?}", e)))?;
+        self.register_agent(agent)?;
+        self.get_agent_by_name(&name)
+            .ok_or_else(|| RegistrationError::Persistence(
+                format!("agent '{}' not found after registration", name),
+            ))
+    }
 
     /// Get the registry-issued ID for an agent name.
     fn agent_id(&self, name: &str) -> ResourceId;
@@ -303,6 +324,14 @@ mod tests {
     fn display_duplicate_name() {
         let err = RegistrationError::DuplicateName("my-agent".into());
         assert_eq!(format!("{}", err), "agent already registered: my-agent");
+    }
+
+    #[test]
+    fn display_config_mismatch() {
+        let err = RegistrationError::ConfigMismatch("my-agent".into());
+        let msg = format!("{}", err);
+        assert!(msg.contains("my-agent"));
+        assert!(msg.contains("different configuration"));
     }
 
     #[test]
