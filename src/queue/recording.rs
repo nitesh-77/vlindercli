@@ -394,22 +394,12 @@ mod tests {
         let inner = Arc::new(InMemoryQueue::new());
         let queue = RecordingQueue::new(Arc::clone(&inner) as Arc<dyn MessageQueue + Send + Sync>, store);
 
-        // Send a message through the inner queue directly
+        // Send a message through the inner queue's trait method
         let msg = test_invoke();
-        let subject = format!(
-            "vlinder.{}.{}.invoke.{}.{}.{}",
-            msg.timeline, msg.submission, msg.harness, msg.runtime.as_str(), "echo"
-        );
+        inner.send_invoke(msg).unwrap();
 
-        // Push directly to inner queue
-        {
-            let mut typed = inner.typed_queues.lock().unwrap();
-            typed.entry(subject.clone()).or_default()
-                .push_back(ObservableMessage::Invoke(msg));
-        }
-
-        // Receive through the recording queue — should delegate
-        let result = queue.receive_invoke(&subject);
+        // Receive through the recording queue — should delegate to inner
+        let result = queue.receive_invoke("echo");
         assert!(result.is_ok());
     }
 

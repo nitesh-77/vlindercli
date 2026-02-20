@@ -2,7 +2,8 @@
 
 use crate::domain::{
     CompleteMessage, DelegateMessage, InvokeMessage, MessageQueue,
-    ObservableMessage, Operation, QueueError, RequestMessage, ResponseMessage, ServiceType, SubmissionId,
+    ObservableMessage, Operation, QueueError, RequestMessage, ResponseMessage,
+    RoutingKey, ServiceType, SubmissionId,
 };
 #[cfg(test)]
 use crate::domain::{
@@ -13,19 +14,25 @@ use std::sync::{Arc, Mutex};
 
 /// In-memory message queue for single-process use.
 ///
+/// Messages are keyed by `RoutingKey` (ADR 096) — collision-freedom is
+/// structural, not dependent on string formatting. Delegate reply messages
+/// use a separate string-keyed map (pending §7 elimination).
+///
 /// ACK/NACK operations are no-ops since messages are removed from the queue
 /// immediately on receive (no durability or redelivery support).
-///
-/// Uses typed messages exclusively (ADR 044).
 pub struct InMemoryQueue {
-    /// Typed queues keyed by subject
-    pub(crate) typed_queues: Arc<Mutex<HashMap<String, VecDeque<ObservableMessage>>>>,
+    /// Messages keyed by RoutingKey (ADR 096 §5).
+    pub(crate) typed_queues: Arc<Mutex<HashMap<RoutingKey, VecDeque<ObservableMessage>>>>,
+    /// Delegate reply messages keyed by opaque subject string.
+    /// Temporary — will be replaced by RoutingKey::DelegateReply in §7.
+    reply_queues: Arc<Mutex<HashMap<String, VecDeque<ObservableMessage>>>>,
 }
 
 impl InMemoryQueue {
     pub fn new() -> Self {
         Self {
             typed_queues: Arc::new(Mutex::new(HashMap::new())),
+            reply_queues: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
@@ -46,93 +53,47 @@ impl MessageQueue for InMemoryQueue {
     }
 
     fn send_invoke(&self, msg: InvokeMessage) -> Result<(), QueueError> {
-        let subject = format!(
-            "vlinder.{}.{}.invoke.{}.{}.{}",
-            msg.timeline,
-            msg.submission,
-            msg.harness,
-            msg.runtime.as_str(),
-            msg.agent_id.as_str(),
-        );
-
-
+        let key = msg.routing_key();
         let mut typed = self.typed_queues.lock().unwrap();
-        typed
-            .entry(subject)
-            .or_default()
-            .push_back(ObservableMessage::Invoke(msg));
+        typed.entry(key).or_default().push_back(ObservableMessage::Invoke(msg));
         Ok(())
     }
 
     fn send_request(&self, msg: RequestMessage) -> Result<(), QueueError> {
-        let subject = format!(
-            "vlinder.{}.{}.req.{}.{}.{}.{}.{}",
-            msg.timeline,
-            msg.submission,
-            msg.agent_id.as_str(),
-            msg.service.service_type(),
-            msg.service.backend_str(),
-            msg.operation,
-            msg.sequence,
-        );
-
-
+        let key = msg.routing_key();
         let mut typed = self.typed_queues.lock().unwrap();
-        typed
-            .entry(subject)
-            .or_default()
-            .push_back(ObservableMessage::Request(msg));
+        typed.entry(key).or_default().push_back(ObservableMessage::Request(msg));
         Ok(())
     }
 
     fn send_response(&self, msg: ResponseMessage) -> Result<(), QueueError> {
-        let subject = format!(
-            "vlinder.{}.{}.res.{}.{}.{}.{}.{}",
-            msg.timeline,
-            msg.submission,
-            msg.service.service_type(),
-            msg.service.backend_str(),
-            msg.agent_id.as_str(),
-            msg.operation,
-            msg.sequence,
-        );
-
-
+        let key = msg.routing_key();
         let mut typed = self.typed_queues.lock().unwrap();
-        typed
-            .entry(subject)
-            .or_default()
-            .push_back(ObservableMessage::Response(msg));
+        typed.entry(key).or_default().push_back(ObservableMessage::Response(msg));
         Ok(())
     }
 
     fn send_complete(&self, msg: CompleteMessage) -> Result<(), QueueError> {
-        let subject = format!(
-            "vlinder.{}.{}.complete.{}.{}",
-            msg.timeline,
-            msg.submission,
-            msg.agent_id.as_str(),
-            msg.harness,
-        );
-
-
+        let key = msg.routing_key();
         let mut typed = self.typed_queues.lock().unwrap();
-        typed
-            .entry(subject)
-            .or_default()
-            .push_back(ObservableMessage::Complete(msg));
+        typed.entry(key).or_default().push_back(ObservableMessage::Complete(msg));
         Ok(())
     }
 
     fn receive_invoke(&self, subject_pattern: &str) -> Result<(InvokeMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
         let mut typed = self.typed_queues.lock().unwrap();
 
-        for (subject, queue) in typed.iter_mut() {
-            if subject.contains(subject_pattern) || subject_pattern.contains("*") {
+        for (key, queue) in typed.iter_mut() {
+            let matches = match key {
+                RoutingKey::Invoke { agent, .. } => {
+                    subject_pattern.contains('*') || agent.as_str() == subject_pattern
+                }
+                _ => false,
+            };
+            if matches {
                 if let Some(ObservableMessage::Invoke(msg)) = queue.front() {
                     let msg = msg.clone();
                     queue.pop_front();
-
                     return Ok((msg, Box::new(|| Ok(()))));
                 }
             }
@@ -144,16 +105,17 @@ impl MessageQueue for InMemoryQueue {
     fn receive_request(&self, service: ServiceType, backend: &str, operation: Operation) -> Result<(RequestMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
         let mut typed = self.typed_queues.lock().unwrap();
 
-        let pattern = format!(".{}.{}.{}.", service, backend, operation);
-
-        for (subject, queue) in typed.iter_mut() {
-            let matches = subject.contains(&pattern) && subject.contains(".req.");
-
+        for (key, queue) in typed.iter_mut() {
+            let matches = match key {
+                RoutingKey::Request { service: svc, operation: op, .. } => {
+                    svc.service_type() == service && svc.backend_str() == backend && *op == operation
+                }
+                _ => false,
+            };
             if matches {
                 if let Some(ObservableMessage::Request(msg)) = queue.front() {
                     let msg = msg.clone();
                     queue.pop_front();
-
                     return Ok((msg, Box::new(|| Ok(()))));
                 }
             }
@@ -163,17 +125,15 @@ impl MessageQueue for InMemoryQueue {
     }
 
     fn receive_response(&self, request: &RequestMessage) -> Result<(ResponseMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
-        let pattern = format!("{}.res.{}.{}", request.submission, request.service.service_type(), request.service.backend_str());
+        // Exact lookup via reply_key (ADR 096 §6).
+        let reply_key = request.routing_key().reply_key(None).unwrap();
         let mut typed = self.typed_queues.lock().unwrap();
 
-        for (subject, queue) in typed.iter_mut() {
-            if subject.contains(&pattern) {
-                if let Some(ObservableMessage::Response(msg)) = queue.front() {
-                    let msg = msg.clone();
-                    queue.pop_front();
-
-                    return Ok((msg, Box::new(|| Ok(()))));
-                }
+        if let Some(queue) = typed.get_mut(&reply_key) {
+            if let Some(ObservableMessage::Response(msg)) = queue.front() {
+                let msg = msg.clone();
+                queue.pop_front();
+                return Ok((msg, Box::new(|| Ok(()))));
             }
         }
 
@@ -183,12 +143,17 @@ impl MessageQueue for InMemoryQueue {
     fn receive_complete(&self, submission: &SubmissionId, harness: &str) -> Result<(CompleteMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
         let mut typed = self.typed_queues.lock().unwrap();
 
-        for (subject, queue) in typed.iter_mut() {
-            if subject.contains("complete") && subject.contains(submission.as_str()) && subject.contains(harness) {
+        for (key, queue) in typed.iter_mut() {
+            let matches = match key {
+                RoutingKey::Complete { submission: sub, harness: h, .. } => {
+                    sub == submission && h.as_str() == harness
+                }
+                _ => false,
+            };
+            if matches {
                 if let Some(ObservableMessage::Complete(msg)) = queue.front() {
                     let msg = msg.clone();
                     queue.pop_front();
-
                     return Ok((msg, Box::new(|| Ok(()))));
                 }
             }
@@ -203,28 +168,24 @@ impl MessageQueue for InMemoryQueue {
     }
 
     fn send_delegate(&self, msg: DelegateMessage) -> Result<(), QueueError> {
-        let subject = format!(
-            "vlinder.{}.{}.delegate.{}.{}",
-            msg.timeline, msg.submission, msg.caller, msg.target,
-        );
-
+        let key = msg.routing_key();
         let mut typed = self.typed_queues.lock().unwrap();
-        typed
-            .entry(subject)
-            .or_default()
-            .push_back(ObservableMessage::Delegate(msg));
+        typed.entry(key).or_default().push_back(ObservableMessage::Delegate(msg));
         Ok(())
     }
 
     fn receive_delegate(&self, target_agent: &str) -> Result<(DelegateMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
         let mut typed = self.typed_queues.lock().unwrap();
 
-        for (subject, queue) in typed.iter_mut() {
-            if subject.contains("delegate") && subject.ends_with(target_agent) {
+        for (key, queue) in typed.iter_mut() {
+            let matches = match key {
+                RoutingKey::Delegate { target, .. } => target.as_str() == target_agent,
+                _ => false,
+            };
+            if matches {
                 if let Some(ObservableMessage::Delegate(msg)) = queue.front() {
                     let msg = msg.clone();
                     queue.pop_front();
-
                     return Ok((msg, Box::new(|| Ok(()))));
                 }
             }
@@ -234,8 +195,8 @@ impl MessageQueue for InMemoryQueue {
     }
 
     fn send_complete_to_subject(&self, msg: CompleteMessage, subject: &str) -> Result<(), QueueError> {
-        let mut typed = self.typed_queues.lock().unwrap();
-        typed
+        let mut replies = self.reply_queues.lock().unwrap();
+        replies
             .entry(subject.to_string())
             .or_default()
             .push_back(ObservableMessage::Complete(msg));
@@ -243,13 +204,12 @@ impl MessageQueue for InMemoryQueue {
     }
 
     fn receive_complete_on_subject(&self, subject: &str) -> Result<(CompleteMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
-        let mut typed = self.typed_queues.lock().unwrap();
+        let mut replies = self.reply_queues.lock().unwrap();
 
-        if let Some(queue) = typed.get_mut(subject) {
+        if let Some(queue) = replies.get_mut(subject) {
             if let Some(ObservableMessage::Complete(msg)) = queue.front() {
                 let msg = msg.clone();
                 queue.pop_front();
-
                 return Ok((msg, Box::new(|| Ok(()))));
             }
         }
@@ -266,7 +226,7 @@ impl MessageQueue for InMemoryQueue {
 mod tests {
     use super::*;
     use crate::domain::{InferenceBackendType, ObjectStorageType, Operation, RuntimeType, ServiceBackend, VectorStorageType};
-    use crate::domain::{ExpectsReply, HarnessType, Sequence, SessionId, SubmissionId, TimelineId};
+    use crate::domain::{HarnessType, Sequence, SessionId, SubmissionId, TimelineId};
 
     fn test_agent_id() -> AgentId {
         AgentId::new("echo-agent")
@@ -274,116 +234,6 @@ mod tests {
 
     fn test_submission() -> SubmissionId {
         SubmissionId::from("sub-test-123".to_string())
-    }
-
-    // ========================================================================
-    // Subject building tests
-    // ========================================================================
-
-    #[test]
-    fn send_invoke_builds_correct_subject() {
-        let queue = InMemoryQueue::new();
-
-        let invoke = InvokeMessage::new(
-            TimelineId::main(),
-            test_submission(),
-            SessionId::new(),
-            HarnessType::Cli,
-            RuntimeType::Container,
-            test_agent_id(),
-            b"input".to_vec(),
-            None,
-            InvokeDiagnostics { harness_version: String::new(), history_turns: 0 },
-        );
-
-        queue.send_invoke(invoke).unwrap();
-
-        let typed = queue.typed_queues.lock().unwrap();
-        assert_eq!(typed.len(), 1);
-        let (subject, messages) = typed.iter().next().unwrap();
-        assert!(subject.contains("invoke"));
-        assert!(subject.contains("cli"));
-        assert!(subject.contains("container"));
-        assert!(subject.contains("echo-agent"));
-        assert_eq!(messages.len(), 1);
-    }
-
-    #[test]
-    fn send_request_builds_correct_subject() {
-        let queue = InMemoryQueue::new();
-
-        let request = RequestMessage::new(
-            TimelineId::main(),
-            test_submission(),
-            SessionId::new(),
-            test_agent_id(),
-            ServiceBackend::Kv(ObjectStorageType::Sqlite),
-            Operation::Get,
-            Sequence::first(),
-            b"key".to_vec(),
-            None,
-            RequestDiagnostics { sequence: 0, endpoint: String::new(), request_bytes: 0, received_at_ms: 0 },
-        );
-
-        queue.send_request(request).unwrap();
-
-        let typed = queue.typed_queues.lock().unwrap();
-        let (subject, _) = typed.iter().next().unwrap();
-
-        // Subject follows ADR 044 pattern
-        assert_eq!(subject, "vlinder.1.sub-test-123.req.echo-agent.kv.sqlite.get.1");
-    }
-
-    #[test]
-    fn send_response_builds_correct_subject() {
-        let queue = InMemoryQueue::new();
-
-        let request = RequestMessage::new(
-            TimelineId::main(),
-            test_submission(),
-            SessionId::new(),
-            test_agent_id(),
-            ServiceBackend::Kv(ObjectStorageType::Sqlite),
-            Operation::Get,
-            Sequence::from(3),
-            b"key".to_vec(),
-            None,
-            RequestDiagnostics { sequence: 0, endpoint: String::new(), request_bytes: 0, received_at_ms: 0 },
-        );
-        let response = request.create_reply(b"value".to_vec());
-
-        queue.send_response(response).unwrap();
-
-        let typed = queue.typed_queues.lock().unwrap();
-        let (subject, _) = typed.iter().next().unwrap();
-
-        // Response subject has service.backend before agent (per ADR 044)
-        assert_eq!(subject, "vlinder.1.sub-test-123.res.kv.sqlite.echo-agent.get.3");
-    }
-
-    #[test]
-    fn send_complete_builds_correct_subject() {
-        let queue = InMemoryQueue::new();
-
-        let invoke = InvokeMessage::new(
-            TimelineId::main(),
-            test_submission(),
-            SessionId::new(),
-            HarnessType::Web,
-            RuntimeType::Container,
-            test_agent_id(),
-            b"input".to_vec(),
-            None,
-            InvokeDiagnostics { harness_version: String::new(), history_turns: 0 },
-        );
-        let complete = invoke.create_reply(b"output".to_vec());
-
-        queue.send_complete(complete).unwrap();
-
-        let typed = queue.typed_queues.lock().unwrap();
-        let (subject, _) = typed.iter().next().unwrap();
-
-        assert_eq!(subject, "vlinder.1.sub-test-123.complete.echo-agent.web");
     }
 
     // ========================================================================
@@ -410,7 +260,7 @@ mod tests {
         queue.send_invoke(invoke).unwrap();
 
         // Receive typed message
-        let (received, ack) = queue.receive_invoke("invoke").unwrap();
+        let (received, ack) = queue.receive_invoke("echo-agent").unwrap();
 
         assert_eq!(received.id, original_id);
         assert_eq!(received.harness, HarnessType::Cli);
@@ -441,7 +291,7 @@ mod tests {
 
         queue.send_invoke(invoke).unwrap();
 
-        let (received, _) = queue.receive_invoke("invoke").unwrap();
+        let (received, _) = queue.receive_invoke("echo-agent").unwrap();
 
         // All dimensions preserved for reply construction
         assert_eq!(received.submission, submission);
@@ -553,30 +403,6 @@ mod tests {
         assert!(addr1.contains("caller"));
         assert!(addr1.contains("target"));
         assert!(addr1.contains(submission.as_str()));
-    }
-
-    #[test]
-    fn send_delegate_builds_correct_subject() {
-        let queue = InMemoryQueue::new();
-
-        let delegate = DelegateMessage::new(
-            TimelineId::main(),
-            test_submission(),
-            SessionId::new(),
-            AgentId::new("coordinator"),
-            AgentId::new("summarizer"),
-            b"summarize this".to_vec(),
-            "vlinder.sub.reply.coordinator.summarizer.abc",
-            None,
-            DelegateDiagnostics { container: ContainerDiagnostics::placeholder(0) },
-        );
-
-        queue.send_delegate(delegate).unwrap();
-
-        let typed = queue.typed_queues.lock().unwrap();
-        assert_eq!(typed.len(), 1);
-        let (subject, _) = typed.iter().next().unwrap();
-        assert_eq!(subject, "vlinder.1.sub-test-123.delegate.coordinator.summarizer");
     }
 
     #[test]

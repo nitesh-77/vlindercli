@@ -387,15 +387,12 @@ mod tests {
         assert_eq!(job.status, JobStatus::Running);
         assert_eq!(job.agent_id, agent_id);
 
-        // Message is in typed queue with ADR 044 subject pattern
-        // Agent name extracted from registry ID "...agents/test-agent" → "test-agent"
-        let typed = queue.typed_queues.lock().unwrap();
-        assert_eq!(typed.len(), 1);
-        let (subject, _) = typed.iter().next().unwrap();
-        assert!(subject.contains(".invoke."));
-        assert!(subject.contains(".cli."));
-        assert!(subject.contains(".container."));
-        assert!(subject.contains(".test-agent"), "subject should contain agent name: {}", subject);
+        // Message is receivable via trait method (ADR 096: no subject inspection)
+        let (received, ack) = queue.receive_invoke("test-agent").unwrap();
+        assert_eq!(received.harness, HarnessType::Cli);
+        assert_eq!(received.runtime, RuntimeType::Container);
+        assert_eq!(received.agent_id.as_str(), "test-agent");
+        ack().unwrap();
     }
 
     #[test]
