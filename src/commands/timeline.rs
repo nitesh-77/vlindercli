@@ -506,56 +506,52 @@ fn passthrough(dir: &Path, args: &[String]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::DateTime;
-    use vlindercli::git_dag::GitDagWorker;
-    use vlindercli::domain::DagWorker;
-    use vlindercli::domain::{
-        AgentId, InvokeMessage, CompleteMessage, ObservableMessage,
-        SubmissionId, SessionId, HarnessType, TimelineId,
-        InvokeDiagnostics, ContainerDiagnostics,
-        RuntimeType,
-    };
 
-    /// Create a test repo with an invoke+complete pair, returning the worker and tmpdir.
-    fn test_repo() -> (GitDagWorker, tempfile::TempDir) {
+    /// Helper: run a git command in a directory, panicking on failure.
+    fn git(dir: &Path, args: &[&str]) {
+        let status = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(status.status.success(), "git {:?} failed: {}",
+            args, String::from_utf8_lossy(&status.stderr));
+    }
+
+    /// Create a test repo with an invoke+complete commit pair.
+    ///
+    /// Uses raw git commands — no daemon types. Produces the same commit
+    /// structure the GitDagWorker writes: subject lines with routing info,
+    /// git trailers for Session/Submission/State.
+    fn test_repo() -> tempfile::TempDir {
         let tmp = tempfile::TempDir::new().unwrap();
-        let mut worker = GitDagWorker::open(tmp.path(), "registry.local:9000", None).unwrap();
+        let dir = tmp.path();
 
-        let agent_id = AgentId::new("agent-a");
+        git(dir, &["init", "-b", "main"]);
+        git(dir, &["config", "user.email", "test@test.com"]);
+        git(dir, &["config", "user.name", "test"]);
 
-        let invoke = InvokeMessage::new(
-            TimelineId::main(),
-            SubmissionId::from("sub-1".to_string()),
-            SessionId::from("sess-1".to_string()),
-            HarnessType::Cli,
-            RuntimeType::Container,
-            agent_id.clone(),
-            b"q".to_vec(),
-            None,
-            InvokeDiagnostics { harness_version: "0.1.0".to_string(), history_turns: 0 },
-        );
-        let ts1 = DateTime::from_timestamp(1000, 0).unwrap();
-        worker.on_observable_message(&ObservableMessage::Invoke(invoke), ts1);
+        // Invoke commit — needs a file so git has something to commit
+        std::fs::write(dir.join("invoke"), "payload").unwrap();
+        git(dir, &["add", "invoke"]);
+        let invoke_msg = "invoke: cli → agent-a\n\nSession: sess-1\nSubmission: sub-1";
+        std::fs::write(dir.join(".commit_msg"), invoke_msg).unwrap();
+        git(dir, &["commit", "-F", ".commit_msg"]);
 
-        let complete = CompleteMessage::new(
-            TimelineId::main(),
-            SubmissionId::from("sub-1".to_string()),
-            SessionId::from("sess-1".to_string()),
-            agent_id,
-            HarnessType::Cli,
-            b"a".to_vec(),
-            Some("state-abc123".to_string()),
-            ContainerDiagnostics::placeholder(100),
-        );
-        let ts2 = DateTime::from_timestamp(1001, 0).unwrap();
-        worker.on_observable_message(&ObservableMessage::Complete(complete), ts2);
+        // Complete commit
+        std::fs::write(dir.join("complete"), "payload").unwrap();
+        git(dir, &["add", "complete"]);
+        let complete_msg = "complete: agent-a → cli\n\nSession: sess-1\nSubmission: sub-1\nState: state-abc123";
+        std::fs::write(dir.join(".commit_msg"), complete_msg).unwrap();
+        git(dir, &["commit", "-F", ".commit_msg"]);
 
-        (worker, tmp)
+        tmp
     }
 
     #[test]
     fn route_shows_session_commits() {
-        let (_worker, tmp) = test_repo();
+        let tmp = test_repo();
 
         let output = std::process::Command::new("git")
             .arg("-C")
@@ -569,9 +565,13 @@ mod tests {
         assert_eq!(lines.len(), 2);
     }
 
+    /// Reader side of the trailer contract. Verifies the CLI can extract
+    /// Session/Submission/State trailers from git commits.
+    ///
+    /// Writer side: `git_dag::tests::complete_trailers_readable_by_timeline`.
     #[test]
     fn checkout_reads_trailers() {
-        let (_worker, tmp) = test_repo();
+        let tmp = test_repo();
 
         // Get the HEAD commit (complete message)
         let head = read_head_sha(tmp.path()).unwrap();
@@ -588,7 +588,7 @@ mod tests {
 
     #[test]
     fn repair_creates_branch() {
-        let (_worker, tmp) = test_repo();
+        let tmp = test_repo();
 
         // Get first commit (invoke)
         let output = std::process::Command::new("git")
@@ -632,7 +632,7 @@ mod tests {
 
     #[test]
     fn promote_moves_main_and_labels_broken() {
-        let (_worker, tmp) = test_repo();
+        let tmp = test_repo();
 
         // Get current main SHA
         let output = std::process::Command::new("git")
