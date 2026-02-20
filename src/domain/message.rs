@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use super::RuntimeType;
 use super::operation::Operation;
-use super::routing_key::{AgentId, RoutingKey, ServiceBackend};
+use super::routing_key::{AgentId, Nonce, RoutingKey, ServiceBackend};
 use super::service_payloads::{RequestPayload, ResponsePayload};
 use super::diagnostics::{
     InvokeDiagnostics, RequestDiagnostics, ServiceDiagnostics,
@@ -551,8 +551,9 @@ pub struct DelegateMessage {
     pub target: AgentId,
     #[serde(skip)]
     pub payload: Vec<u8>,
-    /// The "handle" — caller polls this for result.
-    pub reply_subject: String,
+    /// Uniqueness token for this delegation — prevents routing collisions
+    /// when the same caller delegates to the same target multiple times.
+    pub nonce: Nonce,
     /// Caller's state hash at the time of delegation (ADR 055).
     /// Records the delegating agent's state context.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -570,7 +571,7 @@ impl DelegateMessage {
         caller: AgentId,
         target: AgentId,
         payload: Vec<u8>,
-        reply_subject: impl Into<String>,
+        nonce: Nonce,
         state: Option<String>,
         diagnostics: DelegateDiagnostics,
     ) -> Self {
@@ -583,7 +584,7 @@ impl DelegateMessage {
             caller,
             target,
             payload,
-            reply_subject: reply_subject.into(),
+            nonce,
             state,
             diagnostics,
         }
@@ -597,6 +598,14 @@ impl DelegateMessage {
             caller: self.caller.clone(),
             target: self.target.clone(),
         }
+    }
+
+    /// Produce the reply routing key for this delegation (ADR 096 §7).
+    ///
+    /// Combines the message's routing dimensions with its nonce to produce
+    /// the exact key where the delegation result will be delivered.
+    pub fn reply_routing_key(&self) -> RoutingKey {
+        self.routing_key().reply_key(Some(self.nonce.clone())).unwrap()
     }
 }
 
@@ -1488,7 +1497,7 @@ mod tests {
             AgentId::new("coordinator"),
             AgentId::new("summarizer"),
             b"task".to_vec(),
-            "reply-subject",
+            Nonce::new("test-nonce"),
             None,
             DelegateDiagnostics { container: ContainerDiagnostics::placeholder(0) },
         );
@@ -1499,6 +1508,30 @@ mod tests {
             submission: msg.submission.clone(),
             caller: msg.caller.clone(),
             target: msg.target.clone(),
+        });
+    }
+
+    #[test]
+    fn delegate_reply_routing_key() {
+        let msg = DelegateMessage::new(
+            TimelineId::main(),
+            test_submission(),
+            SessionId::new(),
+            AgentId::new("coordinator"),
+            AgentId::new("summarizer"),
+            b"task".to_vec(),
+            Nonce::new("abc123"),
+            None,
+            DelegateDiagnostics { container: ContainerDiagnostics::placeholder(0) },
+        );
+
+        let reply_key = msg.reply_routing_key();
+        assert_eq!(reply_key, RoutingKey::DelegateReply {
+            timeline: msg.timeline.clone(),
+            submission: msg.submission.clone(),
+            caller: msg.caller.clone(),
+            target: msg.target.clone(),
+            nonce: Nonce::new("abc123"),
         });
     }
 
@@ -1548,6 +1581,7 @@ mod tests {
     fn delegate_message_creation() {
         let submission = test_submission();
         let session = SessionId::new();
+        let nonce = Nonce::new("abc123");
         let msg = DelegateMessage::new(
             TimelineId::main(),
             submission.clone(),
@@ -1555,7 +1589,7 @@ mod tests {
             AgentId::new("coordinator"),
             AgentId::new("summarizer"),
             b"summarize this".to_vec(),
-            "vlinder.sub.delegate-reply.coordinator.summarizer.abc123",
+            nonce.clone(),
             None,
             DelegateDiagnostics { container: ContainerDiagnostics::placeholder(0) },
         );
@@ -1565,7 +1599,7 @@ mod tests {
         assert_eq!(msg.caller, AgentId::new("coordinator"));
         assert_eq!(msg.target, AgentId::new("summarizer"));
         assert_eq!(msg.payload, b"summarize this");
-        assert!(msg.reply_subject.contains("delegate-reply"));
+        assert_eq!(msg.nonce, nonce);
     }
 
     #[test]
@@ -1578,7 +1612,7 @@ mod tests {
             AgentId::new("coordinator"),
             AgentId::new("summarizer"),
             b"test".to_vec(),
-            "reply.subject",
+            Nonce::generate(),
             None,
             DelegateDiagnostics { container: ContainerDiagnostics::placeholder(0) },
         );

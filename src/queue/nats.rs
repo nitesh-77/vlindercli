@@ -17,10 +17,10 @@ use tokio::runtime::Runtime;
 
 use crate::domain::{
     AgentId, CompleteMessage, ContainerDiagnostics, DelegateMessage, DelegateDiagnostics,
-    HarnessType, InvokeDiagnostics, InvokeMessage, MessageId, MessageQueue,
+    HarnessType, InvokeDiagnostics, InvokeMessage, MessageId, MessageQueue, Nonce,
     Operation, QueueError, RequestDiagnostics, RequestMessage, RequestPayload,
-    ResponseMessage, ResponsePayload, RuntimeType, Sequence, ServiceBackend, ServiceDiagnostics,
-    ServiceType, SessionId, SubmissionId, TimelineId,
+    ResponseMessage, ResponsePayload, RoutingKey, RuntimeType, Sequence, ServiceBackend,
+    ServiceDiagnostics, ServiceType, SessionId, SubmissionId, TimelineId,
 };
 
 /// NATS queue with JetStream durability.
@@ -515,11 +515,6 @@ impl MessageQueue for NatsQueue {
         })
     }
 
-    fn create_reply_address(&self, submission: &SubmissionId, caller: &str, target: &str) -> String {
-        let short_uuid = &uuid::Uuid::new_v4().to_string()[..8];
-        format!("vlinder.{}.delegate-reply.{}.{}.{}", submission, caller, target, short_uuid)
-    }
-
     fn send_delegate(&self, msg: DelegateMessage) -> Result<(), QueueError> {
         let subject = format!(
             "vlinder.{}.{}.delegate.{}.{}",
@@ -535,7 +530,7 @@ impl MessageQueue for NatsQueue {
             headers.insert("session-id", msg.session.as_str());
             headers.insert("caller-agent", msg.caller.as_str());
             headers.insert("target-agent", msg.target.as_str());
-            headers.insert("reply-subject", msg.reply_subject.as_str());
+            headers.insert("nonce", msg.nonce.as_str());
             if let Some(ref state) = msg.state {
                 headers.insert("state", state.as_str());
             }
@@ -577,7 +572,7 @@ impl MessageQueue for NatsQueue {
                 caller: AgentId::new(get_header(headers, "caller-agent")?),
                 target: AgentId::new(get_header(headers, "target-agent")?),
                 payload: js_msg.payload.to_vec(),
-                reply_subject: get_header(headers, "reply-subject")?,
+                nonce: Nonce::new(get_header(headers, "nonce")?),
                 state: get_header(headers, "state").ok(),
                 diagnostics,
             };
@@ -586,8 +581,8 @@ impl MessageQueue for NatsQueue {
         })
     }
 
-    fn send_complete_to_subject(&self, msg: CompleteMessage, subject: &str) -> Result<(), QueueError> {
-        let subject = subject.to_string();
+    fn send_delegate_reply(&self, msg: CompleteMessage, reply_key: &RoutingKey) -> Result<(), QueueError> {
+        let subject = delegate_reply_subject(reply_key);
 
         self.inner.runtime.block_on(async {
             let mut headers = async_nats::HeaderMap::new();
@@ -617,8 +612,8 @@ impl MessageQueue for NatsQueue {
         })
     }
 
-    fn receive_complete_on_subject(&self, subject: &str) -> Result<(CompleteMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
-        let filter = subject.to_string();
+    fn receive_delegate_reply(&self, reply_key: &RoutingKey) -> Result<(CompleteMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+        let filter = delegate_reply_subject(reply_key);
 
         self.inner.runtime.block_on(async {
             let (js_msg, ack_fn) = self.fetch_one(&filter).await?;
@@ -645,6 +640,21 @@ impl MessageQueue for NatsQueue {
 
             Ok((msg, ack_fn))
         })
+    }
+}
+
+/// Serialize a DelegateReply routing key to a NATS subject.
+///
+/// Format: `vlinder.{timeline}.{submission}.delegate-reply.{caller}.{target}.{nonce}`
+fn delegate_reply_subject(key: &RoutingKey) -> String {
+    match key {
+        RoutingKey::DelegateReply { timeline, submission, caller, target, nonce } => {
+            format!(
+                "vlinder.{}.{}.delegate-reply.{}.{}.{}",
+                timeline, submission, caller, target, nonce,
+            )
+        }
+        _ => panic!("delegate_reply_subject called with non-DelegateReply key: {:?}", key),
     }
 }
 

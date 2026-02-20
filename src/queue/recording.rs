@@ -113,9 +113,9 @@ impl MessageQueue for RecordingQueue {
         self.inner.send_delegate(msg)
     }
 
-    fn send_complete_to_subject(&self, msg: CompleteMessage, subject: &str) -> Result<(), QueueError> {
+    fn send_delegate_reply(&self, msg: CompleteMessage, reply_key: &crate::domain::RoutingKey) -> Result<(), QueueError> {
         self.record(&msg.clone().into());
-        self.inner.send_complete_to_subject(msg, subject)
+        self.inner.send_delegate_reply(msg, reply_key)
     }
 
     // -------------------------------------------------------------------------
@@ -142,16 +142,12 @@ impl MessageQueue for RecordingQueue {
     // Delegation methods — delegate straight through
     // -------------------------------------------------------------------------
 
-    fn create_reply_address(&self, submission: &SubmissionId, caller: &str, target: &str) -> String {
-        self.inner.create_reply_address(submission, caller, target)
-    }
-
     fn receive_delegate(&self, target_agent: &str) -> Result<(DelegateMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
         self.inner.receive_delegate(target_agent)
     }
 
-    fn receive_complete_on_subject(&self, subject: &str) -> Result<(CompleteMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
-        self.inner.receive_complete_on_subject(subject)
+    fn receive_delegate_reply(&self, reply_key: &crate::domain::RoutingKey) -> Result<(CompleteMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+        self.inner.receive_delegate_reply(reply_key)
     }
 }
 
@@ -160,7 +156,7 @@ mod tests {
     use super::*;
     use crate::domain::{
         AgentId, ContainerDiagnostics, DagNode, DelegateDiagnostics, HarnessType,
-        InMemoryDagStore, InferenceBackendType, InvokeDiagnostics, MessageType, Operation,
+        InMemoryDagStore, InferenceBackendType, InvokeDiagnostics, MessageType, Nonce, Operation,
         RequestDiagnostics, RuntimeType, Sequence, ServiceBackend,
         ServiceDiagnostics, SessionId, SubmissionId, TimelineId,
     };
@@ -253,7 +249,7 @@ mod tests {
             AgentId::new("echo"),
             AgentId::new("summarizer"),
             b"delegate this".to_vec(),
-            "reply-subject",
+            Nonce::new("test-nonce"),
             None,
             DelegateDiagnostics { container: ContainerDiagnostics::placeholder(0) },
         )

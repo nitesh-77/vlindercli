@@ -8,13 +8,14 @@
 //! state hash into requests and extracts the new hash from kv-put
 //! responses. This makes the router the "state cursor" for each invocation.
 
+use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use super::{
-    AgentId, SdkContract, ObjectStorageType, Operation, Registry, ServiceBackend, VectorMatch,
-    VectorStorageType, DelegateMessage, DelegateDiagnostics, ContainerDiagnostics,
-    InferenceBackendType, EmbeddingBackendType, InvokeMessage, MessageQueue, RequestMessage,
-    RequestDiagnostics, SequenceCounter,
+    AgentId, SdkContract, ObjectStorageType, Operation, Registry, RoutingKey, ServiceBackend,
+    VectorMatch, VectorStorageType, DelegateMessage, DelegateDiagnostics, ContainerDiagnostics,
+    InferenceBackendType, EmbeddingBackendType, InvokeMessage, MessageQueue, Nonce,
+    RequestMessage, RequestDiagnostics, SequenceCounter,
 };
 
 use super::service_payloads::{
@@ -41,6 +42,9 @@ pub struct QueueBridge {
     /// Current state hash for the active invocation (ADR 055).
     /// Updated on kv-put responses. Read by runtime on task completion.
     pub(crate) current_state: RwLock<Option<String>>,
+    /// Maps delegation handles (nonce strings) to reply routing keys (ADR 096 §7).
+    /// Populated by delegate(), consumed by wait().
+    pub(crate) pending_replies: RwLock<HashMap<String, RoutingKey>>,
 }
 
 impl QueueBridge {
@@ -238,9 +242,7 @@ impl SdkContract for QueueBridge {
         let caller = invoke.agent_id.clone();
         let target = AgentId::new(target_agent);
         let sha = invoke.submission.to_string();
-        let reply_subject = self.queue.create_reply_address(
-            &invoke.submission, caller.as_str(), target.as_str(),
-        );
+        let nonce = Nonce::generate();
 
         let state = self.current_state.read().unwrap().clone();
         let delegate = DelegateMessage::new(
@@ -250,35 +252,45 @@ impl SdkContract for QueueBridge {
             caller.clone(),
             target.clone(),
             input.as_bytes().to_vec(),
-            &reply_subject,
+            nonce.clone(),
             state,
             DelegateDiagnostics { container: ContainerDiagnostics::placeholder(0) },
         );
+        let reply_key = delegate.reply_routing_key();
+        let handle = nonce.as_str().to_string();
         drop(invoke);
 
         tracing::info!(
             sha = %sha, event = "delegation.sent",
             caller = %caller, target = %target,
-            reply = %reply_subject, "Delegating to agent"
+            nonce = %nonce, "Delegating to agent"
         );
+
+        // Store reply routing key for wait()
+        self.pending_replies.write().unwrap().insert(handle.clone(), reply_key);
 
         self.queue.send_delegate(delegate)
             .map_err(|e| format!("delegate send error: {}", e))?;
 
-        Ok(reply_subject)
+        Ok(handle)
     }
 
     fn wait(&self, handle: &str) -> Result<Vec<u8>, String> {
         let sha = self.invoke.read().unwrap().submission.to_string();
+        let reply_key = self.pending_replies.read().unwrap().get(handle).cloned()
+            .ok_or_else(|| format!("wait: unknown delegation handle '{}'", handle))?;
+
         tracing::debug!(sha = %sha, handle = %handle, "wait: polling for delegation result");
         let poll_start = std::time::Instant::now();
         let mut poll_count: u64 = 0;
 
         loop {
-            match self.queue.receive_complete_on_subject(handle) {
+            match self.queue.receive_delegate_reply(&reply_key) {
                 Ok((complete, ack)) => {
                     let payload = complete.payload.clone();
                     let _ = ack();
+                    // Clean up stored reply key
+                    self.pending_replies.write().unwrap().remove(handle);
                     tracing::info!(
                         sha = %sha, event = "delegation.completed",
                         handle = %handle, polls = poll_count,
@@ -340,6 +352,7 @@ mod tests {
             vec_backend: None,
             sequence: SequenceCounter::new(),
             current_state: RwLock::new(None),
+            pending_replies: RwLock::new(HashMap::new()),
         }
     }
 

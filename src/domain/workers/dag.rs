@@ -15,7 +15,7 @@ use chrono::Utc;
 use crate::domain::{
     AgentId, CompleteMessage, ContainerDiagnostics, DagNode, DelegateDiagnostics,
     DelegateMessage, HarnessType, InvokeDiagnostics, InvokeMessage, MessageId, MessageType,
-    Operation, RequestDiagnostics, RequestMessage, RequestPayload, ResponseMessage,
+    Nonce, Operation, RequestDiagnostics, RequestMessage, RequestPayload, ResponseMessage,
     ResponsePayload, RuntimeType, Sequence, ServiceBackend, ServiceDiagnostics, ServiceType,
     SessionId, SubmissionId, TimelineId, hash_dag_node,
 };
@@ -188,7 +188,7 @@ fn reconstruct_delegate(
         caller: AgentId::new(headers.get("caller-agent")?.clone()),
         target: AgentId::new(headers.get("target-agent")?.clone()),
         payload: payload.to_vec(),
-        reply_subject: headers.get("reply-subject")?.clone(),
+        nonce: Nonce::new(headers.get("nonce")?.clone()),
         state: headers.get("state").cloned(),
         diagnostics,
     }))
@@ -384,7 +384,7 @@ mod tests {
         h.insert("session-id".to_string(), "sess-1".to_string());
         h.insert("caller-agent".to_string(), "coordinator".to_string());
         h.insert("target-agent".to_string(), "summarizer".to_string());
-        h.insert("reply-subject".to_string(), "vlinder.sub-1.delegate-reply".to_string());
+        h.insert("nonce".to_string(), "nonce-1".to_string());
         h
     }
 
@@ -469,7 +469,7 @@ mod tests {
         if let ObservableMessage::Delegate(m) = &msg {
             assert_eq!(m.caller, AgentId::new("coordinator"));
             assert_eq!(m.target, AgentId::new("summarizer"));
-            assert_eq!(m.reply_subject, "vlinder.sub-1.delegate-reply");
+            assert_eq!(m.nonce, Nonce::new("nonce-1"));
             assert_eq!(m.payload, b"delegate-payload");
         }
     }

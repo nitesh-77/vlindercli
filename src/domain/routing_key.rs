@@ -140,7 +140,8 @@ impl std::fmt::Display for ServiceBackend {
 ///
 /// Prevents routing key collisions when the same caller delegates to the
 /// same target multiple times within a submission.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize)]
+#[serde(transparent)]
 pub struct Nonce(String);
 
 impl Nonce {

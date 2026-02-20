@@ -15,24 +15,19 @@ use std::sync::{Arc, Mutex};
 /// In-memory message queue for single-process use.
 ///
 /// Messages are keyed by `RoutingKey` (ADR 096) — collision-freedom is
-/// structural, not dependent on string formatting. Delegate reply messages
-/// use a separate string-keyed map (pending §7 elimination).
+/// structural, not dependent on string formatting.
 ///
 /// ACK/NACK operations are no-ops since messages are removed from the queue
 /// immediately on receive (no durability or redelivery support).
 pub struct InMemoryQueue {
     /// Messages keyed by RoutingKey (ADR 096 §5).
     pub(crate) typed_queues: Arc<Mutex<HashMap<RoutingKey, VecDeque<ObservableMessage>>>>,
-    /// Delegate reply messages keyed by opaque subject string.
-    /// Temporary — will be replaced by RoutingKey::DelegateReply in §7.
-    reply_queues: Arc<Mutex<HashMap<String, VecDeque<ObservableMessage>>>>,
 }
 
 impl InMemoryQueue {
     pub fn new() -> Self {
         Self {
             typed_queues: Arc::new(Mutex::new(HashMap::new())),
-            reply_queues: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
@@ -162,11 +157,6 @@ impl MessageQueue for InMemoryQueue {
         Err(QueueError::Timeout)
     }
 
-    fn create_reply_address(&self, submission: &SubmissionId, caller: &str, target: &str) -> String {
-        let short_uuid = &uuid::Uuid::new_v4().to_string()[..8];
-        format!("reply.{}.{}.{}.{}", submission, caller, target, short_uuid)
-    }
-
     fn send_delegate(&self, msg: DelegateMessage) -> Result<(), QueueError> {
         let key = msg.routing_key();
         let mut typed = self.typed_queues.lock().unwrap();
@@ -194,19 +184,16 @@ impl MessageQueue for InMemoryQueue {
         Err(QueueError::Timeout)
     }
 
-    fn send_complete_to_subject(&self, msg: CompleteMessage, subject: &str) -> Result<(), QueueError> {
-        let mut replies = self.reply_queues.lock().unwrap();
-        replies
-            .entry(subject.to_string())
-            .or_default()
-            .push_back(ObservableMessage::Complete(msg));
+    fn send_delegate_reply(&self, msg: CompleteMessage, reply_key: &RoutingKey) -> Result<(), QueueError> {
+        let mut typed = self.typed_queues.lock().unwrap();
+        typed.entry(reply_key.clone()).or_default().push_back(ObservableMessage::Complete(msg));
         Ok(())
     }
 
-    fn receive_complete_on_subject(&self, subject: &str) -> Result<(CompleteMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
-        let mut replies = self.reply_queues.lock().unwrap();
+    fn receive_delegate_reply(&self, reply_key: &RoutingKey) -> Result<(CompleteMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+        let mut typed = self.typed_queues.lock().unwrap();
 
-        if let Some(queue) = replies.get_mut(subject) {
+        if let Some(queue) = typed.get_mut(reply_key) {
             if let Some(ObservableMessage::Complete(msg)) = queue.front() {
                 let msg = msg.clone();
                 queue.pop_front();
@@ -225,7 +212,7 @@ impl MessageQueue for InMemoryQueue {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{InferenceBackendType, ObjectStorageType, Operation, RuntimeType, ServiceBackend, VectorStorageType};
+    use crate::domain::{InferenceBackendType, Nonce, ObjectStorageType, Operation, RuntimeType, ServiceBackend, VectorStorageType};
     use crate::domain::{HarnessType, Sequence, SessionId, SubmissionId, TimelineId};
 
     fn test_agent_id() -> AgentId {
@@ -390,24 +377,9 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn create_reply_address_is_unique() {
-        let queue = InMemoryQueue::new();
-        let submission = test_submission();
-
-        let addr1 = queue.create_reply_address(&submission, "caller", "target");
-        let addr2 = queue.create_reply_address(&submission, "caller", "target");
-
-        assert!(!addr1.is_empty());
-        assert!(!addr2.is_empty());
-        assert_ne!(addr1, addr2, "each reply address must be unique");
-        assert!(addr1.contains("caller"));
-        assert!(addr1.contains("target"));
-        assert!(addr1.contains(submission.as_str()));
-    }
-
-    #[test]
     fn receive_delegate_returns_typed_message() {
         let queue = InMemoryQueue::new();
+        let nonce = Nonce::new("test-nonce");
 
         let delegate = DelegateMessage::new(
             TimelineId::main(),
@@ -416,7 +388,7 @@ mod tests {
             AgentId::new("coordinator"),
             AgentId::new("summarizer"),
             b"payload".to_vec(),
-            "reply.subject",
+            nonce.clone(),
             None,
             DelegateDiagnostics { container: ContainerDiagnostics::placeholder(0) },
         );
@@ -430,7 +402,7 @@ mod tests {
         assert_eq!(received.caller, AgentId::new("coordinator"));
         assert_eq!(received.target, AgentId::new("summarizer"));
         assert_eq!(received.payload, b"payload");
-        assert_eq!(received.reply_subject, "reply.subject");
+        assert_eq!(received.nonce, nonce);
 
         ack().unwrap();
     }
@@ -446,7 +418,7 @@ mod tests {
             AgentId::new("coordinator"),
             AgentId::new("summarizer"),
             b"payload".to_vec(),
-            "reply.subject",
+            Nonce::generate(),
             None,
             DelegateDiagnostics { container: ContainerDiagnostics::placeholder(0) },
         );
@@ -458,8 +430,17 @@ mod tests {
     }
 
     #[test]
-    fn send_and_receive_complete_on_subject() {
+    fn send_and_receive_delegate_reply() {
         let queue = InMemoryQueue::new();
+
+        // Build a reply routing key (as if from a DelegateMessage)
+        let reply_key = RoutingKey::DelegateReply {
+            timeline: TimelineId::main(),
+            submission: test_submission(),
+            caller: AgentId::new("coordinator"),
+            target: AgentId::new("summarizer"),
+            nonce: Nonce::new("abc123"),
+        };
 
         let complete = CompleteMessage::new(
             TimelineId::main(),
@@ -472,17 +453,31 @@ mod tests {
             ContainerDiagnostics::placeholder(0),
         );
 
-        let subject = "vlinder.sub.delegate-reply.coordinator.summarizer.abc123";
-        queue.send_complete_to_subject(complete, subject).unwrap();
+        queue.send_delegate_reply(complete, &reply_key).unwrap();
 
-        let (received, ack) = queue.receive_complete_on_subject(subject).unwrap();
+        let (received, ack) = queue.receive_delegate_reply(&reply_key).unwrap();
         assert_eq!(received.payload, b"result");
         ack().unwrap();
     }
 
     #[test]
-    fn receive_complete_on_subject_times_out_for_wrong_subject() {
+    fn receive_delegate_reply_times_out_for_wrong_nonce() {
         let queue = InMemoryQueue::new();
+
+        let reply_key_a = RoutingKey::DelegateReply {
+            timeline: TimelineId::main(),
+            submission: test_submission(),
+            caller: AgentId::new("coordinator"),
+            target: AgentId::new("summarizer"),
+            nonce: Nonce::new("nonce-a"),
+        };
+        let reply_key_b = RoutingKey::DelegateReply {
+            timeline: TimelineId::main(),
+            submission: test_submission(),
+            caller: AgentId::new("coordinator"),
+            target: AgentId::new("summarizer"),
+            nonce: Nonce::new("nonce-b"),
+        };
 
         let complete = CompleteMessage::new(
             TimelineId::main(),
@@ -495,9 +490,9 @@ mod tests {
             ContainerDiagnostics::placeholder(0),
         );
 
-        queue.send_complete_to_subject(complete, "subject.a").unwrap();
+        queue.send_delegate_reply(complete, &reply_key_a).unwrap();
 
-        let result = queue.receive_complete_on_subject("subject.b");
+        let result = queue.receive_delegate_reply(&reply_key_b);
         assert!(matches!(result, Err(QueueError::Timeout)));
     }
 }

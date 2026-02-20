@@ -10,8 +10,9 @@ use std::thread;
 use std::time::Instant;
 
 use crate::domain::{
-    Agent, AgentId, ObjectStorageType, QueueBridge, Registry, ResourceId, Runtime, RuntimeType, VectorStorageType,
-    CompleteMessage, ExpectsReply, HarnessType, InvokeDiagnostics, InvokeMessage, MessageQueue, SequenceCounter,
+    Agent, AgentId, ObjectStorageType, QueueBridge, Registry, ResourceId, RoutingKey, Runtime,
+    RuntimeType, VectorStorageType, CompleteMessage, ExpectsReply, HarnessType,
+    InvokeDiagnostics, InvokeMessage, MessageQueue, SequenceCounter,
 };
 
 use super::dispatch::{DispatchError, RunningTask, dispatch_state_machine};
@@ -80,13 +81,14 @@ impl ContainerRuntime {
             kv_backend,
             vec_backend,
             sequence: SequenceCounter::new(),
+            pending_replies: std::sync::RwLock::new(std::collections::HashMap::new()),
         })
     }
 
     /// Route a CompleteMessage to the correct destination (harness or delegating agent).
-    fn send_reply(&self, complete: CompleteMessage, reply_subject: &Option<String>) {
-        if let Some(ref subject) = reply_subject {
-            self.queue.send_complete_to_subject(complete, subject).unwrap();
+    fn send_reply(&self, complete: CompleteMessage, reply_key: &Option<RoutingKey>) {
+        if let Some(ref key) = reply_key {
+            self.queue.send_delegate_reply(complete, key).unwrap();
         } else {
             self.queue.send_complete(complete).unwrap();
         }
@@ -102,7 +104,7 @@ impl ContainerRuntime {
         name: &str,
         agent: &Agent,
         invoke: InvokeMessage,
-        reply_subject: Option<String>,
+        reply_key: Option<RoutingKey>,
         is_retry: bool,
     ) -> bool {
         let (host_port, bridge) = match self.ensure_container(agent, &invoke) {
@@ -112,7 +114,7 @@ impl ContainerRuntime {
                 let complete = invoke.create_reply(
                     format!("[error] container start failed: {}", e).into_bytes()
                 );
-                self.send_reply(complete, &reply_subject);
+                self.send_reply(complete, &reply_key);
                 return false;
             }
         };
@@ -124,7 +126,7 @@ impl ContainerRuntime {
         });
 
         self.running.insert(name.to_string(), RunningTask {
-            handle, invoke, reply_subject, started_at: Instant::now(), is_retry,
+            handle, invoke, reply_key, started_at: Instant::now(), is_retry,
         });
         true
     }
@@ -158,12 +160,12 @@ impl ContainerRuntime {
                     tracing::info!(
                         event = "dispatch.completed",
                         agent = %name,
-                        delegated = task.reply_subject.is_some(),
+                        delegated = task.reply_key.is_some(),
                         duration_ms = duration_ms,
                         "Task completed"
                     );
 
-                    self.send_reply(complete, &task.reply_subject);
+                    self.send_reply(complete, &task.reply_key);
                 }
                 Err(DispatchError::ContainerDead(ref reason)) if !task.is_retry => {
                     // First failure — evict and retry once (ADR 073)
@@ -178,13 +180,13 @@ impl ContainerRuntime {
                     let agent = self.registry.get_agent_by_name(&name);
 
                     if let Some(agent) = agent {
-                        self.dispatch(&name, &agent, task.invoke, task.reply_subject, true);
+                        self.dispatch(&name, &agent, task.invoke, task.reply_key, true);
                     } else {
                         tracing::error!(event = "dispatch.agent_gone", agent = %name, "Agent not found after eviction");
                         let complete = task.invoke.create_reply(
                             format!("[error] agent {} not found after container eviction", name).into_bytes()
                         );
-                        self.send_reply(complete, &task.reply_subject);
+                        self.send_reply(complete, &task.reply_key);
                     }
                 }
                 Err(DispatchError::ContainerDead(reason)) => {
@@ -199,7 +201,7 @@ impl ContainerRuntime {
                     let complete = task.invoke.create_reply(
                         format!("[error] container dead after retry: {}", reason).into_bytes()
                     );
-                    self.send_reply(complete, &task.reply_subject);
+                    self.send_reply(complete, &task.reply_key);
                 }
             }
         }
@@ -274,7 +276,7 @@ impl ContainerRuntime {
                     },
                 );
 
-                self.dispatch(&agent.name, agent, invoke, Some(delegate.reply_subject), false);
+                self.dispatch(&agent.name, agent, invoke, Some(delegate.reply_routing_key()), false);
                 did_work = true;
             }
         }

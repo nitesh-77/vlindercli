@@ -258,7 +258,7 @@ impl GitDagWorker {
                 entries.push(self.write_field("type", "delegate")?);
                 entries.push(self.write_field("caller_agent", m.caller.as_str())?);
                 entries.push(self.write_field("target_agent", m.target.as_str())?);
-                entries.push(self.write_field("reply_subject", &m.reply_subject)?);
+                entries.push(self.write_field("nonce", m.nonce.as_str())?);
                 if let Some(ref state) = m.state {
                     entries.push(self.write_field("state", state)?);
                 }
@@ -578,7 +578,7 @@ mod tests {
     use super::*;
     use crate::domain::{
         AgentId, InvokeMessage, RequestMessage, ResponseMessage, CompleteMessage, DelegateMessage,
-        ObservableMessage, HarnessType, TimelineId, SubmissionId, SessionId, Sequence,
+        ObservableMessage, HarnessType, TimelineId, SubmissionId, SessionId, Sequence, Nonce,
         InvokeDiagnostics, RequestDiagnostics, ServiceDiagnostics, ServiceMetrics,
         ContainerDiagnostics, ContainerRuntimeInfo, DelegateDiagnostics,
         ContainerId, InferenceBackendType, Operation, RuntimeType, ServiceBackend,
@@ -690,7 +690,7 @@ mod tests {
             AgentId::new("coordinator"),
             AgentId::new("summarizer"),
             payload.to_vec(),
-            "vlinder.sub-1.delegate-reply",
+            Nonce::new("nonce-1"),
             None,
             DelegateDiagnostics { container: ContainerDiagnostics::placeholder(50) },
         );
@@ -932,7 +932,7 @@ mod tests {
         assert_eq!(show("type").unwrap(), "delegate");
         assert_eq!(show("caller_agent").unwrap(), "coordinator");
         assert_eq!(show("target_agent").unwrap(), "summarizer");
-        assert_eq!(show("reply_subject").unwrap(), "vlinder.sub-1.delegate-reply");
+        assert_eq!(show("nonce").unwrap(), "nonce-1");
     }
 
     #[test]

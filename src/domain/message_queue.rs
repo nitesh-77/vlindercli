@@ -9,7 +9,7 @@
 //! Each receive method returns a tuple of (TypedMessage, AckFn) where
 //! AckFn acknowledges successful processing.
 
-use super::{Agent, CompleteMessage, DelegateMessage, InvokeMessage, Operation, RequestMessage, ResponseMessage, ResourceId, ServiceType, SubmissionId};
+use super::{Agent, CompleteMessage, DelegateMessage, InvokeMessage, Operation, RequestMessage, ResponseMessage, ResourceId, RoutingKey, ServiceType, SubmissionId};
 use std::fmt;
 
 /// One-shot closure that acknowledges a received message was processed.
@@ -93,15 +93,8 @@ pub trait MessageQueue {
     fn receive_complete(&self, submission: &SubmissionId, harness: &str) -> Result<(CompleteMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError>;
 
     // -------------------------------------------------------------------------
-    // Delegation methods (ADR 056)
+    // Delegation methods (ADR 056, ADR 096 §7)
     // -------------------------------------------------------------------------
-
-    /// Create an opaque reply address for a delegation.
-    ///
-    /// The caller stores this in DelegateMessage and later passes it to
-    /// receive_complete_on_subject() to poll for the result.
-    /// The format is queue-implementation-specific.
-    fn create_reply_address(&self, submission: &SubmissionId, caller: &str, target: &str) -> String;
 
     /// Send a DelegateMessage (Agent → Agent via runtime).
     fn send_delegate(&self, msg: DelegateMessage) -> Result<(), QueueError>;
@@ -109,11 +102,16 @@ pub trait MessageQueue {
     /// Receive a DelegateMessage for a target agent.
     fn receive_delegate(&self, target_agent: &str) -> Result<(DelegateMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError>;
 
-    /// Send a CompleteMessage to a specific subject (for delegation replies).
-    fn send_complete_to_subject(&self, msg: CompleteMessage, subject: &str) -> Result<(), QueueError>;
+    /// Send a CompleteMessage as a delegation reply (ADR 096 §7).
+    ///
+    /// Routes via `RoutingKey::DelegateReply` — the nonce ensures uniqueness
+    /// when the same caller delegates to the same target multiple times.
+    fn send_delegate_reply(&self, msg: CompleteMessage, reply_key: &RoutingKey) -> Result<(), QueueError>;
 
-    /// Receive a CompleteMessage on a specific subject (for delegation replies).
-    fn receive_complete_on_subject(&self, subject: &str) -> Result<(CompleteMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError>;
+    /// Receive a delegation reply (ADR 096 §7).
+    ///
+    /// Polls for a CompleteMessage at the given `DelegateReply` routing key.
+    fn receive_delegate_reply(&self, reply_key: &RoutingKey) -> Result<(CompleteMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError>;
 
     // -------------------------------------------------------------------------
     // Request-reply facades (ADR 092)
