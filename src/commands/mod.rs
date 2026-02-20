@@ -1,4 +1,5 @@
 mod agent;
+mod connect;
 mod daemon;
 mod fleet;
 mod help;
