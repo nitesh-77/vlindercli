@@ -254,12 +254,7 @@ fn get(name: &str) {
 }
 
 fn open_registry(config: &Config) -> Option<Arc<dyn Registry>> {
-    let secret_store = vlindercli::secret_store::from_config()
-        .unwrap_or_else(|e| {
-            eprintln!("Failed to open secret store: {}", e);
-            std::process::exit(1);
-        });
-    vlindercli::registry::open_registry(config, secret_store)
+    vlindercli::registry::open_registry(config)
 }
 
 /// Scaffold a new agent project from a GitHub template.

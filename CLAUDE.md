@@ -55,6 +55,15 @@ Claude should:
 - Read TODO.md when deciding what to do next (don't rely only on conversation memory)
 - Update TODO.md as work progresses, decisions are made, or new questions arise
 
+## Verifying agent runs
+
+- After the human runs an agent, they will ask Claude to check the logs and conversations.
+- This is a trust-building exercise: prove you actually looked at the data, don't just say "looks good."
+- Technique: the human asks "what am I up to?" — Claude must answer from the conversation payloads, not guess.
+    - Read `~/.vlinder/conversations/*/payload` to see actual user inputs and agent responses
+    - Read `~/.vlinder/logs/` for system-level events
+    - Report what you found concretely (actual data, actual todo items, actual errors)
+
 ## Troubleshooting running of agents
 
 - We are developing a runtime that makes agents highly observable.
