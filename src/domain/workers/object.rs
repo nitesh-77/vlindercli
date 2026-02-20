@@ -389,7 +389,7 @@ mod tests {
     use super::*;
     use crate::domain::Agent;
     use crate::domain::InMemoryRegistry;
-    use crate::domain::{Operation, RequestDiagnostics, Sequence, ServiceType, SessionId, SubmissionId, TimelineId};
+    use crate::domain::{ObjectStorageType, Operation, RequestDiagnostics, Sequence, ServiceBackend, SessionId, SubmissionId, TimelineId};
     use crate::domain::SecretStore;
     use crate::domain::InMemorySecretStore;
     use crate::queue::InMemoryQueue;
@@ -465,8 +465,7 @@ mod tests {
             test_submission(),
             test_session(),
             test_agent_id(),
-            ServiceType::Kv,
-            "memory",
+            ServiceBackend::Kv(ObjectStorageType::InMemory),
             Operation::Put,
             Sequence::first(),
             serde_json::to_vec(&put_payload).unwrap(),
@@ -491,8 +490,7 @@ mod tests {
             test_submission(),
             test_session(),
             test_agent_id(),
-            ServiceType::Kv,
-            "memory",
+            ServiceBackend::Kv(ObjectStorageType::InMemory),
             Operation::Get,
             Sequence::from(2),
             serde_json::to_vec(&get_payload).unwrap(),
@@ -528,7 +526,7 @@ mod tests {
         let put_request = RequestMessage::new(
             TimelineId::main(),
             test_submission(), test_session(), test_agent_id(),
-            ServiceType::Kv, "memory", Operation::Put, Sequence::first(),
+            ServiceBackend::Kv(ObjectStorageType::InMemory), Operation::Put, Sequence::first(),
             serde_json::to_vec(&put_payload).unwrap(),
             None,
             test_request_diag(),
@@ -568,7 +566,7 @@ mod tests {
         let put_request = RequestMessage::new(
             TimelineId::main(),
             test_submission(), test_session(), test_agent_id(),
-            ServiceType::Kv, "memory", Operation::Put, Sequence::first(),
+            ServiceBackend::Kv(ObjectStorageType::InMemory), Operation::Put, Sequence::first(),
             serde_json::to_vec(&put_payload).unwrap(),
             None,
             test_request_diag(),
@@ -588,7 +586,7 @@ mod tests {
         let get_request = RequestMessage::new(
             TimelineId::main(),
             test_submission(), test_session(), test_agent_id(),
-            ServiceType::Kv, "memory", Operation::Get, Sequence::from(2),
+            ServiceBackend::Kv(ObjectStorageType::InMemory), Operation::Get, Sequence::from(2),
             serde_json::to_vec(&get_payload).unwrap(),
             None,
             test_request_diag(),
@@ -621,7 +619,7 @@ mod tests {
         let req1 = RequestMessage::new(
             TimelineId::main(),
             test_submission(), test_session(), test_agent_id(),
-            ServiceType::Kv, "memory", Operation::Put, Sequence::first(),
+            ServiceBackend::Kv(ObjectStorageType::InMemory), Operation::Put, Sequence::first(),
             serde_json::to_vec(&put1).unwrap(),
             None,
             test_request_diag(),
@@ -642,7 +640,7 @@ mod tests {
         let req2 = RequestMessage::new(
             TimelineId::main(),
             test_submission(), test_session(), test_agent_id(),
-            ServiceType::Kv, "memory", Operation::Put, Sequence::from(2),
+            ServiceBackend::Kv(ObjectStorageType::InMemory), Operation::Put, Sequence::from(2),
             serde_json::to_vec(&put2).unwrap(),
             None,
             test_request_diag(),
@@ -662,7 +660,7 @@ mod tests {
         let get_req = RequestMessage::new(
             TimelineId::main(),
             test_submission(), test_session(), test_agent_id(),
-            ServiceType::Kv, "memory", Operation::Get, Sequence::from(3),
+            ServiceBackend::Kv(ObjectStorageType::InMemory), Operation::Get, Sequence::from(3),
             serde_json::to_vec(&get).unwrap(),
             None,
             test_request_diag(),
@@ -694,7 +692,7 @@ mod tests {
         let put_req = RequestMessage::new(
             TimelineId::main(),
             test_submission(), test_session(), test_agent_id(),
-            ServiceType::Kv, "memory", Operation::Put, Sequence::first(),
+            ServiceBackend::Kv(ObjectStorageType::InMemory), Operation::Put, Sequence::first(),
             serde_json::to_vec(&put).unwrap(),
             None,
             test_request_diag(),
@@ -711,7 +709,7 @@ mod tests {
         let get_req = RequestMessage::new(
             TimelineId::main(),
             test_submission(), test_session(), test_agent_id(),
-            ServiceType::Kv, "memory", Operation::Get, Sequence::from(2),
+            ServiceBackend::Kv(ObjectStorageType::InMemory), Operation::Get, Sequence::from(2),
             serde_json::to_vec(&get).unwrap(),
             None,
             test_request_diag(),
@@ -742,7 +740,7 @@ mod tests {
         let put_request = RequestMessage::new(
             TimelineId::main(),
             test_submission(), test_session(), test_agent_id(),
-            ServiceType::Kv, "memory", Operation::Put, Sequence::first(),
+            ServiceBackend::Kv(ObjectStorageType::InMemory), Operation::Put, Sequence::first(),
             serde_json::to_vec(&put_payload).unwrap(),
             None,
             test_request_diag(),
@@ -757,7 +755,7 @@ mod tests {
         let get_request = RequestMessage::new(
             TimelineId::main(),
             test_submission(), test_session(), test_agent_id(),
-            ServiceType::Kv, "memory", Operation::Get, Sequence::from(2),
+            ServiceBackend::Kv(ObjectStorageType::InMemory), Operation::Get, Sequence::from(2),
             serde_json::to_vec(&get_payload).unwrap(),
             Some("hash123".to_string()),
             test_request_diag(),
@@ -789,7 +787,7 @@ mod tests {
         let put_req = RequestMessage::new(
             TimelineId::main(),
             test_submission(), test_session(), test_agent_id(),
-            ServiceType::Kv, "memory", Operation::Put, Sequence::first(),
+            ServiceBackend::Kv(ObjectStorageType::InMemory), Operation::Put, Sequence::first(),
             serde_json::to_vec(&put_payload).unwrap(),
             None,
             test_request_diag(),
@@ -804,7 +802,7 @@ mod tests {
         let get_req = RequestMessage::new(
             TimelineId::main(),
             test_submission(), test_session(), test_agent_id(),
-            ServiceType::Kv, "memory", Operation::Get, Sequence::from(2),
+            ServiceBackend::Kv(ObjectStorageType::InMemory), Operation::Get, Sequence::from(2),
             serde_json::to_vec(&get_payload).unwrap(),
             None,
             test_request_diag(),

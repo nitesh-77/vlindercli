@@ -162,7 +162,7 @@ mod tests {
     use super::*;
     use crate::domain::{Agent, Provider, Model, ModelType, ResourceId};
     use crate::domain::InMemoryRegistry;
-    use crate::domain::{Operation, RequestDiagnostics, Sequence, ServiceType, SessionId, SubmissionId, TimelineId};
+    use crate::domain::{InferenceBackendType, Operation, RequestDiagnostics, Sequence, ServiceBackend, SessionId, SubmissionId, TimelineId};
     use crate::domain::SecretStore;
     use crate::domain::InMemorySecretStore;
     use crate::queue::InMemoryQueue;
@@ -237,7 +237,7 @@ mod tests {
         let registry = test_registry_with_agent_and_model(
             test_agent_with_model("inference_model", "phi3"), "phi3",
         );
-        let handler = InferenceServiceWorker::new(Arc::clone(&queue), registry, "memory", test_open_engine());
+        let handler = InferenceServiceWorker::new(Arc::clone(&queue), registry, "ollama", test_open_engine());
 
         // Register mock engine (keyed by alias, how agents address it)
         let engine = Arc::new(InMemoryInference::new("test response"));
@@ -253,8 +253,7 @@ mod tests {
             test_submission(),
             SessionId::new(),
             test_agent_id(),
-            ServiceType::Infer,
-            "memory",
+            ServiceBackend::Infer(InferenceBackendType::Ollama),
             Operation::Run,
             Sequence::first(),
             serde_json::to_vec(&payload).unwrap(),
@@ -279,7 +278,7 @@ mod tests {
         let registry = test_registry_with_agent_and_model(
             test_agent_with_model("inference_model", "phi3"), "phi3",
         );
-        let handler = InferenceServiceWorker::new(Arc::clone(&queue), registry, "memory", test_open_engine());
+        let handler = InferenceServiceWorker::new(Arc::clone(&queue), registry, "ollama", test_open_engine());
 
         let engine = Arc::new(InMemoryInference::new("test response"));
         handler.register("inference_model", engine);
@@ -293,8 +292,7 @@ mod tests {
             test_submission(),
             SessionId::new(),
             test_agent_id(),
-            ServiceType::Infer,
-            "memory",
+            ServiceBackend::Infer(InferenceBackendType::Ollama),
             Operation::Run,
             Sequence::first(),
             serde_json::to_vec(&payload).unwrap(),
@@ -317,7 +315,7 @@ mod tests {
         let registry = test_registry_with_agent_and_model(
             test_agent_with_model("inference_model", "phi3"), "phi3",
         );
-        let handler = InferenceServiceWorker::new(Arc::clone(&queue), registry, "memory", test_open_engine());
+        let handler = InferenceServiceWorker::new(Arc::clone(&queue), registry, "ollama", test_open_engine());
 
         // Register mock engine under alias agent didn't declare
         let engine = Arc::new(InMemoryInference::new("test response"));
@@ -332,8 +330,7 @@ mod tests {
             test_submission(),
             SessionId::new(),
             test_agent_id(),
-            ServiceType::Infer,
-            "memory",
+            ServiceBackend::Infer(InferenceBackendType::Ollama),
             Operation::Run,
             Sequence::first(),
             serde_json::to_vec(&payload).unwrap(),
@@ -356,7 +353,7 @@ mod tests {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
         // Registry with no agents registered
         let registry: Arc<dyn Registry> = Arc::new(InMemoryRegistry::new(test_secret_store()));
-        let handler = InferenceServiceWorker::new(Arc::clone(&queue), registry, "memory", test_open_engine());
+        let handler = InferenceServiceWorker::new(Arc::clone(&queue), registry, "ollama", test_open_engine());
 
         // Register mock engine
         let engine = Arc::new(InMemoryInference::new("test response"));
@@ -371,8 +368,7 @@ mod tests {
             test_submission(),
             SessionId::new(),
             ResourceId::new("http://127.0.0.1:9000/agents/unknown-agent"),
-            ServiceType::Infer,
-            "memory",
+            ServiceBackend::Infer(InferenceBackendType::Ollama),
             Operation::Run,
             Sequence::first(),
             serde_json::to_vec(&payload).unwrap(),

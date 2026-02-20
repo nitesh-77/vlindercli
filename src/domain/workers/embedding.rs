@@ -173,7 +173,7 @@ mod tests {
     use super::*;
     use crate::domain::{Agent, Provider, Model, ModelType, ResourceId};
     use crate::domain::InMemoryRegistry;
-    use crate::domain::{Operation, RequestDiagnostics, Sequence, ServiceType, SessionId, SubmissionId, TimelineId};
+    use crate::domain::{EmbeddingBackendType, Operation, RequestDiagnostics, Sequence, ServiceBackend, SessionId, SubmissionId, TimelineId};
     use crate::domain::SecretStore;
     use crate::domain::InMemorySecretStore;
     use crate::queue::InMemoryQueue;
@@ -248,7 +248,7 @@ mod tests {
         let registry = test_registry_with_agent_and_model(
             test_agent_with_model("embedding_model", "nomic-embed"), "nomic-embed",
         );
-        let handler = EmbeddingServiceWorker::new(Arc::clone(&queue), registry, "memory", test_open_engine());
+        let handler = EmbeddingServiceWorker::new(Arc::clone(&queue), registry, "ollama", test_open_engine());
 
         // Register mock engine (keyed by alias, how agents address it)
         let canned: Vec<f32> = (0..768).map(|i| i as f32 * 0.001).collect();
@@ -265,8 +265,7 @@ mod tests {
             test_submission(),
             SessionId::new(),
             test_agent_id(),
-            ServiceType::Embed,
-            "memory",
+            ServiceBackend::Embed(EmbeddingBackendType::Ollama),
             Operation::Run,
             Sequence::first(),
             serde_json::to_vec(&payload).unwrap(),
@@ -292,7 +291,7 @@ mod tests {
         let registry = test_registry_with_agent_and_model(
             test_agent_with_model("embedding_model", "nomic-embed"), "nomic-embed",
         );
-        let handler = EmbeddingServiceWorker::new(Arc::clone(&queue), registry, "memory", test_open_engine());
+        let handler = EmbeddingServiceWorker::new(Arc::clone(&queue), registry, "ollama", test_open_engine());
 
         let canned: Vec<f32> = (0..768).map(|i| i as f32 * 0.001).collect();
         let engine = Arc::new(InMemoryEmbedding::new(canned));
@@ -307,8 +306,7 @@ mod tests {
             test_submission(),
             SessionId::new(),
             test_agent_id(),
-            ServiceType::Embed,
-            "memory",
+            ServiceBackend::Embed(EmbeddingBackendType::Ollama),
             Operation::Run,
             Sequence::first(),
             serde_json::to_vec(&payload).unwrap(),
@@ -331,7 +329,7 @@ mod tests {
         let registry = test_registry_with_agent_and_model(
             test_agent_with_model("embedding_model", "nomic-embed"), "nomic-embed",
         );
-        let handler = EmbeddingServiceWorker::new(Arc::clone(&queue), registry, "memory", test_open_engine());
+        let handler = EmbeddingServiceWorker::new(Arc::clone(&queue), registry, "ollama", test_open_engine());
 
         // Register mock engine under alias agent didn't declare
         let canned: Vec<f32> = (0..768).map(|i| i as f32 * 0.001).collect();
@@ -347,8 +345,7 @@ mod tests {
             test_submission(),
             SessionId::new(),
             test_agent_id(),
-            ServiceType::Embed,
-            "memory",
+            ServiceBackend::Embed(EmbeddingBackendType::Ollama),
             Operation::Run,
             Sequence::first(),
             serde_json::to_vec(&payload).unwrap(),
@@ -371,7 +368,7 @@ mod tests {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
         // Registry with no agents registered
         let registry: Arc<dyn Registry> = Arc::new(InMemoryRegistry::new(test_secret_store()));
-        let handler = EmbeddingServiceWorker::new(Arc::clone(&queue), registry, "memory", test_open_engine());
+        let handler = EmbeddingServiceWorker::new(Arc::clone(&queue), registry, "ollama", test_open_engine());
 
         // Register mock engine
         let canned: Vec<f32> = (0..768).map(|i| i as f32 * 0.001).collect();
@@ -387,8 +384,7 @@ mod tests {
             test_submission(),
             SessionId::new(),
             ResourceId::new("http://127.0.0.1:9000/agents/unknown-agent"),
-            ServiceType::Embed,
-            "memory",
+            ServiceBackend::Embed(EmbeddingBackendType::Ollama),
             Operation::Run,
             Sequence::first(),
             serde_json::to_vec(&payload).unwrap(),

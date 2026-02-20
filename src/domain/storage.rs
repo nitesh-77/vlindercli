@@ -16,7 +16,7 @@ use serde::Deserialize;
 ///
 /// Registered with the Registry to track what backends are available.
 /// Follows the same pattern as `RuntimeType`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize)]
 pub enum ObjectStorageType {
     /// SQLite-backed storage.
     Sqlite,
@@ -51,7 +51,7 @@ impl ObjectStorageType {
 ///
 /// Registered with the Registry to track what backends are available.
 /// Follows the same pattern as `RuntimeType`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize)]
 pub enum VectorStorageType {
     /// SQLite-backed storage with sqlite-vec extension.
     SqliteVec,

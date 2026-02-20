@@ -19,8 +19,8 @@ use crate::domain::{
     AgentId, CompleteMessage, ContainerDiagnostics, DelegateMessage, DelegateDiagnostics,
     HarnessType, InvokeDiagnostics, InvokeMessage, MessageId, MessageQueue,
     Operation, QueueError, RequestDiagnostics, RequestMessage, RequestPayload, ResourceId,
-    ResponseMessage, ResponsePayload, RuntimeType, Sequence, ServiceDiagnostics, ServiceType,
-    SessionId, SubmissionId, TimelineId,
+    ResponseMessage, ResponsePayload, RuntimeType, Sequence, ServiceBackend, ServiceDiagnostics,
+    ServiceType, SessionId, SubmissionId, TimelineId,
 };
 
 /// NATS queue with JetStream durability.
@@ -259,8 +259,8 @@ impl MessageQueue for NatsQueue {
             msg.timeline,
             msg.submission,
             agent_short_name(&msg.agent_id),
-            msg.service,
-            msg.backend,
+            msg.service.service_type(),
+            msg.service.backend_str(),
             msg.operation,
             msg.sequence,
         );
@@ -273,8 +273,8 @@ impl MessageQueue for NatsQueue {
             headers.insert("submission-id", msg.submission.as_str());
             headers.insert("session-id", msg.session.as_str());
             headers.insert("agent-id", msg.agent_id.as_str());
-            headers.insert("service", msg.service.as_str());
-            headers.insert("backend", msg.backend.as_str());
+            headers.insert("service", msg.service.service_type().as_str());
+            headers.insert("backend", msg.service.backend_str());
             headers.insert("operation", msg.operation.as_str());
             headers.insert("sequence", msg.sequence.to_string());
             if let Some(ref state) = msg.state {
@@ -301,8 +301,8 @@ impl MessageQueue for NatsQueue {
             "vlinder.{}.{}.res.{}.{}.{}.{}.{}",
             msg.timeline,
             msg.submission,
-            msg.service,
-            msg.backend,
+            msg.service.service_type(),
+            msg.service.backend_str(),
             agent_short_name(&msg.agent_id),
             msg.operation,
             msg.sequence,
@@ -316,8 +316,8 @@ impl MessageQueue for NatsQueue {
             headers.insert("submission-id", msg.submission.as_str());
             headers.insert("session-id", msg.session.as_str());
             headers.insert("agent-id", msg.agent_id.as_str());
-            headers.insert("service", msg.service.as_str());
-            headers.insert("backend", msg.backend.as_str());
+            headers.insert("service", msg.service.service_type().as_str());
+            headers.insert("backend", msg.service.backend_str());
             headers.insert("operation", msg.operation.as_str());
             headers.insert("sequence", msg.sequence.to_string());
             headers.insert("correlation-id", msg.correlation_id.as_str());
@@ -431,8 +431,10 @@ impl MessageQueue for NatsQueue {
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
                 session: SessionId::from(get_header(headers, "session-id")?),
                 agent_id: ResourceId::new(&get_header(headers, "agent-id")?),
-                service: parse_service_type(&get_header(headers, "service")?)?,
-                backend: get_header(headers, "backend")?,
+                service: ServiceBackend::from_parts(
+                    parse_service_type(&get_header(headers, "service")?)?,
+                    &get_header(headers, "backend")?,
+                ).ok_or_else(|| QueueError::ReceiveFailed("invalid service/backend".to_string()))?,
                 operation: parse_operation(&get_header(headers, "operation")?)?,
                 sequence: Sequence::from(get_header(headers, "sequence")?.parse::<u32>().unwrap_or(1)),
                 payload: RequestPayload::Legacy(js_msg.payload.to_vec()),
@@ -447,7 +449,7 @@ impl MessageQueue for NatsQueue {
     fn receive_response(&self, request: &RequestMessage) -> Result<(ResponseMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
         // Build filter from request dimensions
         // Wildcards match: {timeline}, {agent}.{operation}.{sequence}
-        let filter = format!("vlinder.*.{}.res.{}.{}.*.*.*", request.submission, request.service, request.backend);
+        let filter = format!("vlinder.*.{}.res.{}.{}.*.*.*", request.submission, request.service.service_type(), request.service.backend_str());
 
         self.inner.runtime.block_on(async {
             let (js_msg, ack_fn) = self.fetch_one(&filter).await?;
@@ -466,8 +468,10 @@ impl MessageQueue for NatsQueue {
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
                 session: SessionId::from(get_header(headers, "session-id")?),
                 agent_id: ResourceId::new(&get_header(headers, "agent-id")?),
-                service: parse_service_type(&get_header(headers, "service")?)?,
-                backend: get_header(headers, "backend")?,
+                service: ServiceBackend::from_parts(
+                    parse_service_type(&get_header(headers, "service")?)?,
+                    &get_header(headers, "backend")?,
+                ).ok_or_else(|| QueueError::ReceiveFailed("invalid service/backend".to_string()))?,
                 operation: parse_operation(&get_header(headers, "operation")?)?,
                 sequence: Sequence::from(get_header(headers, "sequence")?.parse::<u32>().unwrap_or(1)),
                 payload: ResponsePayload::Legacy(js_msg.payload.to_vec()),

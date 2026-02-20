@@ -215,7 +215,7 @@ mod tests {
     use super::*;
     use crate::domain::{Agent, Registry};
     use crate::domain::InMemoryRegistry;
-    use crate::domain::{Operation, RequestDiagnostics, Sequence, ServiceType, SessionId, SubmissionId, TimelineId};
+    use crate::domain::{Operation, RequestDiagnostics, Sequence, ServiceBackend, SessionId, SubmissionId, TimelineId, VectorStorageType};
     use crate::domain::SecretStore;
     use crate::domain::InMemorySecretStore;
     use crate::queue::InMemoryQueue;
@@ -278,7 +278,7 @@ mod tests {
         let store_request = RequestMessage::new(
             TimelineId::main(),
             test_submission(), SessionId::new(), test_agent_id(),
-            ServiceType::Vec, "memory", Operation::Store, Sequence::first(),
+            ServiceBackend::Vec(VectorStorageType::InMemory), Operation::Store, Sequence::first(),
             serde_json::to_vec(&store_payload).unwrap(),
             Some("state-vec".to_string()),
             test_request_diag(),
@@ -297,7 +297,7 @@ mod tests {
         let search_request = RequestMessage::new(
             TimelineId::main(),
             test_submission(), SessionId::new(), test_agent_id(),
-            ServiceType::Vec, "memory", Operation::Search, Sequence::from(2),
+            ServiceBackend::Vec(VectorStorageType::InMemory), Operation::Search, Sequence::from(2),
             serde_json::to_vec(&search_payload).unwrap(),
             Some("state-vec2".to_string()),
             test_request_diag(),
@@ -335,8 +335,7 @@ mod tests {
             test_submission(),
             SessionId::new(),
             test_agent_id(),
-            ServiceType::Vec,
-            "memory",
+            ServiceBackend::Vec(VectorStorageType::InMemory),
             Operation::Store,
             Sequence::first(),
             serde_json::to_vec(&store_payload).unwrap(),
@@ -361,8 +360,7 @@ mod tests {
             test_submission(),
             SessionId::new(),
             test_agent_id(),
-            ServiceType::Vec,
-            "memory",
+            ServiceBackend::Vec(VectorStorageType::InMemory),
             Operation::Search,
             Sequence::from(2),
             serde_json::to_vec(&search_payload).unwrap(),

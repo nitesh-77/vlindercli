@@ -217,8 +217,8 @@ impl GitDagWorker {
             ObservableMessage::Request(m) => {
                 entries.push(self.write_field("type", "request")?);
                 entries.push(self.write_field("agent_id", m.agent_id.as_str())?);
-                entries.push(self.write_field("service", m.service.as_str())?);
-                entries.push(self.write_field("backend", &m.backend)?);
+                entries.push(self.write_field("service", m.service.service_type().as_str())?);
+                entries.push(self.write_field("backend", m.service.backend_str())?);
                 entries.push(self.write_field("operation", m.operation.as_str())?);
                 entries.push(self.write_field("sequence", &m.sequence.as_u32().to_string())?);
                 if let Some(ref state) = m.state {
@@ -229,8 +229,8 @@ impl GitDagWorker {
             ObservableMessage::Response(m) => {
                 entries.push(self.write_field("type", "response")?);
                 entries.push(self.write_field("agent_id", m.agent_id.as_str())?);
-                entries.push(self.write_field("service", m.service.as_str())?);
-                entries.push(self.write_field("backend", &m.backend)?);
+                entries.push(self.write_field("service", m.service.service_type().as_str())?);
+                entries.push(self.write_field("backend", m.service.backend_str())?);
                 entries.push(self.write_field("operation", m.operation.as_str())?);
                 entries.push(self.write_field("sequence", &m.sequence.as_u32().to_string())?);
                 entries.push(self.write_field("correlation_id", m.correlation_id.as_str())?);
@@ -526,11 +526,11 @@ fn message_routing(msg: &ObservableMessage) -> (String, String, &'static str) {
         ),
         ObservableMessage::Request(m) => (
             m.agent_id.as_str().rsplit('/').next().unwrap_or(m.agent_id.as_str()).to_string(),
-            format!("{}.{}", m.service, m.backend),
+            format!("{}.{}", m.service.service_type(), m.service.backend_str()),
             "request",
         ),
         ObservableMessage::Response(m) => (
-            format!("{}.{}", m.service, m.backend),
+            format!("{}.{}", m.service.service_type(), m.service.backend_str()),
             m.agent_id.as_str().rsplit('/').next().unwrap_or(m.agent_id.as_str()).to_string(),
             "response",
         ),
@@ -581,8 +581,8 @@ mod tests {
         ObservableMessage, HarnessType, TimelineId, SubmissionId, SessionId, Sequence,
         InvokeDiagnostics, RequestDiagnostics, ServiceDiagnostics, ServiceMetrics,
         ContainerDiagnostics, ContainerRuntimeInfo, DelegateDiagnostics,
-        ContainerId, Operation, RuntimeType, ResourceId, ServiceType, Agent, SecretStore,
-        InMemorySecretStore, InMemoryRegistry,
+        ContainerId, InferenceBackendType, Operation, RuntimeType, ResourceId, ServiceBackend,
+        ServiceType, Agent, SecretStore, InMemorySecretStore, InMemoryRegistry,
     };
 
     fn test_agent_id() -> ResourceId {
@@ -614,8 +614,7 @@ mod tests {
             SubmissionId::from("sub-1".to_string()),
             SessionId::from("sess-1".to_string()),
             test_agent_id(),
-            ServiceType::Infer,
-            "ollama",
+            ServiceBackend::Infer(InferenceBackendType::Ollama),
             Operation::Run,
             Sequence::from(1),
             payload.to_vec(),
@@ -638,8 +637,7 @@ mod tests {
             SubmissionId::from("sub-1".to_string()),
             SessionId::from("sess-1".to_string()),
             test_agent_id(),
-            ServiceType::Infer,
-            "ollama",
+            ServiceBackend::Infer(InferenceBackendType::Ollama),
             Operation::Run,
             Sequence::from(1),
             b"prompt".to_vec(),

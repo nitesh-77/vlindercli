@@ -11,9 +11,10 @@
 use std::sync::{Arc, RwLock};
 
 use super::{
-    AgentId, SdkContract, ObjectStorageType, Operation, Registry, ServiceType, VectorMatch,
-    VectorStorageType, DelegateMessage, DelegateDiagnostics, ContainerDiagnostics, InvokeMessage,
-    MessageQueue, RequestMessage, RequestDiagnostics, SequenceCounter,
+    AgentId, SdkContract, ObjectStorageType, Operation, Registry, ServiceBackend, VectorMatch,
+    VectorStorageType, DelegateMessage, DelegateDiagnostics, ContainerDiagnostics,
+    InferenceBackendType, EmbeddingBackendType, InvokeMessage, MessageQueue, RequestMessage,
+    RequestDiagnostics, SequenceCounter,
 };
 
 use super::service_payloads::{
@@ -67,8 +68,7 @@ impl QueueBridge {
     /// Send a service request through the queue and poll for the response.
     fn send_service_request(
         &self,
-        service: ServiceType,
-        backend: String,
+        service: ServiceBackend,
         operation: Operation,
         payload: Vec<u8>,
     ) -> Result<Vec<u8>, String> {
@@ -82,7 +82,7 @@ impl QueueBridge {
             .as_millis() as u64;
         let request_diag = RequestDiagnostics {
             sequence: seq.as_u32(),
-            endpoint: format!("/{}", service),
+            endpoint: format!("/{}", service.service_type()),
             request_bytes: payload.len() as u64,
             received_at_ms,
         };
@@ -94,7 +94,6 @@ impl QueueBridge {
             invoke.session.clone(),
             invoke.agent_id.clone(),
             service,
-            backend,
             operation,
             seq,
             payload,
@@ -103,7 +102,7 @@ impl QueueBridge {
         );
         drop(invoke);
 
-        tracing::debug!(sha = %sha, event = "service.request", service = %request.service, backend = %request.backend, seq = %seq, "sending service request");
+        tracing::debug!(sha = %sha, event = "service.request", service = %request.service, seq = %seq, "sending service request");
 
         let response = self.queue.call_service(request)
             .map_err(|e| format!("service call error: {}", e))?;
@@ -137,7 +136,7 @@ impl SdkContract for QueueBridge {
         let state = self.current_state.read().unwrap().clone();
         let req = KvGetRequest { path: path.to_string(), state };
         let payload = serde_json::to_vec(&req).map_err(|e| format!("serialize error: {}", e))?;
-        let response = self.send_service_request(ServiceType::Kv, backend.as_str().to_string(), Operation::Get, payload)?;
+        let response = self.send_service_request(ServiceBackend::Kv(backend), Operation::Get, payload)?;
         Self::check_worker_error(&response)?;
         Ok(response)
     }
@@ -148,7 +147,7 @@ impl SdkContract for QueueBridge {
         let state = self.current_state.read().unwrap().clone();
         let req = KvPutRequest { path: path.to_string(), content: content.to_string(), state };
         let payload = serde_json::to_vec(&req).map_err(|e| format!("serialize error: {}", e))?;
-        let response = self.send_service_request(ServiceType::Kv, backend.as_str().to_string(), Operation::Put, payload)?;
+        let response = self.send_service_request(ServiceBackend::Kv(backend), Operation::Put, payload)?;
         Self::check_worker_error(&response)?;
         Ok(())
     }
@@ -158,7 +157,7 @@ impl SdkContract for QueueBridge {
             .ok_or("agent called kv-list but has no object_storage configured")?;
         let req = KvListRequest { path: prefix.to_string() };
         let payload = serde_json::to_vec(&req).map_err(|e| format!("serialize error: {}", e))?;
-        let response = self.send_service_request(ServiceType::Kv, backend.as_str().to_string(), Operation::List, payload)?;
+        let response = self.send_service_request(ServiceBackend::Kv(backend), Operation::List, payload)?;
         Self::check_worker_error(&response)?;
         serde_json::from_slice(&response)
             .map_err(|e| format!("kv-list response parse error: {}", e))
@@ -169,7 +168,7 @@ impl SdkContract for QueueBridge {
             .ok_or("agent called kv-delete but has no object_storage configured")?;
         let req = KvDeleteRequest { path: path.to_string() };
         let payload = serde_json::to_vec(&req).map_err(|e| format!("serialize error: {}", e))?;
-        let response = self.send_service_request(ServiceType::Kv, backend.as_str().to_string(), Operation::Delete, payload)?;
+        let response = self.send_service_request(ServiceBackend::Kv(backend), Operation::Delete, payload)?;
         Self::check_worker_error(&response)?;
         Ok(response == b"ok")
     }
@@ -179,7 +178,7 @@ impl SdkContract for QueueBridge {
             .ok_or("agent called vector-store but has no vector_storage configured")?;
         let req = VectorStoreRequest { key: key.to_string(), vector: vector.to_vec(), metadata: metadata.to_string() };
         let payload = serde_json::to_vec(&req).map_err(|e| format!("serialize error: {}", e))?;
-        let response = self.send_service_request(ServiceType::Vec, backend.as_str().to_string(), Operation::Store, payload)?;
+        let response = self.send_service_request(ServiceBackend::Vec(backend), Operation::Store, payload)?;
         Self::check_worker_error(&response)?;
         Ok(())
     }
@@ -189,7 +188,7 @@ impl SdkContract for QueueBridge {
             .ok_or("agent called vector-search but has no vector_storage configured")?;
         let req = VectorSearchRequest { vector: vector.to_vec(), limit };
         let payload = serde_json::to_vec(&req).map_err(|e| format!("serialize error: {}", e))?;
-        let response = self.send_service_request(ServiceType::Vec, backend.as_str().to_string(), Operation::Search, payload)?;
+        let response = self.send_service_request(ServiceBackend::Vec(backend), Operation::Search, payload)?;
         Self::check_worker_error(&response)?;
         serde_json::from_slice(&response)
             .map_err(|e| format!("vector-search response parse error: {}", e))
@@ -200,17 +199,19 @@ impl SdkContract for QueueBridge {
             .ok_or("agent called vector-delete but has no vector_storage configured")?;
         let req = VectorDeleteRequest { key: key.to_string() };
         let payload = serde_json::to_vec(&req).map_err(|e| format!("serialize error: {}", e))?;
-        let response = self.send_service_request(ServiceType::Vec, backend.as_str().to_string(), Operation::Delete, payload)?;
+        let response = self.send_service_request(ServiceBackend::Vec(backend), Operation::Delete, payload)?;
         Self::check_worker_error(&response)?;
         Ok(response == b"ok")
     }
 
     fn infer(&self, model: &str, prompt: &str, max_tokens: u32) -> Result<String, String> {
         let agent_id = self.invoke.read().unwrap().agent_id.clone();
-        let backend = self.registry.resolve_model_backend(&agent_id, model)?;
+        let backend_str = self.registry.resolve_model_backend(&agent_id, model)?;
+        let backend = InferenceBackendType::from_str(&backend_str)
+            .ok_or_else(|| format!("unknown inference backend: {}", backend_str))?;
         let req = InferRequest { model: model.to_string(), prompt: prompt.to_string(), max_tokens };
         let payload = serde_json::to_vec(&req).map_err(|e| format!("serialize error: {}", e))?;
-        let response = self.send_service_request(ServiceType::Infer, backend, Operation::Run, payload)?;
+        let response = self.send_service_request(ServiceBackend::Infer(backend), Operation::Run, payload)?;
         Self::check_worker_error(&response)?;
         String::from_utf8(response)
             .map_err(|e| format!("infer response not valid UTF-8: {}", e))
@@ -218,10 +219,12 @@ impl SdkContract for QueueBridge {
 
     fn embed(&self, model: &str, text: &str) -> Result<Vec<f32>, String> {
         let agent_id = self.invoke.read().unwrap().agent_id.clone();
-        let backend = self.registry.resolve_model_backend(&agent_id, model)?;
+        let backend_str = self.registry.resolve_model_backend(&agent_id, model)?;
+        let backend = EmbeddingBackendType::from_str(&backend_str)
+            .ok_or_else(|| format!("unknown embedding backend: {}", backend_str))?;
         let req = EmbedRequest { model: model.to_string(), text: text.to_string() };
         let payload = serde_json::to_vec(&req).map_err(|e| format!("serialize error: {}", e))?;
-        let response = self.send_service_request(ServiceType::Embed, backend, Operation::Run, payload)?;
+        let response = self.send_service_request(ServiceBackend::Embed(backend), Operation::Run, payload)?;
         Self::check_worker_error(&response)?;
         serde_json::from_slice(&response)
             .map_err(|e| format!("embed response parse error: {}", e))

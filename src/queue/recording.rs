@@ -160,9 +160,9 @@ mod tests {
     use super::*;
     use crate::domain::{
         AgentId, ContainerDiagnostics, DagNode, DelegateDiagnostics, HarnessType,
-        InMemoryDagStore, InvokeDiagnostics, MessageType, Operation, RequestDiagnostics,
-        ResourceId, RuntimeType, Sequence, ServiceDiagnostics, ServiceType, SessionId,
-        SubmissionId, TimelineId,
+        InMemoryDagStore, InferenceBackendType, InvokeDiagnostics, MessageType, Operation,
+        RequestDiagnostics, ResourceId, RuntimeType, Sequence, ServiceBackend,
+        ServiceDiagnostics, SessionId, SubmissionId, TimelineId,
     };
     use crate::queue::InMemoryQueue;
 
@@ -210,8 +210,7 @@ mod tests {
             test_submission(),
             test_session(),
             test_agent_id(),
-            ServiceType::Infer,
-            "ollama",
+            ServiceBackend::Infer(InferenceBackendType::Ollama),
             Operation::Run,
             Sequence::first(),
             b"prompt".to_vec(),

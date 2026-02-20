@@ -5,8 +5,8 @@
 //! from equality over all dimensions.
 
 use super::{
-    HarnessType, ObjectStorageType, Operation, RuntimeType, Sequence, SubmissionId, TimelineId,
-    VectorStorageType,
+    HarnessType, ObjectStorageType, Operation, RuntimeType, Sequence, ServiceType, SubmissionId,
+    TimelineId, VectorStorageType,
 };
 
 /// Agent identity within the routing bounded context.
@@ -34,28 +34,106 @@ impl std::fmt::Display for AgentId {
 }
 
 /// Inference backend implementations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
 pub enum InferenceBackendType {
     Ollama,
     OpenRouter,
 }
 
+impl InferenceBackendType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            InferenceBackendType::Ollama => "ollama",
+            InferenceBackendType::OpenRouter => "openrouter",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "ollama" => Some(Self::Ollama),
+            "openrouter" => Some(Self::OpenRouter),
+            _ => None,
+        }
+    }
+}
+
 /// Embedding backend implementations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
 pub enum EmbeddingBackendType {
     Ollama,
+}
+
+impl EmbeddingBackendType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            EmbeddingBackendType::Ollama => "ollama",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "ollama" => Some(Self::Ollama),
+            _ => None,
+        }
+    }
 }
 
 /// Service-backend pair for routing.
 ///
 /// Each service type scopes its own set of valid backends. Invalid
 /// combinations (e.g., Kv + Ollama) are unrepresentable.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
 pub enum ServiceBackend {
     Kv(ObjectStorageType),
     Vec(VectorStorageType),
     Infer(InferenceBackendType),
     Embed(EmbeddingBackendType),
+}
+
+impl ServiceBackend {
+    /// The service type for this backend (wire format compatibility).
+    pub fn service_type(&self) -> ServiceType {
+        match self {
+            ServiceBackend::Kv(_) => ServiceType::Kv,
+            ServiceBackend::Vec(_) => ServiceType::Vec,
+            ServiceBackend::Infer(_) => ServiceType::Infer,
+            ServiceBackend::Embed(_) => ServiceType::Embed,
+        }
+    }
+
+    /// The backend string for this backend (wire format compatibility).
+    pub fn backend_str(&self) -> &'static str {
+        match self {
+            ServiceBackend::Kv(b) => b.as_str(),
+            ServiceBackend::Vec(b) => b.as_str(),
+            ServiceBackend::Infer(b) => b.as_str(),
+            ServiceBackend::Embed(b) => b.as_str(),
+        }
+    }
+
+    /// Reconstruct from separate service type and backend string.
+    pub fn from_parts(service: ServiceType, backend: &str) -> Option<Self> {
+        match service {
+            ServiceType::Kv => match backend {
+                "sqlite" => Some(Self::Kv(ObjectStorageType::Sqlite)),
+                "memory" => Some(Self::Kv(ObjectStorageType::InMemory)),
+                _ => None,
+            },
+            ServiceType::Vec => match backend {
+                "sqlite-vec" => Some(Self::Vec(VectorStorageType::SqliteVec)),
+                "memory" => Some(Self::Vec(VectorStorageType::InMemory)),
+                _ => None,
+            },
+            ServiceType::Infer => InferenceBackendType::from_str(backend).map(Self::Infer),
+            ServiceType::Embed => EmbeddingBackendType::from_str(backend).map(Self::Embed),
+        }
+    }
+}
+
+impl std::fmt::Display for ServiceBackend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}.{}", self.service_type(), self.backend_str())
+    }
 }
 
 /// A value used exactly once to ensure uniqueness.

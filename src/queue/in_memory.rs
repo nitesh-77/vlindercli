@@ -70,8 +70,8 @@ impl MessageQueue for InMemoryQueue {
             msg.timeline,
             msg.submission,
             agent_short_name(&msg.agent_id),
-            msg.service,
-            msg.backend,
+            msg.service.service_type(),
+            msg.service.backend_str(),
             msg.operation,
             msg.sequence,
         );
@@ -90,8 +90,8 @@ impl MessageQueue for InMemoryQueue {
             "vlinder.{}.{}.res.{}.{}.{}.{}.{}",
             msg.timeline,
             msg.submission,
-            msg.service,
-            msg.backend,
+            msg.service.service_type(),
+            msg.service.backend_str(),
             agent_short_name(&msg.agent_id),
             msg.operation,
             msg.sequence,
@@ -163,7 +163,7 @@ impl MessageQueue for InMemoryQueue {
     }
 
     fn receive_response(&self, request: &RequestMessage) -> Result<(ResponseMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
-        let pattern = format!("{}.res.{}.{}", request.submission, request.service, request.backend);
+        let pattern = format!("{}.res.{}.{}", request.submission, request.service.service_type(), request.service.backend_str());
         let mut typed = self.typed_queues.lock().unwrap();
 
         for (subject, queue) in typed.iter_mut() {
@@ -267,7 +267,7 @@ use crate::domain::agent_routing_key as agent_short_name;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{Operation, ResourceId, RuntimeType, ServiceType};
+    use crate::domain::{InferenceBackendType, ObjectStorageType, Operation, ResourceId, RuntimeType, ServiceBackend, VectorStorageType};
     use crate::domain::{ExpectsReply, HarnessType, Sequence, SessionId, SubmissionId, TimelineId};
 
     fn test_agent_id() -> ResourceId {
@@ -319,8 +319,7 @@ mod tests {
             test_submission(),
             SessionId::new(),
             test_agent_id(),
-            ServiceType::Kv,
-            "sqlite",
+            ServiceBackend::Kv(ObjectStorageType::Sqlite),
             Operation::Get,
             Sequence::first(),
             b"key".to_vec(),
@@ -346,8 +345,7 @@ mod tests {
             test_submission(),
             SessionId::new(),
             test_agent_id(),
-            ServiceType::Kv,
-            "sqlite",
+            ServiceBackend::Kv(ObjectStorageType::Sqlite),
             Operation::Get,
             Sequence::from(3),
             b"key".to_vec(),
@@ -474,8 +472,7 @@ mod tests {
             test_submission(),
             SessionId::new(),
             test_agent_id(),
-            ServiceType::Kv,
-            "sqlite",
+            ServiceBackend::Kv(ObjectStorageType::Sqlite),
             Operation::Get,
             Sequence::first(),
             b"key".to_vec(),
@@ -490,8 +487,7 @@ mod tests {
         let (received, ack) = queue.receive_request(ServiceType::Kv, "sqlite", Operation::Get).unwrap();
 
         assert_eq!(received.id, original_id);
-        assert_eq!(received.service, ServiceType::Kv);
-        assert_eq!(received.backend, "sqlite");
+        assert_eq!(received.service, ServiceBackend::Kv(ObjectStorageType::Sqlite));
         assert_eq!(received.operation, Operation::Get);
         assert_eq!(received.payload.legacy_bytes(), b"key");
 
@@ -510,8 +506,7 @@ mod tests {
             submission.clone(),
             SessionId::new(),
             agent_id.clone(),
-            ServiceType::Vec,
-            "sqlite-vec",
+            ServiceBackend::Vec(VectorStorageType::SqliteVec),
             Operation::Search,
             Sequence::from(3),
             b"query".to_vec(),
@@ -538,8 +533,7 @@ mod tests {
             test_submission(),
             SessionId::new(),
             test_agent_id(),
-            ServiceType::Infer,
-            "ollama",
+            ServiceBackend::Infer(InferenceBackendType::Ollama),
             Operation::Run,
             Sequence::first(),
             b"prompt".to_vec(),
@@ -551,8 +545,7 @@ mod tests {
 
         let (received, _) = queue.receive_request(ServiceType::Infer, "ollama", Operation::Run).unwrap();
 
-        assert_eq!(received.service, ServiceType::Infer);
-        assert_eq!(received.backend, "ollama");
+        assert_eq!(received.service, ServiceBackend::Infer(InferenceBackendType::Ollama));
         assert_eq!(received.operation, Operation::Run);
     }
 

@@ -16,8 +16,8 @@ use crate::domain::{
     AgentId, CompleteMessage, ContainerDiagnostics, DagNode, DelegateDiagnostics,
     DelegateMessage, HarnessType, InvokeDiagnostics, InvokeMessage, MessageId, MessageType,
     Operation, RequestDiagnostics, RequestMessage, RequestPayload, ResourceId, ResponseMessage,
-    ResponsePayload, RuntimeType, Sequence, ServiceDiagnostics, ServiceType, SessionId,
-    SubmissionId, TimelineId, hash_dag_node,
+    ResponsePayload, RuntimeType, Sequence, ServiceBackend, ServiceDiagnostics, ServiceType,
+    SessionId, SubmissionId, TimelineId, hash_dag_node,
 };
 use crate::domain::message::ObservableMessage;
 
@@ -103,8 +103,10 @@ fn reconstruct_request(
         submission: SubmissionId::from(headers.get("submission-id")?.clone()),
         session: SessionId::from(headers.get("session-id")?.clone()),
         agent_id: ResourceId::new(headers.get("agent-id")?),
-        service: ServiceType::from_str(headers.get("service")?)?,
-        backend: headers.get("backend")?.clone(),
+        service: ServiceBackend::from_parts(
+            ServiceType::from_str(headers.get("service")?)?,
+            headers.get("backend")?,
+        )?,
         operation: Operation::from_str(headers.get("operation")?)?,
         sequence: Sequence::from(
             headers.get("sequence")?.parse::<u32>().ok()?
@@ -130,8 +132,10 @@ fn reconstruct_response(
         submission: SubmissionId::from(headers.get("submission-id")?.clone()),
         session: SessionId::from(headers.get("session-id")?.clone()),
         agent_id: ResourceId::new(headers.get("agent-id")?),
-        service: ServiceType::from_str(headers.get("service")?)?,
-        backend: headers.get("backend")?.clone(),
+        service: ServiceBackend::from_parts(
+            ServiceType::from_str(headers.get("service")?)?,
+            headers.get("backend")?,
+        )?,
         operation: Operation::from_str(headers.get("operation")?)?,
         sequence: Sequence::from(
             headers.get("sequence")?.parse::<u32>().ok()?
@@ -231,10 +235,10 @@ pub fn observable_from_to(msg: &ObservableMessage) -> (String, String) {
         ),
         ObservableMessage::Request(m) => (
             last_path_segment(m.agent_id.as_str()).to_string(),
-            format!("{}.{}", m.service, m.backend),
+            format!("{}.{}", m.service.service_type(), m.service.backend_str()),
         ),
         ObservableMessage::Response(m) => (
-            format!("{}.{}", m.service, m.backend),
+            format!("{}.{}", m.service.service_type(), m.service.backend_str()),
             last_path_segment(m.agent_id.as_str()).to_string(),
         ),
         ObservableMessage::Complete(m) => (
@@ -324,7 +328,7 @@ fn last_path_segment(s: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{DagStore, InMemoryDagStore};
+    use crate::domain::{DagStore, InferenceBackendType, InMemoryDagStore};
 
     // --- Header construction helpers ---
 
@@ -419,8 +423,7 @@ mod tests {
 
         assert!(matches!(msg, ObservableMessage::Request(_)));
         if let ObservableMessage::Request(m) = &msg {
-            assert_eq!(m.service, ServiceType::Infer);
-            assert_eq!(m.backend, "ollama");
+            assert_eq!(m.service, ServiceBackend::Infer(InferenceBackendType::Ollama));
             assert_eq!(m.operation, Operation::Run);
             assert_eq!(m.sequence.as_u32(), 1);
             assert_eq!(m.payload.legacy_bytes(), b"request-payload");
@@ -437,8 +440,7 @@ mod tests {
 
         assert!(matches!(msg, ObservableMessage::Response(_)));
         if let ObservableMessage::Response(m) = &msg {
-            assert_eq!(m.service, ServiceType::Infer);
-            assert_eq!(m.backend, "ollama");
+            assert_eq!(m.service, ServiceBackend::Infer(InferenceBackendType::Ollama));
             assert_eq!(m.correlation_id.as_str(), "msg-002");
             assert_eq!(m.payload.legacy_bytes(), b"response-payload");
         }
