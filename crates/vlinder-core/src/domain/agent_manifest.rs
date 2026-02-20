@@ -12,7 +12,7 @@ use super::service_type::ServiceType;
 ///
 /// Relative paths (models, mounts, storage) are resolved against
 /// the manifest's directory during loading.
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct AgentManifest {
     pub name: String,
     pub description: String,
@@ -174,7 +174,7 @@ impl From<toml::de::Error> for ParseError {
 }
 
 /// Requirements as declared in agent.toml
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct RequirementsConfig {
     /// Model alias → registry name (ADR 094).
     ///
@@ -228,7 +228,7 @@ pub enum Protocol {
 }
 
 /// Prompt overrides as declared in agent.toml
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
 pub struct PromptsConfig {
     pub intent_recognition: Option<String>,
     pub query_expansion: Option<String>,
@@ -239,7 +239,7 @@ pub struct PromptsConfig {
 }
 
 /// Mount declaration as declared in agent.toml
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct MountConfig {
     pub host_path: String,
     pub guest_path: String,
