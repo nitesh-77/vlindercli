@@ -117,8 +117,7 @@ impl InferenceServiceWorker {
 
     /// Validate that an agent declared the model and return its registry name.
     fn resolve_model_name(&self, agent_id: &str, model_alias: &str) -> Result<String, String> {
-        let agent_rid = crate::domain::ResourceId::new(agent_id);
-        let agent = self.registry.get_agent(&agent_rid)
+        let agent = self.registry.get_agent_by_name(agent_id)
             .ok_or_else(|| format!("agent not found: {}", agent_id))?;
 
         agent.model_name(model_alias)
@@ -160,7 +159,7 @@ impl InferenceServiceWorker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{Agent, Provider, Model, ModelType, ResourceId};
+    use crate::domain::{Agent, AgentId, Provider, Model, ModelType};
     use crate::domain::InMemoryRegistry;
     use crate::domain::{InferenceBackendType, Operation, RequestDiagnostics, Sequence, ServiceBackend, SessionId, SubmissionId, TimelineId};
     use crate::domain::SecretStore;
@@ -172,14 +171,12 @@ mod tests {
         Arc::new(InMemorySecretStore::new())
     }
 
-    const TEST_AGENT_ID: &str = "http://127.0.0.1:9000/agents/test-agent";
-
     fn test_request_diag() -> RequestDiagnostics {
         RequestDiagnostics { sequence: 0, endpoint: String::new(), request_bytes: 0, received_at_ms: 0 }
     }
 
-    fn test_agent_id() -> ResourceId {
-        ResourceId::new(TEST_AGENT_ID)
+    fn test_agent_id() -> AgentId {
+        AgentId::new("test-agent")
     }
 
     fn test_submission() -> SubmissionId {
@@ -367,7 +364,7 @@ mod tests {
             TimelineId::main(),
             test_submission(),
             SessionId::new(),
-            ResourceId::new("http://127.0.0.1:9000/agents/unknown-agent"),
+            AgentId::new("unknown-agent"),
             ServiceBackend::Infer(InferenceBackendType::Ollama),
             Operation::Run,
             Sequence::first(),

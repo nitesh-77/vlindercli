@@ -15,7 +15,7 @@ use chrono::Utc;
 use crate::domain::{
     AgentId, CompleteMessage, ContainerDiagnostics, DagNode, DelegateDiagnostics,
     DelegateMessage, HarnessType, InvokeDiagnostics, InvokeMessage, MessageId, MessageType,
-    Operation, RequestDiagnostics, RequestMessage, RequestPayload, ResourceId, ResponseMessage,
+    Operation, RequestDiagnostics, RequestMessage, RequestPayload, ResponseMessage,
     ResponsePayload, RuntimeType, Sequence, ServiceBackend, ServiceDiagnostics, ServiceType,
     SessionId, SubmissionId, TimelineId, hash_dag_node,
 };
@@ -76,7 +76,7 @@ fn reconstruct_invoke(
         session: SessionId::from(headers.get("session-id")?.clone()),
         harness: parse_harness(headers.get("harness")?)?,
         runtime: parse_runtime(headers.get("runtime")?)?,
-        agent_id: ResourceId::new(headers.get("agent-id")?),
+        agent_id: AgentId::new(headers.get("agent-id")?),
         payload: payload.to_vec(),
         state: headers.get("state").cloned(),
         diagnostics,
@@ -102,7 +102,7 @@ fn reconstruct_request(
         timeline: headers.get("timeline-id").map(|s| TimelineId::from(s.clone())).unwrap_or_else(TimelineId::main),
         submission: SubmissionId::from(headers.get("submission-id")?.clone()),
         session: SessionId::from(headers.get("session-id")?.clone()),
-        agent_id: ResourceId::new(headers.get("agent-id")?),
+        agent_id: AgentId::new(headers.get("agent-id")?),
         service: ServiceBackend::from_parts(
             ServiceType::from_str(headers.get("service")?)?,
             headers.get("backend")?,
@@ -131,7 +131,7 @@ fn reconstruct_response(
         timeline: headers.get("timeline-id").map(|s| TimelineId::from(s.clone())).unwrap_or_else(TimelineId::main),
         submission: SubmissionId::from(headers.get("submission-id")?.clone()),
         session: SessionId::from(headers.get("session-id")?.clone()),
-        agent_id: ResourceId::new(headers.get("agent-id")?),
+        agent_id: AgentId::new(headers.get("agent-id")?),
         service: ServiceBackend::from_parts(
             ServiceType::from_str(headers.get("service")?)?,
             headers.get("backend")?,
@@ -161,7 +161,7 @@ fn reconstruct_complete(
         timeline: headers.get("timeline-id").map(|s| TimelineId::from(s.clone())).unwrap_or_else(TimelineId::main),
         submission: SubmissionId::from(headers.get("submission-id")?.clone()),
         session: SessionId::from(headers.get("session-id")?.clone()),
-        agent_id: ResourceId::new(headers.get("agent-id")?),
+        agent_id: AgentId::new(headers.get("agent-id")?),
         harness: parse_harness(headers.get("harness")?)?,
         payload: payload.to_vec(),
         state: headers.get("state").cloned(),
@@ -231,18 +231,18 @@ pub fn observable_from_to(msg: &ObservableMessage) -> (String, String) {
     match msg {
         ObservableMessage::Invoke(m) => (
             m.harness.as_str().to_string(),
-            last_path_segment(m.agent_id.as_str()).to_string(),
+            m.agent_id.to_string(),
         ),
         ObservableMessage::Request(m) => (
-            last_path_segment(m.agent_id.as_str()).to_string(),
+            m.agent_id.to_string(),
             format!("{}.{}", m.service.service_type(), m.service.backend_str()),
         ),
         ObservableMessage::Response(m) => (
             format!("{}.{}", m.service.service_type(), m.service.backend_str()),
-            last_path_segment(m.agent_id.as_str()).to_string(),
+            m.agent_id.to_string(),
         ),
         ObservableMessage::Complete(m) => (
-            last_path_segment(m.agent_id.as_str()).to_string(),
+            m.agent_id.to_string(),
             m.harness.as_str().to_string(),
         ),
         ObservableMessage::Delegate(m) => (
@@ -317,10 +317,6 @@ pub fn build_dag_node(msg: &ObservableMessage, parent_hash: &str) -> DagNode {
     }
 }
 
-fn last_path_segment(s: &str) -> &str {
-    s.rsplit('/').next().unwrap_or(s)
-}
-
 // ============================================================================
 // Tests
 // ============================================================================
@@ -341,7 +337,7 @@ mod tests {
         h.insert("session-id".to_string(), "sess-1".to_string());
         h.insert("harness".to_string(), "cli".to_string());
         h.insert("runtime".to_string(), "container".to_string());
-        h.insert("agent-id".to_string(), "http://127.0.0.1:9000/agents/myagent".to_string());
+        h.insert("agent-id".to_string(), "myagent".to_string());
         h
     }
 
@@ -352,7 +348,7 @@ mod tests {
         h.insert("timeline-id".to_string(), "1".to_string());
         h.insert("submission-id".to_string(), "sub-1".to_string());
         h.insert("session-id".to_string(), "sess-1".to_string());
-        h.insert("agent-id".to_string(), "http://127.0.0.1:9000/agents/myagent".to_string());
+        h.insert("agent-id".to_string(), "myagent".to_string());
         h.insert("service".to_string(), "infer".to_string());
         h.insert("backend".to_string(), "ollama".to_string());
         h.insert("operation".to_string(), "run".to_string());
@@ -374,7 +370,7 @@ mod tests {
         h.insert("timeline-id".to_string(), "1".to_string());
         h.insert("submission-id".to_string(), "sub-1".to_string());
         h.insert("session-id".to_string(), "sess-1".to_string());
-        h.insert("agent-id".to_string(), "http://127.0.0.1:9000/agents/myagent".to_string());
+        h.insert("agent-id".to_string(), "myagent".to_string());
         h.insert("harness".to_string(), "cli".to_string());
         h
     }
@@ -406,7 +402,7 @@ mod tests {
         if let ObservableMessage::Invoke(m) = &msg {
             assert_eq!(m.harness, HarnessType::Cli);
             assert_eq!(m.runtime, RuntimeType::Container);
-            assert!(m.agent_id.as_str().contains("myagent"));
+            assert_eq!(m.agent_id.as_str(), "myagent");
             assert_eq!(m.payload, b"invoke-payload");
             assert_eq!(m.session.as_str(), "sess-1");
             assert_eq!(m.submission.as_str(), "sub-1");

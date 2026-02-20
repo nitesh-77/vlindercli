@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use vlindercli::domain::{
-    Agent, Registry, ResourceId, Runtime, RuntimeType, SecretStore,
+    Agent, AgentId, Registry, ResourceId, Runtime, RuntimeType, SecretStore,
     InvokeDiagnostics, InvokeMessage, MessageQueue, HarnessType, SessionId, SubmissionId, TimelineId,
 };
 use vlindercli::registry::InMemoryRegistry;
@@ -34,7 +34,7 @@ fn container_runtime_executes_echo_agent() {
 
     "#).unwrap();
     registry.register_agent(agent).unwrap();
-    let agent_id = registry.agent_id("echo-container");
+    let agent_id = AgentId::new("echo-container");
     let registry: Arc<dyn Registry> = Arc::new(registry);
 
     let mut runtime = ContainerRuntime::new(

@@ -521,21 +521,21 @@ fn message_routing(msg: &ObservableMessage) -> (String, String, &'static str) {
     match msg {
         ObservableMessage::Invoke(m) => (
             m.harness.as_str().to_string(),
-            m.agent_id.as_str().rsplit('/').next().unwrap_or(m.agent_id.as_str()).to_string(),
+            m.agent_id.to_string(),
             "invoke",
         ),
         ObservableMessage::Request(m) => (
-            m.agent_id.as_str().rsplit('/').next().unwrap_or(m.agent_id.as_str()).to_string(),
+            m.agent_id.to_string(),
             format!("{}.{}", m.service.service_type(), m.service.backend_str()),
             "request",
         ),
         ObservableMessage::Response(m) => (
             format!("{}.{}", m.service.service_type(), m.service.backend_str()),
-            m.agent_id.as_str().rsplit('/').next().unwrap_or(m.agent_id.as_str()).to_string(),
+            m.agent_id.to_string(),
             "response",
         ),
         ObservableMessage::Complete(m) => (
-            m.agent_id.as_str().rsplit('/').next().unwrap_or(m.agent_id.as_str()).to_string(),
+            m.agent_id.to_string(),
             m.harness.as_str().to_string(),
             "complete",
         ),
@@ -551,13 +551,13 @@ fn message_routing(msg: &ObservableMessage) -> (String, String, &'static str) {
 fn message_agent_name(msg: &ObservableMessage) -> String {
     match msg {
         ObservableMessage::Invoke(m) =>
-            m.agent_id.as_str().rsplit('/').next().unwrap_or(m.agent_id.as_str()).to_string(),
+            m.agent_id.to_string(),
         ObservableMessage::Request(m) =>
-            m.agent_id.as_str().rsplit('/').next().unwrap_or(m.agent_id.as_str()).to_string(),
+            m.agent_id.to_string(),
         ObservableMessage::Response(m) =>
-            m.agent_id.as_str().rsplit('/').next().unwrap_or(m.agent_id.as_str()).to_string(),
+            m.agent_id.to_string(),
         ObservableMessage::Complete(m) =>
-            m.agent_id.as_str().rsplit('/').next().unwrap_or(m.agent_id.as_str()).to_string(),
+            m.agent_id.to_string(),
         ObservableMessage::Delegate(m) => m.target.to_string(),
     }
 }
@@ -581,12 +581,12 @@ mod tests {
         ObservableMessage, HarnessType, TimelineId, SubmissionId, SessionId, Sequence,
         InvokeDiagnostics, RequestDiagnostics, ServiceDiagnostics, ServiceMetrics,
         ContainerDiagnostics, ContainerRuntimeInfo, DelegateDiagnostics,
-        ContainerId, InferenceBackendType, Operation, RuntimeType, ResourceId, ServiceBackend,
+        ContainerId, InferenceBackendType, Operation, RuntimeType, ServiceBackend,
         ServiceType, Agent, SecretStore, InMemorySecretStore, InMemoryRegistry,
     };
 
-    fn test_agent_id() -> ResourceId {
-        ResourceId::new("http://127.0.0.1:9000/agents/support-agent")
+    fn test_agent_id() -> AgentId {
+        AgentId::new("support-agent")
     }
 
     fn test_invoke(payload: &[u8], epoch_secs: i64) -> (ObservableMessage, DateTime<Utc>) {

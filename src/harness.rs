@@ -9,7 +9,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::domain::{
-    Agent, Harness, HarnessType, InvokeDiagnostics, InvokeMessage,
+    Agent, AgentId, Harness, HarnessType, InvokeDiagnostics, InvokeMessage,
     JobId, JobStatus, MessageQueue, Registry, ResourceId, RuntimeType,
     SessionId, SubmissionId, TimelineId,
 };
@@ -195,7 +195,7 @@ impl CliHarness {
             session_id,
             HarnessType::Cli,
             runtime,
-            agent_id.clone(),
+            AgentId::new(crate::domain::agent_routing_key(agent_id)),
             payload.as_bytes().to_vec(),
             self.last_state.clone(),
             invoke_diag,

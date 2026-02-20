@@ -10,7 +10,7 @@ use std::thread;
 use std::time::Instant;
 
 use crate::domain::{
-    Agent, ObjectStorageType, QueueBridge, Registry, ResourceId, Runtime, RuntimeType, VectorStorageType,
+    Agent, AgentId, ObjectStorageType, QueueBridge, Registry, ResourceId, Runtime, RuntimeType, VectorStorageType,
     CompleteMessage, ExpectsReply, HarnessType, InvokeDiagnostics, InvokeMessage, MessageQueue, SequenceCounter,
 };
 
@@ -265,7 +265,7 @@ impl ContainerRuntime {
                     delegate.session.clone(),
                     HarnessType::Cli,  // placeholder — delegated work doesn't route to harness
                     RuntimeType::Container,
-                    agent.id.clone(),
+                    AgentId::new(&agent.name),
                     delegate.payload.clone(),
                     None,
                     InvokeDiagnostics {

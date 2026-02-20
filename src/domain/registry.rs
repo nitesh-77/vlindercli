@@ -186,9 +186,9 @@ pub trait Registry: Send + Sync {
     /// `[requirements.models]`). This method looks up that alias, finds the
     /// registered model by registry name (ADR 094), and returns the provider
     /// as a routing string.
-    fn resolve_model_backend(&self, agent_id: &ResourceId, model: &str) -> Result<String, String> {
-        let agent = self.get_agent(agent_id)
-            .ok_or_else(|| format!("agent '{}' not found in registry", agent_id))?;
+    fn resolve_model_backend(&self, agent_name: &str, model: &str) -> Result<String, String> {
+        let agent = self.get_agent_by_name(agent_name)
+            .ok_or_else(|| format!("agent '{}' not found in registry", agent_name))?;
         let model_name = agent.requirements.models.get(model)
             .ok_or_else(|| format!("agent called service with undeclared model '{}'\n\nDeclared models: {:?}",
                 model, agent.requirements.models.keys().collect::<Vec<_>>()))?;

@@ -57,8 +57,7 @@ impl VectorServiceWorker {
         }
 
         // Look up agent in Registry
-        let resource_id = ResourceId::new(agent_id);
-        let agent = self.registry.get_agent(&resource_id)
+        let agent = self.registry.get_agent_by_name(agent_id)
             .ok_or_else(|| format!("unknown agent: {}", agent_id))?;
         let uri = agent.vector_storage
             .ok_or_else(|| format!("agent has no vector_storage declared: {}", agent_id))?;
@@ -213,7 +212,7 @@ impl VectorServiceWorker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{Agent, Registry};
+    use crate::domain::{Agent, AgentId, Registry};
     use crate::domain::InMemoryRegistry;
     use crate::domain::{Operation, RequestDiagnostics, Sequence, ServiceBackend, SessionId, SubmissionId, TimelineId, VectorStorageType};
     use crate::domain::SecretStore;
@@ -224,14 +223,12 @@ mod tests {
         Arc::new(InMemorySecretStore::new())
     }
 
-    const TEST_AGENT_ID: &str = "http://127.0.0.1:9000/agents/test-agent";
-
     fn test_request_diag() -> RequestDiagnostics {
         RequestDiagnostics { sequence: 0, endpoint: String::new(), request_bytes: 0, received_at_ms: 0 }
     }
 
-    fn test_agent_id() -> ResourceId {
-        ResourceId::new(TEST_AGENT_ID)
+    fn test_agent_id() -> AgentId {
+        AgentId::new("test-agent")
     }
 
     fn test_submission() -> SubmissionId {

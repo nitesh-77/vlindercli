@@ -561,10 +561,10 @@ mod tests {
     use vlindercli::git_dag::GitDagWorker;
     use vlindercli::domain::DagWorker;
     use vlindercli::domain::{
-        InvokeMessage, CompleteMessage, ObservableMessage,
+        AgentId, InvokeMessage, CompleteMessage, ObservableMessage,
         SubmissionId, SessionId, HarnessType, TimelineId,
         InvokeDiagnostics, ContainerDiagnostics,
-        RuntimeType, ResourceId,
+        RuntimeType,
     };
 
     /// Create a test repo with an invoke+complete pair, returning the worker and tmpdir.
@@ -572,7 +572,7 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let mut worker = GitDagWorker::open(tmp.path(), "registry.local:9000", None).unwrap();
 
-        let agent_id = ResourceId::new("http://127.0.0.1:9000/agents/agent-a");
+        let agent_id = AgentId::new("agent-a");
 
         let invoke = InvokeMessage::new(
             TimelineId::main(),

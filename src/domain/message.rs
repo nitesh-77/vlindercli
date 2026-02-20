@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use serde::{Deserialize, Serialize};
 
-use super::{ResourceId, RuntimeType};
+use super::RuntimeType;
 use super::operation::Operation;
 use super::routing_key::{AgentId, ServiceBackend};
 use super::service_payloads::{RequestPayload, ResponsePayload};
@@ -340,7 +340,7 @@ pub struct InvokeMessage {
     pub session: SessionId,
     pub harness: HarnessType,
     pub runtime: RuntimeType,
-    pub agent_id: ResourceId,
+    pub agent_id: AgentId,
     #[serde(skip)]
     pub payload: Vec<u8>,
     /// Initial state hash from the previous turn's State trailer (ADR 055).
@@ -359,7 +359,7 @@ impl InvokeMessage {
         session: SessionId,
         harness: HarnessType,
         runtime: RuntimeType,
-        agent_id: ResourceId,
+        agent_id: AgentId,
         payload: Vec<u8>,
         state: Option<String>,
         diagnostics: InvokeDiagnostics,
@@ -391,7 +391,7 @@ pub struct RequestMessage {
     pub timeline: TimelineId,
     pub submission: SubmissionId,
     pub session: SessionId,
-    pub agent_id: ResourceId,
+    pub agent_id: AgentId,
     pub service: ServiceBackend,
     pub operation: Operation,
     pub sequence: Sequence,
@@ -411,7 +411,7 @@ impl RequestMessage {
         timeline: TimelineId,
         submission: SubmissionId,
         session: SessionId,
-        agent_id: ResourceId,
+        agent_id: AgentId,
         service: ServiceBackend,
         operation: Operation,
         sequence: Sequence,
@@ -446,7 +446,7 @@ pub struct ResponseMessage {
     pub timeline: TimelineId,
     pub submission: SubmissionId,
     pub session: SessionId,
-    pub agent_id: ResourceId,
+    pub agent_id: AgentId,
     pub service: ServiceBackend,
     pub operation: Operation,
     pub sequence: Sequence,
@@ -565,7 +565,7 @@ pub struct CompleteMessage {
     pub timeline: TimelineId,
     pub submission: SubmissionId,
     pub session: SessionId,
-    pub agent_id: ResourceId,
+    pub agent_id: AgentId,
     pub harness: HarnessType,
     #[serde(skip)]
     pub payload: Vec<u8>,
@@ -583,7 +583,7 @@ impl CompleteMessage {
         timeline: TimelineId,
         submission: SubmissionId,
         session: SessionId,
-        agent_id: ResourceId,
+        agent_id: AgentId,
         harness: HarnessType,
         payload: Vec<u8>,
         state: Option<String>,
@@ -1065,8 +1065,8 @@ mod tests {
 
     // --- Typed message tests ---
 
-    fn test_agent_id() -> ResourceId {
-        ResourceId::new("http://127.0.0.1:9000/agents/echo-agent")
+    fn test_agent_id() -> AgentId {
+        AgentId::new("echo-agent")
     }
 
     #[test]

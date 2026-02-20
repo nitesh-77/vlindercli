@@ -64,8 +64,7 @@ pub fn run_worker_loop(role: WorkerRole, shutdown: Arc<AtomicBool>) {
 /// worker depends only on the StateStore trait.
 fn make_state_store_factory(registry: Arc<dyn Registry>) -> crate::domain::workers::OpenStateStore {
     Box::new(move |agent_id: &str| {
-        let resource_id = crate::domain::ResourceId::new(agent_id);
-        let agent = registry.get_agent(&resource_id)
+        let agent = registry.get_agent_by_name(agent_id)
             .ok_or_else(|| format!("unknown agent: {}", agent_id))?;
         let uri = agent.object_storage
             .ok_or_else(|| format!("agent has no object_storage declared: {}", agent_id))?;

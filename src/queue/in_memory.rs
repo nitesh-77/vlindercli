@@ -52,7 +52,7 @@ impl MessageQueue for InMemoryQueue {
             msg.submission,
             msg.harness,
             msg.runtime.as_str(),
-            agent_short_name(&msg.agent_id),
+            msg.agent_id.as_str(),
         );
 
 
@@ -69,7 +69,7 @@ impl MessageQueue for InMemoryQueue {
             "vlinder.{}.{}.req.{}.{}.{}.{}.{}",
             msg.timeline,
             msg.submission,
-            agent_short_name(&msg.agent_id),
+            msg.agent_id.as_str(),
             msg.service.service_type(),
             msg.service.backend_str(),
             msg.operation,
@@ -92,7 +92,7 @@ impl MessageQueue for InMemoryQueue {
             msg.submission,
             msg.service.service_type(),
             msg.service.backend_str(),
-            agent_short_name(&msg.agent_id),
+            msg.agent_id.as_str(),
             msg.operation,
             msg.sequence,
         );
@@ -111,7 +111,7 @@ impl MessageQueue for InMemoryQueue {
             "vlinder.{}.{}.complete.{}.{}",
             msg.timeline,
             msg.submission,
-            agent_short_name(&msg.agent_id),
+            msg.agent_id.as_str(),
             msg.harness,
         );
 
@@ -262,16 +262,14 @@ impl MessageQueue for InMemoryQueue {
 // Internal helpers
 // ============================================================================
 
-use crate::domain::agent_routing_key as agent_short_name;
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{InferenceBackendType, ObjectStorageType, Operation, ResourceId, RuntimeType, ServiceBackend, VectorStorageType};
+    use crate::domain::{InferenceBackendType, ObjectStorageType, Operation, RuntimeType, ServiceBackend, VectorStorageType};
     use crate::domain::{ExpectsReply, HarnessType, Sequence, SessionId, SubmissionId, TimelineId};
 
-    fn test_agent_id() -> ResourceId {
-        ResourceId::new("http://127.0.0.1:9000/agents/echo-agent")
+    fn test_agent_id() -> AgentId {
+        AgentId::new("echo-agent")
     }
 
     fn test_submission() -> SubmissionId {
@@ -386,18 +384,6 @@ mod tests {
         let (subject, _) = typed.iter().next().unwrap();
 
         assert_eq!(subject, "vlinder.1.sub-test-123.complete.echo-agent.web");
-    }
-
-    #[test]
-    fn agent_short_name_extracts_from_registry_id() {
-        let id = ResourceId::new("http://127.0.0.1:9000/agents/pensieve");
-        assert_eq!(agent_short_name(&id), "pensieve");
-    }
-
-    #[test]
-    fn agent_short_name_extracts_last_path_component() {
-        let id = ResourceId::new("http://example.com/agents/test-agent");
-        assert_eq!(agent_short_name(&id), "test-agent");
     }
 
     // ========================================================================

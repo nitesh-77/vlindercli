@@ -161,7 +161,7 @@ mod tests {
     use crate::domain::{
         AgentId, ContainerDiagnostics, DagNode, DelegateDiagnostics, HarnessType,
         InMemoryDagStore, InferenceBackendType, InvokeDiagnostics, MessageType, Operation,
-        RequestDiagnostics, ResourceId, RuntimeType, Sequence, ServiceBackend,
+        RequestDiagnostics, RuntimeType, Sequence, ServiceBackend,
         ServiceDiagnostics, SessionId, SubmissionId, TimelineId,
     };
     use crate::queue::InMemoryQueue;
@@ -183,8 +183,8 @@ mod tests {
         SubmissionId::from("sub-test-001".to_string())
     }
 
-    fn test_agent_id() -> ResourceId {
-        ResourceId::new("localhost:9000/agents/echo")
+    fn test_agent_id() -> AgentId {
+        AgentId::new("echo")
     }
 
     fn test_invoke() -> InvokeMessage {

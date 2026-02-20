@@ -11,7 +11,7 @@ use chrono::{DateTime, Utc};
 use vlindercli::git_dag::GitDagWorker;
 use vlindercli::domain::{
     CompleteMessage, ContainerDiagnostics, HarnessType, InvokeDiagnostics, InvokeMessage,
-    ObservableMessage, ResourceId, RuntimeType, SessionId, SubmissionId, TimelineId,
+    AgentId, ObservableMessage, RuntimeType, SessionId, SubmissionId, TimelineId,
 };
 
 /// Create an isolated VLINDER_DIR for this test.
@@ -79,8 +79,8 @@ pub fn read_head_sha(dir: &Path) -> Option<String> {
 // Message factory helpers
 // ============================================================================
 
-fn test_agent_id() -> ResourceId {
-    ResourceId::new("http://127.0.0.1:9000/agents/test-agent")
+fn test_agent_id() -> AgentId {
+    AgentId::new("test-agent")
 }
 
 /// Create an invoke message with the given payload and state.

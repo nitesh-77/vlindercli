@@ -206,7 +206,7 @@ impl SdkContract for QueueBridge {
 
     fn infer(&self, model: &str, prompt: &str, max_tokens: u32) -> Result<String, String> {
         let agent_id = self.invoke.read().unwrap().agent_id.clone();
-        let backend_str = self.registry.resolve_model_backend(&agent_id, model)?;
+        let backend_str = self.registry.resolve_model_backend(agent_id.as_str(), model)?;
         let backend = InferenceBackendType::from_str(&backend_str)
             .ok_or_else(|| format!("unknown inference backend: {}", backend_str))?;
         let req = InferRequest { model: model.to_string(), prompt: prompt.to_string(), max_tokens };
@@ -219,7 +219,7 @@ impl SdkContract for QueueBridge {
 
     fn embed(&self, model: &str, text: &str) -> Result<Vec<f32>, String> {
         let agent_id = self.invoke.read().unwrap().agent_id.clone();
-        let backend_str = self.registry.resolve_model_backend(&agent_id, model)?;
+        let backend_str = self.registry.resolve_model_backend(agent_id.as_str(), model)?;
         let backend = EmbeddingBackendType::from_str(&backend_str)
             .ok_or_else(|| format!("unknown embedding backend: {}", backend_str))?;
         let req = EmbedRequest { model: model.to_string(), text: text.to_string() };
@@ -235,7 +235,7 @@ impl SdkContract for QueueBridge {
             .ok_or_else(|| format!("delegate: target agent '{}' not found", target_agent))?;
 
         let invoke = self.invoke.read().unwrap();
-        let caller = AgentId::new(super::agent_routing_key(&invoke.agent_id));
+        let caller = invoke.agent_id.clone();
         let target = AgentId::new(target_agent);
         let sha = invoke.submission.to_string();
         let reply_subject = self.queue.create_reply_address(
@@ -309,7 +309,7 @@ mod tests {
     use super::*;
     use crate::queue::InMemoryQueue;
     use crate::domain::{
-        HarnessType, InvokeDiagnostics, RuntimeType, ResourceId, SessionId, SubmissionId, TimelineId,
+        HarnessType, InvokeDiagnostics, RuntimeType, SessionId, SubmissionId, TimelineId,
         SecretStore, InMemoryRegistry, InMemorySecretStore,
     };
 
@@ -327,7 +327,7 @@ mod tests {
             SessionId::new(),
             HarnessType::Cli,
             RuntimeType::Container,
-            ResourceId::new("http://test/agents/echo"),
+            AgentId::new("echo"),
             b"hello".to_vec(),
             None,
             InvokeDiagnostics { harness_version: String::new(), history_turns: 0 },
@@ -412,7 +412,7 @@ mod tests {
             SessionId::new(),
             HarnessType::Cli,
             RuntimeType::Container,
-            ResourceId::new("http://test/agents/echo"),
+            AgentId::new("echo"),
             b"new input".to_vec(),
             Some("sha256:explicit".to_string()),
             InvokeDiagnostics { harness_version: String::new(), history_turns: 0 },
@@ -435,7 +435,7 @@ mod tests {
             SessionId::new(),
             HarnessType::Cli,
             RuntimeType::Container,
-            ResourceId::new("http://test/agents/echo"),
+            AgentId::new("echo"),
             b"input".to_vec(),
             None, // No state in invoke
             InvokeDiagnostics { harness_version: String::new(), history_turns: 0 },
@@ -459,7 +459,7 @@ mod tests {
             SessionId::new(),
             HarnessType::Cli,
             RuntimeType::Container,
-            ResourceId::new("http://test/agents/echo"),
+            AgentId::new("echo"),
             b"input".to_vec(),
             None,
             InvokeDiagnostics { harness_version: String::new(), history_turns: 0 },

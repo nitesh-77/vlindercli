@@ -18,7 +18,7 @@ use tokio::runtime::Runtime;
 use crate::domain::{
     AgentId, CompleteMessage, ContainerDiagnostics, DelegateMessage, DelegateDiagnostics,
     HarnessType, InvokeDiagnostics, InvokeMessage, MessageId, MessageQueue,
-    Operation, QueueError, RequestDiagnostics, RequestMessage, RequestPayload, ResourceId,
+    Operation, QueueError, RequestDiagnostics, RequestMessage, RequestPayload,
     ResponseMessage, ResponsePayload, RuntimeType, Sequence, ServiceBackend, ServiceDiagnostics,
     ServiceType, SessionId, SubmissionId, TimelineId,
 };
@@ -221,7 +221,7 @@ impl MessageQueue for NatsQueue {
             msg.submission,
             msg.harness,
             msg.runtime.as_str(),
-            agent_short_name(&msg.agent_id),
+            msg.agent_id.as_str(),
         );
 
         self.inner.runtime.block_on(async {
@@ -258,7 +258,7 @@ impl MessageQueue for NatsQueue {
             "vlinder.{}.{}.req.{}.{}.{}.{}.{}",
             msg.timeline,
             msg.submission,
-            agent_short_name(&msg.agent_id),
+            msg.agent_id.as_str(),
             msg.service.service_type(),
             msg.service.backend_str(),
             msg.operation,
@@ -303,7 +303,7 @@ impl MessageQueue for NatsQueue {
             msg.submission,
             msg.service.service_type(),
             msg.service.backend_str(),
-            agent_short_name(&msg.agent_id),
+            msg.agent_id.as_str(),
             msg.operation,
             msg.sequence,
         );
@@ -345,7 +345,7 @@ impl MessageQueue for NatsQueue {
             "vlinder.{}.{}.complete.{}.{}",
             msg.timeline,
             msg.submission,
-            agent_short_name(&msg.agent_id),
+            msg.agent_id.as_str(),
             msg.harness,
         );
 
@@ -400,7 +400,7 @@ impl MessageQueue for NatsQueue {
                 session: SessionId::from(get_header(headers, "session-id")?),
                 harness: parse_harness_type(&get_header(headers, "harness")?)?,
                 runtime: parse_runtime_type(&get_header(headers, "runtime")?)?,
-                agent_id: ResourceId::new(&get_header(headers, "agent-id")?),
+                agent_id: AgentId::new(get_header(headers, "agent-id")?),
                 payload: js_msg.payload.to_vec(),
                 state: get_header(headers, "state").ok(),
                 diagnostics,
@@ -430,7 +430,7 @@ impl MessageQueue for NatsQueue {
                 timeline: get_header(headers, "timeline-id").map(TimelineId::from).unwrap_or_else(|_| TimelineId::main()),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
                 session: SessionId::from(get_header(headers, "session-id")?),
-                agent_id: ResourceId::new(&get_header(headers, "agent-id")?),
+                agent_id: AgentId::new(get_header(headers, "agent-id")?),
                 service: ServiceBackend::from_parts(
                     parse_service_type(&get_header(headers, "service")?)?,
                     &get_header(headers, "backend")?,
@@ -467,7 +467,7 @@ impl MessageQueue for NatsQueue {
                 timeline: get_header(headers, "timeline-id").map(TimelineId::from).unwrap_or_else(|_| TimelineId::main()),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
                 session: SessionId::from(get_header(headers, "session-id")?),
-                agent_id: ResourceId::new(&get_header(headers, "agent-id")?),
+                agent_id: AgentId::new(get_header(headers, "agent-id")?),
                 service: ServiceBackend::from_parts(
                     parse_service_type(&get_header(headers, "service")?)?,
                     &get_header(headers, "backend")?,
@@ -504,7 +504,7 @@ impl MessageQueue for NatsQueue {
                 timeline: get_header(headers, "timeline-id").map(TimelineId::from).unwrap_or_else(|_| TimelineId::main()),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
                 session: SessionId::from(get_header(headers, "session-id")?),
-                agent_id: ResourceId::new(&get_header(headers, "agent-id")?),
+                agent_id: AgentId::new(get_header(headers, "agent-id")?),
                 harness: parse_harness_type(&get_header(headers, "harness")?)?,
                 payload: js_msg.payload.to_vec(),
                 state: get_header(headers, "state").ok(),
@@ -636,7 +636,7 @@ impl MessageQueue for NatsQueue {
                 timeline: get_header(headers, "timeline-id").map(TimelineId::from).unwrap_or_else(|_| TimelineId::main()),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
                 session: SessionId::from(get_header(headers, "session-id")?),
-                agent_id: ResourceId::new(&get_header(headers, "agent-id")?),
+                agent_id: AgentId::new(get_header(headers, "agent-id")?),
                 harness: parse_harness_type(&get_header(headers, "harness")?)?,
                 payload: js_msg.payload.to_vec(),
                 state: get_header(headers, "state").ok(),
@@ -658,8 +658,6 @@ fn filter_to_consumer_name(filter: &str) -> String {
         .replace('*', "W")
         .replace('>', "G")
 }
-
-use crate::domain::agent_routing_key as agent_short_name;
 
 /// Extract a header value from NATS headers.
 fn get_header(headers: &async_nats::HeaderMap, key: &str) -> Result<String, QueueError> {
