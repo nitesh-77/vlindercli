@@ -2,7 +2,7 @@
 
 use chrono::{DateTime, Utc};
 
-use crate::domain::{DagNode, MessageType, Timeline};
+use vlinder_core::domain::{DagNode, MessageType, Timeline};
 use super::proto;
 
 // =============================================================================

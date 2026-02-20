@@ -3,7 +3,7 @@
 use std::sync::Mutex;
 use tonic::transport::Channel;
 
-use crate::domain::{Harness, HarnessType, ResourceId, TimelineId};
+use vlinder_core::domain::{Harness, HarnessType, ResourceId, TimelineId};
 use super::proto::{self, harness_client::HarnessClient};
 
 /// Ping a harness service at the given address, returning its protocol version.

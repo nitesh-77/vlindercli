@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use crate::domain::{
+use vlinder_core::domain::{
     AbsolutePath, Agent, Job, JobId, JobStatus, Model, ModelType, Mount,
     Protocol, Provider, Requirements, ResourceId, RuntimeType, ServiceConfig, ServiceType,
     SubmissionId,

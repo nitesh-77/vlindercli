@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
 
-use crate::domain::DagStore;
+use vlinder_core::domain::DagStore;
 use super::proto::{
     self,
     state_service_server::StateService,

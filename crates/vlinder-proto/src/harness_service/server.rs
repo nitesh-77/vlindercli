@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use tonic::{Request, Response, Status};
 
-use crate::domain::{Harness, ResourceId, TimelineId};
+use vlinder_core::domain::{Harness, ResourceId, TimelineId};
 use super::proto::{
     self,
     harness_server::Harness as HarnessService,

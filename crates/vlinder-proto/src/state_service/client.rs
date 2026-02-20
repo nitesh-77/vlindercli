@@ -3,7 +3,7 @@
 use std::sync::Mutex;
 use tonic::transport::Channel;
 
-use crate::domain::{DagNode, DagStore, Timeline};
+use vlinder_core::domain::{DagNode, DagStore, Timeline};
 use super::proto::{self, state_service_client::StateServiceClient};
 
 /// DagStore implementation that makes gRPC calls to a remote State Service.

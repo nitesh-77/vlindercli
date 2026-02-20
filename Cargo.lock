@@ -3132,6 +3132,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "vlinder-proto"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "prost",
+ "tokio",
+ "tonic",
+ "tonic-build",
+ "vlinder-core",
+]
+
+[[package]]
 name = "vlindercli"
 version = "0.1.0"
 dependencies = [
@@ -3145,7 +3157,6 @@ dependencies = [
  "ed25519-dalek",
  "futures",
  "indicatif",
- "prost",
  "rand",
  "reedline",
  "rusqlite",
@@ -3161,13 +3172,13 @@ dependencies = [
  "tokio-stream",
  "toml",
  "tonic",
- "tonic-build",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
  "ureq",
  "uuid",
  "vlinder-core",
+ "vlinder-proto",
  "zerocopy 0.7.35",
 ]
 

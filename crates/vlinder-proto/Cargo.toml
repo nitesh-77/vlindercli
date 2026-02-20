@@ -1,0 +1,15 @@
+[package]
+name = "vlinder-proto"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+vlinder-core = { path = "../vlinder-core" }
+tonic = "0.12"
+prost = "0.13"
+tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+[build-dependencies]
+tonic-build = "0.12"

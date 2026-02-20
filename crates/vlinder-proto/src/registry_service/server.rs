@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
 
-use crate::domain::{Registry, JobStatus as DomainJobStatus, ResourceId};
+use vlinder_core::domain::{Registry, JobStatus as DomainJobStatus, ResourceId, SubmissionId};
 use super::proto::{
     self,
     registry_server::Registry as RegistryService,
@@ -189,7 +189,7 @@ impl RegistryService for RegistryServiceServer {
         request: Request<CreateJobRequest>,
     ) -> Result<Response<CreateJobResponse>, Status> {
         let req = request.into_inner();
-        let submission_id: crate::domain::SubmissionId = req.submission_id
+        let submission_id: SubmissionId = req.submission_id
             .ok_or_else(|| Status::invalid_argument("missing submission_id"))?
             .into();
         let agent_id: ResourceId = req.agent_id

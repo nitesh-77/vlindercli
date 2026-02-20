@@ -3,9 +3,9 @@
 use std::sync::Mutex;
 use tonic::transport::Channel;
 
-use crate::domain::{
+use vlinder_core::domain::{
     Agent, Job, JobId, JobStatus, Model, ObjectStorageType,
-    Provider, RegistrationError, Registry, ResourceId, RuntimeType, VectorStorageType,
+    Provider, RegistrationError, Registry, ResourceId, RuntimeType, SubmissionId, VectorStorageType,
 };
 use super::proto::{self, registry_client::RegistryClient};
 
@@ -253,7 +253,7 @@ impl Registry for GrpcRegistryClient {
 
     // --- Job operations ---
 
-    fn create_job(&self, submission_id: crate::domain::SubmissionId, agent_id: ResourceId, input: String) -> JobId {
+    fn create_job(&self, submission_id: SubmissionId, agent_id: ResourceId, input: String) -> JobId {
         let request = proto::CreateJobRequest {
             submission_id: Some(submission_id.into()),
             agent_id: Some(agent_id.into()),
