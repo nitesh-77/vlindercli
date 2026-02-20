@@ -4,7 +4,7 @@ use std::sync::Arc;
 use clap::Subcommand;
 
 use vlindercli::config::Config;
-use vlindercli::domain::{DagStore, Fleet, Registry, agent_routing_key, MessageQueue};
+use vlindercli::domain::{DagStore, Fleet, Harness, Registry, agent_routing_key, MessageQueue};
 use vlindercli::harness::{CliHarness, read_latest_state};
 use vlindercli::queue_factory;
 use vlindercli::registry_service::{GrpcRegistryClient, ping_registry};

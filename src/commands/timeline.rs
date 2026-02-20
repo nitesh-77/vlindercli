@@ -16,7 +16,7 @@ use std::sync::Arc;
 use clap::Subcommand;
 
 use vlindercli::config::{Config, conversations_dir};
-use vlindercli::domain::{DagStore, MessageQueue, Registry, TimelineId, agent_routing_key};
+use vlindercli::domain::{DagStore, Harness, MessageQueue, Registry, TimelineId, agent_routing_key};
 use vlindercli::harness::CliHarness;
 
 #[derive(Subcommand, Debug, PartialEq)]

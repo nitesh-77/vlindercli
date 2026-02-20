@@ -58,17 +58,6 @@ impl CliHarness {
         }
     }
 
-    /// Start a conversation session for an agent (ADR 054, ADR 070).
-    ///
-    /// Creates a SessionId and Session. No ConversationStore — the harness
-    /// computes SubmissionIds in-process and the GitDagWorker writes to git.
-    pub fn start_session(&mut self, agent_name: &str) {
-        let session_id = SessionId::new();
-        let session = Session::new(session_id, agent_name);
-
-        self.session = Some(session);
-    }
-
     /// Record an agent response to the in-memory session.
     ///
     /// Clears the pending question and appends the completed turn to history.
@@ -261,6 +250,13 @@ impl Harness for CliHarness {
             JobStatus::Failed(ref error) => Some(format!("[error] {}", error)),
             _ => None,
         }
+    }
+
+    fn start_session(&mut self, agent_name: &str) {
+        let session_id = SessionId::new();
+        let session = Session::new(session_id, agent_name);
+
+        self.session = Some(session);
     }
 }
 

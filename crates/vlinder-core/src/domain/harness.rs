@@ -23,4 +23,10 @@ pub trait Harness {
 
     /// Poll for job completion.
     fn poll(&self, job_id: &JobId) -> Option<String>;
+
+    /// Start a conversation session for an agent.
+    ///
+    /// Creates a session that tracks conversation history, submission
+    /// chaining, and state continuity across turns.
+    fn start_session(&mut self, agent_name: &str);
 }
