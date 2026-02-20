@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use super::RuntimeType;
 use super::operation::Operation;
-use super::routing_key::{AgentId, ServiceBackend};
+use super::routing_key::{AgentId, RoutingKey, ServiceBackend};
 use super::service_payloads::{RequestPayload, ResponsePayload};
 use super::diagnostics::{
     InvokeDiagnostics, RequestDiagnostics, ServiceDiagnostics,
@@ -378,6 +378,17 @@ impl InvokeMessage {
             diagnostics,
         }
     }
+
+    /// Produce the routing key for this message (ADR 096 §4).
+    pub fn routing_key(&self) -> RoutingKey {
+        RoutingKey::Invoke {
+            timeline: self.timeline.clone(),
+            submission: self.submission.clone(),
+            harness: self.harness,
+            runtime: self.runtime,
+            agent: self.agent_id.clone(),
+        }
+    }
 }
 
 /// Request message: Runtime → Service
@@ -432,6 +443,18 @@ impl RequestMessage {
             payload: RequestPayload::Legacy(payload),
             state,
             diagnostics,
+        }
+    }
+
+    /// Produce the routing key for this message (ADR 096 §4).
+    pub fn routing_key(&self) -> RoutingKey {
+        RoutingKey::Request {
+            timeline: self.timeline.clone(),
+            submission: self.submission.clone(),
+            agent: self.agent_id.clone(),
+            service: self.service,
+            operation: self.operation,
+            sequence: self.sequence,
         }
     }
 }
@@ -497,6 +520,18 @@ impl ResponseMessage {
             diagnostics,
         }
     }
+
+    /// Produce the routing key for this message (ADR 096 §4).
+    pub fn routing_key(&self) -> RoutingKey {
+        RoutingKey::Response {
+            timeline: self.timeline.clone(),
+            submission: self.submission.clone(),
+            service: self.service,
+            agent: self.agent_id.clone(),
+            operation: self.operation,
+            sequence: self.sequence,
+        }
+    }
 }
 
 /// Delegate message: Agent → Agent (via runtime)
@@ -553,6 +588,16 @@ impl DelegateMessage {
             diagnostics,
         }
     }
+
+    /// Produce the routing key for this message (ADR 096 §4).
+    pub fn routing_key(&self) -> RoutingKey {
+        RoutingKey::Delegate {
+            timeline: self.timeline.clone(),
+            submission: self.submission.clone(),
+            caller: self.caller.clone(),
+            target: self.target.clone(),
+        }
+    }
 }
 
 /// Complete message: Runtime → Harness
@@ -600,6 +645,16 @@ impl CompleteMessage {
             payload,
             state,
             diagnostics,
+        }
+    }
+
+    /// Produce the routing key for this message (ADR 096 §4).
+    pub fn routing_key(&self) -> RoutingKey {
+        RoutingKey::Complete {
+            timeline: self.timeline.clone(),
+            submission: self.submission.clone(),
+            agent: self.agent_id.clone(),
+            harness: self.harness,
         }
     }
 }
@@ -806,6 +861,7 @@ impl From<DelegateMessage> for ObservableMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::routing_key::InferenceBackendType;
     use super::super::storage::ObjectStorageType;
     use std::collections::HashSet;
 
@@ -1318,6 +1374,172 @@ mod tests {
         assert_eq!(observable.submission(), &submission);
         assert_eq!(observable.session(), &session);
         assert_eq!(observable.payload(), b"payload");
+    }
+
+    // --- DelegateMessage tests ---
+
+    // --- routing_key() projection tests (ADR 096 §4) ---
+
+    #[test]
+    fn invoke_routing_key() {
+        let msg = InvokeMessage::new(
+            TimelineId::main(),
+            test_submission(),
+            SessionId::new(),
+            HarnessType::Cli,
+            RuntimeType::Container,
+            test_agent_id(),
+            b"test".to_vec(),
+            None,
+            test_invoke_diag(),
+        );
+
+        let key = msg.routing_key();
+        assert_eq!(key, RoutingKey::Invoke {
+            timeline: msg.timeline.clone(),
+            submission: msg.submission.clone(),
+            harness: msg.harness,
+            runtime: msg.runtime,
+            agent: msg.agent_id.clone(),
+        });
+    }
+
+    #[test]
+    fn request_routing_key() {
+        let msg = RequestMessage::new(
+            TimelineId::main(),
+            test_submission(),
+            SessionId::new(),
+            test_agent_id(),
+            ServiceBackend::Kv(ObjectStorageType::Sqlite),
+            Operation::Get,
+            Sequence::first(),
+            b"key".to_vec(),
+            None,
+            test_request_diag(),
+        );
+
+        let key = msg.routing_key();
+        assert_eq!(key, RoutingKey::Request {
+            timeline: msg.timeline.clone(),
+            submission: msg.submission.clone(),
+            agent: msg.agent_id.clone(),
+            service: msg.service,
+            operation: msg.operation,
+            sequence: msg.sequence,
+        });
+    }
+
+    #[test]
+    fn response_routing_key() {
+        let request = RequestMessage::new(
+            TimelineId::main(),
+            test_submission(),
+            SessionId::new(),
+            test_agent_id(),
+            ServiceBackend::Infer(InferenceBackendType::Ollama),
+            Operation::Run,
+            Sequence::from(3),
+            b"prompt".to_vec(),
+            None,
+            test_request_diag(),
+        );
+        let response = ResponseMessage::from_request(&request, b"reply".to_vec());
+
+        let key = response.routing_key();
+        assert_eq!(key, RoutingKey::Response {
+            timeline: response.timeline.clone(),
+            submission: response.submission.clone(),
+            service: response.service,
+            agent: response.agent_id.clone(),
+            operation: response.operation,
+            sequence: response.sequence,
+        });
+    }
+
+    #[test]
+    fn complete_routing_key() {
+        let msg = CompleteMessage::new(
+            TimelineId::main(),
+            test_submission(),
+            SessionId::new(),
+            test_agent_id(),
+            HarnessType::Web,
+            b"done".to_vec(),
+            None,
+            ContainerDiagnostics::placeholder(0),
+        );
+
+        let key = msg.routing_key();
+        assert_eq!(key, RoutingKey::Complete {
+            timeline: msg.timeline.clone(),
+            submission: msg.submission.clone(),
+            agent: msg.agent_id.clone(),
+            harness: msg.harness,
+        });
+    }
+
+    #[test]
+    fn delegate_routing_key() {
+        let msg = DelegateMessage::new(
+            TimelineId::main(),
+            test_submission(),
+            SessionId::new(),
+            AgentId::new("coordinator"),
+            AgentId::new("summarizer"),
+            b"task".to_vec(),
+            "reply-subject",
+            None,
+            DelegateDiagnostics { container: ContainerDiagnostics::placeholder(0) },
+        );
+
+        let key = msg.routing_key();
+        assert_eq!(key, RoutingKey::Delegate {
+            timeline: msg.timeline.clone(),
+            submission: msg.submission.clone(),
+            caller: msg.caller.clone(),
+            target: msg.target.clone(),
+        });
+    }
+
+    #[test]
+    fn routing_key_reply_key_round_trip() {
+        // invoke.routing_key().reply_key() == complete.routing_key()
+        let invoke = InvokeMessage::new(
+            TimelineId::main(),
+            test_submission(),
+            SessionId::new(),
+            HarnessType::Cli,
+            RuntimeType::Container,
+            test_agent_id(),
+            b"input".to_vec(),
+            None,
+            test_invoke_diag(),
+        );
+        let complete = invoke.create_reply(b"output".to_vec());
+
+        let reply_key = invoke.routing_key().reply_key(None).unwrap();
+        assert_eq!(reply_key, complete.routing_key());
+    }
+
+    #[test]
+    fn request_reply_key_matches_response_routing_key() {
+        let request = RequestMessage::new(
+            TimelineId::main(),
+            test_submission(),
+            SessionId::new(),
+            test_agent_id(),
+            ServiceBackend::Kv(ObjectStorageType::Sqlite),
+            Operation::Get,
+            Sequence::first(),
+            b"key".to_vec(),
+            None,
+            test_request_diag(),
+        );
+        let response = ResponseMessage::from_request(&request, b"value".to_vec());
+
+        let reply_key = request.routing_key().reply_key(None).unwrap();
+        assert_eq!(reply_key, response.routing_key());
     }
 
     // --- DelegateMessage tests ---
