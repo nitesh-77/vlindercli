@@ -4,9 +4,8 @@ use clap::Subcommand;
 
 use vlindercli::config::Config;
 use vlindercli::domain::{AgentManifest, Fleet, Harness, agent_routing_key};
-use vlindercli::harness::read_latest_state;
 
-use super::connect::{connect_harness, connect_registry, open_dag_store};
+use super::connect::{connect_harness, connect_registry, open_dag_store, read_latest_state};
 use super::repl;
 
 #[derive(Subcommand, Debug, PartialEq)]

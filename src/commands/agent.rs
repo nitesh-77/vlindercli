@@ -5,9 +5,8 @@ use clap::{Subcommand, ValueEnum};
 
 use vlindercli::config::Config;
 use vlindercli::domain::{AgentManifest, Harness, Registry};
-use vlindercli::harness::read_latest_state;
 
-use super::connect::{connect_harness, connect_registry, open_dag_store};
+use super::connect::{connect_harness, connect_registry, open_dag_store, read_latest_state};
 use super::repl;
 
 #[derive(Clone, Debug, PartialEq, ValueEnum)]

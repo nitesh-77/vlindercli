@@ -147,14 +147,6 @@ impl CoreHarness {
     }
 }
 
-/// Read the latest state for an agent from the DAG store (ADR 079).
-///
-/// Queries the given DagStore for the most recent non-empty state hash
-/// associated with the agent. Returns None if no state has been recorded.
-pub fn read_latest_state(store: &dyn crate::domain::DagStore, agent_name: &str) -> Option<String> {
-    store.latest_state(agent_name).ok().flatten()
-}
-
 impl Harness for CoreHarness {
     fn harness_type(&self) -> HarnessType {
         self.harness_type
