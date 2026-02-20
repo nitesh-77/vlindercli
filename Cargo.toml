@@ -11,6 +11,10 @@ publish = false
 name = "vlinder"
 path = "src/main.rs"
 
+[[bin]]
+name = "vlinderd"
+path = "src/bin/vlinderd.rs"
+
 [features]
 default = []
 

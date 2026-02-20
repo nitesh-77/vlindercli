@@ -242,7 +242,6 @@ fn spawn_worker(role: WorkerRole) -> Option<Child> {
     tracing::debug!(role = %role, "Spawning worker");
 
     match Command::new(exe)
-        .args(["daemon"])
         .env("VLINDER_WORKER_ROLE", role.as_env_value())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())

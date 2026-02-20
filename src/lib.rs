@@ -19,5 +19,6 @@ pub mod runtime;
 pub mod session_server;
 pub mod storage;
 pub mod supervisor;
+pub mod tracing_setup;
 pub mod worker;
 pub mod worker_role;

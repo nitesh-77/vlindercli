@@ -1,6 +1,5 @@
 mod agent;
 mod connect;
-mod daemon;
 mod fleet;
 mod help;
 mod model;
@@ -47,8 +46,6 @@ pub enum Command {
         #[command(subcommand)]
         cmd: timeline::TimelineCommand,
     },
-    /// Run the vlinder daemon
-    Daemon,
 }
 
 pub fn run() {
@@ -61,7 +58,6 @@ pub fn run() {
         Command::Model { cmd } => model::execute(cmd),
         Command::Secret { cmd } => secret::execute(cmd),
         Command::Timeline { cmd } => timeline::execute(cmd),
-        Command::Daemon => daemon::execute(),
     }
 }
 

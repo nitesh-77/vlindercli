@@ -1,48 +1,29 @@
-//! Daemon command - runs the vlinder daemon, supervisor, or a worker process.
+//! vlinderd — the Vlinder daemon process.
 //!
-//! ## Usage
-//!
-//! Start in local mode (all services in-process):
-//! ```bash
-//! vlinder daemon
-//! ```
-//!
-//! Start in distributed mode (spawns worker processes):
-//! ```bash
-//! # With distributed.enabled = true in config
-//! vlinder daemon
-//! ```
-//!
-//! Workers can also be started manually:
-//! ```bash
-//! VLINDER_WORKER_ROLE=agent-wasm vlinder daemon
-//! ```
+//! Routes to one of two modes:
+//! - Worker: if VLINDER_WORKER_ROLE is set
+//! - Supervisor: spawns and manages worker processes
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use vlindercli::config::{conversations_dir, Config};
-use vlindercli::worker_role::WorkerRole;
-use vlindercli::worker::run_worker_loop;
-use vlindercli::supervisor::Supervisor;
 use vlindercli::session_server::SessionServer;
+use vlindercli::supervisor::Supervisor;
+use vlindercli::worker::run_worker_loop;
+use vlindercli::worker_role::WorkerRole;
 
-/// Execute the daemon command.
-///
-/// Routes to one of three modes:
-/// - Worker: if VLINDER_WORKER_ROLE is set
-/// - Supervisor: if distributed.enabled = true
-/// - Daemon: local mode (default)
-pub fn execute() {
+fn main() {
+    let config = Config::load();
+    vlindercli::tracing_setup::init_tracing(&config);
+
     if let Some(role) = WorkerRole::from_env() {
         run_as_worker(role);
     } else {
-        let config = Config::load();
         run_as_supervisor(&config);
     }
 }
 
-/// Run as a worker process with the given role.
 fn run_as_worker(role: WorkerRole) {
     tracing::info!(role = %role, "Starting as worker process");
 
@@ -57,7 +38,6 @@ fn run_as_worker(role: WorkerRole) {
     run_worker_loop(role, shutdown);
 }
 
-/// Run as a process supervisor in distributed mode.
 fn run_as_supervisor(config: &Config) {
     tracing::info!("Starting vlinder supervisor (distributed mode)");
 
@@ -95,4 +75,3 @@ fn run_as_supervisor(config: &Config) {
     supervisor.shutdown();
     tracing::info!("Supervisor stopped");
 }
-
