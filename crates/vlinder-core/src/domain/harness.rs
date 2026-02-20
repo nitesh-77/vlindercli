@@ -5,7 +5,7 @@
 //! a common contract via the `Harness` trait.
 //!
 //! Implementations live outside the domain module:
-//! - `CliHarness` — `crate::harness`
+//! - `CoreHarness` — `crate::harness`
 
 use crate::domain::registry::JobId;
 use crate::domain::ResourceId;

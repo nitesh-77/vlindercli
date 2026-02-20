@@ -5,7 +5,7 @@ use clap::Subcommand;
 
 use vlindercli::config::Config;
 use vlindercli::domain::{DagStore, Fleet, Harness, Registry, agent_routing_key, MessageQueue};
-use vlindercli::harness::{CliHarness, read_latest_state};
+use vlindercli::harness::{CoreHarness, read_latest_state};
 use vlindercli::queue_factory;
 use vlindercli::registry_service::{GrpcRegistryClient, ping_registry};
 use vlindercli::state_service::GrpcStateClient;
@@ -129,7 +129,7 @@ pub fn run(path: Option<PathBuf>) {
             .expect("Failed to create queue");
 
     // Create harness with remote backends (no daemon, no workers)
-    let mut harness = CliHarness::new(queue, registry);
+    let mut harness = CoreHarness::new(queue, registry);
 
     // Deploy ALL agents in the fleet via remote registry
     for (name, agent_path) in fleet.agents() {
@@ -173,7 +173,7 @@ pub fn run(path: Option<PathBuf>) {
 }
 
 /// Read the latest state for an agent from the DAG store (ADR 079).
-fn apply_latest_state(config: &Config, harness: &mut CliHarness, agent_name: &str) {
+fn apply_latest_state(config: &Config, harness: &mut CoreHarness, agent_name: &str) {
     let store = open_dag_store(config);
     let Some(store) = store else { return };
     if let Some(state) = read_latest_state(store.as_ref(), agent_name) {

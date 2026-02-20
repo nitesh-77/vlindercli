@@ -5,7 +5,7 @@ use clap::{Subcommand, ValueEnum};
 
 use vlindercli::config::Config;
 use vlindercli::domain::{AgentManifest, DagStore, Harness, Registry, MessageQueue};
-use vlindercli::harness::{CliHarness, read_latest_state};
+use vlindercli::harness::{CoreHarness, read_latest_state};
 use vlindercli::queue_factory;
 use vlindercli::registry_service::{GrpcRegistryClient, ping_registry};
 use vlindercli::state_service::GrpcStateClient;
@@ -130,7 +130,7 @@ fn run(name: &str) {
             .expect("Failed to create queue");
 
     // Create harness (no deploy, just invoke/poll/session)
-    let mut harness = CliHarness::new(queue, registry);
+    let mut harness = CoreHarness::new(queue, registry);
 
     // Start conversation session (ADR 054, ADR 070)
     harness.start_session(name);
@@ -169,7 +169,7 @@ fn connect_registry(config: &Config) -> Arc<dyn Registry> {
 
 /// Read the latest state for an agent from the DAG store (ADR 079)
 /// and initialize the harness with it (state continuity across sessions).
-fn apply_latest_state(config: &Config, harness: &mut CliHarness, agent_name: &str) {
+fn apply_latest_state(config: &Config, harness: &mut CoreHarness, agent_name: &str) {
     let store = open_dag_store(config);
     let Some(store) = store else { return };
     if let Some(state) = read_latest_state(store.as_ref(), agent_name) {

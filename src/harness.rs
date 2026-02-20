@@ -1,4 +1,4 @@
-//! CliHarness — CLI-specific implementation of the Harness trait (ADR 076).
+//! CoreHarness — CLI-specific implementation of the Harness trait (ADR 076).
 //!
 //! Domain types (Harness trait) live in `crate::domain`.
 //! This module contains the CLI implementation with tick loop,
@@ -22,7 +22,7 @@ use crate::domain::Session;
 /// - `tick()`: Polling loop for reconciling completed jobs
 /// - `start_session()`: Begin a conversation session (ADR 054)
 /// - `record_response()`: Record agent response to in-memory session
-pub struct CliHarness {
+pub struct CoreHarness {
     queue: Arc<dyn MessageQueue + Send + Sync>,
     registry: Arc<dyn Registry>,
     inflight: HashMap<SubmissionId, JobId>,
@@ -40,7 +40,7 @@ pub struct CliHarness {
     timeline_sealed: bool,
 }
 
-impl CliHarness {
+impl CoreHarness {
     pub fn new(
         queue: Arc<dyn MessageQueue + Send + Sync>,
         registry: Arc<dyn Registry>,
@@ -188,7 +188,7 @@ pub fn read_latest_state(store: &dyn crate::domain::DagStore, agent_name: &str) 
     store.latest_state(agent_name).ok().flatten()
 }
 
-impl Harness for CliHarness {
+impl Harness for CoreHarness {
     fn harness_type(&self) -> HarnessType {
         HarnessType::Cli
     }
@@ -279,7 +279,7 @@ mod tests {
     }
 
     /// Deploy a minimal test agent.
-    fn deploy_test_agent(harness: &CliHarness) -> ResourceId {
+    fn deploy_test_agent(harness: &CoreHarness) -> ResourceId {
         let manifest = r#"
             name = "test-agent"
             description = "Test"
@@ -295,7 +295,7 @@ mod tests {
     fn harness_type_is_cli() {
         let queue = Arc::new(InMemoryQueue::new());
         let registry = test_registry();
-        let harness = CliHarness::new(queue, registry);
+        let harness = CoreHarness::new(queue, registry);
 
         assert_eq!(harness.harness_type(), HarnessType::Cli);
     }
@@ -304,7 +304,7 @@ mod tests {
     fn invoke_creates_job_and_queues_message() {
         let queue = Arc::new(InMemoryQueue::new());
         let registry = test_registry();
-        let mut harness = CliHarness::new(queue.clone(), registry.clone());
+        let mut harness = CoreHarness::new(queue.clone(), registry.clone());
 
         // Deploy agent first
         let agent_id = deploy_test_agent(&harness);
@@ -329,7 +329,7 @@ mod tests {
     fn invoke_fails_for_undeployed_agent() {
         let queue = Arc::new(InMemoryQueue::new());
         let registry = test_registry();
-        let mut harness = CliHarness::new(queue, registry);
+        let mut harness = CoreHarness::new(queue, registry);
 
         let agent_id = test_agent_id();
         let result = harness.invoke(&agent_id, "hello");
@@ -342,7 +342,7 @@ mod tests {
     fn poll_returns_none_for_running_job() {
         let queue = Arc::new(InMemoryQueue::new());
         let registry = test_registry();
-        let mut harness = CliHarness::new(queue, registry);
+        let mut harness = CoreHarness::new(queue, registry);
 
         let agent_id = deploy_test_agent(&harness);
         let job_id = harness.invoke(&agent_id, "hello").unwrap();
@@ -355,7 +355,7 @@ mod tests {
     fn poll_returns_result_for_completed_job() {
         let queue = Arc::new(InMemoryQueue::new());
         let registry = test_registry();
-        let harness = CliHarness::new(queue, registry.clone());
+        let harness = CoreHarness::new(queue, registry.clone());
 
         let agent_id = test_agent_id();
         let job_id = registry.create_job(SubmissionId::new(), agent_id, "input".to_string());
@@ -370,7 +370,7 @@ mod tests {
 
         let queue = Arc::new(InMemoryQueue::new());
         let registry = test_registry();
-        let mut harness = CliHarness::new(queue.clone(), registry.clone());
+        let mut harness = CoreHarness::new(queue.clone(), registry.clone());
 
         let agent_id = deploy_test_agent(&harness);
         let job_id = harness.invoke(&agent_id, "hello").unwrap();
@@ -400,7 +400,7 @@ mod tests {
     fn deploy_from_path_loads_and_registers_agent() {
         let queue = Arc::new(InMemoryQueue::new());
         let registry = test_registry();
-        let harness = CliHarness::new(queue, registry.clone());
+        let harness = CoreHarness::new(queue, registry.clone());
 
         let agent_id = harness.deploy_from_path(&fixture_path("echo-agent")).unwrap();
 
@@ -413,7 +413,7 @@ mod tests {
     fn deploy_from_path_fails_for_nonexistent_path() {
         let queue = Arc::new(InMemoryQueue::new());
         let registry = test_registry();
-        let harness = CliHarness::new(queue, registry);
+        let harness = CoreHarness::new(queue, registry);
 
         let result = harness.deploy_from_path(Path::new("/nonexistent/path"));
 
@@ -425,7 +425,7 @@ mod tests {
     fn deploy_from_path_fails_for_path_without_manifest() {
         let queue = Arc::new(InMemoryQueue::new());
         let registry = test_registry();
-        let harness = CliHarness::new(queue, registry);
+        let harness = CoreHarness::new(queue, registry);
 
         // Use tests/ directory which exists but has no agent.toml
         let result = harness.deploy_from_path(Path::new("tests"));
@@ -440,7 +440,7 @@ mod tests {
     fn invoke_with_session_creates_sha_derived_submission() {
         let queue = Arc::new(InMemoryQueue::new());
         let registry = test_registry();
-        let mut harness = CliHarness::new(queue.clone(), registry.clone());
+        let mut harness = CoreHarness::new(queue.clone(), registry.clone());
 
         let agent_id = deploy_test_agent(&harness);
 
@@ -460,7 +460,7 @@ mod tests {
     fn invoke_with_session_enriches_payload() {
         let queue = Arc::new(InMemoryQueue::new());
         let registry = test_registry();
-        let mut harness = CliHarness::new(queue.clone(), registry.clone());
+        let mut harness = CoreHarness::new(queue.clone(), registry.clone());
 
         let agent_id = deploy_test_agent(&harness);
 
@@ -481,7 +481,7 @@ mod tests {
     fn invoke_with_session_includes_history_on_second_turn() {
         let queue = Arc::new(InMemoryQueue::new());
         let registry = test_registry();
-        let mut harness = CliHarness::new(queue.clone(), registry.clone());
+        let mut harness = CoreHarness::new(queue.clone(), registry.clone());
 
         let agent_id = deploy_test_agent(&harness);
 
@@ -510,7 +510,7 @@ mod tests {
     fn second_invoke_has_different_submission_id() {
         let queue = Arc::new(InMemoryQueue::new());
         let registry = test_registry();
-        let mut harness = CliHarness::new(queue.clone(), registry.clone());
+        let mut harness = CoreHarness::new(queue.clone(), registry.clone());
 
         let agent_id = deploy_test_agent(&harness);
         harness.start_session("test-agent");
@@ -531,7 +531,7 @@ mod tests {
     fn sealed_timeline_rejects_invocation() {
         let queue = Arc::new(InMemoryQueue::new());
         let registry = test_registry();
-        let mut harness = CliHarness::new(queue, registry);
+        let mut harness = CoreHarness::new(queue, registry);
 
         let agent_id = deploy_test_agent(&harness);
 
@@ -547,7 +547,7 @@ mod tests {
     fn unsealed_timeline_allows_invocation() {
         let queue = Arc::new(InMemoryQueue::new());
         let registry = test_registry();
-        let mut harness = CliHarness::new(queue, registry);
+        let mut harness = CoreHarness::new(queue, registry);
 
         let agent_id = deploy_test_agent(&harness);
 
