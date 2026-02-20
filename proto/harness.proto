@@ -1,0 +1,54 @@
+syntax = "proto3";
+
+package vlinder.harness;
+
+// =============================================================================
+// Harness Service — agent session and invocation (ADR 101)
+// =============================================================================
+
+service Harness {
+  // Set the timeline for branch-scoped subjects (ADR 093).
+  rpc SetTimeline(SetTimelineRequest) returns (SetTimelineResponse);
+
+  // Start a conversation session for an agent.
+  rpc StartSession(StartSessionRequest) returns (StartSessionResponse);
+
+  // Set the initial state for the next invocation (time travel resume).
+  rpc SetInitialState(SetInitialStateRequest) returns (SetInitialStateResponse);
+
+  // Run an agent to completion — send input, block for response.
+  rpc RunAgent(RunAgentRequest) returns (RunAgentResponse);
+}
+
+// =============================================================================
+// Messages
+// =============================================================================
+
+message SetTimelineRequest {
+  string timeline_id = 1;
+  bool sealed = 2;
+}
+
+message SetTimelineResponse {}
+
+message StartSessionRequest {
+  string agent_name = 1;
+}
+
+message StartSessionResponse {}
+
+message SetInitialStateRequest {
+  string state = 1;
+}
+
+message SetInitialStateResponse {}
+
+message RunAgentRequest {
+  string agent_id = 1;  // ResourceId URI
+  string input = 2;
+}
+
+message RunAgentResponse {
+  string output = 1;
+  optional string error = 2;
+}

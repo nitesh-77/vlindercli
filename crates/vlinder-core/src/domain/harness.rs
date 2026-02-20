@@ -7,22 +7,20 @@
 //! Implementations live outside the domain module:
 //! - `CoreHarness` — `crate::harness`
 
-use crate::domain::registry::JobId;
-use crate::domain::ResourceId;
+use crate::domain::{HarnessType, ResourceId, TimelineId};
 
 /// Common harness operations shared across all harness types.
 pub trait Harness {
-    /// The type of this harness (CLI, Web, API, WhatsApp).
-    fn harness_type(&self) -> super::HarnessType;
+    /// Identify which transport submitted the job.
+    ///
+    /// Stamped into every `InvokeMessage` and used by the completion
+    /// path to route responses back to the correct consumer.
+    fn harness_type(&self) -> HarnessType;
 
-    /// Deploy an agent from TOML manifest content.
-    fn deploy(&self, manifest_toml: &str) -> Result<ResourceId, String>;
-
-    /// Submit a job for an already-deployed agent.
-    fn invoke(&mut self, agent_id: &ResourceId, input: &str) -> Result<JobId, String>;
-
-    /// Poll for job completion.
-    fn poll(&self, job_id: &JobId) -> Option<String>;
+    /// Set the timeline for branch-scoped subjects (ADR 093).
+    ///
+    /// If `sealed` is true, subsequent invocations will be rejected.
+    fn set_timeline(&mut self, timeline: TimelineId, sealed: bool);
 
     /// Start a conversation session for an agent.
     ///

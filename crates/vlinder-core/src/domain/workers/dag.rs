@@ -200,6 +200,7 @@ fn parse_harness(s: &str) -> Option<HarnessType> {
         "web" => Some(HarnessType::Web),
         "api" => Some(HarnessType::Api),
         "whatsapp" => Some(HarnessType::Whatsapp),
+        "grpc" => Some(HarnessType::Grpc),
         _ => None,
     }
 }

@@ -286,6 +286,8 @@ pub enum HarnessType {
     Api,
     /// WhatsApp integration harness
     Whatsapp,
+    /// gRPC remote harness
+    Grpc,
 }
 
 impl HarnessType {
@@ -296,6 +298,7 @@ impl HarnessType {
             HarnessType::Web => "web",
             HarnessType::Api => "api",
             HarnessType::Whatsapp => "whatsapp",
+            HarnessType::Grpc => "grpc",
         }
     }
 }
@@ -1094,6 +1097,7 @@ mod tests {
         assert_eq!(HarnessType::Web.as_str(), "web");
         assert_eq!(HarnessType::Api.as_str(), "api");
         assert_eq!(HarnessType::Whatsapp.as_str(), "whatsapp");
+        assert_eq!(HarnessType::Grpc.as_str(), "grpc");
     }
 
     #[test]
@@ -1102,6 +1106,7 @@ mod tests {
         assert_eq!(format!("{}", HarnessType::Web), "web");
         assert_eq!(format!("{}", HarnessType::Api), "api");
         assert_eq!(format!("{}", HarnessType::Whatsapp), "whatsapp");
+        assert_eq!(format!("{}", HarnessType::Grpc), "grpc");
     }
 
     #[test]

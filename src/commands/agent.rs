@@ -4,7 +4,7 @@ use std::sync::Arc;
 use clap::{Subcommand, ValueEnum};
 
 use vlindercli::config::Config;
-use vlindercli::domain::{AgentManifest, DagStore, Harness, Registry, MessageQueue};
+use vlindercli::domain::{AgentManifest, DagStore, Harness, HarnessType, Registry, MessageQueue};
 use vlindercli::harness::{CoreHarness, read_latest_state};
 use vlindercli::queue_factory;
 use vlindercli::registry_service::{GrpcRegistryClient, ping_registry};
@@ -130,7 +130,7 @@ fn run(name: &str) {
             .expect("Failed to create queue");
 
     // Create harness (no deploy, just invoke/poll/session)
-    let mut harness = CoreHarness::new(queue, registry);
+    let mut harness = CoreHarness::new(queue, registry, HarnessType::Cli);
 
     // Start conversation session (ADR 054, ADR 070)
     harness.start_session(name);

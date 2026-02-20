@@ -673,6 +673,7 @@ fn parse_harness_type(s: &str) -> Result<HarnessType, QueueError> {
         "web" => Ok(HarnessType::Web),
         "api" => Ok(HarnessType::Api),
         "whatsapp" => Ok(HarnessType::Whatsapp),
+        "grpc" => Ok(HarnessType::Grpc),
         _ => Err(QueueError::ReceiveFailed(format!("unknown harness type: {}", s))),
     }
 }

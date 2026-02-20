@@ -12,6 +12,7 @@ pub mod loader;
 pub mod queue_factory;
 pub mod registry;
 pub mod secret_store;
+pub mod harness_service;
 pub mod registry_service;
 pub mod state_service;
 pub mod runtime;

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use clap::Subcommand;
 
 use vlindercli::config::Config;
-use vlindercli::domain::{DagStore, Fleet, Harness, Registry, agent_routing_key, MessageQueue};
+use vlindercli::domain::{DagStore, Fleet, Harness, HarnessType, Registry, agent_routing_key, MessageQueue};
 use vlindercli::harness::{CoreHarness, read_latest_state};
 use vlindercli::queue_factory;
 use vlindercli::registry_service::{GrpcRegistryClient, ping_registry};
@@ -129,7 +129,7 @@ pub fn run(path: Option<PathBuf>) {
             .expect("Failed to create queue");
 
     // Create harness with remote backends (no daemon, no workers)
-    let mut harness = CoreHarness::new(queue, registry);
+    let mut harness = CoreHarness::new(queue, registry, HarnessType::Cli);
 
     // Deploy ALL agents in the fleet via remote registry
     for (name, agent_path) in fleet.agents() {

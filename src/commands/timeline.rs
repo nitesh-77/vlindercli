@@ -16,7 +16,7 @@ use std::sync::Arc;
 use clap::Subcommand;
 
 use vlindercli::config::{Config, conversations_dir};
-use vlindercli::domain::{DagStore, Harness, MessageQueue, Registry, TimelineId, agent_routing_key};
+use vlindercli::domain::{DagStore, Harness, HarnessType, MessageQueue, Registry, TimelineId, agent_routing_key};
 use vlindercli::harness::CoreHarness;
 
 #[derive(Subcommand, Debug, PartialEq)]
@@ -387,7 +387,7 @@ fn repair(dir: &Path, path: Option<PathBuf>) {
             }
         };
 
-    let mut harness = CoreHarness::new(queue, registry);
+    let mut harness = CoreHarness::new(queue, registry, HarnessType::Cli);
 
     // Set timeline on harness so invocations use the correct branch-scoped subjects (ADR 093)
     if let Some(id) = timeline_id {
