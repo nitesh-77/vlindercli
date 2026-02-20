@@ -14,7 +14,7 @@ use super::runtime::RuntimeType;
 ///
 /// All paths (executable, mounts, model URIs) are resolved to absolute paths at load time.
 /// See ADR 020 for the manifest format, ADR 048 for identity model.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Agent {
     pub name: String,
     pub description: String,
@@ -147,7 +147,7 @@ impl From<ParseError> for LoadError {
 }
 
 /// Agent runtime requirements (validated)
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Requirements {
     /// Model alias → registry name (ADR 094).
     /// e.g., "inference_model" → "claude-sonnet"
@@ -166,7 +166,7 @@ impl Requirements {
 }
 
 /// Prompt overrides (validated)
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Prompts {
     pub intent_recognition: Option<String>,
     pub query_expansion: Option<String>,
@@ -190,7 +190,7 @@ impl From<PromptsConfig> for Prompts {
 }
 
 /// Resolved filesystem mount for WASI access
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Mount {
     pub host_path: AbsolutePath,
     pub guest_path: PathBuf,
