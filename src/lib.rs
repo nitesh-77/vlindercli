@@ -1,13 +1,14 @@
+pub use vlinder_core::domain;
+pub use vlinder_core::queue;
+
 pub mod catalog;
 pub mod cli;
 pub mod config;
-pub mod domain;
 pub mod embedding;
 pub mod git_dag;
 pub mod harness;
 pub mod inference;
 pub mod loader;
-pub mod queue;
 pub mod queue_factory;
 pub mod registry;
 pub mod secret_store;

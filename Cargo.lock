@@ -3110,6 +3110,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
+name = "vlinder-core"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "async-openai",
+ "base64",
+ "chrono",
+ "dirs",
+ "ed25519-dalek",
+ "futures",
+ "rand",
+ "semver",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "toml",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "vlindercli"
 version = "0.1.0"
 dependencies = [
@@ -3145,6 +3167,7 @@ dependencies = [
  "tracing-subscriber",
  "ureq",
  "uuid",
+ "vlinder-core",
  "zerocopy 0.7.35",
 ]
 

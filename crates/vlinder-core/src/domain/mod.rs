@@ -86,7 +86,7 @@ pub use dag::{DagWorker, DagStore, DagNode, MessageType, Timeline, hash_dag_node
 // ============================================================================
 
 pub use state::{StateCommit, StateStore, hash_value, hash_snapshot, hash_state_commit};
-pub(crate) use state::sorted_entries_json;
+pub use state::sorted_entries_json;
 #[cfg(test)]
 pub use state::InMemoryStateStore;
 

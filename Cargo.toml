@@ -1,3 +1,6 @@
+[workspace]
+members = [".", "crates/vlinder-core"]
+
 [package]
 name = "vlindercli"
 version = "0.1.0"
@@ -12,6 +15,7 @@ path = "src/main.rs"
 default = []
 
 [dependencies]
+vlinder-core = { path = "crates/vlinder-core" }
 clap = { version = "4", features = ["derive"] }
 dirs = "6"
 indicatif = "0.17"

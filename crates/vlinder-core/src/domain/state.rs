@@ -75,7 +75,7 @@ pub fn hash_state_commit(snapshot_hash: &str, parent_hash: &str) -> String {
 }
 
 /// Produce deterministic JSON from entries by sorting keys.
-pub(crate) fn sorted_entries_json(entries: &HashMap<String, String>) -> String {
+pub fn sorted_entries_json(entries: &HashMap<String, String>) -> String {
     let mut sorted: Vec<(&String, &String)> = entries.iter().collect();
     sorted.sort_by_key(|(k, _)| k.as_str());
     let map: serde_json::Map<String, serde_json::Value> = sorted.into_iter()

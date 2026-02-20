@@ -445,15 +445,9 @@ mod tests {
         let agent_id = deploy_test_agent(&harness);
         let job_id = harness.invoke(&agent_id, "hello").unwrap();
 
-        // Get the InvokeMessage from typed queue to build CompleteMessage reply
-        let invoke = {
-            let typed = queue.typed_queues.lock().unwrap();
-            let (_, messages) = typed.iter().next().unwrap();
-            match &messages[0] {
-                crate::domain::ObservableMessage::Invoke(msg) => msg.clone(),
-                _ => panic!("expected InvokeMessage"),
-            }
-        };
+        // Get the InvokeMessage via trait method to build CompleteMessage reply
+        let (invoke, ack) = queue.receive_invoke("test-agent").unwrap();
+        ack().unwrap();
 
         // Simulate runtime sending typed CompleteMessage (ADR 044)
         let complete = invoke.create_reply(b"result".to_vec());
@@ -544,11 +538,10 @@ mod tests {
 
         harness.invoke(&agent_id, "first message").unwrap();
 
-        // Check the payload in the queue
-        let typed = queue.typed_queues.lock().unwrap();
-        let (_, messages) = typed.iter().next().unwrap();
-        let payload = messages[0].payload();
-        let payload_str = String::from_utf8_lossy(payload);
+        // Check the payload via trait method
+        let (invoke, ack) = queue.receive_invoke("test-agent").unwrap();
+        ack().unwrap();
+        let payload_str = String::from_utf8_lossy(&invoke.payload);
 
         // First message should just be "User: first message"
         assert_eq!(payload_str, "User: first message");
@@ -566,18 +559,17 @@ mod tests {
 
         // First turn
         harness.invoke(&agent_id, "hello").unwrap();
+        // Drain the first invoke so the next receive gets the second turn
+        let (_first, ack) = queue.receive_invoke("test-agent").unwrap();
+        ack().unwrap();
         harness.record_response("hi there");
-
-        // Clear queue for clean second invoke
-        queue.typed_queues.lock().unwrap().clear();
 
         // Second turn — payload should include history
         harness.invoke(&agent_id, "follow up").unwrap();
 
-        let typed = queue.typed_queues.lock().unwrap();
-        let (_, messages) = typed.iter().next().unwrap();
-        let payload = messages[0].payload();
-        let payload_str = String::from_utf8_lossy(payload);
+        let (invoke, ack) = queue.receive_invoke("test-agent").unwrap();
+        ack().unwrap();
+        let payload_str = String::from_utf8_lossy(&invoke.payload);
 
         assert!(payload_str.contains("User: hello"), "payload: {}", payload_str);
         assert!(payload_str.contains("Agent: hi there"), "payload: {}", payload_str);

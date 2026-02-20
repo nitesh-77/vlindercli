@@ -29,22 +29,22 @@ use super::service_payloads::{
 /// Constructed once per container, shared across all service calls.
 /// The invoke context is updated per invocation via `update_invoke()`.
 pub struct QueueBridge {
-    pub(crate) queue: Arc<dyn MessageQueue + Send + Sync>,
-    pub(crate) registry: Arc<dyn Registry>,
+    pub queue: Arc<dyn MessageQueue + Send + Sync>,
+    pub registry: Arc<dyn Registry>,
     /// The invoke that triggered this execution — carries submission + agent_id.
     /// Updated per invocation so SDK calls route on the correct submission ID.
-    pub(crate) invoke: RwLock<InvokeMessage>,
+    pub invoke: RwLock<InvokeMessage>,
     /// Resolved backends from agent config (None if agent didn't declare storage)
-    pub(crate) kv_backend: Option<ObjectStorageType>,
-    pub(crate) vec_backend: Option<VectorStorageType>,
+    pub kv_backend: Option<ObjectStorageType>,
+    pub vec_backend: Option<VectorStorageType>,
     /// Sequence counter — incremented per service call, reset per invocation
-    pub(crate) sequence: SequenceCounter,
+    pub sequence: SequenceCounter,
     /// Current state hash for the active invocation (ADR 055).
     /// Updated on kv-put responses. Read by runtime on task completion.
-    pub(crate) current_state: RwLock<Option<String>>,
+    pub current_state: RwLock<Option<String>>,
     /// Maps delegation handles (nonce strings) to reply routing keys (ADR 096 §7).
     /// Populated by delegate(), consumed by wait().
-    pub(crate) pending_replies: RwLock<HashMap<String, RoutingKey>>,
+    pub pending_replies: RwLock<HashMap<String, RoutingKey>>,
 }
 
 impl QueueBridge {
@@ -52,7 +52,7 @@ impl QueueBridge {
     ///
     /// If the invoke carries no state but the agent has KV storage, bootstraps
     /// to root state ("") so versioned operations start tracking (ADR 055).
-    pub(crate) fn update_invoke(&self, invoke: InvokeMessage) {
+    pub fn update_invoke(&self, invoke: InvokeMessage) {
         let state = invoke.state.clone()
             .or_else(|| self.kv_backend.as_ref().map(|_| String::new()));
         *self.invoke.write().unwrap() = invoke;
@@ -61,7 +61,7 @@ impl QueueBridge {
     }
 
     /// Read the final state hash after an invocation completes.
-    pub(crate) fn final_state(&self) -> Option<String> {
+    pub fn final_state(&self) -> Option<String> {
         self.current_state.read().unwrap().clone()
     }
 
