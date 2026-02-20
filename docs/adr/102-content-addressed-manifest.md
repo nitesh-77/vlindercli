@@ -1,6 +1,6 @@
 # ADR 102: Content-Addressed Agent Manifest
 
-**Status:** Draft
+**Status:** Superseded
 
 ## Context
 
@@ -81,7 +81,27 @@ The registry stores a mapping: `agent_name → (manifest, agent)`. The
 `Agent` struct does not grow — it references the manifest by name.
 The manifest is persisted in `StoredAgent` / `SqliteRegistryRepository`.
 
-## Consequences
+## Why this was superseded
+
+The premise was wrong. Content identity shouldn't be computed by the
+platform from manifest TOML — it already exists in the user's git repo.
+
+Agent names are `name:git-sha` (e.g., `todoapp:a3f8c2d`). Each git
+commit of the agent's source repo produces a distinct agent identity.
+Agents are immutable — there is no update. A new commit means a new
+agent, not a mutation of an existing one.
+
+What this ADR got right:
+- Manifests are immutable (yes — agents are never updated)
+- `PartialEq` for idempotency (yes — same manifest, same name = no-op)
+- `ConfigMismatch` on different content (yes — correct, names are unique)
+
+What this ADR got wrong:
+- Platform-computed SHA-256 of serialized TOML (unnecessary — git has the hash)
+- `name:tag` with mutable/pinned semantics (no — every version is a distinct name)
+- Deploy history / rollback in the registry (no — git is the history)
+
+## Original Consequences (no longer applicable)
 
 - `AgentManifest`, `RequirementsConfig`, `PromptsConfig`, `MountConfig`
   derive `PartialEq`.

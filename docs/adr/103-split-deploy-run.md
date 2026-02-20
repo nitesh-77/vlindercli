@@ -1,6 +1,6 @@
 # ADR 103: Split Deploy and Run
 
-**Status:** Draft
+**Status:** Accepted
 
 ## Context
 

@@ -1,6 +1,6 @@
 # ADR 101: Harness as gRPC Service
 
-**Status:** Draft
+**Status:** Accepted
 
 ## Context
 
@@ -24,53 +24,49 @@ implements the Harness trait as a thin gRPC client.
 ### Service definition
 
 ```protobuf
-service HarnessService {
-  rpc Deploy (DeployRequest)           returns (DeployResponse);
-  rpc Invoke (InvokeRequest)           returns (InvokeResponse);
-  rpc Poll   (PollRequest)             returns (PollResponse);
-  rpc StartSession (StartSessionRequest)   returns (StartSessionResponse);
-  rpc RecordResponse (RecordResponseRequest) returns (RecordResponseResponse);
+service Harness {
+  rpc Ping(PingRequest) returns (SemVer);
+  rpc SetTimeline(SetTimelineRequest) returns (SetTimelineResponse);
+  rpc StartSession(StartSessionRequest) returns (StartSessionResponse);
+  rpc SetInitialState(SetInitialStateRequest) returns (SetInitialStateResponse);
+  rpc RunAgent(RunAgentRequest) returns (RunAgentResponse);
 }
 ```
 
 ### RPC mapping
 
-| Harness method | RPC | Request | Response |
-|---|---|---|---|
-| `deploy(manifest_toml)` | `Deploy` | manifest TOML string | agent ResourceId |
-| `invoke(agent_id, input)` | `Invoke` | agent_id + input + session_id | job_id |
-| `poll(job_id)` | `Poll` | job_id | optional result string |
-| `start_session(agent)` | `StartSession` | agent name | session_id |
-| `record_response(text)` | `RecordResponse` | session_id + response text | ack |
+| Harness method | RPC | Notes |
+|---|---|---|
+| `start_session(name)` | `StartSession` | Daemon creates session, owns history |
+| `set_initial_state(hash)` | `SetInitialState` | Time travel resume from checkpoint |
+| `set_timeline(id, sealed)` | `SetTimeline` | Branch-scoped subjects (ADR 093) |
+| `run_agent(agent_id, input)` | `RunAgent` | Synchronous invoke→complete (ADR 092) |
+
+Deploy is a registry operation (ADR 103), not a harness operation.
+`RunAgent` replaces the old `Invoke`/`Poll` pair — the daemon blocks
+internally via `send_and_wait` and the gRPC server uses `spawn_blocking`
+to keep h2 alive.
 
 ### What stays CLI-local
 
-- `deploy_from_path()` — reads the manifest file from the local filesystem,
-  then calls `Deploy` with the TOML string. File I/O is a CLI concern.
+- `vlinder agent deploy` — reads manifest from disk, registers via
+  registry gRPC. File I/O is a CLI concern.
 - REPL, terminal styling, progress spinners — pure UI.
+- State read via `GrpcStateClient` for `set_initial_state` before run.
 
 ### What moves to the daemon
 
-- `build_invoke()` — session state, submission ID computation, Merkle
-  chaining, queue dispatch. The daemon owns the queue and the session.
-- `tick()` — job reconciliation loop. Internal daemon concern.
-- `register_agent()` — image digest resolution, registry interaction.
-  Image digest resolution uses the Podman REST API exclusively (ADR 077).
-  The current `resolve_image_digest()` free function that shells out to
-  `podman image inspect` is removed. The daemon constructs a
-  `PodmanApiClient` from socket config and uses it for all Podman
-  interactions — no CLI shelling.
+- `CoreHarness` — session state, submission ID, Merkle chaining, queue
+  dispatch. The daemon's harness worker owns the queue and registry.
 - Timeline management (`set_timeline`, sealed checks).
+- All NATS queue interaction — the CLI has no queue dependency.
 
 ### Session ownership
 
-Sessions move to the daemon. The CLI sends `StartSession` once, gets
-back a `session_id`, and includes it on every subsequent `Invoke`. The
-daemon manages session history, submission chaining, and state tracking.
-
-The CLI keeps a local `Session` only for display purposes (showing
-conversation history in the REPL). It does not use it for payload
-construction — that's the daemon's job.
+Sessions live in the daemon's `CoreHarness`. The CLI calls
+`StartSession` once per `agent run`, then `RunAgent` for each REPL
+turn. The daemon manages session history, submission chaining, and
+state tracking.
 
 ## Consequences
 
