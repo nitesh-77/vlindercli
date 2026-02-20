@@ -11,13 +11,13 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::Arc;
 
 use clap::Subcommand;
 
 use vlindercli::config::{Config, conversations_dir};
-use vlindercli::domain::{DagStore, Harness, HarnessType, MessageQueue, Registry, TimelineId, agent_routing_key};
-use vlindercli::harness::CoreHarness;
+use vlindercli::domain::{AgentManifest, TimelineId, agent_routing_key};
+
+use super::connect::{connect_harness, connect_registry, open_dag_store};
 
 #[derive(Subcommand, Debug, PartialEq)]
 pub enum TimelineCommand {
@@ -179,7 +179,7 @@ fn checkout(dir: &Path, target: &str) {
         // commit subject: "complete: <agent> → <harness>".
         if let Some(ref subj) = subject {
             if let Some(agent_name) = parse_agent_from_subject(subj) {
-                if let Some(store) = open_dag_store() {
+                if let Some(store) = open_dag_store(&Config::load()) {
                     match store.set_checkout_state(&agent_name, &state) {
                         Ok(()) => {}
                         Err(e) => {
@@ -201,38 +201,6 @@ fn parse_agent_from_subject(subject: &str) -> Option<String> {
     let agent = rest.split(" →").next()?;
     let agent = agent.trim();
     if agent.is_empty() { None } else { Some(agent.to_string()) }
-}
-
-/// Open the DAG store (local SQLite or remote gRPC) for state persistence.
-fn open_dag_store() -> Option<Box<dyn DagStore>> {
-    let config = Config::load();
-    if config.distributed.enabled {
-        let state_addr = if config.distributed.state_addr.starts_with("http://")
-            || config.distributed.state_addr.starts_with("https://") {
-            config.distributed.state_addr.clone()
-        } else {
-            format!("http://{}", config.distributed.state_addr)
-        };
-        match vlindercli::state_service::GrpcStateClient::connect(&state_addr) {
-            Ok(client) => Some(Box::new(client)),
-            Err(e) => {
-                eprintln!("Warning: cannot reach state service at {}: {}", state_addr, e);
-                None
-            }
-        }
-    } else {
-        let db_path = vlindercli::config::dag_db_path();
-        if !db_path.exists() {
-            return None;
-        }
-        match vlindercli::storage::dag_store::SqliteDagStore::open(&db_path) {
-            Ok(store) => Some(Box::new(store)),
-            Err(e) => {
-                eprintln!("Warning: failed to open DAG store: {}", e);
-                None
-            }
-        }
-    }
 }
 
 /// Repair from current position — create a branch and re-execute (ADR 081).
@@ -271,8 +239,9 @@ fn repair(dir: &Path, path: Option<PathBuf>) {
     }
 
     // 4. Create repair branch with unique name (repair-YYYY-MM-DD-N)
+    let config = Config::load();
     let date = chrono::Utc::now().format("%Y-%m-%d").to_string();
-    let dag_store = open_dag_store();
+    let dag_store = open_dag_store(&config);
 
     // Count existing repair branches for today to generate unique suffix
     let counter = dag_store.as_ref()
@@ -342,8 +311,7 @@ fn repair(dir: &Path, path: Option<PathBuf>) {
         println!("State:      {}", state);
     }
 
-    // 5-8. Connect to registry/queue, deploy agent, start session, enter REPL
-    let config = Config::load();
+    // 5-8. Deploy agent via registry, connect harness via gRPC, enter REPL
     let agent_path = path.unwrap_or_else(|| {
         std::env::current_dir().expect("Failed to get current directory")
     });
@@ -356,53 +324,34 @@ fn repair(dir: &Path, path: Option<PathBuf>) {
         }
     };
 
-    let registry_addr = if config.distributed.registry_addr.starts_with("http://")
-        || config.distributed.registry_addr.starts_with("https://") {
-        config.distributed.registry_addr.clone()
-    } else {
-        format!("http://{}", config.distributed.registry_addr)
-    };
-
-    if vlindercli::registry_service::ping_registry(&registry_addr).is_none() {
-        eprintln!("Cannot reach registry at {}. Is the daemon running?", registry_addr);
-        return;
-    }
-
-    let registry: Arc<dyn Registry> = Arc::new(
-        match vlindercli::registry_service::GrpcRegistryClient::connect(&registry_addr) {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("Failed to connect to registry: {}", e);
-                return;
-            }
+    // Deploy via registry gRPC (ADR 103) — file I/O is a CLI concern
+    let registry = connect_registry(&config);
+    let manifest_path = absolute_path.join("agent.toml");
+    let manifest = match AgentManifest::load(&manifest_path) {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("Failed to load agent manifest: {:?}", e);
+            return;
         }
-    );
+    };
+    let agent = match registry.register_manifest(manifest) {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("Failed to deploy agent: {}", e);
+            return;
+        }
+    };
+    let agent_id = agent.id.clone();
+    let agent_name = agent_routing_key(&agent_id);
 
-    let queue: Arc<dyn MessageQueue + Send + Sync> =
-        match vlindercli::queue_factory::recording_from_config() {
-            Ok(q) => q,
-            Err(e) => {
-                eprintln!("Failed to create queue: {}", e);
-                return;
-            }
-        };
-
-    let mut harness = CoreHarness::new(queue, registry, HarnessType::Cli);
+    // Connect harness via gRPC — the daemon owns queue and registry
+    let mut harness = connect_harness(&config);
 
     // Set timeline on harness so invocations use the correct branch-scoped subjects (ADR 093)
     if let Some(id) = timeline_id {
         harness.set_timeline(TimelineId::from(id), false);
     }
 
-    let agent_id = match harness.deploy_from_path(&absolute_path) {
-        Ok(id) => id,
-        Err(e) => {
-            eprintln!("Failed to deploy agent: {}", e);
-            return;
-        }
-    };
-
-    let agent_name = agent_routing_key(&agent_id);
     harness.start_session(&agent_name);
 
     // Restore state from trailer
@@ -454,7 +403,7 @@ fn promote(dir: &Path) {
     let broken_name = format!("broken-{}", date);
 
     // Update timeline rows (ADR 093): seal old main, rename both
-    if let Some(store) = open_dag_store() {
+    if let Some(store) = open_dag_store(&Config::load()) {
         let _ = store.ensure_main_timeline();
 
         if let Ok(Some(old_main)) = store.get_timeline_by_branch("main") {

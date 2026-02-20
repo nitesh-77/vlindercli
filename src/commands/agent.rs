@@ -4,12 +4,10 @@ use std::sync::Arc;
 use clap::{Subcommand, ValueEnum};
 
 use vlindercli::config::Config;
-use vlindercli::domain::{AgentManifest, DagStore, Harness, Registry};
+use vlindercli::domain::{AgentManifest, Harness, Registry};
 use vlindercli::harness::read_latest_state;
-use vlindercli::harness_service::{GrpcHarnessClient, ping_harness};
-use vlindercli::registry_service::{GrpcRegistryClient, ping_registry};
-use vlindercli::state_service::GrpcStateClient;
 
+use super::connect::{connect_harness, connect_registry, open_dag_store};
 use super::repl;
 
 #[derive(Clone, Debug, PartialEq, ValueEnum)]
@@ -143,46 +141,6 @@ fn run(name: &str) {
     });
 }
 
-/// Connect to the registry via gRPC, exiting on failure.
-fn connect_registry(config: &Config) -> Arc<dyn Registry> {
-    let registry_addr = if config.distributed.registry_addr.starts_with("http://")
-        || config.distributed.registry_addr.starts_with("https://") {
-        config.distributed.registry_addr.clone()
-    } else {
-        format!("http://{}", config.distributed.registry_addr)
-    };
-
-    if ping_registry(&registry_addr).is_none() {
-        eprintln!("Cannot reach registry at {}. Is the daemon running?", registry_addr);
-        std::process::exit(1);
-    }
-
-    Arc::new(
-        GrpcRegistryClient::connect(&registry_addr)
-            .expect("Failed to connect to registry")
-    )
-}
-
-/// Connect to the harness via gRPC, exiting on failure.
-fn connect_harness(config: &Config) -> Box<dyn Harness> {
-    let harness_addr = if config.distributed.harness_addr.starts_with("http://")
-        || config.distributed.harness_addr.starts_with("https://") {
-        config.distributed.harness_addr.clone()
-    } else {
-        format!("http://{}", config.distributed.harness_addr)
-    };
-
-    if ping_harness(&harness_addr).is_none() {
-        eprintln!("Cannot reach harness at {}. Is the daemon running?", harness_addr);
-        std::process::exit(1);
-    }
-
-    Box::new(
-        GrpcHarnessClient::connect(&harness_addr)
-            .expect("Failed to connect to harness")
-    )
-}
-
 /// Read the latest state for an agent from the DAG store (ADR 079)
 /// and initialize the harness with it (state continuity across sessions).
 fn apply_latest_state(config: &Config, harness: &mut dyn Harness, agent_name: &str) {
@@ -191,37 +149,6 @@ fn apply_latest_state(config: &Config, harness: &mut dyn Harness, agent_name: &s
     if let Some(state) = read_latest_state(store.as_ref(), agent_name) {
         println!("Resuming from state {}…", &state[..8.min(state.len())]);
         harness.set_initial_state(state);
-    }
-}
-
-/// Open the appropriate DagStore: local SQLite or remote gRPC.
-fn open_dag_store(config: &Config) -> Option<Box<dyn DagStore>> {
-    if config.distributed.enabled {
-        let state_addr = if config.distributed.state_addr.starts_with("http://")
-            || config.distributed.state_addr.starts_with("https://") {
-            config.distributed.state_addr.clone()
-        } else {
-            format!("http://{}", config.distributed.state_addr)
-        };
-        match GrpcStateClient::connect(&state_addr) {
-            Ok(client) => Some(Box::new(client)),
-            Err(e) => {
-                tracing::warn!(error = %e, "Failed to connect to state service, skipping state read");
-                None
-            }
-        }
-    } else {
-        let db_path = vlindercli::config::dag_db_path();
-        if !db_path.exists() {
-            return None;
-        }
-        match vlindercli::storage::dag_store::SqliteDagStore::open(&db_path) {
-            Ok(store) => Some(Box::new(store)),
-            Err(e) => {
-                tracing::warn!(error = %e, "Failed to open DAG store, skipping state read");
-                None
-            }
-        }
     }
 }
 
