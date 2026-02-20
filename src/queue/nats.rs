@@ -206,23 +206,8 @@ impl NatsQueue {
 }
 
 impl MessageQueue for NatsQueue {
-    fn service_queue(&self, service: ServiceType, backend: &str, action: Operation) -> String {
-        format!("vlinder.svc.{}.{}.{}", service, backend, action)
-    }
-
-    fn agent_queue(&self, runtime: &str, agent: &crate::domain::Agent) -> String {
-        format!("vlinder.agent.{}.{}", runtime, agent.name)
-    }
-
     fn send_invoke(&self, msg: InvokeMessage) -> Result<(), QueueError> {
-        let subject = format!(
-            "vlinder.{}.{}.invoke.{}.{}.{}",
-            msg.timeline,
-            msg.submission,
-            msg.harness,
-            msg.runtime.as_str(),
-            msg.agent_id.as_str(),
-        );
+        let subject = routing_key_to_subject(&msg.routing_key());
 
         self.inner.runtime.block_on(async {
             let mut headers = async_nats::HeaderMap::new();
@@ -254,16 +239,7 @@ impl MessageQueue for NatsQueue {
     }
 
     fn send_request(&self, msg: RequestMessage) -> Result<(), QueueError> {
-        let subject = format!(
-            "vlinder.{}.{}.req.{}.{}.{}.{}.{}",
-            msg.timeline,
-            msg.submission,
-            msg.agent_id.as_str(),
-            msg.service.service_type(),
-            msg.service.backend_str(),
-            msg.operation,
-            msg.sequence,
-        );
+        let subject = routing_key_to_subject(&msg.routing_key());
 
         self.inner.runtime.block_on(async {
             let mut headers = async_nats::HeaderMap::new();
@@ -297,16 +273,7 @@ impl MessageQueue for NatsQueue {
     }
 
     fn send_response(&self, msg: ResponseMessage) -> Result<(), QueueError> {
-        let subject = format!(
-            "vlinder.{}.{}.res.{}.{}.{}.{}.{}",
-            msg.timeline,
-            msg.submission,
-            msg.service.service_type(),
-            msg.service.backend_str(),
-            msg.agent_id.as_str(),
-            msg.operation,
-            msg.sequence,
-        );
+        let subject = routing_key_to_subject(&msg.routing_key());
 
         self.inner.runtime.block_on(async {
             let mut headers = async_nats::HeaderMap::new();
@@ -341,13 +308,7 @@ impl MessageQueue for NatsQueue {
     }
 
     fn send_complete(&self, msg: CompleteMessage) -> Result<(), QueueError> {
-        let subject = format!(
-            "vlinder.{}.{}.complete.{}.{}",
-            msg.timeline,
-            msg.submission,
-            msg.agent_id.as_str(),
-            msg.harness,
-        );
+        let subject = routing_key_to_subject(&msg.routing_key());
 
         self.inner.runtime.block_on(async {
             let mut headers = async_nats::HeaderMap::new();
@@ -516,10 +477,7 @@ impl MessageQueue for NatsQueue {
     }
 
     fn send_delegate(&self, msg: DelegateMessage) -> Result<(), QueueError> {
-        let subject = format!(
-            "vlinder.{}.{}.delegate.{}.{}",
-            msg.timeline, msg.submission, msg.caller, msg.target,
-        );
+        let subject = routing_key_to_subject(&msg.routing_key());
 
         self.inner.runtime.block_on(async {
             let mut headers = async_nats::HeaderMap::new();
@@ -582,7 +540,7 @@ impl MessageQueue for NatsQueue {
     }
 
     fn send_delegate_reply(&self, msg: CompleteMessage, reply_key: &RoutingKey) -> Result<(), QueueError> {
-        let subject = delegate_reply_subject(reply_key);
+        let subject = routing_key_to_subject(reply_key);
 
         self.inner.runtime.block_on(async {
             let mut headers = async_nats::HeaderMap::new();
@@ -613,7 +571,7 @@ impl MessageQueue for NatsQueue {
     }
 
     fn receive_delegate_reply(&self, reply_key: &RoutingKey) -> Result<(CompleteMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
-        let filter = delegate_reply_subject(reply_key);
+        let filter = routing_key_to_subject(reply_key);
 
         self.inner.runtime.block_on(async {
             let (js_msg, ack_fn) = self.fetch_one(&filter).await?;
@@ -643,18 +601,49 @@ impl MessageQueue for NatsQueue {
     }
 }
 
-/// Serialize a DelegateReply routing key to a NATS subject.
+/// Serialize a routing key to a NATS subject string (ADR 096 §8).
 ///
-/// Format: `vlinder.{timeline}.{submission}.delegate-reply.{caller}.{target}.{nonce}`
-fn delegate_reply_subject(key: &RoutingKey) -> String {
+/// This is the single point of truth for RoutingKey → NATS subject
+/// serialization. Injectivity: distinct routing keys produce distinct
+/// subjects (verified by tests in routing_key.rs).
+fn routing_key_to_subject(key: &RoutingKey) -> String {
     match key {
+        RoutingKey::Invoke { timeline, submission, harness, runtime, agent } => {
+            format!(
+                "vlinder.{}.{}.invoke.{}.{}.{}",
+                timeline, submission, harness, runtime, agent,
+            )
+        }
+        RoutingKey::Complete { timeline, submission, agent, harness } => {
+            format!(
+                "vlinder.{}.{}.complete.{}.{}",
+                timeline, submission, agent, harness,
+            )
+        }
+        RoutingKey::Request { timeline, submission, agent, service, operation, sequence } => {
+            format!(
+                "vlinder.{}.{}.req.{}.{}.{}.{}.{}",
+                timeline, submission, agent, service.service_type(), service.backend_str(), operation, sequence,
+            )
+        }
+        RoutingKey::Response { timeline, submission, service, agent, operation, sequence } => {
+            format!(
+                "vlinder.{}.{}.res.{}.{}.{}.{}.{}",
+                timeline, submission, service.service_type(), service.backend_str(), agent, operation, sequence,
+            )
+        }
+        RoutingKey::Delegate { timeline, submission, caller, target } => {
+            format!(
+                "vlinder.{}.{}.delegate.{}.{}",
+                timeline, submission, caller, target,
+            )
+        }
         RoutingKey::DelegateReply { timeline, submission, caller, target, nonce } => {
             format!(
                 "vlinder.{}.{}.delegate-reply.{}.{}.{}",
                 timeline, submission, caller, target, nonce,
             )
         }
-        _ => panic!("delegate_reply_subject called with non-DelegateReply key: {:?}", key),
     }
 }
 
@@ -706,5 +695,262 @@ fn parse_service_type(s: &str) -> Result<ServiceType, QueueError> {
 fn parse_operation(s: &str) -> Result<Operation, QueueError> {
     Operation::from_str(s)
         .ok_or_else(|| QueueError::ReceiveFailed(format!("unknown operation: {}", s)))
+}
+
+// ============================================================================
+// Tests — subject serialization injectivity (ADR 096 §9)
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{
+        InferenceBackendType, ObjectStorageType, VectorStorageType,
+    };
+
+    fn timeline() -> TimelineId { TimelineId::main() }
+    fn timeline_alt() -> TimelineId { TimelineId::from(2) }
+    fn submission() -> SubmissionId { SubmissionId::from("sub-1".to_string()) }
+    fn submission_alt() -> SubmissionId { SubmissionId::from("sub-2".to_string()) }
+    fn agent() -> AgentId { AgentId::new("echo") }
+    fn agent_alt() -> AgentId { AgentId::new("pensieve") }
+
+    // ========================================================================
+    // Format sanity — subjects have the expected shape
+    // ========================================================================
+
+    #[test]
+    fn invoke_subject_format() {
+        let key = RoutingKey::Invoke {
+            timeline: timeline(),
+            submission: submission(),
+            harness: HarnessType::Cli,
+            runtime: RuntimeType::Container,
+            agent: agent(),
+        };
+        assert_eq!(
+            routing_key_to_subject(&key),
+            format!("vlinder.{}.{}.invoke.cli.container.echo", timeline(), submission()),
+        );
+    }
+
+    #[test]
+    fn request_subject_format() {
+        let key = RoutingKey::Request {
+            timeline: timeline(),
+            submission: submission(),
+            agent: agent(),
+            service: ServiceBackend::Kv(ObjectStorageType::Sqlite),
+            operation: Operation::Get,
+            sequence: Sequence::first(),
+        };
+        assert_eq!(
+            routing_key_to_subject(&key),
+            format!("vlinder.{}.{}.req.echo.kv.sqlite.get.1", timeline(), submission()),
+        );
+    }
+
+    #[test]
+    fn response_subject_format() {
+        let key = RoutingKey::Response {
+            timeline: timeline(),
+            submission: submission(),
+            service: ServiceBackend::Infer(InferenceBackendType::Ollama),
+            agent: agent(),
+            operation: Operation::Run,
+            sequence: Sequence::from(3),
+        };
+        assert_eq!(
+            routing_key_to_subject(&key),
+            format!("vlinder.{}.{}.res.infer.ollama.echo.run.3", timeline(), submission()),
+        );
+    }
+
+    #[test]
+    fn complete_subject_format() {
+        let key = RoutingKey::Complete {
+            timeline: timeline(),
+            submission: submission(),
+            agent: agent(),
+            harness: HarnessType::Web,
+        };
+        assert_eq!(
+            routing_key_to_subject(&key),
+            format!("vlinder.{}.{}.complete.echo.web", timeline(), submission()),
+        );
+    }
+
+    #[test]
+    fn delegate_subject_format() {
+        let key = RoutingKey::Delegate {
+            timeline: timeline(),
+            submission: submission(),
+            caller: agent(),
+            target: agent_alt(),
+        };
+        assert_eq!(
+            routing_key_to_subject(&key),
+            format!("vlinder.{}.{}.delegate.echo.pensieve", timeline(), submission()),
+        );
+    }
+
+    #[test]
+    fn delegate_reply_subject_format() {
+        let key = RoutingKey::DelegateReply {
+            timeline: timeline(),
+            submission: submission(),
+            caller: agent(),
+            target: agent_alt(),
+            nonce: Nonce::new("abc123"),
+        };
+        assert_eq!(
+            routing_key_to_subject(&key),
+            format!("vlinder.{}.{}.delegate-reply.echo.pensieve.abc123", timeline(), submission()),
+        );
+    }
+
+    // ========================================================================
+    // Injectivity — distinct routing keys produce distinct subjects
+    // ========================================================================
+
+    /// Helper: assert two different routing keys serialize to different subjects.
+    fn assert_injective(a: &RoutingKey, b: &RoutingKey) {
+        assert_ne!(a, b, "precondition: keys must differ");
+        assert_ne!(
+            routing_key_to_subject(a),
+            routing_key_to_subject(b),
+            "injectivity violated: {a:?} and {b:?} mapped to same subject",
+        );
+    }
+
+    #[test]
+    fn invoke_injective_by_timeline() {
+        let a = RoutingKey::Invoke { timeline: timeline(), submission: submission(), harness: HarnessType::Cli, runtime: RuntimeType::Container, agent: agent() };
+        let b = RoutingKey::Invoke { timeline: timeline_alt(), submission: submission(), harness: HarnessType::Cli, runtime: RuntimeType::Container, agent: agent() };
+        assert_injective(&a, &b);
+    }
+
+    #[test]
+    fn invoke_injective_by_submission() {
+        let a = RoutingKey::Invoke { timeline: timeline(), submission: submission(), harness: HarnessType::Cli, runtime: RuntimeType::Container, agent: agent() };
+        let b = RoutingKey::Invoke { timeline: timeline(), submission: submission_alt(), harness: HarnessType::Cli, runtime: RuntimeType::Container, agent: agent() };
+        assert_injective(&a, &b);
+    }
+
+    #[test]
+    fn invoke_injective_by_harness() {
+        let a = RoutingKey::Invoke { timeline: timeline(), submission: submission(), harness: HarnessType::Cli, runtime: RuntimeType::Container, agent: agent() };
+        let b = RoutingKey::Invoke { timeline: timeline(), submission: submission(), harness: HarnessType::Web, runtime: RuntimeType::Container, agent: agent() };
+        assert_injective(&a, &b);
+    }
+
+    #[test]
+    fn invoke_injective_by_agent() {
+        let a = RoutingKey::Invoke { timeline: timeline(), submission: submission(), harness: HarnessType::Cli, runtime: RuntimeType::Container, agent: agent() };
+        let b = RoutingKey::Invoke { timeline: timeline(), submission: submission(), harness: HarnessType::Cli, runtime: RuntimeType::Container, agent: agent_alt() };
+        assert_injective(&a, &b);
+    }
+
+    #[test]
+    fn request_injective_by_service() {
+        let a = RoutingKey::Request { timeline: timeline(), submission: submission(), agent: agent(), service: ServiceBackend::Kv(ObjectStorageType::Sqlite), operation: Operation::Get, sequence: Sequence::first() };
+        let b = RoutingKey::Request { timeline: timeline(), submission: submission(), agent: agent(), service: ServiceBackend::Vec(VectorStorageType::SqliteVec), operation: Operation::Get, sequence: Sequence::first() };
+        assert_injective(&a, &b);
+    }
+
+    #[test]
+    fn request_injective_by_backend() {
+        let a = RoutingKey::Request { timeline: timeline(), submission: submission(), agent: agent(), service: ServiceBackend::Kv(ObjectStorageType::Sqlite), operation: Operation::Get, sequence: Sequence::first() };
+        let b = RoutingKey::Request { timeline: timeline(), submission: submission(), agent: agent(), service: ServiceBackend::Kv(ObjectStorageType::InMemory), operation: Operation::Get, sequence: Sequence::first() };
+        assert_injective(&a, &b);
+    }
+
+    #[test]
+    fn request_injective_by_operation() {
+        let a = RoutingKey::Request { timeline: timeline(), submission: submission(), agent: agent(), service: ServiceBackend::Kv(ObjectStorageType::Sqlite), operation: Operation::Get, sequence: Sequence::first() };
+        let b = RoutingKey::Request { timeline: timeline(), submission: submission(), agent: agent(), service: ServiceBackend::Kv(ObjectStorageType::Sqlite), operation: Operation::Put, sequence: Sequence::first() };
+        assert_injective(&a, &b);
+    }
+
+    #[test]
+    fn request_injective_by_sequence() {
+        let a = RoutingKey::Request { timeline: timeline(), submission: submission(), agent: agent(), service: ServiceBackend::Kv(ObjectStorageType::Sqlite), operation: Operation::Get, sequence: Sequence::first() };
+        let b = RoutingKey::Request { timeline: timeline(), submission: submission(), agent: agent(), service: ServiceBackend::Kv(ObjectStorageType::Sqlite), operation: Operation::Get, sequence: Sequence::from(2) };
+        assert_injective(&a, &b);
+    }
+
+    #[test]
+    fn response_injective_by_agent() {
+        let a = RoutingKey::Response { timeline: timeline(), submission: submission(), service: ServiceBackend::Infer(InferenceBackendType::Ollama), agent: agent(), operation: Operation::Run, sequence: Sequence::first() };
+        let b = RoutingKey::Response { timeline: timeline(), submission: submission(), service: ServiceBackend::Infer(InferenceBackendType::Ollama), agent: agent_alt(), operation: Operation::Run, sequence: Sequence::first() };
+        assert_injective(&a, &b);
+    }
+
+    #[test]
+    fn response_injective_by_backend() {
+        let a = RoutingKey::Response { timeline: timeline(), submission: submission(), service: ServiceBackend::Infer(InferenceBackendType::Ollama), agent: agent(), operation: Operation::Run, sequence: Sequence::first() };
+        let b = RoutingKey::Response { timeline: timeline(), submission: submission(), service: ServiceBackend::Infer(InferenceBackendType::OpenRouter), agent: agent(), operation: Operation::Run, sequence: Sequence::first() };
+        assert_injective(&a, &b);
+    }
+
+    #[test]
+    fn complete_injective_by_harness() {
+        let a = RoutingKey::Complete { timeline: timeline(), submission: submission(), agent: agent(), harness: HarnessType::Cli };
+        let b = RoutingKey::Complete { timeline: timeline(), submission: submission(), agent: agent(), harness: HarnessType::Web };
+        assert_injective(&a, &b);
+    }
+
+    #[test]
+    fn complete_injective_by_agent() {
+        let a = RoutingKey::Complete { timeline: timeline(), submission: submission(), agent: agent(), harness: HarnessType::Cli };
+        let b = RoutingKey::Complete { timeline: timeline(), submission: submission(), agent: agent_alt(), harness: HarnessType::Cli };
+        assert_injective(&a, &b);
+    }
+
+    #[test]
+    fn delegate_injective_by_caller() {
+        let a = RoutingKey::Delegate { timeline: timeline(), submission: submission(), caller: agent(), target: agent_alt() };
+        let b = RoutingKey::Delegate { timeline: timeline(), submission: submission(), caller: agent_alt(), target: agent_alt() };
+        assert_injective(&a, &b);
+    }
+
+    #[test]
+    fn delegate_injective_by_target() {
+        let a = RoutingKey::Delegate { timeline: timeline(), submission: submission(), caller: agent(), target: agent_alt() };
+        let b = RoutingKey::Delegate { timeline: timeline(), submission: submission(), caller: agent(), target: AgentId::new("fact-checker") };
+        assert_injective(&a, &b);
+    }
+
+    #[test]
+    fn delegate_reply_injective_by_nonce() {
+        let a = RoutingKey::DelegateReply { timeline: timeline(), submission: submission(), caller: agent(), target: agent_alt(), nonce: Nonce::new("nonce-1") };
+        let b = RoutingKey::DelegateReply { timeline: timeline(), submission: submission(), caller: agent(), target: agent_alt(), nonce: Nonce::new("nonce-2") };
+        assert_injective(&a, &b);
+    }
+
+    // ========================================================================
+    // Cross-variant injectivity — different message types never collide
+    // ========================================================================
+
+    #[test]
+    fn invoke_and_complete_subjects_differ() {
+        let invoke = RoutingKey::Invoke { timeline: timeline(), submission: submission(), harness: HarnessType::Cli, runtime: RuntimeType::Container, agent: agent() };
+        let complete = RoutingKey::Complete { timeline: timeline(), submission: submission(), agent: agent(), harness: HarnessType::Cli };
+        assert_injective(&invoke, &complete);
+    }
+
+    #[test]
+    fn request_and_response_subjects_differ() {
+        let request = RoutingKey::Request { timeline: timeline(), submission: submission(), agent: agent(), service: ServiceBackend::Kv(ObjectStorageType::Sqlite), operation: Operation::Get, sequence: Sequence::first() };
+        let response = RoutingKey::Response { timeline: timeline(), submission: submission(), service: ServiceBackend::Kv(ObjectStorageType::Sqlite), agent: agent(), operation: Operation::Get, sequence: Sequence::first() };
+        assert_injective(&request, &response);
+    }
+
+    #[test]
+    fn delegate_and_delegate_reply_subjects_differ() {
+        let delegate = RoutingKey::Delegate { timeline: timeline(), submission: submission(), caller: agent(), target: agent_alt() };
+        let reply = RoutingKey::DelegateReply { timeline: timeline(), submission: submission(), caller: agent(), target: agent_alt(), nonce: Nonce::new("n") };
+        assert_injective(&delegate, &reply);
+    }
 }
 

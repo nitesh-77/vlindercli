@@ -9,7 +9,7 @@
 //! Each receive method returns a tuple of (TypedMessage, AckFn) where
 //! AckFn acknowledges successful processing.
 
-use super::{Agent, CompleteMessage, DelegateMessage, InvokeMessage, Operation, RequestMessage, ResponseMessage, ResourceId, RoutingKey, ServiceType, SubmissionId};
+use super::{CompleteMessage, DelegateMessage, InvokeMessage, Operation, RequestMessage, ResponseMessage, ResourceId, RoutingKey, ServiceType, SubmissionId};
 use std::fmt;
 
 /// One-shot closure that acknowledges a received message was processed.
@@ -19,29 +19,6 @@ pub type Acknowledgement = Box<dyn FnOnce() -> Result<(), QueueError> + Send>;
 
 /// A message queue for sending and receiving typed messages (ADR 044).
 pub trait MessageQueue {
-    // -------------------------------------------------------------------------
-    // Routing helpers - build queue names for backend-specific routing (ADR 043)
-    // -------------------------------------------------------------------------
-
-    /// Build queue name for a service call with backend type.
-    ///
-    /// Used by workers to subscribe and by agents to send service requests.
-    ///
-    /// # Arguments
-    /// - `service`: Service type (Kv, Vec, Infer, Embed)
-    /// - `backend`: Backend implementation (e.g., "sqlite", "ollama", "memory")
-    /// - `action`: Operation (e.g., Get, Put, Search)
-    fn service_queue(&self, service: ServiceType, backend: &str, action: Operation) -> String;
-
-    /// Build queue name for an agent with runtime type.
-    ///
-    /// Used by harness to send to agents and by runtimes to receive.
-    ///
-    /// # Arguments
-    /// - `runtime`: Runtime type (e.g., "wasm", "docker")
-    /// - `agent`: The agent to build queue name for
-    fn agent_queue(&self, runtime: &str, agent: &Agent) -> String;
-
     // -------------------------------------------------------------------------
     // Typed message methods (ADR 044)
     // -------------------------------------------------------------------------
@@ -169,8 +146,6 @@ fn send_and_wait<T>(
 
 #[derive(Debug)]
 pub enum QueueError {
-    /// Queue does not exist
-    QueueNotFound(String),
     /// Failed to send message
     SendFailed(String),
     /// Failed to receive message
@@ -182,7 +157,6 @@ pub enum QueueError {
 impl fmt::Display for QueueError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            QueueError::QueueNotFound(q) => write!(f, "queue not found: {}", q),
             QueueError::SendFailed(msg) => write!(f, "send failed: {}", msg),
             QueueError::ReceiveFailed(msg) => write!(f, "receive failed: {}", msg),
             QueueError::Timeout => write!(f, "receive timed out"),

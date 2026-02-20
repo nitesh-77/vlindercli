@@ -39,14 +39,6 @@ impl Default for InMemoryQueue {
 }
 
 impl MessageQueue for InMemoryQueue {
-    fn service_queue(&self, service: ServiceType, backend: &str, action: Operation) -> String {
-        format!("vlinder.svc.{}.{}.{}", service, backend, action)
-    }
-
-    fn agent_queue(&self, runtime: &str, agent: &crate::domain::Agent) -> String {
-        format!("vlinder.agent.{}.{}", runtime, agent.name)
-    }
-
     fn send_invoke(&self, msg: InvokeMessage) -> Result<(), QueueError> {
         let key = msg.routing_key();
         let mut typed = self.typed_queues.lock().unwrap();

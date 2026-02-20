@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use crate::domain::{
-    Agent, CompleteMessage, DagStore, DelegateMessage, InvokeMessage,
+    CompleteMessage, DagStore, DelegateMessage, InvokeMessage,
     MessageQueue, ObservableMessage, QueueError, RequestMessage, ResponseMessage,
     SubmissionId,
 };
@@ -72,18 +72,6 @@ impl RecordingQueue {
 }
 
 impl MessageQueue for RecordingQueue {
-    // -------------------------------------------------------------------------
-    // Routing helpers — delegate straight through
-    // -------------------------------------------------------------------------
-
-    fn service_queue(&self, service: crate::domain::ServiceType, backend: &str, action: crate::domain::Operation) -> String {
-        self.inner.service_queue(service, backend, action)
-    }
-
-    fn agent_queue(&self, runtime: &str, agent: &Agent) -> String {
-        self.inner.agent_queue(runtime, agent)
-    }
-
     // -------------------------------------------------------------------------
     // Send methods — record DAG node, then forward
     // -------------------------------------------------------------------------

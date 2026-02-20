@@ -17,6 +17,12 @@ pub enum RuntimeType {
     Container,
 }
 
+impl std::fmt::Display for RuntimeType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 impl RuntimeType {
     /// String representation for URI construction.
     pub fn as_str(&self) -> &'static str {
