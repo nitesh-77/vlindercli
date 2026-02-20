@@ -17,6 +17,8 @@ use std::str::FromStr;
 pub enum WorkerRole {
     /// Registry service - coordinates agents, models, and jobs
     Registry,
+    /// Harness service — gRPC interface for CLI agent invocation
+    Harness,
     /// Container agent runtime - executes OCI container agents via Podman
     AgentContainer,
     /// Ollama inference service
@@ -53,6 +55,7 @@ impl WorkerRole {
     pub fn as_env_value(&self) -> &'static str {
         match self {
             WorkerRole::Registry => "registry",
+            WorkerRole::Harness => "harness",
             WorkerRole::AgentContainer => "agent-container",
             WorkerRole::InferenceOllama => "inference-ollama",
             WorkerRole::InferenceOpenRouter => "inference-openrouter",
@@ -70,6 +73,7 @@ impl WorkerRole {
     pub fn description(&self) -> &'static str {
         match self {
             WorkerRole::Registry => "Registry service",
+            WorkerRole::Harness => "Harness service",
             WorkerRole::AgentContainer => "Container agent runtime",
             WorkerRole::InferenceOllama => "Ollama inference service",
             WorkerRole::InferenceOpenRouter => "OpenRouter inference service",
@@ -96,6 +100,7 @@ impl FromStr for WorkerRole {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "registry" => Ok(WorkerRole::Registry),
+            "harness" => Ok(WorkerRole::Harness),
             "agent-container" => Ok(WorkerRole::AgentContainer),
             "inference-ollama" => Ok(WorkerRole::InferenceOllama),
             "inference-openrouter" => Ok(WorkerRole::InferenceOpenRouter),
@@ -129,6 +134,7 @@ mod tests {
     #[test]
     fn parse_valid_roles() {
         assert_eq!("registry".parse::<WorkerRole>().unwrap(), WorkerRole::Registry);
+        assert_eq!("harness".parse::<WorkerRole>().unwrap(), WorkerRole::Harness);
         assert_eq!("agent-container".parse::<WorkerRole>().unwrap(), WorkerRole::AgentContainer);
         assert_eq!("inference-ollama".parse::<WorkerRole>().unwrap(), WorkerRole::InferenceOllama);
         assert_eq!("embedding-ollama".parse::<WorkerRole>().unwrap(), WorkerRole::EmbeddingOllama);
@@ -151,6 +157,7 @@ mod tests {
     fn roundtrip_env_value() {
         for role in [
             WorkerRole::Registry,
+            WorkerRole::Harness,
             WorkerRole::AgentContainer,
             WorkerRole::InferenceOllama,
             WorkerRole::EmbeddingOllama,

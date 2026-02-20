@@ -112,6 +112,8 @@ pub struct DistributedConfig {
     pub registry_addr: String,
     /// State service gRPC address (ADR 079)
     pub state_addr: String,
+    /// Harness gRPC address for CLI→daemon agent invocation
+    pub harness_addr: String,
     /// Worker process counts by type
     pub workers: WorkerCounts,
 }
@@ -122,6 +124,8 @@ pub struct DistributedConfig {
 pub struct WorkerCounts {
     /// Number of registry worker processes
     pub registry: u32,
+    /// Number of harness worker processes
+    pub harness: u32,
     /// Agent runtime workers
     pub agent: AgentWorkerCounts,
     /// Inference service workers
@@ -268,6 +272,7 @@ impl Default for DistributedConfig {
             enabled: false,
             registry_addr: "http://127.0.0.1:9090".to_string(),
             state_addr: "http://127.0.0.1:9092".to_string(),
+            harness_addr: "http://127.0.0.1:9091".to_string(),
             workers: WorkerCounts::default(),
         }
     }
@@ -277,6 +282,7 @@ impl Default for WorkerCounts {
     fn default() -> Self {
         Self {
             registry: 1,
+            harness: 1,
             agent: AgentWorkerCounts::default(),
             inference: InferenceWorkerCounts::default(),
             embedding: EmbeddingWorkerCounts::default(),
@@ -398,10 +404,16 @@ impl Config {
         if let Ok(v) = std::env::var("VLINDER_DISTRIBUTED_STATE_ADDR") {
             self.distributed.state_addr = v;
         }
+        if let Ok(v) = std::env::var("VLINDER_DISTRIBUTED_HARNESS_ADDR") {
+            self.distributed.harness_addr = v;
+        }
 
         // Worker counts (flat env vars for simplicity)
         if let Ok(v) = std::env::var("VLINDER_WORKERS_REGISTRY") {
             self.distributed.workers.registry = v.parse().unwrap_or(1);
+        }
+        if let Ok(v) = std::env::var("VLINDER_WORKERS_HARNESS") {
+            self.distributed.workers.harness = v.parse().unwrap_or(1);
         }
         if let Ok(v) = std::env::var("VLINDER_WORKERS_AGENT_CONTAINER") {
             self.distributed.workers.agent.container = v.parse().unwrap_or(0);
@@ -544,7 +556,9 @@ mod tests {
         let config = Config::default();
         assert!(!config.distributed.enabled);
         assert_eq!(config.distributed.registry_addr, "http://127.0.0.1:9090");
+        assert_eq!(config.distributed.harness_addr, "http://127.0.0.1:9091");
         assert_eq!(config.distributed.workers.registry, 1);
+        assert_eq!(config.distributed.workers.harness, 1);
         assert_eq!(config.distributed.workers.agent.container, 1);
         assert_eq!(config.distributed.workers.inference.ollama, 1);
         assert_eq!(config.distributed.workers.embedding.ollama, 1);

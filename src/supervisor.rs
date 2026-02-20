@@ -11,6 +11,7 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use crate::config::Config;
+use crate::harness_service::ping_harness;
 use crate::registry_service::ping_registry;
 use crate::state_service::ping_state_service;
 use crate::worker_role::WorkerRole;
@@ -104,6 +105,51 @@ impl Supervisor {
                 }
                 None => {
                     tracing::warn!(addr = %state_addr, "State service did not become ready within 10s — state queries will fail until it starts");
+                }
+            }
+        }
+
+        // Harness service — gRPC bridge for CLI→daemon agent invocation.
+        // Must start before agent/inference workers (they depend on harness
+        // being available for agent execution).
+        for _ in 0..counts.harness {
+            if let Some(child) = spawn_worker(WorkerRole::Harness) {
+                workers.push(child);
+            }
+        }
+
+        if counts.harness > 0 {
+            let harness_addr = if config.distributed.harness_addr.starts_with("http://") {
+                config.distributed.harness_addr.clone()
+            } else {
+                format!("http://{}", config.distributed.harness_addr)
+            };
+
+            let deadline = Instant::now() + Duration::from_secs(10);
+            let mut version = None;
+
+            while Instant::now() < deadline {
+                if let Some(v) = ping_harness(&harness_addr) {
+                    version = Some(v);
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+
+            match version {
+                Some((major, minor, patch)) => {
+                    tracing::info!(
+                        addr = %harness_addr,
+                        version = %format!("{}.{}.{}", major, minor, patch),
+                        "Harness service is ready"
+                    );
+                }
+                None => {
+                    tracing::error!(addr = %harness_addr, "Harness service did not become ready within 10s");
+                    for child in &mut workers {
+                        let _ = child.kill();
+                    }
+                    panic!("Harness failed to start — aborting distributed mode");
                 }
             }
         }
@@ -224,8 +270,10 @@ mod tests {
                 enabled: true,
                 registry_addr: "http://127.0.0.1:9090".to_string(),
                 state_addr: "http://127.0.0.1:9092".to_string(),
+                harness_addr: "http://127.0.0.1:9091".to_string(),
                 workers: crate::config::WorkerCounts {
                     registry: 0,
+                    harness: 0,
                     agent: crate::config::AgentWorkerCounts { container: 0 },
                     inference: crate::config::InferenceWorkerCounts { ollama: 0, openrouter: 0 },
                     embedding: crate::config::EmbeddingWorkerCounts { ollama: 0 },

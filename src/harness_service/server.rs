@@ -1,6 +1,6 @@
 //! gRPC server wrapping the Harness trait.
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use tonic::{Request, Response, Status};
 
@@ -8,6 +8,7 @@ use crate::domain::{Harness, ResourceId, TimelineId};
 use super::proto::{
     self,
     harness_server::Harness as HarnessService,
+    PingRequest, SemVer,
     SetTimelineRequest, SetTimelineResponse,
     StartSessionRequest, StartSessionResponse,
     SetInitialStateRequest, SetInitialStateResponse,
@@ -15,14 +16,17 @@ use super::proto::{
 };
 
 /// gRPC server that wraps a Harness implementation.
+///
+/// Uses `Arc<Mutex<…>>` so the harness can be shared into
+/// `spawn_blocking` for long-running calls like `run_agent`.
 pub struct HarnessServiceServer {
-    harness: Mutex<Box<dyn Harness + Send>>,
+    harness: Arc<Mutex<Box<dyn Harness + Send>>>,
 }
 
 impl HarnessServiceServer {
     pub fn new(harness: Box<dyn Harness + Send>) -> Self {
         Self {
-            harness: Mutex::new(harness),
+            harness: Arc::new(Mutex::new(harness)),
         }
     }
 
@@ -34,6 +38,17 @@ impl HarnessServiceServer {
 
 #[tonic::async_trait]
 impl HarnessService for HarnessServiceServer {
+    async fn ping(
+        &self,
+        _request: Request<PingRequest>,
+    ) -> Result<Response<SemVer>, Status> {
+        Ok(Response::new(SemVer {
+            major: 0,
+            minor: 0,
+            patch: 1,
+        }))
+    }
+
     async fn set_timeline(
         &self,
         request: Request<SetTimelineRequest>,
@@ -67,9 +82,21 @@ impl HarnessService for HarnessServiceServer {
         request: Request<RunAgentRequest>,
     ) -> Result<Response<RunAgentResponse>, Status> {
         let req = request.into_inner();
-        let agent_id = ResourceId::new(&req.agent_id);
+        let agent_id = req.agent_id.clone();
+        let input = req.input.clone();
+        let harness = Arc::clone(&self.harness);
 
-        match self.harness.lock().unwrap().run_agent(&agent_id, &req.input) {
+        // run_agent blocks (poll loop waiting for agent completion).
+        // Offload to a blocking thread so the tokio runtime stays healthy
+        // for h2 connection management.
+        let result = tokio::task::spawn_blocking(move || {
+            let id = ResourceId::new(&agent_id);
+            harness.lock().unwrap().run_agent(&id, &input)
+        })
+        .await
+        .map_err(|e| Status::internal(format!("spawn_blocking failed: {}", e)))?;
+
+        match result {
             Ok(output) => Ok(Response::new(RunAgentResponse {
                 output,
                 error: None,

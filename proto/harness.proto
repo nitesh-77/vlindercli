@@ -7,6 +7,9 @@ package vlinder.harness;
 // =============================================================================
 
 service Harness {
+  // Health check — returns server's protocol version
+  rpc Ping(PingRequest) returns (SemVer);
+
   // Set the timeline for branch-scoped subjects (ADR 093).
   rpc SetTimeline(SetTimelineRequest) returns (SetTimelineResponse);
 
@@ -18,6 +21,18 @@ service Harness {
 
   // Run an agent to completion — send input, block for response.
   rpc RunAgent(RunAgentRequest) returns (RunAgentResponse);
+}
+
+// =============================================================================
+// Health Check
+// =============================================================================
+
+message PingRequest {}
+
+message SemVer {
+  uint32 major = 1;
+  uint32 minor = 2;
+  uint32 patch = 3;
 }
 
 // =============================================================================

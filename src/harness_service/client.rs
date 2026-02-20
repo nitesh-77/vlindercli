@@ -6,6 +6,26 @@ use tonic::transport::Channel;
 use crate::domain::{Harness, HarnessType, ResourceId, TimelineId};
 use super::proto::{self, harness_client::HarnessClient};
 
+/// Ping a harness service at the given address, returning its protocol version.
+///
+/// Creates a temporary connection and sends a Ping. Returns the server's
+/// version on success, None on any connection or transport error.
+pub fn ping_harness(addr: &str) -> Option<(u32, u32, u32)> {
+    let Ok(runtime) = tokio::runtime::Runtime::new() else {
+        return None;
+    };
+
+    runtime.block_on(async {
+        let Ok(mut client) = HarnessClient::connect(addr.to_string()).await else {
+            return None;
+        };
+        client.ping(proto::PingRequest {}).await.ok().map(|r| {
+            let v = r.into_inner();
+            (v.major, v.minor, v.patch)
+        })
+    })
+}
+
 /// Harness implementation that makes gRPC calls to a remote server.
 pub struct GrpcHarnessClient {
     client: Mutex<HarnessClient<Channel>>,

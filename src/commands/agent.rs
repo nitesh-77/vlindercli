@@ -4,9 +4,9 @@ use std::sync::Arc;
 use clap::{Subcommand, ValueEnum};
 
 use vlindercli::config::Config;
-use vlindercli::domain::{AgentManifest, DagStore, Harness, HarnessType, Registry, MessageQueue};
-use vlindercli::harness::{CoreHarness, read_latest_state};
-use vlindercli::queue_factory;
+use vlindercli::domain::{AgentManifest, DagStore, Harness, Registry};
+use vlindercli::harness::read_latest_state;
+use vlindercli::harness_service::{GrpcHarnessClient, ping_harness};
 use vlindercli::registry_service::{GrpcRegistryClient, ping_registry};
 use vlindercli::state_service::GrpcStateClient;
 
@@ -124,19 +124,15 @@ fn run(name: &str) {
 
     let agent_id = agent.id.clone();
 
-    // Connect to queue with synchronous DAG recording
-    let queue: Arc<dyn MessageQueue + Send + Sync> =
-        queue_factory::recording_from_config()
-            .expect("Failed to create queue");
-
-    // Create harness (no deploy, just invoke/poll/session)
-    let mut harness = CoreHarness::new(queue, registry, HarnessType::Cli);
+    // Connect to harness via gRPC — the daemon's harness worker owns the
+    // queue and registry connection. The CLI is now a pure gRPC client.
+    let mut harness = connect_harness(&config);
 
     // Start conversation session (ADR 054, ADR 070)
     harness.start_session(name);
 
     // Read state from state service (ADR 079)
-    apply_latest_state(&config, &mut harness, name);
+    apply_latest_state(&config, &mut *harness, name);
 
     // Run REPL with synchronous run_agent (ADR 092)
     repl::run(|input| {
@@ -167,9 +163,29 @@ fn connect_registry(config: &Config) -> Arc<dyn Registry> {
     )
 }
 
+/// Connect to the harness via gRPC, exiting on failure.
+fn connect_harness(config: &Config) -> Box<dyn Harness> {
+    let harness_addr = if config.distributed.harness_addr.starts_with("http://")
+        || config.distributed.harness_addr.starts_with("https://") {
+        config.distributed.harness_addr.clone()
+    } else {
+        format!("http://{}", config.distributed.harness_addr)
+    };
+
+    if ping_harness(&harness_addr).is_none() {
+        eprintln!("Cannot reach harness at {}. Is the daemon running?", harness_addr);
+        std::process::exit(1);
+    }
+
+    Box::new(
+        GrpcHarnessClient::connect(&harness_addr)
+            .expect("Failed to connect to harness")
+    )
+}
+
 /// Read the latest state for an agent from the DAG store (ADR 079)
 /// and initialize the harness with it (state continuity across sessions).
-fn apply_latest_state(config: &Config, harness: &mut CoreHarness, agent_name: &str) {
+fn apply_latest_state(config: &Config, harness: &mut dyn Harness, agent_name: &str) {
     let store = open_dag_store(config);
     let Some(store) = store else { return };
     if let Some(state) = read_latest_state(store.as_ref(), agent_name) {

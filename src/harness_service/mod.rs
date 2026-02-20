@@ -8,7 +8,7 @@ mod server;
 mod client;
 
 pub use server::HarnessServiceServer;
-pub use client::GrpcHarnessClient;
+pub use client::{GrpcHarnessClient, ping_harness};
 
 /// Generated protobuf types.
 pub mod proto {

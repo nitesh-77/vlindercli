@@ -40,6 +40,7 @@ pub fn run_worker_loop(role: WorkerRole, shutdown: Arc<AtomicBool>) {
 
     match role {
         WorkerRole::Registry => run_registry_worker(&config, &shutdown),
+        WorkerRole::Harness => run_harness_worker(&config, &shutdown),
         WorkerRole::AgentContainer => run_agent_container_worker(&config, &shutdown),
         WorkerRole::InferenceOllama => run_inference_ollama_worker(&config, &shutdown),
         WorkerRole::InferenceOpenRouter => run_inference_openrouter_worker(&config, &shutdown),
@@ -143,6 +144,50 @@ fn run_registry_worker(config: &Config, shutdown: &AtomicBool) {
 
         if let Err(e) = server.await {
             tracing::error!(?e, "Registry server error");
+        }
+    });
+}
+
+fn run_harness_worker(config: &Config, shutdown: &AtomicBool) {
+    use tonic::transport::Server;
+    use crate::domain::HarnessType;
+    use crate::harness::CoreHarness;
+    use crate::harness_service::HarnessServiceServer;
+    use crate::registry_service::GrpcRegistryClient;
+
+    let queue = crate::queue_factory::recording_from_config().expect("Failed to create queue");
+
+    let registry_addr = grpc_registry_addr(config);
+    let registry: Arc<dyn Registry> = Arc::new(
+        GrpcRegistryClient::connect(&registry_addr)
+            .expect("Failed to connect to registry")
+    );
+
+    let harness = CoreHarness::new(queue, registry, HarnessType::Grpc);
+
+    // Parse address, stripping http:// prefix if present
+    let addr_str = config.distributed.harness_addr
+        .strip_prefix("http://")
+        .unwrap_or(&config.distributed.harness_addr);
+    let addr: std::net::SocketAddr = addr_str.parse()
+        .expect("Invalid harness address");
+
+    tracing::info!(?addr, registry = %registry_addr, "Starting harness gRPC server");
+
+    let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
+    rt.block_on(async {
+        let service = HarnessServiceServer::new(Box::new(harness)).into_service();
+
+        let server = Server::builder()
+            .add_service(service)
+            .serve_with_shutdown(addr, async {
+                while !shutdown.load(Ordering::Relaxed) {
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                }
+            });
+
+        if let Err(e) = server.await {
+            tracing::error!(?e, "Harness server error");
         }
     });
 }
