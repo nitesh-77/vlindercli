@@ -783,6 +783,48 @@ mod tests {
         assert!(body.contains("Submission: sub-1"), "body: {}", body);
     }
 
+    /// Writer side of the trailer contract. Verifies GitDagWorker writes
+    /// Session/Submission/State trailers that git's `%(trailers:key=…,valueonly)`
+    /// format can extract.
+    ///
+    /// Reader side: `commands::timeline::tests::checkout_reads_trailers`.
+    #[test]
+    fn complete_trailers_readable_by_timeline() {
+        let (mut worker, _tmp) = test_worker();
+
+        // Write invoke + complete with a state hash
+        let (invoke, ts1) = test_invoke(b"question", 1000);
+        worker.on_observable_message(&invoke, ts1);
+
+        let complete = CompleteMessage::new(
+            TimelineId::main(),
+            SubmissionId::from("sub-1".to_string()),
+            SessionId::from("sess-1".to_string()),
+            test_agent_id(),
+            HarnessType::Cli,
+            b"answer".to_vec(),
+            Some("state-abc123".to_string()),
+            ContainerDiagnostics::placeholder(100),
+        );
+        let ts2 = DateTime::from_timestamp(1001, 0).unwrap();
+        worker.on_observable_message(&ObservableMessage::Complete(complete), ts2);
+
+        // Read trailers using the same format string as read_trailer()
+        let session = worker.git(&[
+            "log", "-1", "--format=%(trailers:key=Session,valueonly)", "main"
+        ]).unwrap();
+        let submission = worker.git(&[
+            "log", "-1", "--format=%(trailers:key=Submission,valueonly)", "main"
+        ]).unwrap();
+        let state = worker.git(&[
+            "log", "-1", "--format=%(trailers:key=State,valueonly)", "main"
+        ]).unwrap();
+
+        assert_eq!(session.trim(), "sess-1");
+        assert_eq!(submission.trim(), "sub-1");
+        assert_eq!(state.trim(), "state-abc123");
+    }
+
     #[test]
     fn author_is_message_sender() {
         let (mut worker, _tmp) = test_worker();
