@@ -1,0 +1,16 @@
+[package]
+name = "vlinder"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+vlindercli = { path = "../.." }
+clap = { version = "4", features = ["derive"] }
+reedline = "0.37"
+tracing = "0.1"
+chrono = "0.4"
+ureq = { version = "3", features = ["json"] }
+
+[dev-dependencies]
+tempfile = "3"

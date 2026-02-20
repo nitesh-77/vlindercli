@@ -1,15 +1,12 @@
 [workspace]
-members = [".", "crates/vlinder-core", "crates/vlinder-proto"]
+members = [".", "crates/vlinder-core", "crates/vlinder-proto", "crates/vlinder"]
+default-members = [".", "crates/vlinder"]
 
 [package]
 name = "vlindercli"
 version = "0.1.0"
 edition = "2021"
 publish = false
-
-[[bin]]
-name = "vlinder"
-path = "src/main.rs"
 
 [[bin]]
 name = "vlinderd"

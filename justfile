@@ -55,23 +55,23 @@ support:
 
 # List models from Ollama catalog
 model-list:
-    cargo run -q -- model list
+    cargo run -q -p vlinder -- model list
 
 # Add a model from Ollama (usage: just model-add phi3)
 model-add name:
-    cargo run -q -- model add {{name}}
+    cargo run -q -p vlinder -- model add {{name}}
 
 # Show registered models
 model-registered:
-    cargo run -q -- model registered
+    cargo run -q -p vlinder -- model registered
 
 # Remove a registered model (usage: just model-remove phi3)
 model-remove name:
-    cargo run -q -- model remove {{name}}
+    cargo run -q -p vlinder -- model remove {{name}}
 
 # Run tests
 test:
-    cargo test
+    cargo test --workspace
 
 # Build CLI
 build:
@@ -160,7 +160,7 @@ reset:
     echo ""
     echo "Next steps:"
     echo "  1. Rebuild:  just build-everything"
-    echo "  2. Daemon:   cargo run -- daemon"
+    echo "  2. Daemon:   cargo run -p vlindercli --bin vlinderd"
     echo "  3. Run:      just run todoapp"
 
 # Check license compliance (fails on GPL/copyleft)
