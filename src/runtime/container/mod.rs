@@ -17,4 +17,3 @@ mod unix_transport;
 
 pub use pool::ImagePolicy;
 pub use runtime::ContainerRuntime;
-pub(crate) use podman::resolve_image_digest;

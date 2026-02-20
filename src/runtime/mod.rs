@@ -7,4 +7,3 @@ mod container;
 
 pub use container::ContainerRuntime;
 pub use container::ImagePolicy;
-pub(crate) use container::resolve_image_digest;

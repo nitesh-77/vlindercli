@@ -71,38 +71,41 @@ mod tests {
     use std::path::PathBuf;
 
     #[test]
-    fn cli_agent_run_default_path() {
-        let cli = Cli::try_parse_from(["vlinder", "agent", "run"]).unwrap();
+    fn cli_agent_run_requires_name() {
+        let cli = Cli::try_parse_from(["vlinder", "agent", "run", "todoapp"]).unwrap();
         assert_eq!(
             cli.command,
             Command::Agent {
-                cmd: agent::AgentCommand::Run { path: None }
+                cmd: agent::AgentCommand::Run { name: "todoapp".to_string() }
             }
         );
     }
 
     #[test]
-    fn cli_agent_run_with_short_path() {
-        let cli = Cli::try_parse_from(["vlinder", "agent", "run", "-p", "/tmp/agent"]).unwrap();
+    fn cli_agent_run_without_name_fails() {
+        let result = Cli::try_parse_from(["vlinder", "agent", "run"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn cli_agent_deploy_default_path() {
+        let cli = Cli::try_parse_from(["vlinder", "agent", "deploy"]).unwrap();
         assert_eq!(
             cli.command,
             Command::Agent {
-                cmd: agent::AgentCommand::Run {
+                cmd: agent::AgentCommand::Deploy { path: None }
+            }
+        );
+    }
+
+    #[test]
+    fn cli_agent_deploy_with_path() {
+        let cli = Cli::try_parse_from(["vlinder", "agent", "deploy", "-p", "/tmp/agent"]).unwrap();
+        assert_eq!(
+            cli.command,
+            Command::Agent {
+                cmd: agent::AgentCommand::Deploy {
                     path: Some(PathBuf::from("/tmp/agent")),
-                }
-            }
-        );
-    }
-
-    #[test]
-    fn cli_agent_run_with_long_path() {
-        let cli =
-            Cli::try_parse_from(["vlinder", "agent", "run", "--path", "./my-agent"]).unwrap();
-        assert_eq!(
-            cli.command,
-            Command::Agent {
-                cmd: agent::AgentCommand::Run {
-                    path: Some(PathBuf::from("./my-agent")),
                 }
             }
         );

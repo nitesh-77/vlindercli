@@ -9,8 +9,6 @@ use std::fmt;
 
 use crate::domain::{ContainerId, ImageDigest, ImageRef, Mount};
 
-use super::podman_cli::PodmanCliClient;
-
 // ── Error type ──────────────────────────────────────────────────────
 
 /// Podman operation failure.
@@ -89,12 +87,6 @@ pub(crate) trait Podman: Send {
 }
 
 // ── Shared utilities ────────────────────────────────────────────────
-
-/// Resolve the content-addressed digest for an image via `podman image inspect`.
-/// Returns None if the inspect fails (image not found, Podman unavailable, etc.).
-pub(crate) fn resolve_image_digest(image_ref: &ImageRef) -> Option<ImageDigest> {
-    PodmanCliClient.image_digest(image_ref)
-}
 
 /// Resolve a Podman socket path from the config value (ADR 077).
 ///

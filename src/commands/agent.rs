@@ -4,7 +4,7 @@ use std::sync::Arc;
 use clap::{Subcommand, ValueEnum};
 
 use vlindercli::config::Config;
-use vlindercli::domain::{DagStore, Registry, agent_routing_key, MessageQueue};
+use vlindercli::domain::{AgentManifest, DagStore, Registry, MessageQueue};
 use vlindercli::harness::{CliHarness, read_latest_state};
 use vlindercli::queue_factory;
 use vlindercli::registry_service::{GrpcRegistryClient, ping_registry};
@@ -43,11 +43,16 @@ impl std::fmt::Display for Language {
 
 #[derive(Subcommand, Debug, PartialEq)]
 pub enum AgentCommand {
-    /// Run an agent interactively
-    Run {
+    /// Deploy an agent manifest to the registry
+    Deploy {
         /// Path to agent directory (default: current directory)
         #[arg(short, long)]
         path: Option<PathBuf>,
+    },
+    /// Run a deployed agent interactively
+    Run {
+        /// Agent name
+        name: String,
     },
     /// List deployed agents
     List,
@@ -67,14 +72,15 @@ pub enum AgentCommand {
 
 pub fn execute(cmd: AgentCommand) {
     match cmd {
-        AgentCommand::Run { path } => run(path),
+        AgentCommand::Deploy { path } => deploy(path),
+        AgentCommand::Run { name } => run(&name),
         AgentCommand::List => list(),
         AgentCommand::Get { name } => get(&name),
         AgentCommand::New { language, name } => scaffold(&language, &name),
     }
 }
 
-fn run(path: Option<PathBuf>) {
+fn deploy(path: Option<PathBuf>) {
     let config = Config::load();
     let agent_path = path.unwrap_or_else(|| {
         std::env::current_dir().expect("Failed to get current directory")
@@ -84,50 +90,53 @@ fn run(path: Option<PathBuf>) {
         .canonicalize()
         .expect("Failed to resolve agent path");
 
-    // Ensure URL has scheme (tonic requires it)
-    let registry_addr = if config.distributed.registry_addr.starts_with("http://")
-        || config.distributed.registry_addr.starts_with("https://") {
-        config.distributed.registry_addr.clone()
-    } else {
-        format!("http://{}", config.distributed.registry_addr)
+    let registry = connect_registry(&config);
+
+    // Load manifest from disk (CLI concern) and register via registry (ADR 103)
+    let manifest_path = absolute_path.join("agent.toml");
+    let manifest = AgentManifest::load(&manifest_path)
+        .unwrap_or_else(|e| {
+            eprintln!("Failed to load agent manifest: {:?}", e);
+            std::process::exit(1);
+        });
+
+    let agent = registry.register_manifest(manifest)
+        .unwrap_or_else(|e| {
+            eprintln!("Failed to deploy agent: {}", e);
+            std::process::exit(1);
+        });
+
+    println!("Deployed: {} ({})", agent.name, agent.id);
+}
+
+fn run(name: &str) {
+    let config = Config::load();
+    let registry = connect_registry(&config);
+
+    // Look up already-deployed agent by name (ADR 103)
+    let agent = match registry.get_agent_by_name(name) {
+        Some(a) => a,
+        None => {
+            eprintln!("Agent '{}' not found — deploy it first with: vlinder agent deploy", name);
+            std::process::exit(1);
+        }
     };
 
-    // Check registry is reachable before proceeding
-    if ping_registry(&registry_addr).is_none() {
-        eprintln!("Cannot reach registry at {}. Is the daemon running?", registry_addr);
-        std::process::exit(1);
-    }
-
-    let registry: Arc<dyn Registry> = Arc::new(
-        GrpcRegistryClient::connect(&registry_addr)
-            .expect("Failed to connect to registry")
-    );
+    let agent_id = agent.id.clone();
 
     // Connect to queue with synchronous DAG recording
     let queue: Arc<dyn MessageQueue + Send + Sync> =
         queue_factory::recording_from_config()
             .expect("Failed to create queue");
 
-    // Create harness with remote backends (no daemon, no workers)
+    // Create harness (no deploy, just invoke/poll/session)
     let mut harness = CliHarness::new(queue, registry);
 
-    // Deploy agent via remote registry
-    let agent_id = match harness.deploy_from_path(&absolute_path) {
-        Ok(id) => id,
-        Err(e) => {
-            eprintln!("Failed to deploy agent: {}", e);
-            std::process::exit(1);
-        }
-    };
-
-    tracing::info!(agent = %agent_id, "Agent deployed to distributed daemon");
-
     // Start conversation session (ADR 054, ADR 070)
-    let agent_name = agent_routing_key(&agent_id);
-    harness.start_session(&agent_name);
+    harness.start_session(name);
 
     // Read state from state service (ADR 079)
-    apply_latest_state(&config, &mut harness, &agent_name);
+    apply_latest_state(&config, &mut harness, name);
 
     // Run REPL with synchronous run_agent (ADR 092)
     repl::run(|input| {
@@ -136,6 +145,26 @@ fn run(path: Option<PathBuf>) {
             Err(e) => format!("[error] {}", e),
         }
     });
+}
+
+/// Connect to the registry via gRPC, exiting on failure.
+fn connect_registry(config: &Config) -> Arc<dyn Registry> {
+    let registry_addr = if config.distributed.registry_addr.starts_with("http://")
+        || config.distributed.registry_addr.starts_with("https://") {
+        config.distributed.registry_addr.clone()
+    } else {
+        format!("http://{}", config.distributed.registry_addr)
+    };
+
+    if ping_registry(&registry_addr).is_none() {
+        eprintln!("Cannot reach registry at {}. Is the daemon running?", registry_addr);
+        std::process::exit(1);
+    }
+
+    Arc::new(
+        GrpcRegistryClient::connect(&registry_addr)
+            .expect("Failed to connect to registry")
+    )
 }
 
 /// Read the latest state for an agent from the DAG store (ADR 079)
@@ -285,7 +314,8 @@ fn scaffold(language: &Language, name: &str) {
     println!("Next steps:");
     println!("  cd {}", name);
     println!("  ./build.sh");
-    println!("  vlinder agent run");
+    println!("  vlinder agent deploy");
+    println!("  vlinder agent run {}", name);
 }
 
 /// Download a URL to a temporary file and return the path.

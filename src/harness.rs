@@ -9,8 +9,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::domain::{
-    Agent, AgentId, Harness, HarnessType, InvokeDiagnostics, InvokeMessage,
-    JobId, JobStatus, MessageQueue, Registry, ResourceId, RuntimeType,
+    AgentId, AgentManifest, Harness, HarnessType, InvokeDiagnostics, InvokeMessage,
+    JobId, JobStatus, MessageQueue, Registry, ResourceId,
     SessionId, SubmissionId, TimelineId,
 };
 use crate::domain::Session;
@@ -103,48 +103,18 @@ impl CliHarness {
 
     /// Deploy an agent from a local directory path (CLI-specific).
     ///
-    /// Loads the manifest, resolves relative paths, validates requirements,
-    /// and registers the agent.
+    /// Loads the manifest, validates requirements, and registers via the
+    /// registry's `register_manifest()` (ADR 102). Idempotency is handled
+    /// by the registry: same manifest → returns existing agent.
     pub fn deploy_from_path(&self, path: &Path) -> Result<ResourceId, String> {
-        let agent = Agent::load(path)
+        let manifest_path = path.join("agent.toml");
+        let manifest = AgentManifest::load(&manifest_path)
             .map_err(|e| format!("failed to load agent: {:?}", e))?;
 
-        self.register_agent(agent)
-    }
-
-    /// Internal: register an agent after loading/parsing.
-    ///
-    /// Idempotent: if an agent with the same name is already registered and
-    /// the configuration matches, returns the existing ID. If the configuration
-    /// differs, returns an error listing the differences.
-    fn register_agent(&self, mut agent: Agent) -> Result<ResourceId, String> {
-        // Resolve image digest for container agents at registration time (ADR 073).
-        // Both forms (tag + digest) are stored — the runtime switches based on ImagePolicy.
-        if agent.runtime == RuntimeType::Container && agent.image_digest.is_none() {
-            if let Ok(image_ref) = crate::domain::ImageRef::parse(&agent.executable) {
-                agent.image_digest = crate::runtime::resolve_image_digest(&image_ref);
-            }
-        }
-
-        let name = agent.name.clone();
-
-        if let Some(existing) = self.registry.get_agent_by_name(&name) {
-            let diffs = compare_agents(&agent, &existing);
-            if diffs.is_empty() {
-                return Ok(existing.id);
-            }
-            return Err(format!(
-                "agent '{}' is already deployed with a different configuration:\n{}",
-                name,
-                diffs.join("\n")
-            ));
-        }
-
-        self.registry.register_agent(agent)
+        let agent = self.registry.register_manifest(manifest)
             .map_err(|e| format!("registration failed: {}", e))?;
 
-        // Query after registration — in distributed mode, the server assigns the ID.
-        Ok(self.registry.agent_id(&name))
+        Ok(agent.id)
     }
 
     /// Build an InvokeMessage from session state and register a job.
@@ -248,38 +218,6 @@ impl CliHarness {
     }
 }
 
-/// Compare two agents and return a list of field differences.
-///
-/// Skips `id` (placeholder vs registry-assigned) and `mounts` (path-dependent).
-/// Returns an empty vec if the agents are functionally identical.
-fn compare_agents(new: &Agent, existing: &Agent) -> Vec<String> {
-    let mut diffs = Vec::new();
-
-    if new.executable != existing.executable {
-        diffs.push(format!("  - executable: {:?} -> {:?}", existing.executable, new.executable));
-    }
-    if new.runtime != existing.runtime {
-        diffs.push(format!("  - runtime: {:?} -> {:?}", existing.runtime, new.runtime));
-    }
-    if new.description != existing.description {
-        diffs.push(format!("  - description: {:?} -> {:?}", existing.description, new.description));
-    }
-    if new.object_storage != existing.object_storage {
-        diffs.push(format!("  - object_storage: {:?} -> {:?}", existing.object_storage, new.object_storage));
-    }
-    if new.vector_storage != existing.vector_storage {
-        diffs.push(format!("  - vector_storage: {:?} -> {:?}", existing.vector_storage, new.vector_storage));
-    }
-    if new.requirements.models != existing.requirements.models {
-        diffs.push(format!("  - requirements.models: {:?} -> {:?}", existing.requirements.models, new.requirements.models));
-    }
-    if new.requirements.services != existing.requirements.services {
-        diffs.push(format!("  - requirements.services: {:?} -> {:?}", existing.requirements.services, new.requirements.services));
-    }
-
-    diffs
-}
-
 /// Read the latest state for an agent from the DAG store (ADR 079).
 ///
 /// Queries the given DagStore for the most recent non-empty state hash
@@ -294,10 +232,13 @@ impl Harness for CliHarness {
     }
 
     fn deploy(&self, manifest_toml: &str) -> Result<ResourceId, String> {
-        let agent = Agent::from_toml(manifest_toml)
-            .map_err(|e| format!("failed to parse manifest: {:?}", e))?;
+        let manifest: AgentManifest = toml::from_str(manifest_toml)
+            .map_err(|e| format!("failed to parse manifest: {}", e))?;
 
-        self.register_agent(agent)
+        let agent = self.registry.register_manifest(manifest)
+            .map_err(|e| format!("registration failed: {}", e))?;
+
+        Ok(agent.id)
     }
 
     fn invoke(&mut self, agent_id: &ResourceId, input: &str) -> Result<JobId, String> {
@@ -329,7 +270,7 @@ mod tests {
     use crate::registry::InMemoryRegistry;
     use crate::queue::InMemoryQueue;
     use crate::secret_store::InMemorySecretStore;
-    use crate::domain::SecretStore;
+    use crate::domain::{RuntimeType, SecretStore};
     use std::path::PathBuf;
 
     fn test_agent_id() -> ResourceId {
