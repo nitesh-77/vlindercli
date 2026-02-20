@@ -75,13 +75,6 @@ impl CliHarness {
         }
     }
 
-    /// Set the initial state for the next invocation (ADR 055).
-    ///
-    /// Used by `--from` to fork from a historical state.
-    pub fn set_initial_state(&mut self, state: String) {
-        self.last_state = Some(state);
-    }
-
     /// Set the timeline for branch-scoped subjects (ADR 093).
     ///
     /// If `sealed` is true, subsequent `invoke()` calls will be rejected.
@@ -257,6 +250,10 @@ impl Harness for CliHarness {
         let session = Session::new(session_id, agent_name);
 
         self.session = Some(session);
+    }
+
+    fn set_initial_state(&mut self, state: String) {
+        self.last_state = Some(state);
     }
 }
 

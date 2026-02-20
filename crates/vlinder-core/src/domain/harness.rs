@@ -29,4 +29,10 @@ pub trait Harness {
     /// Creates a session that tracks conversation history, submission
     /// chaining, and state continuity across turns.
     fn start_session(&mut self, agent_name: &str);
+
+    /// Set the initial state for the next invocation.
+    ///
+    /// Used to resume from a historical state (time travel, session
+    /// continuity). The state hash is passed to the agent on the next invoke.
+    fn set_initial_state(&mut self, state: String);
 }
