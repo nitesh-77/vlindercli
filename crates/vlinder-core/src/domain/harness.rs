@@ -35,4 +35,10 @@ pub trait Harness {
     /// Used to resume from a historical state (time travel, session
     /// continuity). The state hash is passed to the agent on the next invoke.
     fn set_initial_state(&mut self, state: String);
+
+    /// Run an agent to completion synchronously.
+    ///
+    /// Sends input to the agent and blocks until the response arrives.
+    /// Returns the agent's output as a string.
+    fn run_agent(&mut self, agent_id: &ResourceId, input: &str) -> Result<String, String>;
 }

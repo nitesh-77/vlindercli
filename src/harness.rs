@@ -156,26 +156,6 @@ impl CliHarness {
         Ok((invoke, job_id))
     }
 
-    /// Run an agent to completion (ADR 092).
-    ///
-    /// Builds the invocation, sends it, and blocks until the CompleteMessage
-    /// arrives. Returns the agent's output as a string.
-    pub fn run_agent(&mut self, agent_id: &ResourceId, input: &str) -> Result<String, String> {
-        let (invoke_msg, job_id) = self.build_invoke(agent_id, input)?;
-        self.registry.update_job_status(&job_id, JobStatus::Running);
-
-        let complete = self.queue.run_agent(invoke_msg)
-            .map_err(|e| format!("queue error: {}", e))?;
-
-        let result = String::from_utf8_lossy(&complete.payload).to_string();
-        self.registry.update_job_status(&job_id, JobStatus::Completed(result.clone()));
-        if complete.state.is_some() {
-            self.pending_state = complete.state;
-        }
-        self.record_response(&result);
-        Ok(result)
-    }
-
     /// Tick: monitor reply queue and update completed jobs in registry.
     ///
     /// CLI-specific: runs until no more messages or shutdown signal.
@@ -254,6 +234,22 @@ impl Harness for CliHarness {
 
     fn set_initial_state(&mut self, state: String) {
         self.last_state = Some(state);
+    }
+
+    fn run_agent(&mut self, agent_id: &ResourceId, input: &str) -> Result<String, String> {
+        let (invoke_msg, job_id) = self.build_invoke(agent_id, input)?;
+        self.registry.update_job_status(&job_id, JobStatus::Running);
+
+        let complete = self.queue.run_agent(invoke_msg)
+            .map_err(|e| format!("queue error: {}", e))?;
+
+        let result = String::from_utf8_lossy(&complete.payload).to_string();
+        self.registry.update_job_status(&job_id, JobStatus::Completed(result.clone()));
+        if complete.state.is_some() {
+            self.pending_state = complete.state;
+        }
+        self.record_response(&result);
+        Ok(result)
     }
 }
 
