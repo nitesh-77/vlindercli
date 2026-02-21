@@ -196,7 +196,7 @@ fn get(name: &str) {
 }
 
 fn open_registry(config: &Config) -> Option<Arc<dyn Registry>> {
-    vlindercli::registry::open_registry(config)
+    super::connect::open_registry(config)
 }
 
 /// Scaffold a new agent project from a GitHub template.

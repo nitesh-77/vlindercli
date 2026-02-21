@@ -99,7 +99,7 @@ pub fn execute(cmd: ModelCommand) {
 }
 
 fn open_registry(config: &Config) -> Option<Arc<dyn Registry>> {
-    vlindercli::registry::open_registry(config)
+    super::connect::open_registry(config)
 }
 
 /// Connect to a catalog backend via the daemon's gRPC catalog service.

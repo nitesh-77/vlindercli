@@ -26,6 +26,24 @@ pub fn connect_registry(config: &Config) -> Arc<dyn Registry> {
     )
 }
 
+/// Connect to the registry via gRPC, returning None on failure.
+pub fn open_registry(config: &Config) -> Option<Arc<dyn Registry>> {
+    let registry_addr = normalize_addr(&config.distributed.registry_addr);
+
+    if ping_registry(&registry_addr).is_none() {
+        eprintln!("Cannot reach registry at {}. Is the daemon running?", registry_addr);
+        return None;
+    }
+
+    match GrpcRegistryClient::connect(&registry_addr) {
+        Ok(client) => Some(Arc::new(client)),
+        Err(e) => {
+            eprintln!("Failed to connect to registry: {}", e);
+            None
+        }
+    }
+}
+
 /// Connect to the harness via gRPC, exiting on failure.
 pub fn connect_harness(config: &Config) -> Box<dyn Harness> {
     let harness_addr = normalize_addr(&config.distributed.harness_addr);
