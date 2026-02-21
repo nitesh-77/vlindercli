@@ -8,7 +8,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::domain::{ContainerId, ImageDigest, ImageRef};
+use crate::domain::{ContainerId, ImageDigest, ImageRef, PodId};
 
 use super::podman::{Podman, PodmanError, RunTarget};
 use super::unix_transport::unix_agent;
@@ -55,106 +55,89 @@ impl Podman for PodmanApiClient {
         ImageDigest::parse(body.digest).ok()
     }
 
-    fn run(&self, image: RunTarget<'_>) -> Result<ContainerId, PodmanError> {
-        // Build the container spec
-        let port_mapping = vec![PortMapping {
-            container_port: 8080,
-            host_port: 0,
-            protocol: "tcp".to_string(),
-        }];
+    // ── Pod operations ────────────────────────────────────────────────
 
-        let spec = ContainerCreateSpec {
-            image: image.as_str().to_string(),
-            portmappings: Some(port_mapping),
+    fn pod_create(&self, name: &str) -> Result<PodId, PodmanError> {
+        let url = format!("{}/pods/create", API_BASE);
+        let spec = PodCreateSpec {
+            name: name.to_string(),
         };
 
-        // Create container
+        let mut resp = self.agent.post(&url)
+            .send_json(&spec)
+            .map_err(|e| PodmanError::Run(format!("pod create failed: {}", e)))?;
+
+        let status = resp.status().as_u16();
+        if status != 200 && status != 201 {
+            let body = resp.body_mut().read_to_string().unwrap_or_default();
+            return Err(PodmanError::Run(format!("pod create HTTP {}: {}", status, body)));
+        }
+
+        let created: PodCreateResponse = resp.body_mut()
+            .read_json()
+            .map_err(|e| PodmanError::Run(format!("failed to parse pod create response: {}", e)))?;
+
+        Ok(PodId::new(created.id))
+    }
+
+    fn container_in_pod(
+        &self,
+        image: RunTarget<'_>,
+        pod_id: &PodId,
+        env_vars: &[(&str, &str)],
+    ) -> Result<ContainerId, PodmanError> {
+        let env: HashMap<String, String> = env_vars.iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+
+        let spec = PodContainerCreateSpec {
+            image: image.as_str().to_string(),
+            pod: pod_id.as_str().to_string(),
+            env: if env.is_empty() { None } else { Some(env) },
+        };
+
         let url = format!("{}/containers/create", API_BASE);
         let mut resp = self.agent.post(&url)
             .send_json(&spec)
-            .map_err(|e| PodmanError::Run(format!("container create failed: {}", e)))?;
+            .map_err(|e| PodmanError::Run(format!("container create in pod failed: {}", e)))?;
 
         let status = resp.status().as_u16();
         if status != 201 {
             let body = resp.body_mut().read_to_string().unwrap_or_default();
-            return Err(PodmanError::Run(format!("container create HTTP {}: {}", status, body)));
+            return Err(PodmanError::Run(format!("container create in pod HTTP {}: {}", status, body)));
         }
 
         let created: ContainerCreateResponse = resp.body_mut()
             .read_json()
-            .map_err(|e| PodmanError::Run(format!("failed to parse create response: {}", e)))?;
+            .map_err(|e| PodmanError::Run(format!("failed to parse container create response: {}", e)))?;
 
-        let container_id = created.id;
+        Ok(ContainerId::new(created.id))
+    }
 
-        // Start container
-        let url = format!("{}/containers/{}/start", API_BASE, container_id);
+    fn pod_start(&self, pod_id: &PodId) -> Result<(), PodmanError> {
+        let url = format!("{}/pods/{}/start", API_BASE, pod_id.as_str());
         let resp = self.agent.post(&url)
             .send("")
-            .map_err(|e| PodmanError::Run(format!("container start failed: {}", e)))?;
+            .map_err(|e| PodmanError::Run(format!("pod start failed: {}", e)))?;
 
         let status = resp.status().as_u16();
-        if status != 204 && status != 304 {
-            return Err(PodmanError::Run(format!("container start HTTP {}", status)));
+        if status != 200 && status != 204 && status != 304 {
+            return Err(PodmanError::Run(format!("pod start HTTP {}", status)));
         }
 
-        Ok(ContainerId::new(container_id))
+        Ok(())
     }
 
-    fn port(&self, container_id: &ContainerId) -> Result<u16, PodmanError> {
-        let url = format!("{}/containers/{}/json", API_BASE, container_id.as_str());
-        let mut resp = self.agent.get(&url)
-            .call()
-            .map_err(|e| PodmanError::Port(format!("container inspect failed: {}", e)))?;
-
-        let status = resp.status().as_u16();
-        if status != 200 {
-            return Err(PodmanError::Port(format!("container inspect HTTP {}", status)));
-        }
-
-        let body: ContainerInspect = resp.body_mut()
-            .read_json()
-            .map_err(|e| PodmanError::Port(format!("failed to parse inspect response: {}", e)))?;
-
-        let ports = body.network_settings
-            .and_then(|ns| ns.ports)
-            .ok_or_else(|| PodmanError::Port("no port mappings in container inspect".to_string()))?;
-
-        let bindings = ports.get("8080/tcp")
-            .ok_or_else(|| PodmanError::Port("port 8080/tcp not found in container".to_string()))?;
-
-        bindings.first()
-            .and_then(|b| b.host_port.parse::<u16>().ok())
-            .ok_or_else(|| PodmanError::Port("no host port binding for 8080".to_string()))
-    }
-
-    fn stop_and_remove(&self, container_id: &ContainerId, timeout_secs: u32) {
-        let id = container_id.as_str();
+    fn pod_stop_and_remove(&self, pod_id: &PodId, timeout_secs: u32) {
+        let id = pod_id.as_str();
 
         // Stop — fire and forget
-        let url = format!("{}/containers/{}/stop?t={}", API_BASE, id, timeout_secs);
+        let url = format!("{}/pods/{}/stop?t={}", API_BASE, id, timeout_secs);
         let _ = self.agent.post(&url).send("");
 
         // Remove with force — fire and forget
-        let url = format!("{}/containers/{}?force=true", API_BASE, id);
+        let url = format!("{}/pods/{}?force=true", API_BASE, id);
         let _ = self.agent.delete(&url).call();
-    }
-
-    fn wait_for_ready(&self, host_port: u16) -> Result<(), PodmanError> {
-        let url = format!("http://127.0.0.1:{}/health", host_port);
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-
-        loop {
-            if std::time::Instant::now() > deadline {
-                return Err(PodmanError::ReadinessTimeout);
-            }
-
-            match ureq::get(&url).call() {
-                Ok(_) => return Ok(()),
-                Err(_) => {
-                    std::thread::sleep(std::time::Duration::from_millis(100));
-                }
-            }
-        }
     }
 }
 
@@ -172,42 +155,29 @@ struct ImageInspect {
     digest: String,
 }
 
-#[derive(Serialize)]
-struct ContainerCreateSpec {
-    image: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    portmappings: Option<Vec<PortMapping>>,
-}
-
-#[derive(Serialize)]
-struct PortMapping {
-    container_port: u16,
-    host_port: u16,
-    protocol: String,
-}
-
 #[derive(Deserialize)]
 struct ContainerCreateResponse {
     #[serde(alias = "Id")]
     id: String,
 }
 
-#[derive(Deserialize)]
-struct ContainerInspect {
-    #[serde(alias = "NetworkSettings")]
-    network_settings: Option<NetworkSettings>,
+#[derive(Serialize)]
+struct PodCreateSpec {
+    name: String,
 }
 
 #[derive(Deserialize)]
-struct NetworkSettings {
-    #[serde(alias = "Ports")]
-    ports: Option<HashMap<String, Vec<PortBinding>>>,
+struct PodCreateResponse {
+    #[serde(alias = "Id")]
+    id: String,
 }
 
-#[derive(Deserialize)]
-struct PortBinding {
-    #[serde(alias = "HostPort")]
-    host_port: String,
+#[derive(Serialize)]
+struct PodContainerCreateSpec {
+    image: String,
+    pod: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    env: Option<HashMap<String, String>>,
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -247,23 +217,6 @@ mod tests {
         assert_eq!(v.version, "5.3.1");
     }
 
-    // ── Container inspect response parsing ──
-
-    #[test]
-    fn parse_container_inspect_ports() {
-        let json = r#"{
-            "NetworkSettings": {
-                "Ports": {
-                    "8080/tcp": [{"HostIp": "", "HostPort": "43210"}]
-                }
-            }
-        }"#;
-        let inspect: ContainerInspect = serde_json::from_str(json).unwrap();
-        let ports = inspect.network_settings.unwrap().ports.unwrap();
-        let binding = &ports["8080/tcp"][0];
-        assert_eq!(binding.host_port, "43210");
-    }
-
     // ── Image inspect response parsing ──
 
     #[test]
@@ -280,5 +233,47 @@ mod tests {
         let json = r#"{"Id":"abc123","Warnings":[]}"#;
         let resp: ContainerCreateResponse = serde_json::from_str(json).unwrap();
         assert_eq!(resp.id, "abc123");
+    }
+
+    // ── Pod serde types ──
+
+    #[test]
+    fn pod_create_spec_serialization() {
+        let spec = PodCreateSpec { name: "vlinder-echo".to_string() };
+        let json = serde_json::to_string(&spec).unwrap();
+        assert!(json.contains("vlinder-echo"));
+    }
+
+    #[test]
+    fn parse_pod_create_response() {
+        let json = r#"{"Id":"pod123abc"}"#;
+        let resp: PodCreateResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(resp.id, "pod123abc");
+    }
+
+    #[test]
+    fn pod_container_create_spec_with_env() {
+        let mut env = HashMap::new();
+        env.insert("KEY".to_string(), "VALUE".to_string());
+        let spec = PodContainerCreateSpec {
+            image: "localhost/echo:latest".to_string(),
+            pod: "pod123".to_string(),
+            env: Some(env),
+        };
+        let json = serde_json::to_string(&spec).unwrap();
+        assert!(json.contains("KEY"));
+        assert!(json.contains("VALUE"));
+        assert!(json.contains("pod123"));
+    }
+
+    #[test]
+    fn pod_container_create_spec_without_env() {
+        let spec = PodContainerCreateSpec {
+            image: "localhost/echo:latest".to_string(),
+            pod: "pod123".to_string(),
+            env: None,
+        };
+        let json = serde_json::to_string(&spec).unwrap();
+        assert!(!json.contains("env"));
     }
 }

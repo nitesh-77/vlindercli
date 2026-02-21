@@ -7,39 +7,28 @@
 
 use std::fmt;
 
-use crate::domain::{ContainerId, ImageDigest, ImageRef};
+use crate::domain::{ContainerId, ImageDigest, ImageRef, PodId};
 
 // ── Error type ──────────────────────────────────────────────────────
 
 /// Podman operation failure.
-///
-/// Three variants match the three fallible phases of container startup:
-/// run, port discovery, and health check.
 #[derive(Debug)]
 pub(crate) enum PodmanError {
-    /// Container create or start failed.
+    /// Container or pod create/start failed.
     Run(String),
-    /// Host port could not be determined.
-    Port(String),
-    /// Container health check timed out.
-    ReadinessTimeout,
 }
 
 impl fmt::Display for PodmanError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            PodmanError::Run(msg) => write!(f, "container run failed: {}", msg),
-            PodmanError::Port(msg) => write!(f, "port discovery failed: {}", msg),
-            PodmanError::ReadinessTimeout => {
-                write!(f, "container did not become ready within 30 seconds")
-            }
+            PodmanError::Run(msg) => write!(f, "podman operation failed: {}", msg),
         }
     }
 }
 
 // ── Run target ──────────────────────────────────────────────────────
 
-/// What to pass to `podman run` as the image argument.
+/// What to pass to `podman create` as the image argument.
 ///
 /// Mutable policy uses the image ref (tag-based, picks up rebuilds).
 /// Pinned policy uses the content-addressed digest (deterministic bytes).
@@ -64,26 +53,32 @@ impl RunTarget<'_> {
 
 /// Abstraction over the Podman container engine.
 ///
-/// Each method maps to one Podman operation.  The trait is object-safe
-/// so `ContainerPool` can hold a `Box<dyn Podman>`.
+/// Pod-oriented: create pods, add containers to them, start/stop pods.
+/// The trait is object-safe so `ContainerPool` can hold a `Box<dyn Podman>`.
 pub(crate) trait Podman: Send {
     /// Engine version (e.g. 4.9.3).  None if Podman is unavailable.
     fn engine_version(&self) -> Option<semver::Version>;
 
-    /// Start a detached container and return its ID.
-    fn run(&self, image: RunTarget<'_>) -> Result<ContainerId, PodmanError>;
-
     /// Return the content-addressed digest for an image.
     fn image_digest(&self, image_ref: &ImageRef) -> Option<ImageDigest>;
 
-    /// Discover the host port mapped to container port 8080.
-    fn port(&self, container_id: &ContainerId) -> Result<u16, PodmanError>;
+    /// Create a pod with the given name. Returns the pod ID.
+    fn pod_create(&self, name: &str) -> Result<PodId, PodmanError>;
 
-    /// Tear down a container (stop + force remove).
-    fn stop_and_remove(&self, container_id: &ContainerId, timeout_secs: u32);
+    /// Create a container inside a pod. No port mapping — containers in
+    /// a pod share a network namespace (like k8s).
+    fn container_in_pod(
+        &self,
+        image: RunTarget<'_>,
+        pod_id: &PodId,
+        env_vars: &[(&str, &str)],
+    ) -> Result<ContainerId, PodmanError>;
 
-    /// Poll `GET /health` until the container responds or a deadline expires.
-    fn wait_for_ready(&self, host_port: u16) -> Result<(), PodmanError>;
+    /// Start all containers in a pod.
+    fn pod_start(&self, pod_id: &PodId) -> Result<(), PodmanError>;
+
+    /// Stop and remove a pod (all containers within it).
+    fn pod_stop_and_remove(&self, pod_id: &PodId, timeout_secs: u32);
 }
 
 // ── Shared utilities ────────────────────────────────────────────────
@@ -177,15 +172,7 @@ mod tests {
     fn podman_error_display() {
         assert_eq!(
             PodmanError::Run("boom".to_string()).to_string(),
-            "container run failed: boom"
-        );
-        assert_eq!(
-            PodmanError::Port("no port".to_string()).to_string(),
-            "port discovery failed: no port"
-        );
-        assert_eq!(
-            PodmanError::ReadinessTimeout.to_string(),
-            "container did not become ready within 30 seconds"
+            "podman operation failed: boom"
         );
     }
 }

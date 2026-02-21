@@ -10,13 +10,13 @@ use std::sync::Arc;
 
 use serde_json::json;
 
-use crate::domain::{AgentAction, SdkContract, AgentEvent};
+use vlinder_core::domain::{AgentAction, AgentEvent, SdkContract};
 
 /// Dispatch failure classification (ADR 073).
 ///
 /// Transport errors (connection refused, timeout) indicate the container is dead.
 /// HTTP status errors mean the container is alive — treated as successful dispatch.
-pub(crate) enum DispatchError {
+pub enum DispatchError {
     /// The container is unreachable (connection refused, DNS failure, timeout).
     ContainerDead(String),
 }
@@ -79,7 +79,7 @@ fn post_handle(host_port: u16, event: &AgentEvent, session_id: &str) -> Result<A
 /// 3. Execute the requested service call via `SdkContract`
 /// 4. Send the result back as an `AgentEvent`
 /// 5. Repeat until `AgentAction::Complete`
-pub(crate) fn dispatch_state_machine(
+pub fn dispatch_state_machine(
     host_port: u16,
     payload: &[u8],
     session_id: &str,

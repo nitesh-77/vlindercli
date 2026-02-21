@@ -1,16 +1,18 @@
-//! ContainerPool — manages the lifecycle of long-running OCI containers.
+//! ContainerPool — manages the lifecycle of Podman pods.
 //!
-//! Owns the pod map, Podman engine, and image resolution policy.
-//! Each pod is a container + sidecar thread. The pool starts containers,
-//! spawns sidecar threads, reaps dead threads, and shuts everything down.
+//! Each agent runs as a pod containing two containers:
+//! 1. The agent container (user-provided OCI image)
+//! 2. The sidecar container (vlinder-sidecar, mediates queue ↔ agent)
+//!
+//! The pool creates pods, starts them, and tears them down on shutdown.
+//! Dead pod detection is deferred — ensure_containers restarts missing pods
+//! on the next tick.
 
 use std::collections::HashMap;
-use std::thread::{self, JoinHandle};
 
 use crate::config::Config;
-use crate::domain::{Agent, ContainerId, ImageRef, Registry, RuntimeType};
+use crate::domain::{Agent, ImageRef, PodId, Registry, RuntimeType};
 
-use super::pod::{Container, Sidecar};
 use super::podman::{Podman, RunTarget, resolve_socket};
 use super::podman_api::PodmanApiClient;
 use super::podman_cli::PodmanCliClient;
@@ -35,20 +37,19 @@ impl ImagePolicy {
     }
 }
 
-/// A running pod: container ID (for stop/remove) + sidecar thread handle.
+/// A running pod: agent + sidecar containers sharing a network namespace.
 struct Pod {
-    container_id: ContainerId,
-    handle: JoinHandle<()>,
+    pod_id: PodId,
 }
 
-/// Manages the lifecycle of long-running OCI containers.
+/// Manages the lifecycle of Podman pods for container agents.
 ///
-/// Maps agent names to running pods, starts containers with sidecar threads,
-/// reaps dead threads, and tears everything down on shutdown.
+/// Maps agent names to running pods. Each pod contains an agent container
+/// and a sidecar container. The sidecar handles dispatch; the pool handles
+/// compute lifecycle.
 pub(crate) struct ContainerPool {
     pods: HashMap<String, Pod>,
     config: Config,
-    engine_version: Option<semver::Version>,
     image_policy: ImagePolicy,
     podman: Box<dyn Podman>,
 }
@@ -80,23 +81,21 @@ impl ContainerPool {
         Ok(Self {
             pods: HashMap::new(),
             config: config.clone(),
-            engine_version,
             image_policy,
             podman,
         })
     }
 
-    /// Start a container and sidecar thread for `agent`.
+    /// Start a pod with agent + sidecar containers.
     ///
-    /// Runs the container via Podman, spawns a sidecar thread running
-    /// `Sidecar::run()`, and stores the pod in the map.
+    /// 1. Create a Podman pod named `vlinder-{name}`
+    /// 2. Add the agent container (user image, no env vars)
+    /// 3. Add the sidecar container (vlinder-sidecar image, env vars for config)
+    /// 4. Start the pod (all containers start together)
     pub(crate) fn start(&mut self, name: &str, agent: &Agent) -> Result<(), String> {
         if self.pods.contains_key(name) {
             return Ok(());
         }
-
-        let sidecar = Sidecar::new(&self.config, agent)
-            .map_err(|e| e.to_string())?;
 
         let image_ref = ImageRef::parse(&agent.executable)
             .unwrap_or_else(|_| ImageRef::parse("unknown/unknown").unwrap());
@@ -109,63 +108,68 @@ impl ContainerPool {
                 .unwrap_or(RunTarget::Ref(&image_ref)),
         };
 
-        let container_id = self.podman.run(run_target)
+        // 1. Create pod
+        let pod_name = format!("vlinder-{}", name);
+        let pod_id = self.podman.pod_create(&pod_name)
             .map_err(|e| e.to_string())?;
 
-        // Capture image metadata for diagnostics (ADR 073)
-        let image_digest = self.podman.image_digest(&image_ref);
-
-        // Discover the mapped host port
-        let host_port = self.podman.port(&container_id)
+        // 2. Add agent container (no env vars, no port mapping — shared network in pod)
+        self.podman.container_in_pod(run_target, &pod_id, &[])
             .map_err(|e| e.to_string())?;
 
-        // Wait for container to be ready
-        self.podman.wait_for_ready(host_port)
+        // 3. Build sidecar env vars
+        let sidecar_image_ref = ImageRef::parse(&self.config.runtime.sidecar_image)
+            .unwrap_or_else(|_| ImageRef::parse("localhost/vlinder-sidecar:latest").unwrap());
+        let sidecar_target = RunTarget::Ref(&sidecar_image_ref);
+
+        let nats_url = format!(
+            "nats://host.containers.internal:{}",
+            extract_port(&self.config.queue.nats_url, 4222)
+        );
+        let registry_url = format!(
+            "http://host.containers.internal:{}",
+            extract_port(&self.config.distributed.registry_addr, 9090)
+        );
+        let state_url = format!(
+            "http://host.containers.internal:{}",
+            extract_port(&self.config.distributed.state_addr, 9092)
+        );
+
+        let image_digest_str = self.podman.image_digest(&image_ref)
+            .map(|d| String::from(d))
+            .unwrap_or_default();
+
+        let env_vars: Vec<(&str, String)> = vec![
+            ("VLINDER_AGENT", name.to_string()),
+            ("VLINDER_NATS_URL", nats_url),
+            ("VLINDER_REGISTRY_URL", registry_url),
+            ("VLINDER_STATE_URL", state_url),
+            ("VLINDER_CONTAINER_PORT", "8080".to_string()),
+            ("VLINDER_IMAGE_REF", image_ref.as_str().to_string()),
+            ("VLINDER_IMAGE_DIGEST", image_digest_str),
+        ];
+        let env_refs: Vec<(&str, &str)> = env_vars.iter()
+            .map(|(k, v)| (*k, v.as_str()))
+            .collect();
+
+        // 4. Add sidecar container
+        self.podman.container_in_pod(sidecar_target, &pod_id, &env_refs)
+            .map_err(|e| e.to_string())?;
+
+        // 5. Start the pod (all containers start together)
+        self.podman.pod_start(&pod_id)
             .map_err(|e| e.to_string())?;
 
         tracing::info!(
-            event = "container.started",
+            event = "pod.started",
             agent = %name,
-            container = %container_id,
-            port = host_port,
+            pod = %pod_id,
             image_ref = %image_ref,
-            image_digest = image_digest.as_ref().map(|d| d.as_str()).unwrap_or("unknown"),
-            "Container started"
+            "Pod started (agent + sidecar)"
         );
 
-        let container = Container {
-            container_id: container_id.clone(),
-            image_ref,
-            image_digest,
-        };
-
-        let engine_version = self.engine_version.clone();
-        let agent_name = name.to_string();
-        let handle = thread::spawn(move || {
-            sidecar.run(agent_name, host_port, container, engine_version);
-        });
-
-        self.pods.insert(name.to_string(), Pod { container_id, handle });
+        self.pods.insert(name.to_string(), Pod { pod_id });
         Ok(())
-    }
-
-    /// Check which sidecar threads have exited (container died), clean up those pods.
-    fn reap_dead(&mut self) {
-        let finished: Vec<String> = self.pods.iter()
-            .filter(|(_, pod)| pod.handle.is_finished())
-            .map(|(name, _)| name.clone())
-            .collect();
-
-        for name in finished {
-            let pod = self.pods.remove(&name).unwrap();
-            tracing::warn!(
-                event = "sidecar.reaped",
-                agent = %name,
-                container = %pod.container_id,
-                "Sidecar thread exited — stopping container"
-            );
-            self.podman.stop_and_remove(&pod.container_id, 2);
-        }
     }
 
     /// Start pods for agents that don't have one yet.
@@ -177,31 +181,37 @@ impl ContainerPool {
             }
             if let Err(e) = self.start(&agent.name, agent) {
                 tracing::error!(
-                    event = "container.start_failed",
+                    event = "pod.start_failed",
                     agent = %agent.name,
                     error = %e,
-                    "Failed to start container"
+                    "Failed to start pod"
                 );
             }
         }
     }
 
-    /// Tick: ensure containers are running, reap dead sidecar threads.
+    /// Tick: ensure pods are running for all registered container agents.
     pub(crate) fn tick(&mut self, registry: &dyn Registry) -> bool {
         let before = self.pods.len();
-        self.reap_dead();
         self.ensure_containers(registry);
-        // Did work if pods changed (reaped or started)
         self.pods.len() != before
     }
 
-    /// Shut down all managed containers.
+    /// Shut down all managed pods.
     pub(crate) fn shutdown(&mut self) {
         for (name, pod) in self.pods.drain() {
-            tracing::info!(event = "container.stopped", agent = %name, container = %pod.container_id, "Stopping container");
-            self.podman.stop_and_remove(&pod.container_id, 5);
+            tracing::info!(event = "pod.stopped", agent = %name, pod = %pod.pod_id, "Stopping pod");
+            self.podman.pod_stop_and_remove(&pod.pod_id, 5);
         }
     }
+}
+
+/// Extract port number from a URL string, with a default fallback.
+fn extract_port(url: &str, default: u16) -> u16 {
+    url.rsplit(':')
+        .next()
+        .and_then(|s| s.trim_end_matches('/').parse().ok())
+        .unwrap_or(default)
 }
 
 #[cfg(test)]
@@ -222,5 +232,30 @@ mod tests {
     fn image_policy_from_config_default_is_mutable() {
         assert_eq!(ImagePolicy::from_config(""), ImagePolicy::Mutable);
         assert_eq!(ImagePolicy::from_config("unknown"), ImagePolicy::Mutable);
+    }
+
+    #[test]
+    fn extract_port_nats_url() {
+        assert_eq!(extract_port("nats://localhost:4222", 4222), 4222);
+    }
+
+    #[test]
+    fn extract_port_http_url() {
+        assert_eq!(extract_port("http://127.0.0.1:9090", 9090), 9090);
+    }
+
+    #[test]
+    fn extract_port_custom_port() {
+        assert_eq!(extract_port("nats://myhost:5555", 4222), 5555);
+    }
+
+    #[test]
+    fn extract_port_no_port_returns_default() {
+        assert_eq!(extract_port("nats://localhost", 4222), 4222);
+    }
+
+    #[test]
+    fn extract_port_trailing_slash() {
+        assert_eq!(extract_port("http://localhost:9090/", 9090), 9090);
     }
 }

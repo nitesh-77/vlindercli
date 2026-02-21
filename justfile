@@ -1,4 +1,12 @@
 # =============================================================================
+# Platform Builds (OCI container images via Podman)
+# =============================================================================
+
+# Build vlinder-sidecar (OCI image via Podman, multi-stage Rust build)
+build-sidecar:
+    podman build -t localhost/vlinder-sidecar:latest -f crates/vlinder-sidecar/Dockerfile .
+
+# =============================================================================
 # Agent Builds (OCI container images via Podman)
 # =============================================================================
 
@@ -35,8 +43,8 @@ build-support-fleet: build-support-agent build-log-analyst build-code-analyst
 # Main Commands
 # =============================================================================
 
-# Build everything needed to run agents: CLI + all container images
-build-everything: build build-todoapp build-echo-container
+# Build everything needed to run agents: CLI + sidecar + agent container images
+build-everything: build build-sidecar build-todoapp build-echo-container
 
 # Run a specific agent (usage: just run pensieve-container)
 # Uses ~/.vlinder by default (no VLINDER_DIR override needed)

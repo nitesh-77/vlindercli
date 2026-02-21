@@ -277,6 +277,10 @@ pub struct RuntimeConfig {
     /// Podman socket path: "auto" (probe filesystem), "disabled" (CLI only),
     /// or an absolute path to the socket file.
     pub podman_socket: String,
+
+    /// OCI image reference for the vlinder-sidecar container.
+    /// Deployed alongside agent containers in a Podman pod.
+    pub sidecar_image: String,
 }
 
 // ============================================================================
@@ -379,6 +383,7 @@ impl Default for RuntimeConfig {
         Self {
             image_policy: "mutable".to_string(),
             podman_socket: "auto".to_string(),
+            sidecar_image: "localhost/vlinder-sidecar:latest".to_string(),
         }
     }
 }
@@ -527,6 +532,9 @@ impl Config {
         }
         if let Ok(v) = std::env::var("VLINDER_RUNTIME_PODMAN_SOCKET") {
             self.runtime.podman_socket = v;
+        }
+        if let Ok(v) = std::env::var("VLINDER_RUNTIME_SIDECAR_IMAGE") {
+            self.runtime.sidecar_image = v;
         }
     }
 

@@ -1,14 +1,11 @@
-//! Container runtime module — executes OCI container agents.
+//! Container runtime module — executes OCI container agents via Podman pods.
 //!
 //! - `runtime`: tick-loop orchestrator (ContainerRuntime)
-//! - `pool`: container lifecycle management (ContainerPool)
+//! - `pool`: pod lifecycle management (ContainerPool)
 //! - `podman`: Podman trait + shared utilities
 //! - `podman_api`: PodmanApiClient (primary, REST API)
 //! - `podman_cli`: PodmanCliClient (fallback, CLI)
-//! - `dispatch`: HTTP dispatch to containers + in-flight task tracking
 
-mod dispatch;
-mod pod;
 mod podman;
 mod podman_api;
 mod podman_cli;

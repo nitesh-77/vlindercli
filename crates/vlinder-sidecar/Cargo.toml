@@ -1,0 +1,18 @@
+[package]
+name = "vlinder-sidecar"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "vlinder-sidecar"
+path = "src/main.rs"
+
+[dependencies]
+vlinder-core = { path = "../vlinder-core" }
+vlinder-proto = { path = "../vlinder-proto" }
+ureq = { version = "3", features = ["json"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+semver = "1"

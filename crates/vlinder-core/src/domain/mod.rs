@@ -14,6 +14,7 @@ mod dag;
 mod state;
 pub mod registry_memory;
 mod container_id;
+mod pod_id;
 mod diagnostics;
 mod image_digest;
 mod image_ref;
@@ -50,6 +51,7 @@ pub mod workers;
 
 pub use agent::{Agent, LoadError as AgentLoadError, Prompts, Requirements};
 pub use container_id::ContainerId;
+pub use pod_id::PodId;
 pub use image_digest::ImageDigest;
 pub use operation::Operation;
 pub use service_type::ServiceType;

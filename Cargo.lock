@@ -3164,6 +3164,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "vlinder-sidecar"
+version = "0.1.0"
+dependencies = [
+ "semver",
+ "serde_json",
+ "tracing",
+ "tracing-subscriber",
+ "ureq",
+ "vlinder-core",
+ "vlinder-proto",
+]
+
+[[package]]
 name = "vlinderd"
 version = "0.1.0"
 dependencies = [
