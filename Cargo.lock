@@ -3121,6 +3121,8 @@ dependencies = [
  "tempfile",
  "termimad",
  "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
  "ureq",
  "vlinder-core",
  "vlinder-proto",
