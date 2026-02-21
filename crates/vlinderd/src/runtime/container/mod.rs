@@ -8,6 +8,7 @@
 //! - `dispatch`: HTTP dispatch to containers + in-flight task tracking
 
 mod dispatch;
+mod pod;
 mod podman;
 mod podman_api;
 mod podman_cli;
