@@ -257,7 +257,7 @@ mod tests {
         let temp = tempfile::TempDir::new().unwrap();
         let db_path = temp.path().join("registry.db");
 
-        let registry = PersistentRegistry::open(&db_path, &Config::default(), test_secret_store()).unwrap();
+        let registry = PersistentRegistry::open(&db_path, &Config::for_test(), test_secret_store()).unwrap();
         assert!(registry.get_models().is_empty());
     }
 
@@ -272,7 +272,7 @@ mod tests {
             repo.save_model(&test_model("llama3")).unwrap();
         }
 
-        let registry = PersistentRegistry::open(&db_path, &Config::default(), test_secret_store()).unwrap();
+        let registry = PersistentRegistry::open(&db_path, &Config::for_test(), test_secret_store()).unwrap();
         assert!(registry.get_model("llama3").is_some());
     }
 
@@ -281,7 +281,7 @@ mod tests {
         let temp = tempfile::TempDir::new().unwrap();
         let db_path = temp.path().join("registry.db");
 
-        let registry = PersistentRegistry::open(&db_path, &Config::default(), test_secret_store()).unwrap();
+        let registry = PersistentRegistry::open(&db_path, &Config::for_test(), test_secret_store()).unwrap();
         registry.register_model(test_model("phi3")).unwrap();
 
         // Verify in-memory
@@ -299,7 +299,7 @@ mod tests {
         let temp = tempfile::TempDir::new().unwrap();
         let db_path = temp.path().join("registry.db");
 
-        let registry = PersistentRegistry::open(&db_path, &Config::default(), test_secret_store()).unwrap();
+        let registry = PersistentRegistry::open(&db_path, &Config::for_test(), test_secret_store()).unwrap();
         registry.register_model(test_model("phi3")).unwrap();
         assert!(registry.get_model("phi3").is_some());
 
@@ -319,7 +319,7 @@ mod tests {
         let temp = tempfile::TempDir::new().unwrap();
         let db_path = temp.path().join("registry.db");
 
-        let registry = PersistentRegistry::open(&db_path, &Config::default(), test_secret_store()).unwrap();
+        let registry = PersistentRegistry::open(&db_path, &Config::for_test(), test_secret_store()).unwrap();
         let deleted = registry.delete_model("nope").unwrap();
         assert!(!deleted);
     }
@@ -330,7 +330,7 @@ mod tests {
         let db_path = temp.path().join("registry.db");
         std::fs::write(&db_path, b"not a database").unwrap();
 
-        let result = PersistentRegistry::open(&db_path, &Config::default(), test_secret_store());
+        let result = PersistentRegistry::open(&db_path, &Config::for_test(), test_secret_store());
         let err = match result {
             Err(e) => e.to_string(),
             Ok(_) => panic!("expected error for corrupt db"),
@@ -345,13 +345,13 @@ mod tests {
 
         // First "session": add a model
         {
-            let registry = PersistentRegistry::open(&db_path, &Config::default(), test_secret_store()).unwrap();
+            let registry = PersistentRegistry::open(&db_path, &Config::for_test(), test_secret_store()).unwrap();
             registry.register_model(test_model("llama3")).unwrap();
         }
 
         // Second "session": model should be there
         {
-            let registry = PersistentRegistry::open(&db_path, &Config::default(), test_secret_store()).unwrap();
+            let registry = PersistentRegistry::open(&db_path, &Config::for_test(), test_secret_store()).unwrap();
             let model = registry.get_model("llama3");
             assert!(model.is_some(), "model should survive restart");
             assert_eq!(model.unwrap().name, "llama3");
@@ -382,7 +382,7 @@ mod tests {
 
     /// Config with container runtime enabled so register_agent validation passes.
     fn config_with_runtime() -> Config {
-        Config::default()
+        Config::for_test()
     }
 
     /// Open a PersistentRegistry with container runtime pre-registered.
@@ -424,7 +424,7 @@ mod tests {
 
         // Second "session": agent should be loaded via restore_agent
         {
-            let registry = PersistentRegistry::open(&db_path, &Config::default(), test_secret_store()).unwrap();
+            let registry = PersistentRegistry::open(&db_path, &Config::for_test(), test_secret_store()).unwrap();
             let agent = registry.get_agent_by_name("echo");
             assert!(agent.is_some(), "agent should survive restart");
             assert_eq!(agent.unwrap().name, "echo");

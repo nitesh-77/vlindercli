@@ -5,23 +5,23 @@
 
 use std::sync::Arc;
 
-use crate::config::Config;
+use crate::config::{Config, QueueBackend, StateBackend};
 use crate::domain::{DagStore, MessageQueue, QueueError};
-use crate::queue::{InMemoryQueue, NatsQueue, RecordingQueue};
+use crate::queue::{NatsQueue, RecordingQueue};
 
 /// Create a queue from configuration.
 ///
-/// Returns `InMemoryQueue` for `backend = "memory"` (default),
-/// or `NatsQueue` for `backend = "nats"`.
-pub fn from_config() -> Result<Arc<dyn MessageQueue + Send + Sync>, QueueError> {
-    let config = Config::load();
-    match config.queue.backend.as_str() {
-        "nats" => {
+/// Returns `NatsQueue` in production. In test builds, `Memory` backend
+/// returns an `InMemoryQueue` (no network required).
+pub fn from_config(config: &Config) -> Result<Arc<dyn MessageQueue + Send + Sync>, QueueError> {
+    match config.queue.backend {
+        QueueBackend::Nats => {
             let queue = NatsQueue::connect(&config.queue.nats_url)?;
             Ok(Arc::new(queue))
         }
-        "memory" | _ => {
-            Ok(Arc::new(InMemoryQueue::new()))
+        #[cfg(test)]
+        QueueBackend::Memory => {
+            Ok(Arc::new(crate::queue::InMemoryQueue::new()))
         }
     }
 }
@@ -29,28 +29,37 @@ pub fn from_config() -> Result<Arc<dyn MessageQueue + Send + Sync>, QueueError> 
 /// Create a queue with synchronous DAG recording (transactional outbox).
 ///
 /// Wraps the configured queue in a `RecordingQueue` that records
-/// DAG nodes into the gRPC State Service on every send.
+/// DAG nodes into the DagStore on every send.
 ///
-/// Fails if the State Service is unreachable — recording is not optional.
-pub fn recording_from_config() -> Result<Arc<dyn MessageQueue + Send + Sync>, QueueError> {
-    use crate::state_service::GrpcStateClient;
+/// In production, the DagStore is the gRPC State Service.
+/// In test builds with `StateBackend::Memory`, uses `InMemoryDagStore`.
+pub fn recording_from_config(config: &Config) -> Result<Arc<dyn MessageQueue + Send + Sync>, QueueError> {
+    let inner = from_config(config)?;
 
-    let config = Config::load();
-    let inner = from_config()?;
+    let store: Arc<dyn DagStore> = match config.state.backend {
+        StateBackend::Grpc => {
+            use crate::state_service::GrpcStateClient;
 
-    let state_addr = if config.distributed.state_addr.starts_with("http://")
-        || config.distributed.state_addr.starts_with("https://") {
-        config.distributed.state_addr.clone()
-    } else {
-        format!("http://{}", config.distributed.state_addr)
+            let state_addr = if config.distributed.state_addr.starts_with("http://")
+                || config.distributed.state_addr.starts_with("https://") {
+                config.distributed.state_addr.clone()
+            } else {
+                format!("http://{}", config.distributed.state_addr)
+            };
+
+            Arc::new(
+                GrpcStateClient::connect(&state_addr)
+                    .map_err(|e| QueueError::SendFailed(
+                        format!("state service at {} unreachable: {}", state_addr, e)
+                    ))?
+            )
+        }
+        #[cfg(test)]
+        StateBackend::Memory => {
+            use crate::domain::InMemoryDagStore;
+            Arc::new(InMemoryDagStore::new())
+        }
     };
-
-    let store: Arc<dyn DagStore> = Arc::new(
-        GrpcStateClient::connect(&state_addr)
-            .map_err(|e| QueueError::SendFailed(
-                format!("state service at {} unreachable: {}", state_addr, e)
-            ))?
-    );
 
     Ok(Arc::new(RecordingQueue::new(inner, store)))
 }

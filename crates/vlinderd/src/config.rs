@@ -12,6 +12,34 @@ use serde::Deserialize;
 use std::path::PathBuf;
 
 // ============================================================================
+// Backend Enums (compile-time safety for queue + state backends)
+// ============================================================================
+
+/// Queue backend selector.
+///
+/// In production only `Nats` is available. The `Memory` variant exists
+/// only in test builds (`#[cfg(test)]`), so production binaries physically
+/// cannot select an in-memory queue.
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum QueueBackend {
+    Nats,
+    #[cfg(test)]
+    Memory,
+}
+
+/// State backend selector (DagStore).
+///
+/// Same gating strategy as `QueueBackend`: `Grpc` in prod, `Memory` in tests.
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StateBackend {
+    Grpc,
+    #[cfg(test)]
+    Memory,
+}
+
+// ============================================================================
 // Config Loader Trait
 // ============================================================================
 
@@ -52,14 +80,22 @@ impl ConfigLoader for TestLoader {
 // ============================================================================
 
 /// Application configuration loaded from ~/.vlinder/config.toml
+///
+/// `queue` and `state` sections are required — the daemon refuses to start
+/// if backends are not explicitly configured.
 #[derive(Debug, Clone, Deserialize)]
-#[serde(default)]
 pub struct Config {
+    #[serde(default)]
     pub logging: LoggingConfig,
+    #[serde(default)]
     pub ollama: OllamaConfig,
+    #[serde(default)]
     pub openrouter: OpenRouterConfig,
     pub queue: QueueConfig,
+    pub state: StateConfig,
+    #[serde(default)]
     pub distributed: DistributedConfig,
+    #[serde(default)]
     pub runtime: RuntimeConfig,
 }
 
@@ -87,12 +123,19 @@ pub struct OpenRouterConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(default)]
 pub struct QueueConfig {
-    /// Queue backend: "memory" or "nats"
-    pub backend: String,
-    /// NATS server URL (if backend = "nats")
+    pub backend: QueueBackend,
+    #[serde(default = "default_nats_url")]
     pub nats_url: String,
+}
+
+fn default_nats_url() -> String {
+    "nats://localhost:4222".to_string()
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct StateConfig {
+    pub backend: StateBackend,
 }
 
 // ============================================================================
@@ -221,19 +264,6 @@ pub struct RuntimeConfig {
 // Defaults
 // ============================================================================
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            logging: LoggingConfig::default(),
-            ollama: OllamaConfig::default(),
-            openrouter: OpenRouterConfig::default(),
-            queue: QueueConfig::default(),
-            distributed: DistributedConfig::default(),
-            runtime: RuntimeConfig::default(),
-        }
-    }
-}
-
 impl Default for LoggingConfig {
     fn default() -> Self {
         Self {
@@ -255,15 +285,6 @@ impl Default for OpenRouterConfig {
         Self {
             endpoint: "https://openrouter.ai/api/v1".to_string(),
             api_key: String::new(),
-        }
-    }
-}
-
-impl Default for QueueConfig {
-    fn default() -> Self {
-        Self {
-            backend: "memory".to_string(),
-            nats_url: "nats://localhost:4222".to_string(),
         }
     }
 }
@@ -357,16 +378,46 @@ impl Config {
         loader.load()
     }
 
-    /// Load config from file only (no env overrides).
+    /// Load config from file.
+    ///
+    /// Panics if the config file exists but is invalid — missing `[queue]` or
+    /// `[state]` sections is a fatal misconfiguration.
+    /// Panics if no config file exists — run `vlinder init` first.
     fn load_from_file() -> Self {
         let config_path = config_path();
-        if config_path.exists() {
-            match std::fs::read_to_string(&config_path) {
-                Ok(contents) => toml::from_str(&contents).unwrap_or_default(),
-                Err(_) => Self::default(),
-            }
-        } else {
-            Self::default()
+        if !config_path.exists() {
+            panic!(
+                "Config file not found: {}\n\
+                 Run `vlinder init` or create it manually.\n\
+                 Required sections: [queue] (backend), [state] (backend)",
+                config_path.display()
+            );
+        }
+        let contents = std::fs::read_to_string(&config_path)
+            .unwrap_or_else(|e| panic!("Cannot read {}: {}", config_path.display(), e));
+        toml::from_str(&contents)
+            .unwrap_or_else(|e| panic!("Invalid config {}: {}", config_path.display(), e))
+    }
+
+    /// Construct a Config for tests with memory backends.
+    ///
+    /// Explicit — not hidden behind Default. Tests that need
+    /// different backends should construct Config directly.
+    #[cfg(test)]
+    pub fn for_test() -> Self {
+        Self {
+            logging: LoggingConfig::default(),
+            ollama: OllamaConfig::default(),
+            openrouter: OpenRouterConfig::default(),
+            queue: QueueConfig {
+                backend: QueueBackend::Memory,
+                nats_url: "nats://localhost:4222".to_string(),
+            },
+            state: StateConfig {
+                backend: StateBackend::Memory,
+            },
+            distributed: DistributedConfig::default(),
+            runtime: RuntimeConfig::default(),
         }
     }
 
@@ -391,10 +442,15 @@ impl Config {
 
         // Queue
         if let Ok(v) = std::env::var("VLINDER_QUEUE_BACKEND") {
-            self.queue.backend = v;
+            self.queue.backend = parse_queue_backend(&v);
         }
         if let Ok(v) = std::env::var("VLINDER_QUEUE_NATS_URL") {
             self.queue.nats_url = v;
+        }
+
+        // State
+        if let Ok(v) = std::env::var("VLINDER_STATE_BACKEND") {
+            self.state.backend = parse_state_backend(&v);
         }
 
         // Distributed
@@ -458,6 +514,40 @@ impl Config {
             "warn,vlinderd={}",
             self.logging.level
         )
+    }
+}
+
+// ============================================================================
+// Backend parsing helpers
+// ============================================================================
+
+fn parse_queue_backend(s: &str) -> QueueBackend {
+    match s {
+        "nats" => QueueBackend::Nats,
+        #[cfg(test)]
+        "memory" => QueueBackend::Memory,
+        other => {
+            tracing::warn!(
+                value = other,
+                "Unknown VLINDER_QUEUE_BACKEND — defaulting to nats"
+            );
+            QueueBackend::Nats
+        }
+    }
+}
+
+fn parse_state_backend(s: &str) -> StateBackend {
+    match s {
+        "grpc" => StateBackend::Grpc,
+        #[cfg(test)]
+        "memory" => StateBackend::Memory,
+        other => {
+            tracing::warn!(
+                value = other,
+                "Unknown VLINDER_STATE_BACKEND — defaulting to grpc"
+            );
+            StateBackend::Grpc
+        }
     }
 }
 
@@ -526,8 +616,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_config_values() {
-        let config = Config::default();
+    fn for_test_gives_memory_backends() {
+        let config = Config::for_test();
+        assert_eq!(config.queue.backend, QueueBackend::Memory);
+        assert_eq!(config.state.backend, StateBackend::Memory);
         assert_eq!(config.logging.level, "warn");
         assert_eq!(config.ollama.endpoint, "http://localhost:11434");
     }
@@ -535,7 +627,7 @@ mod tests {
     #[test]
     fn env_override_ollama_endpoint() {
         std::env::set_var("VLINDER_OLLAMA_ENDPOINT", "http://remote:11434");
-        let mut config = Config::default();
+        let mut config = Config::for_test();
         config.apply_env_overrides();
         std::env::remove_var("VLINDER_OLLAMA_ENDPOINT");
 
@@ -544,12 +636,8 @@ mod tests {
 
     #[test]
     fn test_loader_returns_custom_config() {
-        let custom = Config {
-            ollama: OllamaConfig {
-                endpoint: "http://custom:9999".to_string(),
-            },
-            ..Default::default()
-        };
+        let mut custom = Config::for_test();
+        custom.ollama.endpoint = "http://custom:9999".to_string();
 
         let loader = TestLoader(custom);
         let config = Config::load_with(&loader);
@@ -558,8 +646,8 @@ mod tests {
     }
 
     #[test]
-    fn default_distributed_config() {
-        let config = Config::default();
+    fn for_test_distributed_defaults() {
+        let config = Config::for_test();
         assert_eq!(config.distributed.registry_addr, "http://127.0.0.1:9090");
         assert_eq!(config.distributed.harness_addr, "http://127.0.0.1:9091");
         assert_eq!(config.distributed.secret_addr, "http://127.0.0.1:9093");
@@ -575,7 +663,7 @@ mod tests {
     #[test]
     fn env_override_distributed_registry_addr() {
         std::env::set_var("VLINDER_DISTRIBUTED_REGISTRY_ADDR", "http://remote:9090");
-        let mut config = Config::default();
+        let mut config = Config::for_test();
         config.apply_env_overrides();
         std::env::remove_var("VLINDER_DISTRIBUTED_REGISTRY_ADDR");
 
@@ -586,12 +674,32 @@ mod tests {
     fn env_override_worker_counts() {
         std::env::set_var("VLINDER_WORKERS_AGENT_CONTAINER", "4");
         std::env::set_var("VLINDER_WORKERS_INFERENCE_OLLAMA", "2");
-        let mut config = Config::default();
+        let mut config = Config::for_test();
         config.apply_env_overrides();
         std::env::remove_var("VLINDER_WORKERS_AGENT_CONTAINER");
         std::env::remove_var("VLINDER_WORKERS_INFERENCE_OLLAMA");
 
         assert_eq!(config.distributed.workers.agent.container, 4);
         assert_eq!(config.distributed.workers.inference.ollama, 2);
+    }
+
+    #[test]
+    fn env_override_queue_backend_to_nats() {
+        std::env::set_var("VLINDER_QUEUE_BACKEND", "nats");
+        let mut config = Config::for_test();
+        config.apply_env_overrides();
+        std::env::remove_var("VLINDER_QUEUE_BACKEND");
+
+        assert_eq!(config.queue.backend, QueueBackend::Nats);
+    }
+
+    #[test]
+    fn env_override_state_backend_to_grpc() {
+        std::env::set_var("VLINDER_STATE_BACKEND", "grpc");
+        let mut config = Config::for_test();
+        config.apply_env_overrides();
+        std::env::remove_var("VLINDER_STATE_BACKEND");
+
+        assert_eq!(config.state.backend, StateBackend::Grpc);
     }
 }

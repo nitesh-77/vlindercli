@@ -8,7 +8,7 @@
 mod nats;
 
 use std::sync::Arc;
-use crate::config::Config;
+use crate::config::{Config, QueueBackend};
 use crate::domain::{SecretStore, SecretStoreError};
 
 // Re-export from domain (canonical location) for backward compatibility
@@ -17,20 +17,19 @@ pub use nats::NatsSecretStore;
 
 /// Create a secret store from configuration.
 ///
-/// Requires `backend = "nats"` — secrets must persist across processes.
-/// `InMemorySecretStore` exists for unit tests only, not wired here.
+/// Requires `backend = Nats` — secrets must persist across processes.
+/// In test builds with `Memory` queue backend, returns an `InMemorySecretStore`.
 ///
 /// Reuses the queue's `nats_url` config — same NATS cluster, different bucket.
-pub fn from_config() -> Result<Arc<dyn SecretStore>, SecretStoreError> {
-    let config = Config::load();
-    match config.queue.backend.as_str() {
-        "nats" => {
+pub fn from_config(config: &Config) -> Result<Arc<dyn SecretStore>, SecretStoreError> {
+    match config.queue.backend {
+        QueueBackend::Nats => {
             let store = NatsSecretStore::connect(&config.queue.nats_url)?;
             Ok(Arc::new(store))
         }
-        other => Err(SecretStoreError::StoreFailed(format!(
-            "unsupported secret store backend: '{}' (set queue.backend = \"nats\" in config)",
-            other,
-        ))),
+        #[cfg(test)]
+        QueueBackend::Memory => {
+            Ok(Arc::new(InMemorySecretStore::new()))
+        }
     }
 }
