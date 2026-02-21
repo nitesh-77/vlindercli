@@ -101,13 +101,11 @@ pub struct QueueConfig {
 
 /// Configuration for distributed multi-process deployments.
 ///
-/// When `enabled = true`, the daemon spawns separate worker processes
-/// for each service type. Workers communicate via NATS queues.
+/// The daemon spawns separate worker processes for each service type.
+/// Workers communicate via NATS queues.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct DistributedConfig {
-    /// Enable distributed mode (spawn worker processes)
-    pub enabled: bool,
     /// Registry gRPC address for worker coordination
     pub registry_addr: String,
     /// State service gRPC address (ADR 079)
@@ -273,7 +271,6 @@ impl Default for QueueConfig {
 impl Default for DistributedConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
             registry_addr: "http://127.0.0.1:9090".to_string(),
             state_addr: "http://127.0.0.1:9092".to_string(),
             harness_addr: "http://127.0.0.1:9091".to_string(),
@@ -401,9 +398,6 @@ impl Config {
         }
 
         // Distributed
-        if let Ok(v) = std::env::var("VLINDER_DISTRIBUTED_ENABLED") {
-            self.distributed.enabled = v.parse().unwrap_or(false);
-        }
         if let Ok(v) = std::env::var("VLINDER_DISTRIBUTED_REGISTRY_ADDR") {
             self.distributed.registry_addr = v;
         }
@@ -566,7 +560,6 @@ mod tests {
     #[test]
     fn default_distributed_config() {
         let config = Config::default();
-        assert!(!config.distributed.enabled);
         assert_eq!(config.distributed.registry_addr, "http://127.0.0.1:9090");
         assert_eq!(config.distributed.harness_addr, "http://127.0.0.1:9091");
         assert_eq!(config.distributed.secret_addr, "http://127.0.0.1:9093");
@@ -580,15 +573,12 @@ mod tests {
     }
 
     #[test]
-    fn env_override_distributed_enabled() {
-        std::env::set_var("VLINDER_DISTRIBUTED_ENABLED", "true");
+    fn env_override_distributed_registry_addr() {
         std::env::set_var("VLINDER_DISTRIBUTED_REGISTRY_ADDR", "http://remote:9090");
         let mut config = Config::default();
         config.apply_env_overrides();
-        std::env::remove_var("VLINDER_DISTRIBUTED_ENABLED");
         std::env::remove_var("VLINDER_DISTRIBUTED_REGISTRY_ADDR");
 
-        assert!(config.distributed.enabled);
         assert_eq!(config.distributed.registry_addr, "http://remote:9090");
     }
 
