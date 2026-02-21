@@ -3115,8 +3115,11 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "clap",
+ "dirs",
+ "indicatif",
  "reedline",
  "tempfile",
+ "termimad",
  "tracing",
  "ureq",
  "vlinder-core",

@@ -9,7 +9,10 @@ vlindercli = { path = "../.." }
 vlinder-core = { path = "../vlinder-core" }
 vlinder-proto = { path = "../vlinder-proto" }
 clap = { version = "4", features = ["derive"] }
+dirs = "6"
+indicatif = "0.17"
 reedline = "0.37"
+termimad = "0.30"
 tracing = "0.1"
 chrono = "0.4"
 ureq = { version = "3", features = ["json"] }

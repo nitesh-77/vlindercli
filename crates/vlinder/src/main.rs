@@ -1,5 +1,6 @@
 use vlindercli::config::Config;
 
+mod cli;
 mod commands;
 
 fn main() {

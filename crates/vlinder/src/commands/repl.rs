@@ -2,7 +2,7 @@ use std::io::{stdout, Write};
 
 use reedline::Signal;
 
-use vlindercli::cli::{self, VlinderPrompt};
+use crate::cli::{self, VlinderPrompt};
 
 /// Run an interactive REPL loop.
 ///
