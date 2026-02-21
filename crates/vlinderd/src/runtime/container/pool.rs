@@ -14,16 +14,26 @@ use super::podman::{Podman, RunTarget, resolve_socket};
 use super::podman_api::PodmanApiClient;
 use super::podman_cli::PodmanCliClient;
 
-/// A Pod — the deployable unit managed by the pool.
-pub(super) struct Pod {
+/// The OCI container half of a Pod.
+struct Container {
     container_id: ContainerId,
     host_port: u16,
-    pub(super) bridge: Arc<QueueBridge>,
     /// The OCI image reference (always `agent.executable` — identifies *which* image).
     image_ref: ImageRef,
     /// Content-addressed digest from `podman image inspect` at container start.
     /// None if the inspect failed.
     image_digest: Option<ImageDigest>,
+}
+
+/// The sidecar half of a Pod — mediates between queue and container.
+pub(super) struct Sidecar {
+    pub(super) bridge: Arc<QueueBridge>,
+}
+
+/// A Pod = Container + Sidecar. The deployable unit managed by the pool.
+struct Pod {
+    container: Container,
+    sidecar: Sidecar,
 }
 
 /// Image resolution policy for container agents (ADR 073).
@@ -99,8 +109,8 @@ impl ContainerPool {
     /// new invoke context and return the host port and bridge.
     pub(crate) fn get_port(&self, name: &str, invoke: &InvokeMessage) -> Option<(u16, Arc<QueueBridge>)> {
         self.pods.get(name).map(|pod| {
-            pod.bridge.update_invoke(invoke.clone());
-            (pod.host_port, Arc::clone(&pod.bridge))
+            pod.sidecar.bridge.update_invoke(invoke.clone());
+            (pod.container.host_port, Arc::clone(&pod.sidecar.bridge))
         })
     }
 
@@ -154,11 +164,13 @@ impl ContainerPool {
 
         let bridge_clone = Arc::clone(&bridge);
         self.pods.insert(name.to_string(), Pod {
-            container_id,
-            host_port,
-            bridge,
-            image_ref,
-            image_digest,
+            container: Container {
+                container_id,
+                host_port,
+                image_ref,
+                image_digest,
+            },
+            sidecar: Sidecar { bridge },
         });
 
         Ok((host_port, bridge_clone))
@@ -194,18 +206,18 @@ impl ContainerPool {
             tracing::warn!(
                 event = "container.evicted",
                 agent = %agent_name,
-                container = %pod.container_id,
+                container = %pod.container.container_id,
                 "Evicting stale container"
             );
-            self.podman.stop_and_remove(&pod.container_id, 2);
+            self.podman.stop_and_remove(&pod.container.container_id, 2);
         }
     }
 
     /// Shut down all managed containers.
     pub(crate) fn shutdown(&mut self) {
         for (name, pod) in self.pods.drain() {
-            tracing::info!(event = "container.stopped", agent = %name, container = %pod.container_id, "Stopping container");
-            self.podman.stop_and_remove(&pod.container_id, 5);
+            tracing::info!(event = "container.stopped", agent = %name, container = %pod.container.container_id, "Stopping container");
+            self.podman.stop_and_remove(&pod.container.container_id, 5);
         }
     }
 
@@ -218,9 +230,9 @@ impl ContainerPool {
                     engine_version: self.engine_version.as_ref()
                         .map(|v| v.to_string())
                         .unwrap_or_else(|| "unknown".to_string()),
-                    image_ref: Some(pod.image_ref.clone()),
-                    image_digest: pod.image_digest.clone(),
-                    container_id: pod.container_id.clone(),
+                    image_ref: Some(pod.container.image_ref.clone()),
+                    image_digest: pod.container.image_digest.clone(),
+                    container_id: pod.container.container_id.clone(),
                 },
                 duration_ms,
             },
@@ -230,7 +242,7 @@ impl ContainerPool {
 
     /// Retrieve the final state hash from the bridge for a named container.
     pub(crate) fn final_state(&self, name: &str) -> Option<String> {
-        self.pods.get(name).and_then(|pod| pod.bridge.final_state())
+        self.pods.get(name).and_then(|pod| pod.sidecar.bridge.final_state())
     }
 }
 
