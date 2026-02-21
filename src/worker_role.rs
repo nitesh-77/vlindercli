@@ -39,6 +39,8 @@ pub enum WorkerRole {
     Secret,
     /// State service — gRPC interface to the DagStore (ADR 079)
     State,
+    /// Catalog service — gRPC interface to model catalogs (Ollama, OpenRouter)
+    Catalog,
     /// DAG git worker — writes messages as git commits for time-travel
     DagGit,
 }
@@ -68,6 +70,7 @@ impl WorkerRole {
             WorkerRole::StorageVectorMemory => "storage-vector-memory",
             WorkerRole::Secret => "secret",
             WorkerRole::State => "state",
+            WorkerRole::Catalog => "catalog",
             WorkerRole::DagGit => "dag-git",
         }
     }
@@ -87,6 +90,7 @@ impl WorkerRole {
             WorkerRole::StorageVectorMemory => "In-memory vector storage",
             WorkerRole::Secret => "Secret store service",
             WorkerRole::State => "State service",
+            WorkerRole::Catalog => "Catalog service",
             WorkerRole::DagGit => "DAG git worker",
         }
     }
@@ -115,6 +119,7 @@ impl FromStr for WorkerRole {
             "storage-vector-memory" => Ok(WorkerRole::StorageVectorMemory),
             "secret" => Ok(WorkerRole::Secret),
             "state" => Ok(WorkerRole::State),
+            "catalog" => Ok(WorkerRole::Catalog),
             "dag-git" => Ok(WorkerRole::DagGit),
             _ => Err(ParseWorkerRoleError(s.to_string())),
         }
@@ -147,6 +152,7 @@ mod tests {
         assert_eq!("storage-vector-sqlite".parse::<WorkerRole>().unwrap(), WorkerRole::StorageVectorSqlite);
         assert_eq!("secret".parse::<WorkerRole>().unwrap(), WorkerRole::Secret);
         assert_eq!("state".parse::<WorkerRole>().unwrap(), WorkerRole::State);
+        assert_eq!("catalog".parse::<WorkerRole>().unwrap(), WorkerRole::Catalog);
         assert_eq!("dag-git".parse::<WorkerRole>().unwrap(), WorkerRole::DagGit);
     }
 
@@ -171,6 +177,7 @@ mod tests {
             WorkerRole::StorageVectorSqlite,
             WorkerRole::Secret,
             WorkerRole::State,
+            WorkerRole::Catalog,
             WorkerRole::DagGit,
         ] {
             let env_val = role.as_env_value();

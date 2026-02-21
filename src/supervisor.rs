@@ -11,6 +11,7 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use crate::config::Config;
+use crate::catalog_service::ping_catalog_service;
 use crate::harness_service::ping_harness;
 use crate::registry_service::ping_registry;
 use crate::secret_service::ping_secret_service;
@@ -144,6 +145,45 @@ impl Supervisor {
                 }
                 None => {
                     tracing::warn!(addr = %state_addr, "State service did not become ready within 10s — state queries will fail until it starts");
+                }
+            }
+        }
+
+        // Catalog service — singleton gRPC server for model catalog queries.
+        // Independent of other services (talks only to external APIs).
+        // Non-fatal health check: CLI falls back to direct catalog access.
+        if let Some(child) = spawn_worker(WorkerRole::Catalog) {
+            workers.push(child);
+        }
+
+        {
+            let catalog_addr = if config.distributed.catalog_addr.starts_with("http://") {
+                config.distributed.catalog_addr.clone()
+            } else {
+                format!("http://{}", config.distributed.catalog_addr)
+            };
+
+            let deadline = Instant::now() + Duration::from_secs(10);
+            let mut version = None;
+
+            while Instant::now() < deadline {
+                if let Some(v) = ping_catalog_service(&catalog_addr) {
+                    version = Some(v);
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+
+            match version {
+                Some((major, minor, patch)) => {
+                    tracing::info!(
+                        addr = %catalog_addr,
+                        version = %format!("{}.{}.{}", major, minor, patch),
+                        "Catalog service is ready"
+                    );
+                }
+                None => {
+                    tracing::warn!(addr = %catalog_addr, "Catalog service did not become ready within 10s — catalog queries will fail until it starts");
                 }
             }
         }
@@ -310,6 +350,7 @@ mod tests {
                 state_addr: "http://127.0.0.1:9092".to_string(),
                 harness_addr: "http://127.0.0.1:9091".to_string(),
                 secret_addr: "http://127.0.0.1:9093".to_string(),
+                catalog_addr: "http://127.0.0.1:9094".to_string(),
                 workers: crate::config::WorkerCounts {
                     registry: 0,
                     harness: 0,
@@ -326,9 +367,9 @@ mod tests {
         };
 
         let mut supervisor = Supervisor::new(&config);
-        // Three unconditional singletons: secret, state, dag-git.
+        // Four unconditional singletons: secret, state, catalog, dag-git.
         // All config-driven workers have count 0.
-        assert_eq!(supervisor.workers.len(), 3);
+        assert_eq!(supervisor.workers.len(), 4);
         supervisor.shutdown();
     }
 }

@@ -51,6 +51,7 @@ pub fn run_worker_loop(role: WorkerRole, shutdown: Arc<AtomicBool>) {
         WorkerRole::StorageVectorMemory => run_storage_vector_memory_worker(&config, &shutdown),
         WorkerRole::Secret => run_secret_worker(&config, &shutdown),
         WorkerRole::State => run_state_worker(&config, &shutdown),
+        WorkerRole::Catalog => run_catalog_worker(&config, &shutdown),
         WorkerRole::DagGit => run_dag_git_worker(&config, &shutdown),
     }
 
@@ -486,6 +487,54 @@ fn run_state_worker(config: &Config, shutdown: &AtomicBool) {
 
         if let Err(e) = server.await {
             tracing::error!(?e, "State server error");
+        }
+    });
+}
+
+fn run_catalog_worker(config: &Config, shutdown: &AtomicBool) {
+    use std::collections::HashMap;
+    use tonic::transport::Server;
+    use crate::catalog::{OllamaCatalog, OpenRouterCatalog};
+    use crate::catalog_service::CatalogServiceServer;
+    use crate::domain::ModelCatalog;
+
+    let mut catalogs: HashMap<String, Arc<dyn ModelCatalog>> = HashMap::new();
+    catalogs.insert(
+        "ollama".to_string(),
+        Arc::new(OllamaCatalog::new(&config.ollama.endpoint)),
+    );
+    if !config.openrouter.api_key.is_empty() {
+        catalogs.insert(
+            "openrouter".to_string(),
+            Arc::new(OpenRouterCatalog::new(
+                &config.openrouter.endpoint,
+                &config.openrouter.api_key,
+            )),
+        );
+    }
+
+    let addr_str = config.distributed.catalog_addr
+        .strip_prefix("http://")
+        .unwrap_or(&config.distributed.catalog_addr);
+    let addr: std::net::SocketAddr = addr_str.parse()
+        .expect("Invalid catalog service address");
+
+    tracing::info!(?addr, catalogs = ?catalogs.keys().collect::<Vec<_>>(), "Starting catalog gRPC server");
+
+    let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
+    rt.block_on(async {
+        let service = CatalogServiceServer::new(catalogs).into_service();
+
+        let server = Server::builder()
+            .add_service(service)
+            .serve_with_shutdown(addr, async {
+                while !shutdown.load(Ordering::Relaxed) {
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                }
+            });
+
+        if let Err(e) = server.await {
+            tracing::error!(?e, "Catalog server error");
         }
     });
 }

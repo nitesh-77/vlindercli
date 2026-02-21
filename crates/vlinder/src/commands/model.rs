@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use clap::Subcommand;
 
-use vlindercli::catalog::{OllamaCatalog, OpenRouterCatalog};
+use vlindercli::catalog_service::{GrpcCatalogClient, ping_catalog_service};
 use vlindercli::config::Config;
 use vlindercli::domain::{Model, ModelCatalog, Registry};
 
@@ -48,13 +48,10 @@ pub enum ModelCommand {
 }
 
 pub fn execute(cmd: ModelCommand) {
-    let mut config = Config::load();
+    let config = Config::load();
 
     match cmd {
-        ModelCommand::Add { name, catalog, endpoint } => {
-            if let Some(ep) = endpoint {
-                config.ollama.endpoint = ep;
-            }
+        ModelCommand::Add { name, catalog, endpoint: _ } => {
             let model = resolve_model(&name, &catalog, &config);
             let Some(model) = model else { return };
 
@@ -71,10 +68,7 @@ pub fn execute(cmd: ModelCommand) {
             println!("  Engine: {:?}", model.provider);
             println!("  Path:   {}", model.model_path);
         }
-        ModelCommand::Available { filter, ref catalog, endpoint } => {
-            if let Some(ep) = endpoint {
-                config.ollama.endpoint = ep;
-            }
+        ModelCommand::Available { filter, ref catalog, endpoint: _ } => {
             list_available(catalog, filter.as_deref(), &config)
         }
         ModelCommand::List => {
@@ -108,6 +102,34 @@ fn open_registry(config: &Config) -> Option<Arc<dyn Registry>> {
     vlindercli::registry::open_registry(config)
 }
 
+/// Connect to a catalog backend via the daemon's gRPC catalog service.
+fn open_catalog(catalog_name: &str, config: &Config) -> Option<Box<dyn ModelCatalog>> {
+    if !CATALOGS.contains(&catalog_name) {
+        eprintln!("Unknown catalog: {}. Supported: ollama, openrouter", catalog_name);
+        return None;
+    }
+
+    let catalog_addr = if config.distributed.catalog_addr.starts_with("http://")
+        || config.distributed.catalog_addr.starts_with("https://") {
+        config.distributed.catalog_addr.clone()
+    } else {
+        format!("http://{}", config.distributed.catalog_addr)
+    };
+
+    if ping_catalog_service(&catalog_addr).is_none() {
+        eprintln!("Cannot reach catalog service at {}. Is the daemon running?", catalog_addr);
+        return None;
+    }
+
+    match GrpcCatalogClient::connect(&catalog_addr, catalog_name) {
+        Ok(client) => Some(Box::new(client)),
+        Err(e) => {
+            eprintln!("Failed to connect to catalog service: {}", e);
+            None
+        }
+    }
+}
+
 /// Resolve a model from name — either a TOML manifest path or a catalog lookup.
 fn resolve_model(name: &str, catalog: &str, config: &Config) -> Option<Model> {
     if Path::new(name).extension().is_some_and(|ext| ext == "toml") {
@@ -119,17 +141,7 @@ fn resolve_model(name: &str, catalog: &str, config: &Config) -> Option<Model> {
             }
         }
     } else {
-        let catalog: Box<dyn ModelCatalog> = match catalog {
-            "ollama" => Box::new(OllamaCatalog::new(&config.ollama.endpoint)),
-            "openrouter" => Box::new(OpenRouterCatalog::new(
-                &config.openrouter.endpoint,
-                &config.openrouter.api_key,
-            )),
-            other => {
-                eprintln!("Unknown catalog: {}. Supported: ollama, openrouter", other);
-                return None;
-            }
-        };
+        let catalog = open_catalog(catalog, config)?;
 
         match catalog.resolve(name) {
             Ok(m) => Some(m),
@@ -166,13 +178,8 @@ fn list_available(catalog_name: &str, filter: Option<&str>, config: &Config) {
             continue;
         }
 
-        let catalog: Box<dyn ModelCatalog> = match *name {
-            "ollama" => Box::new(OllamaCatalog::new(&config.ollama.endpoint)),
-            "openrouter" => Box::new(OpenRouterCatalog::new(
-                &config.openrouter.endpoint,
-                &config.openrouter.api_key,
-            )),
-            _ => continue,
+        let Some(catalog) = open_catalog(name, config) else {
+            continue;
         };
 
         match catalog.list() {

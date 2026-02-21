@@ -12,6 +12,7 @@ pub mod loader;
 pub mod queue_factory;
 pub mod registry;
 pub mod secret_store;
+pub use vlinder_proto::catalog_service;
 pub use vlinder_proto::harness_service;
 pub use vlinder_proto::registry_service;
 pub use vlinder_proto::secret_service;

@@ -116,6 +116,8 @@ pub struct DistributedConfig {
     pub harness_addr: String,
     /// Secret store gRPC address
     pub secret_addr: String,
+    /// Catalog service gRPC address
+    pub catalog_addr: String,
     /// Worker process counts by type
     pub workers: WorkerCounts,
 }
@@ -276,6 +278,7 @@ impl Default for DistributedConfig {
             state_addr: "http://127.0.0.1:9092".to_string(),
             harness_addr: "http://127.0.0.1:9091".to_string(),
             secret_addr: "http://127.0.0.1:9093".to_string(),
+            catalog_addr: "http://127.0.0.1:9094".to_string(),
             workers: WorkerCounts::default(),
         }
     }
@@ -412,6 +415,9 @@ impl Config {
         }
         if let Ok(v) = std::env::var("VLINDER_DISTRIBUTED_SECRET_ADDR") {
             self.distributed.secret_addr = v;
+        }
+        if let Ok(v) = std::env::var("VLINDER_DISTRIBUTED_CATALOG_ADDR") {
+            self.distributed.catalog_addr = v;
         }
 
         // Worker counts (flat env vars for simplicity)

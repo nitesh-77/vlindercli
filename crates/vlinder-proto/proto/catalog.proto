@@ -1,0 +1,49 @@
+syntax = "proto3";
+package vlinder.catalog;
+
+service CatalogService {
+  rpc Ping(PingRequest) returns (SemVer);
+  rpc Resolve(ResolveRequest) returns (ResolveResponse);
+  rpc List(ListRequest) returns (ListResponse);
+  rpc Available(AvailableRequest) returns (AvailableResponse);
+}
+
+message PingRequest {}
+message SemVer { uint32 major = 1; uint32 minor = 2; uint32 patch = 3; }
+
+enum ModelType {
+  MODEL_TYPE_UNSPECIFIED = 0;
+  MODEL_TYPE_INFERENCE = 1;
+  MODEL_TYPE_EMBEDDING = 2;
+}
+
+enum Provider {
+  PROVIDER_UNSPECIFIED = 0;
+  PROVIDER_OPENROUTER = 1;
+  PROVIDER_OLLAMA = 2;
+}
+
+message Model {
+  string id = 1;
+  string name = 2;
+  ModelType model_type = 3;
+  Provider provider = 4;
+  string model_path = 5;
+  string digest = 6;
+}
+
+message ModelInfo {
+  string name = 1;
+  optional string size = 2;
+  optional string modified = 3;
+  optional string digest = 4;
+}
+
+message ResolveRequest { string catalog = 1; string name = 2; }
+message ResolveResponse { optional Model model = 1; optional string error = 2; }
+
+message ListRequest { string catalog = 1; }
+message ListResponse { repeated ModelInfo models = 1; optional string error = 2; }
+
+message AvailableRequest { string catalog = 1; string name = 2; }
+message AvailableResponse { bool available = 1; optional string error = 2; }
