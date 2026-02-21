@@ -27,6 +27,7 @@ struct Container {
 
 /// The sidecar half of a Pod — mediates between queue and container.
 pub(super) struct Sidecar {
+    config: Config,
     pub(super) bridge: Arc<QueueBridge>,
 }
 
@@ -62,6 +63,7 @@ impl ImagePolicy {
 /// invocation, and tears them down on eviction or shutdown.
 pub(crate) struct ContainerPool {
     pods: HashMap<String, Pod>,
+    config: Config,
     queue: Arc<dyn MessageQueue + Send + Sync>,
     registry: Arc<dyn Registry>,
     engine_version: Option<semver::Version>,
@@ -97,6 +99,7 @@ impl ContainerPool {
         tracing::info!(event = "runtime.image_policy", policy = ?image_policy, "Container image policy");
         Ok(Self {
             pods: HashMap::new(),
+            config: config.clone(),
             queue,
             registry,
             engine_version,
@@ -170,7 +173,7 @@ impl ContainerPool {
                 image_ref,
                 image_digest,
             },
-            sidecar: Sidecar { bridge },
+            sidecar: Sidecar { config: self.config.clone(), bridge },
         });
 
         Ok((host_port, bridge_clone))
