@@ -1,9 +1,12 @@
 use std::io::{self, Read, Write};
 use std::process;
+use std::sync::Arc;
 
 use clap::Subcommand;
 
-use vlindercli::secret_store;
+use vlindercli::config::Config;
+use vlindercli::domain::SecretStore;
+use vlindercli::secret_service::GrpcSecretClient;
 
 #[derive(Subcommand, Debug, PartialEq)]
 pub enum SecretCommand {
@@ -26,6 +29,18 @@ pub fn execute(cmd: SecretCommand) {
     }
 }
 
+fn open_store() -> Arc<dyn SecretStore> {
+    let config = Config::load();
+    let addr = &config.distributed.secret_addr;
+    match GrpcSecretClient::connect(addr) {
+        Ok(client) => Arc::new(client),
+        Err(e) => {
+            eprintln!("Failed to connect to secret service at {}: {}", addr, e);
+            process::exit(1);
+        }
+    }
+}
+
 fn put(name: &str) {
     let mut buf = Vec::new();
     if let Err(e) = io::stdin().read_to_end(&mut buf) {
@@ -33,13 +48,7 @@ fn put(name: &str) {
         process::exit(1);
     }
 
-    let store = match secret_store::from_config() {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("Failed to open secret store: {}", e);
-            process::exit(1);
-        }
-    };
+    let store = open_store();
 
     if let Err(e) = store.put(name, &buf) {
         eprintln!("Failed to store secret: {}", e);
@@ -50,13 +59,7 @@ fn put(name: &str) {
 }
 
 fn get(name: &str) {
-    let store = match secret_store::from_config() {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("Failed to open secret store: {}", e);
-            process::exit(1);
-        }
-    };
+    let store = open_store();
 
     match store.get(name) {
         Ok(value) => {
@@ -73,13 +76,7 @@ fn get(name: &str) {
 }
 
 fn delete(name: &str) {
-    let store = match secret_store::from_config() {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("Failed to open secret store: {}", e);
-            process::exit(1);
-        }
-    };
+    let store = open_store();
 
     if let Err(e) = store.delete(name) {
         eprintln!("{}", e);
@@ -90,13 +87,7 @@ fn delete(name: &str) {
 }
 
 fn exists(name: &str) {
-    let store = match secret_store::from_config() {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("Failed to open secret store: {}", e);
-            process::exit(1);
-        }
-    };
+    let store = open_store();
 
     match store.exists(name) {
         Ok(true) => {

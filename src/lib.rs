@@ -14,6 +14,7 @@ pub mod registry;
 pub mod secret_store;
 pub use vlinder_proto::harness_service;
 pub use vlinder_proto::registry_service;
+pub use vlinder_proto::secret_service;
 pub use vlinder_proto::state_service;
 pub mod runtime;
 pub mod session_server;

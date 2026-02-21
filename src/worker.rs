@@ -49,6 +49,7 @@ pub fn run_worker_loop(role: WorkerRole, shutdown: Arc<AtomicBool>) {
         WorkerRole::StorageObjectMemory => run_storage_object_memory_worker(&config, &shutdown),
         WorkerRole::StorageVectorSqlite => run_storage_vector_sqlite_worker(&config, &shutdown),
         WorkerRole::StorageVectorMemory => run_storage_vector_memory_worker(&config, &shutdown),
+        WorkerRole::Secret => run_secret_worker(&config, &shutdown),
         WorkerRole::State => run_state_worker(&config, &shutdown),
         WorkerRole::DagGit => run_dag_git_worker(&config, &shutdown),
     }
@@ -103,9 +104,17 @@ fn run_registry_worker(config: &Config, shutdown: &AtomicBool) {
     use crate::domain::{RuntimeType, ObjectStorageType, VectorStorageType};
     use crate::registry::PersistentRegistry;
     use crate::registry_service::RegistryServiceServer;
+    use crate::secret_service::GrpcSecretClient;
 
-    let secret_store = crate::secret_store::from_config()
-        .unwrap_or_else(|e| panic!("Failed to open secret store: {}", e));
+    let secret_addr = if config.distributed.secret_addr.starts_with("http://") {
+        config.distributed.secret_addr.clone()
+    } else {
+        format!("http://{}", config.distributed.secret_addr)
+    };
+    let secret_store: Arc<dyn crate::domain::SecretStore> = Arc::new(
+        GrpcSecretClient::connect(&secret_addr)
+            .unwrap_or_else(|e| panic!("Failed to connect to secret service: {}", e))
+    );
 
     let db_path = registry_db_path();
     let registry = PersistentRegistry::open(&db_path, config, secret_store)
@@ -144,6 +153,40 @@ fn run_registry_worker(config: &Config, shutdown: &AtomicBool) {
 
         if let Err(e) = server.await {
             tracing::error!(?e, "Registry server error");
+        }
+    });
+}
+
+fn run_secret_worker(config: &Config, shutdown: &AtomicBool) {
+    use tonic::transport::Server;
+    use crate::secret_service::SecretServiceServer;
+
+    let secret_store = crate::secret_store::from_config()
+        .unwrap_or_else(|e| panic!("Failed to open secret store: {}", e));
+
+    // Parse address, stripping http:// prefix if present
+    let addr_str = config.distributed.secret_addr
+        .strip_prefix("http://")
+        .unwrap_or(&config.distributed.secret_addr);
+    let addr: std::net::SocketAddr = addr_str.parse()
+        .expect("Invalid secret service address");
+
+    tracing::info!(?addr, "Starting secret store gRPC server");
+
+    let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
+    rt.block_on(async {
+        let service = SecretServiceServer::new(secret_store).into_service();
+
+        let server = Server::builder()
+            .add_service(service)
+            .serve_with_shutdown(addr, async {
+                while !shutdown.load(Ordering::Relaxed) {
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                }
+            });
+
+        if let Err(e) = server.await {
+            tracing::error!(?e, "Secret store server error");
         }
     });
 }

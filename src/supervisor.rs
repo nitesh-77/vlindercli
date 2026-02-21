@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 use crate::config::Config;
 use crate::harness_service::ping_harness;
 use crate::registry_service::ping_registry;
+use crate::secret_service::ping_secret_service;
 use crate::state_service::ping_state_service;
 use crate::worker_role::WorkerRole;
 
@@ -27,7 +28,45 @@ impl Supervisor {
         let counts = &config.distributed.workers;
         let mut workers = Vec::new();
 
-        // Registry must start first — other workers connect to it.
+        // Secret service must start first — registry needs secrets for
+        // agent identity (keys). Singleton worker.
+        if let Some(child) = spawn_worker(WorkerRole::Secret) {
+            workers.push(child);
+        }
+
+        {
+            let secret_addr = if config.distributed.secret_addr.starts_with("http://") {
+                config.distributed.secret_addr.clone()
+            } else {
+                format!("http://{}", config.distributed.secret_addr)
+            };
+
+            let deadline = Instant::now() + Duration::from_secs(10);
+            let mut version = None;
+
+            while Instant::now() < deadline {
+                if let Some(v) = ping_secret_service(&secret_addr) {
+                    version = Some(v);
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+
+            match version {
+                Some((major, minor, patch)) => {
+                    tracing::info!(
+                        addr = %secret_addr,
+                        version = %format!("{}.{}.{}", major, minor, patch),
+                        "Secret service is ready"
+                    );
+                }
+                None => {
+                    tracing::warn!(addr = %secret_addr, "Secret service did not become ready within 10s — registry may fail to connect");
+                }
+            }
+        }
+
+        // Registry must start next — other workers connect to it.
         for _ in 0..counts.registry {
             if let Some(child) = spawn_worker(WorkerRole::Registry) {
                 workers.push(child);
@@ -270,6 +309,7 @@ mod tests {
                 registry_addr: "http://127.0.0.1:9090".to_string(),
                 state_addr: "http://127.0.0.1:9092".to_string(),
                 harness_addr: "http://127.0.0.1:9091".to_string(),
+                secret_addr: "http://127.0.0.1:9093".to_string(),
                 workers: crate::config::WorkerCounts {
                     registry: 0,
                     harness: 0,
@@ -286,9 +326,9 @@ mod tests {
         };
 
         let mut supervisor = Supervisor::new(&config);
-        // Two unconditional singletons: state, dag-git.
+        // Three unconditional singletons: secret, state, dag-git.
         // All config-driven workers have count 0.
-        assert_eq!(supervisor.workers.len(), 2);
+        assert_eq!(supervisor.workers.len(), 3);
         supervisor.shutdown();
     }
 }

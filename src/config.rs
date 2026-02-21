@@ -114,6 +114,8 @@ pub struct DistributedConfig {
     pub state_addr: String,
     /// Harness gRPC address for CLI→daemon agent invocation
     pub harness_addr: String,
+    /// Secret store gRPC address
+    pub secret_addr: String,
     /// Worker process counts by type
     pub workers: WorkerCounts,
 }
@@ -273,6 +275,7 @@ impl Default for DistributedConfig {
             registry_addr: "http://127.0.0.1:9090".to_string(),
             state_addr: "http://127.0.0.1:9092".to_string(),
             harness_addr: "http://127.0.0.1:9091".to_string(),
+            secret_addr: "http://127.0.0.1:9093".to_string(),
             workers: WorkerCounts::default(),
         }
     }
@@ -406,6 +409,9 @@ impl Config {
         }
         if let Ok(v) = std::env::var("VLINDER_DISTRIBUTED_HARNESS_ADDR") {
             self.distributed.harness_addr = v;
+        }
+        if let Ok(v) = std::env::var("VLINDER_DISTRIBUTED_SECRET_ADDR") {
+            self.distributed.secret_addr = v;
         }
 
         // Worker counts (flat env vars for simplicity)
@@ -557,6 +563,7 @@ mod tests {
         assert!(!config.distributed.enabled);
         assert_eq!(config.distributed.registry_addr, "http://127.0.0.1:9090");
         assert_eq!(config.distributed.harness_addr, "http://127.0.0.1:9091");
+        assert_eq!(config.distributed.secret_addr, "http://127.0.0.1:9093");
         assert_eq!(config.distributed.workers.registry, 1);
         assert_eq!(config.distributed.workers.harness, 1);
         assert_eq!(config.distributed.workers.agent.container, 1);
