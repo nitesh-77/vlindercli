@@ -5,7 +5,7 @@ use std::sync::Arc;
 use clap::Subcommand;
 
 use vlindercli::config::Config;
-use vlindercli::domain::SecretStore;
+use vlinder_core::domain::SecretStore;
 use vlinder_proto::secret_service::GrpcSecretClient;
 
 #[derive(Subcommand, Debug, PartialEq)]

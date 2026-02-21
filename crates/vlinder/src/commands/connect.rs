@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use vlindercli::config::Config;
-use vlindercli::domain::{DagStore, Harness, Registry};
+use vlinder_core::domain::{DagStore, Harness, Registry};
 use vlinder_proto::harness_service::{GrpcHarnessClient, ping_harness};
 use vlinder_proto::registry_service::{GrpcRegistryClient, ping_registry};
 use vlinder_proto::state_service::GrpcStateClient;

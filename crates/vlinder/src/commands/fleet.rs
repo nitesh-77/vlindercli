@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use clap::Subcommand;
 
 use vlindercli::config::Config;
-use vlindercli::domain::{AgentManifest, Fleet, Harness, agent_routing_key};
+use vlinder_core::domain::{AgentManifest, Fleet, Harness, agent_routing_key};
 
 use super::connect::{connect_harness, connect_registry, open_dag_store, read_latest_state};
 use super::repl;

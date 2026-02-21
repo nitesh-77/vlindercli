@@ -5,7 +5,7 @@ use clap::Subcommand;
 
 use vlinder_proto::catalog_service::{GrpcCatalogClient, ping_catalog_service};
 use vlindercli::config::Config;
-use vlindercli::domain::{Model, ModelCatalog, Registry};
+use vlinder_core::domain::{Model, ModelCatalog, Registry};
 
 #[derive(Subcommand, Debug, PartialEq)]
 pub enum ModelCommand {

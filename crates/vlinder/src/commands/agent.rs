@@ -4,7 +4,7 @@ use std::sync::Arc;
 use clap::{Subcommand, ValueEnum};
 
 use vlindercli::config::Config;
-use vlindercli::domain::{AgentManifest, Harness, Registry};
+use vlinder_core::domain::{AgentManifest, Harness, Registry};
 
 use super::connect::{connect_harness, connect_registry, open_dag_store, read_latest_state};
 use super::repl;

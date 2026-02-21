@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 vlindercli = { path = "../.." }
+vlinder-core = { path = "../vlinder-core" }
 vlinder-proto = { path = "../vlinder-proto" }
 clap = { version = "4", features = ["derive"] }
 reedline = "0.37"

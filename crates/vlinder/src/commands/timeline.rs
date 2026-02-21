@@ -15,7 +15,7 @@ use std::process::Command;
 use clap::Subcommand;
 
 use vlindercli::config::{Config, conversations_dir};
-use vlindercli::domain::{AgentManifest, TimelineId, agent_routing_key};
+use vlinder_core::domain::{AgentManifest, TimelineId, agent_routing_key};
 
 use super::connect::{connect_harness, connect_registry, open_dag_store};
 
