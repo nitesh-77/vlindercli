@@ -14,8 +14,8 @@ use super::podman::{Podman, RunTarget, resolve_socket};
 use super::podman_api::PodmanApiClient;
 use super::podman_cli::PodmanCliClient;
 
-/// A long-running container managed by the pool.
-pub(super) struct ManagedContainer {
+/// A Pod — the deployable unit managed by the pool.
+pub(super) struct Pod {
     container_id: ContainerId,
     host_port: u16,
     pub(super) bridge: Arc<QueueBridge>,
@@ -51,7 +51,7 @@ impl ImagePolicy {
 /// Maps agent names to running containers, lazily starts them on first
 /// invocation, and tears them down on eviction or shutdown.
 pub(crate) struct ContainerPool {
-    containers: HashMap<String, ManagedContainer>,
+    pods: HashMap<String, Pod>,
     queue: Arc<dyn MessageQueue + Send + Sync>,
     registry: Arc<dyn Registry>,
     engine_version: Option<semver::Version>,
@@ -86,7 +86,7 @@ impl ContainerPool {
         }
         tracing::info!(event = "runtime.image_policy", policy = ?image_policy, "Container image policy");
         Ok(Self {
-            containers: HashMap::new(),
+            pods: HashMap::new(),
             queue,
             registry,
             engine_version,
@@ -98,9 +98,9 @@ impl ContainerPool {
     /// If a container is already running for `name`, update its bridge with the
     /// new invoke context and return the host port and bridge.
     pub(crate) fn get_port(&self, name: &str, invoke: &InvokeMessage) -> Option<(u16, Arc<QueueBridge>)> {
-        self.containers.get(name).map(|mc| {
-            mc.bridge.update_invoke(invoke.clone());
-            (mc.host_port, Arc::clone(&mc.bridge))
+        self.pods.get(name).map(|pod| {
+            pod.bridge.update_invoke(invoke.clone());
+            (pod.host_port, Arc::clone(&pod.bridge))
         })
     }
 
@@ -153,7 +153,7 @@ impl ContainerPool {
         );
 
         let bridge_clone = Arc::clone(&bridge);
-        self.containers.insert(name.to_string(), ManagedContainer {
+        self.pods.insert(name.to_string(), Pod {
             container_id,
             host_port,
             bridge,
@@ -190,37 +190,37 @@ impl ContainerPool {
     ///
     /// Called when dispatch detects a transport error (container dead).
     pub(crate) fn evict(&mut self, agent_name: &str) {
-        if let Some(mc) = self.containers.remove(agent_name) {
+        if let Some(pod) = self.pods.remove(agent_name) {
             tracing::warn!(
                 event = "container.evicted",
                 agent = %agent_name,
-                container = %mc.container_id,
+                container = %pod.container_id,
                 "Evicting stale container"
             );
-            self.podman.stop_and_remove(&mc.container_id, 2);
+            self.podman.stop_and_remove(&pod.container_id, 2);
         }
     }
 
     /// Shut down all managed containers.
     pub(crate) fn shutdown(&mut self) {
-        for (name, mc) in self.containers.drain() {
-            tracing::info!(event = "container.stopped", agent = %name, container = %mc.container_id, "Stopping container");
-            self.podman.stop_and_remove(&mc.container_id, 5);
+        for (name, pod) in self.pods.drain() {
+            tracing::info!(event = "container.stopped", agent = %name, container = %pod.container_id, "Stopping container");
+            self.podman.stop_and_remove(&pod.container_id, 5);
         }
     }
 
     /// Build ContainerDiagnostics from cached metadata (ADR 073).
     pub(crate) fn diagnostics(&self, agent_name: &str, duration_ms: u64) -> ContainerDiagnostics {
-        match self.containers.get(agent_name) {
-            Some(mc) => ContainerDiagnostics {
+        match self.pods.get(agent_name) {
+            Some(pod) => ContainerDiagnostics {
                 stderr: Vec::new(),
                 runtime: ContainerRuntimeInfo {
                     engine_version: self.engine_version.as_ref()
                         .map(|v| v.to_string())
                         .unwrap_or_else(|| "unknown".to_string()),
-                    image_ref: Some(mc.image_ref.clone()),
-                    image_digest: mc.image_digest.clone(),
-                    container_id: mc.container_id.clone(),
+                    image_ref: Some(pod.image_ref.clone()),
+                    image_digest: pod.image_digest.clone(),
+                    container_id: pod.container_id.clone(),
                 },
                 duration_ms,
             },
@@ -230,7 +230,7 @@ impl ContainerPool {
 
     /// Retrieve the final state hash from the bridge for a named container.
     pub(crate) fn final_state(&self, name: &str) -> Option<String> {
-        self.containers.get(name).and_then(|mc| mc.bridge.final_state())
+        self.pods.get(name).and_then(|pod| pod.bridge.final_state())
     }
 }
 
