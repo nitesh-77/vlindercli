@@ -6,4 +6,3 @@
 mod container;
 
 pub use container::ContainerRuntime;
-pub use container::ImagePolicy;

@@ -15,5 +15,4 @@ mod pool;
 mod runtime;
 mod unix_transport;
 
-pub use pool::ImagePolicy;
 pub use runtime::ContainerRuntime;

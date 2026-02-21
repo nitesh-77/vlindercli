@@ -17,7 +17,7 @@ use crate::domain::{
 };
 
 use super::dispatch::{DispatchError, RunningTask, dispatch_state_machine};
-use super::pool::{ContainerPool, ImagePolicy};
+use super::pool::ContainerPool;
 
 pub struct ContainerRuntime {
     id: ResourceId,
@@ -33,7 +33,6 @@ impl ContainerRuntime {
         let registry = crate::registry_factory::from_config(config)?;
 
         let registry_id = ResourceId::new(&config.distributed.registry_addr);
-        let image_policy = ImagePolicy::from_config(&config.runtime.image_policy);
 
         let id = ResourceId::new(format!(
             "{}/runtimes/{}",
@@ -45,7 +44,7 @@ impl ContainerRuntime {
             queue,
             registry,
             running: HashMap::new(),
-            pool: ContainerPool::new(image_policy, &config.runtime.podman_socket),
+            pool: ContainerPool::new(&config.runtime),
         })
     }
 

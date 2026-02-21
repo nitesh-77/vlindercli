@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::config::RuntimeConfig;
 use crate::domain::{Agent, ContainerId, ImageDigest, ImageRef, QueueBridge, ContainerDiagnostics, ContainerRuntimeInfo, InvokeMessage};
 
 use super::podman::{Podman, RunTarget, resolve_socket};
@@ -60,8 +61,9 @@ impl ContainerPool {
     /// Create a new pool, detecting the Podman engine version.
     ///
     /// Selects socket API or CLI based on the `podman_socket` config value (ADR 077).
-    pub(crate) fn new(image_policy: ImagePolicy, podman_socket_config: &str) -> Self {
-        let podman: Box<dyn Podman> = match resolve_socket(podman_socket_config) {
+    pub(crate) fn new(config: &RuntimeConfig) -> Self {
+        let image_policy = ImagePolicy::from_config(&config.image_policy);
+        let podman: Box<dyn Podman> = match resolve_socket(&config.podman_socket) {
             Some(path) => {
                 tracing::info!(event = "podman.socket", path = %path.display(), "Using Podman socket API");
                 Box::new(PodmanApiClient::new(&path))
