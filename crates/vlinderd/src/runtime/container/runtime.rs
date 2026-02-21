@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Instant;
 
+use crate::config::Config;
 use crate::domain::{
     Agent, AgentId, ObjectStorageType, QueueBridge, Registry, ResourceId, RoutingKey, Runtime,
     RuntimeType, VectorStorageType, CompleteMessage, ExpectsReply, HarnessType,
@@ -27,25 +28,37 @@ pub struct ContainerRuntime {
 }
 
 impl ContainerRuntime {
-    pub fn new(
-        registry_id: &ResourceId,
-        queue: Arc<dyn MessageQueue + Send + Sync>,
-        registry: Arc<dyn Registry>,
-        image_policy: ImagePolicy,
-        podman_socket: &str,
-    ) -> Self {
+    pub fn new(config: &Config) -> Result<Self, Box<dyn std::error::Error>> {
+        let queue = crate::queue_factory::recording_from_config(config)?;
+        let registry = crate::registry_factory::from_config(config)?;
+
+        let registry_id = ResourceId::new(&config.distributed.registry_addr);
+        let image_policy = ImagePolicy::from_config(&config.runtime.image_policy);
+
         let id = ResourceId::new(format!(
             "{}/runtimes/{}",
             registry_id.as_str(),
             RuntimeType::Container.as_str()
         ));
-        Self {
+        Ok(Self {
             id,
             queue,
             registry,
             running: HashMap::new(),
-            pool: ContainerPool::new(image_policy, podman_socket),
-        }
+            pool: ContainerPool::new(image_policy, &config.runtime.podman_socket),
+        })
+    }
+
+    /// Access the queue (test-only, for integration test setup).
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn queue(&self) -> &Arc<dyn MessageQueue + Send + Sync> {
+        &self.queue
+    }
+
+    /// Access the registry (test-only, for integration test setup).
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn registry(&self) -> &Arc<dyn Registry> {
+        &self.registry
     }
 
     /// Ensure a container is running for this agent. Starts one lazily if needed.
@@ -316,36 +329,22 @@ impl Runtime for ContainerRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::registry::InMemoryRegistry;
-    use crate::domain::SecretStore;
-    use crate::secret_store::InMemorySecretStore;
-    use crate::queue::InMemoryQueue;
-
-    fn test_registry_id() -> ResourceId {
-        ResourceId::new("http://test:9000")
-    }
-
-    fn test_secret_store() -> Arc<dyn SecretStore> {
-        Arc::new(InMemorySecretStore::new())
-    }
-
-    fn test_registry() -> Arc<dyn Registry> {
-        Arc::new(InMemoryRegistry::new(test_secret_store()))
-    }
+    use crate::config::Config;
 
     #[test]
     fn runtime_id_format() {
-        let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
-        let runtime = ContainerRuntime::new(&test_registry_id(), queue, test_registry(), ImagePolicy::Mutable, "disabled");
+        let runtime = ContainerRuntime::new(&Config::for_test()).unwrap();
 
-        assert_eq!(runtime.id().as_str(), "http://test:9000/runtimes/container");
+        assert_eq!(
+            runtime.id().as_str(),
+            "http://127.0.0.1:9090/runtimes/container"
+        );
         assert_eq!(runtime.runtime_type(), RuntimeType::Container);
     }
 
     #[test]
     fn tick_returns_false_when_no_agents() {
-        let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
-        let mut runtime = ContainerRuntime::new(&test_registry_id(), queue, test_registry(), ImagePolicy::Mutable, "disabled");
+        let mut runtime = ContainerRuntime::new(&Config::for_test()).unwrap();
 
         assert!(!runtime.tick());
     }

@@ -237,28 +237,13 @@ fn run_harness_worker(config: &Config, shutdown: &AtomicBool) {
 }
 
 fn run_agent_container_worker(config: &Config, shutdown: &AtomicBool) {
-    use crate::domain::ResourceId;
-
     use crate::runtime::ContainerRuntime;
     use crate::domain::Runtime;
-    use crate::registry_service::GrpcRegistryClient;
 
-    let queue = crate::queue_factory::recording_from_config(config).expect("Failed to create queue");
+    let mut runtime = ContainerRuntime::new(config)
+        .expect("Failed to create container runtime");
 
-    let registry_addr = grpc_registry_addr(config);
-    let registry: Arc<dyn Registry> = Arc::new(
-        GrpcRegistryClient::connect(&registry_addr)
-            .expect("Failed to connect to registry")
-    );
-
-    let registry_id = ResourceId::new(&config.distributed.registry_addr);
-    let image_policy = crate::runtime::ImagePolicy::from_config(&config.runtime.image_policy);
-    let mut runtime = ContainerRuntime::new(
-        &registry_id, queue, Arc::clone(&registry), image_policy,
-        &config.runtime.podman_socket,
-    );
-
-    tracing::info!(registry = %registry_addr, "Container agent worker ready");
+    tracing::info!("Container agent worker ready");
 
     while !shutdown.load(Ordering::Relaxed) {
         runtime.tick();

@@ -18,13 +18,13 @@ use std::path::PathBuf;
 /// Queue backend selector.
 ///
 /// In production only `Nats` is available. The `Memory` variant exists
-/// only in test builds (`#[cfg(test)]`), so production binaries physically
+/// only in test/test-support builds, so production binaries physically
 /// cannot select an in-memory queue.
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum QueueBackend {
     Nats,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     Memory,
 }
 
@@ -35,7 +35,19 @@ pub enum QueueBackend {
 #[serde(rename_all = "lowercase")]
 pub enum StateBackend {
     Grpc,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
+    Memory,
+}
+
+/// Registry backend selector.
+///
+/// Same gating strategy: `Grpc` in prod (connects to registry service),
+/// `Memory` in tests (in-process InMemoryRegistry).
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RegistryBackend {
+    Grpc,
+    #[cfg(any(test, feature = "test-support"))]
     Memory,
 }
 
@@ -65,10 +77,10 @@ impl ConfigLoader for DefaultLoader {
 }
 
 /// Test loader: returns a pre-configured Config.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub struct TestLoader(pub Config);
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 impl ConfigLoader for TestLoader {
     fn load(&self) -> Config {
         self.0.clone()
@@ -133,6 +145,10 @@ fn default_nats_url() -> String {
     "nats://localhost:4222".to_string()
 }
 
+fn default_registry_backend() -> RegistryBackend {
+    RegistryBackend::Grpc
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct StateConfig {
     pub backend: StateBackend,
@@ -149,6 +165,9 @@ pub struct StateConfig {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct DistributedConfig {
+    /// Registry backend selector
+    #[serde(default = "default_registry_backend")]
+    pub registry_backend: RegistryBackend,
     /// Registry gRPC address for worker coordination
     pub registry_addr: String,
     /// State service gRPC address (ADR 079)
@@ -292,6 +311,7 @@ impl Default for OpenRouterConfig {
 impl Default for DistributedConfig {
     fn default() -> Self {
         Self {
+            registry_backend: default_registry_backend(),
             registry_addr: "http://127.0.0.1:9090".to_string(),
             state_addr: "http://127.0.0.1:9092".to_string(),
             harness_addr: "http://127.0.0.1:9091".to_string(),
@@ -403,7 +423,7 @@ impl Config {
     ///
     /// Explicit — not hidden behind Default. Tests that need
     /// different backends should construct Config directly.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn for_test() -> Self {
         Self {
             logging: LoggingConfig::default(),
@@ -416,7 +436,10 @@ impl Config {
             state: StateConfig {
                 backend: StateBackend::Memory,
             },
-            distributed: DistributedConfig::default(),
+            distributed: DistributedConfig {
+                registry_backend: RegistryBackend::Memory,
+                ..DistributedConfig::default()
+            },
             runtime: RuntimeConfig::default(),
         }
     }
@@ -454,6 +477,9 @@ impl Config {
         }
 
         // Distributed
+        if let Ok(v) = std::env::var("VLINDER_DISTRIBUTED_REGISTRY_BACKEND") {
+            self.distributed.registry_backend = parse_registry_backend(&v);
+        }
         if let Ok(v) = std::env::var("VLINDER_DISTRIBUTED_REGISTRY_ADDR") {
             self.distributed.registry_addr = v;
         }
@@ -524,7 +550,7 @@ impl Config {
 fn parse_queue_backend(s: &str) -> QueueBackend {
     match s {
         "nats" => QueueBackend::Nats,
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         "memory" => QueueBackend::Memory,
         other => {
             tracing::warn!(
@@ -536,10 +562,25 @@ fn parse_queue_backend(s: &str) -> QueueBackend {
     }
 }
 
+fn parse_registry_backend(s: &str) -> RegistryBackend {
+    match s {
+        "grpc" => RegistryBackend::Grpc,
+        #[cfg(any(test, feature = "test-support"))]
+        "memory" => RegistryBackend::Memory,
+        other => {
+            tracing::warn!(
+                value = other,
+                "Unknown VLINDER_DISTRIBUTED_REGISTRY_BACKEND — defaulting to grpc"
+            );
+            RegistryBackend::Grpc
+        }
+    }
+}
+
 fn parse_state_backend(s: &str) -> StateBackend {
     match s {
         "grpc" => StateBackend::Grpc,
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         "memory" => StateBackend::Memory,
         other => {
             tracing::warn!(

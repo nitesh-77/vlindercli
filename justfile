@@ -284,7 +284,7 @@ run-integration-tests:
 
     # 8. Run integration tests
     echo "=== Running integration tests ==="
-    VLINDER_INTEGRATION_RUN="$RUN_DIR" cargo test --test '*' -- --ignored --test-threads=1
+    VLINDER_INTEGRATION_RUN="$RUN_DIR" cargo test --features test-support --test '*' -- --ignored --test-threads=1
 
     echo ""
     echo "=== Done. Artifacts in: $RUN_DIR ==="

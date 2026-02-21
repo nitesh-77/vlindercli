@@ -19,7 +19,7 @@ pub fn from_config(config: &Config) -> Result<Arc<dyn MessageQueue + Send + Sync
             let queue = NatsQueue::connect(&config.queue.nats_url)?;
             Ok(Arc::new(queue))
         }
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         QueueBackend::Memory => {
             Ok(Arc::new(crate::queue::InMemoryQueue::new()))
         }
@@ -54,7 +54,7 @@ pub fn recording_from_config(config: &Config) -> Result<Arc<dyn MessageQueue + S
                     ))?
             )
         }
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         StateBackend::Memory => {
             use crate::domain::InMemoryDagStore;
             Arc::new(InMemoryDagStore::new())

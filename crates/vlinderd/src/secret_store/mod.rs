@@ -27,7 +27,7 @@ pub fn from_config(config: &Config) -> Result<Arc<dyn SecretStore>, SecretStoreE
             let store = NatsSecretStore::connect(&config.queue.nats_url)?;
             Ok(Arc::new(store))
         }
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         QueueBackend::Memory => {
             Ok(Arc::new(InMemorySecretStore::new()))
         }

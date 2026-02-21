@@ -1,28 +1,26 @@
 //! Integration tests for ContainerRuntime (long-running model).
 //!
 //! Requires: podman installed + `just build-echo-container`
+//! Compile with: cargo test --features test-support
 
-use std::sync::Arc;
+#![cfg(feature = "test-support")]
 
+use vlinderd::config::Config;
 use vlinderd::domain::{
-    Agent, AgentId, Registry, ResourceId, Runtime, RuntimeType, SecretStore,
-    InvokeDiagnostics, InvokeMessage, MessageQueue, HarnessType, SessionId, SubmissionId, TimelineId,
+    Agent, AgentId, Runtime, RuntimeType,
+    InvokeDiagnostics, InvokeMessage, HarnessType, SessionId, SubmissionId, TimelineId,
 };
-use vlinderd::registry::InMemoryRegistry;
-use vlinderd::queue::InMemoryQueue;
 use vlinderd::runtime::ContainerRuntime;
-use vlinderd::secret_store::InMemorySecretStore;
-
-fn test_secret_store() -> Arc<dyn SecretStore> {
-    Arc::new(InMemorySecretStore::new())
-}
 
 #[test]
 #[ignore] // Run via: just run-integration-tests
 fn container_runtime_executes_echo_agent() {
-    let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
+    let mut runtime = ContainerRuntime::new(&Config::for_test()).unwrap();
 
-    let registry = InMemoryRegistry::new(test_secret_store());
+    // Use the runtime's own queue and registry for test setup
+    let queue = runtime.queue().clone();
+    let registry = runtime.registry().clone();
+
     registry.register_runtime(RuntimeType::Container);
 
     let agent = Agent::from_toml(r#"
@@ -35,15 +33,6 @@ fn container_runtime_executes_echo_agent() {
     "#).unwrap();
     registry.register_agent(agent).unwrap();
     let agent_id = AgentId::new("echo-container");
-    let registry: Arc<dyn Registry> = Arc::new(registry);
-
-    let mut runtime = ContainerRuntime::new(
-        &ResourceId::new("http://test:9000"),
-        Arc::clone(&queue),
-        registry,
-        vlinderd::runtime::ImagePolicy::Mutable,
-        "auto",
-    );
 
     // Send InvokeMessage
     let submission = SubmissionId::new();

@@ -10,6 +10,7 @@ pub mod inference;
 pub mod loader;
 pub mod queue_factory;
 pub mod registry;
+pub mod registry_factory;
 pub mod secret_store;
 pub use vlinder_proto::catalog_service;
 pub use vlinder_proto::harness_service;
