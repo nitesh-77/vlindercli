@@ -41,28 +41,14 @@ pub fn connect_harness(config: &Config) -> Box<dyn Harness> {
     )
 }
 
-/// Open the appropriate DagStore: local SQLite or remote gRPC.
+/// Open the DagStore via gRPC state service.
 pub fn open_dag_store(config: &Config) -> Option<Box<dyn DagStore>> {
-    if config.distributed.enabled {
-        let state_addr = normalize_addr(&config.distributed.state_addr);
-        match GrpcStateClient::connect(&state_addr) {
-            Ok(client) => Some(Box::new(client)),
-            Err(e) => {
-                tracing::warn!(error = %e, "Failed to connect to state service, skipping state read");
-                None
-            }
-        }
-    } else {
-        let db_path = vlindercli::config::dag_db_path();
-        if !db_path.exists() {
-            return None;
-        }
-        match vlindercli::storage::dag_store::SqliteDagStore::open(&db_path) {
-            Ok(store) => Some(Box::new(store)),
-            Err(e) => {
-                tracing::warn!(error = %e, "Failed to open DAG store, skipping state read");
-                None
-            }
+    let state_addr = normalize_addr(&config.distributed.state_addr);
+    match GrpcStateClient::connect(&state_addr) {
+        Ok(client) => Some(Box::new(client)),
+        Err(e) => {
+            tracing::warn!(error = %e, "Failed to connect to state service, skipping state read");
+            None
         }
     }
 }
