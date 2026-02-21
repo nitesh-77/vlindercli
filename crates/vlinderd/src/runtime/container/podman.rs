@@ -54,7 +54,7 @@ impl RunTarget<'_> {
 /// Abstraction over the Podman container engine.
 ///
 /// Pod-oriented: create pods, add containers to them, start/stop pods.
-/// The trait is object-safe so `ContainerPool` can hold a `Box<dyn Podman>`.
+/// The trait is object-safe so `ContainerRuntime` can hold a `Box<dyn Podman>`.
 pub(crate) trait Podman: Send {
     /// Engine version (e.g. 4.9.3).  None if Podman is unavailable.
     fn engine_version(&self) -> Option<semver::Version>;

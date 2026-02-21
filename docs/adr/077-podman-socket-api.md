@@ -13,7 +13,7 @@ All Podman interactions shell out via `Command::new("podman")` in `PodmanCli`. T
 - Error messages are raw stderr strings
 - No structured error codes
 
-Podman exposes a REST API over a Unix socket (`/v5.0.0/libpod/...`) with typed JSON responses. The existing `Podman` trait was designed for exactly this kind of swap — `ContainerPool` holds `Box<dyn Podman>`.
+Podman exposes a REST API over a Unix socket (`/v5.0.0/libpod/...`) with typed JSON responses. The existing `Podman` trait was designed for exactly this kind of swap — `ContainerRuntime` holds `Box<dyn Podman>`.
 
 ## Decision
 

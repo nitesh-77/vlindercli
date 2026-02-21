@@ -1,17 +1,18 @@
-//! ContainerPool — manages the lifecycle of Podman pods.
+//! ContainerRuntime — manages the lifecycle of Podman pods for container agents.
 //!
 //! Each agent runs as a pod containing two containers:
 //! 1. The agent container (user-provided OCI image)
 //! 2. The sidecar container (vlinder-sidecar, mediates queue ↔ agent)
 //!
-//! The pool creates pods, starts them, and tears them down on shutdown.
+//! The runtime creates pods, starts them, and tears them down on shutdown.
 //! Dead pod detection is deferred — ensure_containers restarts missing pods
 //! on the next tick.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::config::Config;
-use crate::domain::{Agent, ImageRef, PodId, Registry, RuntimeType};
+use crate::domain::{Agent, ImageRef, PodId, Registry, ResourceId, Runtime, RuntimeType};
 
 use super::podman::{Podman, RunTarget, resolve_socket};
 use super::podman_api::PodmanApiClient;
@@ -42,23 +43,34 @@ struct Pod {
     pod_id: PodId,
 }
 
-/// Manages the lifecycle of Podman pods for container agents.
+/// Orchestrates Podman pods for container agents.
 ///
 /// Maps agent names to running pods. Each pod contains an agent container
-/// and a sidecar container. The sidecar handles dispatch; the pool handles
+/// and a sidecar container. The sidecar handles dispatch; the runtime handles
 /// compute lifecycle.
-pub(crate) struct ContainerPool {
+pub struct ContainerRuntime {
+    id: ResourceId,
+    registry: Arc<dyn Registry>,
     pods: HashMap<String, Pod>,
     config: Config,
     image_policy: ImagePolicy,
     podman: Box<dyn Podman>,
 }
 
-impl ContainerPool {
-    /// Create a new pool, detecting the Podman engine version.
+impl ContainerRuntime {
+    /// Create a new runtime, connecting to the registry and detecting Podman.
     ///
     /// Selects socket API or CLI based on the `podman_socket` config value (ADR 077).
-    pub(crate) fn new(config: &Config) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new(config: &Config) -> Result<Self, Box<dyn std::error::Error>> {
+        let registry = crate::registry_factory::from_config(config)?;
+
+        let registry_id = ResourceId::new(&config.distributed.registry_addr);
+        let id = ResourceId::new(format!(
+            "{}/runtimes/{}",
+            registry_id.as_str(),
+            RuntimeType::Container.as_str()
+        ));
+
         let image_policy = ImagePolicy::from_config(&config.runtime.image_policy);
         let podman: Box<dyn Podman> = match resolve_socket(&config.runtime.podman_socket) {
             Some(path) => {
@@ -79,11 +91,19 @@ impl ContainerPool {
         }
         tracing::info!(event = "runtime.image_policy", policy = ?image_policy, "Container image policy");
         Ok(Self {
+            id,
+            registry,
             pods: HashMap::new(),
             config: config.clone(),
             image_policy,
             podman,
         })
+    }
+
+    /// Access the registry (test-only, for integration test setup).
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn registry(&self) -> &Arc<dyn Registry> {
+        &self.registry
     }
 
     /// Start a pod with agent + sidecar containers.
@@ -92,7 +112,7 @@ impl ContainerPool {
     /// 2. Add the agent container (user image, no env vars)
     /// 3. Add the sidecar container (vlinder-sidecar image, env vars for config)
     /// 4. Start the pod (all containers start together)
-    pub(crate) fn start(&mut self, name: &str, agent: &Agent) -> Result<(), String> {
+    fn start(&mut self, name: &str, agent: &Agent) -> Result<(), String> {
         if self.pods.contains_key(name) {
             return Ok(());
         }
@@ -173,8 +193,8 @@ impl ContainerPool {
     }
 
     /// Start pods for agents that don't have one yet.
-    fn ensure_containers(&mut self, registry: &dyn Registry) {
-        let agents = registry.get_agents_by_runtime(RuntimeType::Container);
+    fn ensure_containers(&mut self) {
+        let agents = self.registry.get_agents_by_runtime(RuntimeType::Container);
         for agent in &agents {
             if self.pods.contains_key(&agent.name) {
                 continue;
@@ -189,16 +209,30 @@ impl ContainerPool {
             }
         }
     }
+}
 
-    /// Tick: ensure pods are running for all registered container agents.
-    pub(crate) fn tick(&mut self, registry: &dyn Registry) -> bool {
+impl Drop for ContainerRuntime {
+    fn drop(&mut self) {
+        self.shutdown();
+    }
+}
+
+impl Runtime for ContainerRuntime {
+    fn id(&self) -> &ResourceId {
+        &self.id
+    }
+
+    fn runtime_type(&self) -> RuntimeType {
+        RuntimeType::Container
+    }
+
+    fn tick(&mut self) -> bool {
         let before = self.pods.len();
-        self.ensure_containers(registry);
+        self.ensure_containers();
         self.pods.len() != before
     }
 
-    /// Shut down all managed pods.
-    pub(crate) fn shutdown(&mut self) {
+    fn shutdown(&mut self) {
         for (name, pod) in self.pods.drain() {
             tracing::info!(event = "pod.stopped", agent = %name, pod = %pod.pod_id, "Stopping pod");
             self.podman.pod_stop_and_remove(&pod.pod_id, 5);
@@ -217,6 +251,7 @@ fn extract_port(url: &str, default: u16) -> u16 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::Config;
 
     #[test]
     fn image_policy_from_config_pinned() {
@@ -257,5 +292,23 @@ mod tests {
     #[test]
     fn extract_port_trailing_slash() {
         assert_eq!(extract_port("http://localhost:9090/", 9090), 9090);
+    }
+
+    #[test]
+    fn runtime_id_format() {
+        let runtime = ContainerRuntime::new(&Config::for_test()).unwrap();
+
+        assert_eq!(
+            runtime.id().as_str(),
+            "http://127.0.0.1:9090/runtimes/container"
+        );
+        assert_eq!(runtime.runtime_type(), RuntimeType::Container);
+    }
+
+    #[test]
+    fn tick_returns_false_when_no_agents() {
+        let mut runtime = ContainerRuntime::new(&Config::for_test()).unwrap();
+
+        assert!(!runtime.tick());
     }
 }
