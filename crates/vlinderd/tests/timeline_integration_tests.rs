@@ -11,10 +11,10 @@ mod common;
 
 use common::*;
 
-use vlindercli::domain::workers::dag::build_dag_node;
-use vlindercli::domain::{DagStore, DagWorker};
-use vlindercli::git_dag::GitDagWorker;
-use vlindercli::storage::dag_store::SqliteDagStore;
+use vlinderd::domain::workers::dag::build_dag_node;
+use vlinderd::domain::{DagStore, DagWorker};
+use vlinderd::git_dag::GitDagWorker;
+use vlinderd::storage::dag_store::SqliteDagStore;
 
 // ============================================================================
 // Test: checkout shows trailers and state

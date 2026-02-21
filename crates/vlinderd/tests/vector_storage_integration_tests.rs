@@ -2,7 +2,7 @@
 //! Tests SQLite-specific behavior: persistence, sqlite-vec functionality.
 
 use tempfile::TempDir;
-use vlindercli::storage::{VectorStorage, SqliteVectorStorage};
+use vlinderd::storage::{VectorStorage, SqliteVectorStorage};
 
 /// Create a 768-dim test vector
 fn make_test_vector(seed: f32) -> Vec<f32> {

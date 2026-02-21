@@ -4,14 +4,14 @@
 
 use std::sync::Arc;
 
-use vlindercli::domain::{
+use vlinderd::domain::{
     Agent, AgentId, Registry, ResourceId, Runtime, RuntimeType, SecretStore,
     InvokeDiagnostics, InvokeMessage, MessageQueue, HarnessType, SessionId, SubmissionId, TimelineId,
 };
-use vlindercli::registry::InMemoryRegistry;
-use vlindercli::queue::InMemoryQueue;
-use vlindercli::runtime::ContainerRuntime;
-use vlindercli::secret_store::InMemorySecretStore;
+use vlinderd::registry::InMemoryRegistry;
+use vlinderd::queue::InMemoryQueue;
+use vlinderd::runtime::ContainerRuntime;
+use vlinderd::secret_store::InMemorySecretStore;
 
 fn test_secret_store() -> Arc<dyn SecretStore> {
     Arc::new(InMemorySecretStore::new())
@@ -41,7 +41,7 @@ fn container_runtime_executes_echo_agent() {
         &ResourceId::new("http://test:9000"),
         Arc::clone(&queue),
         registry,
-        vlindercli::runtime::ImagePolicy::Mutable,
+        vlinderd::runtime::ImagePolicy::Mutable,
         "auto",
     );
 

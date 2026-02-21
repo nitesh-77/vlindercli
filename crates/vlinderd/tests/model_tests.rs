@@ -1,6 +1,6 @@
 //! Model and ModelManifest tests.
 
-use vlindercli::domain::{Model, ModelManifest, ModelType, ModelTypeConfig, Provider};
+use vlinderd::domain::{Model, ModelManifest, ModelType, ModelTypeConfig, Provider};
 
 // ============================================================================
 // ModelManifest Tests (inline TOML - no fixtures needed)

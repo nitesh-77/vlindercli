@@ -456,12 +456,12 @@ impl Config {
 
     /// Build tracing EnvFilter from config.
     ///
-    /// The configured level applies to vlindercli only. External crates
+    /// The configured level applies to vlinderd only. External crates
     /// (async_nats, tonic, hyper, etc.) are suppressed to warn so they
     /// don't pollute the user's terminal.
     pub fn tracing_filter(&self) -> String {
         format!(
-            "warn,vlindercli={}",
+            "warn,vlinderd={}",
             self.logging.level
         )
     }

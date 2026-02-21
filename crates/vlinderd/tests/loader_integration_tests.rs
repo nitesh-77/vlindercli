@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use vlindercli::loader::{load_agent, load_fleet};
+use vlinderd::loader::{load_agent, load_fleet};
 
 fn fixture_uri(name: &str) -> String {
     let path = PathBuf::from("tests/fixtures/agents")

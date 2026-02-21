@@ -1,9 +1,9 @@
 //! Integration tests that require a running Ollama server.
 
-use vlindercli::catalog::OllamaCatalog;
-use vlindercli::domain::{EmbeddingEngine, Provider, InferenceEngine, ModelCatalog};
-use vlindercli::embedding::OllamaEmbeddingEngine;
-use vlindercli::inference::OllamaInferenceEngine;
+use vlinderd::catalog::OllamaCatalog;
+use vlinderd::domain::{EmbeddingEngine, Provider, InferenceEngine, ModelCatalog};
+use vlinderd::embedding::OllamaEmbeddingEngine;
+use vlinderd::inference::OllamaInferenceEngine;
 
 #[test]
 #[ignore] // Run via: just run-integration-tests

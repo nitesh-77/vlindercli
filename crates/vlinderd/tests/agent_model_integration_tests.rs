@@ -4,7 +4,7 @@
 //! The registry owns models; agents reference them by name.
 
 use std::path::{Path, PathBuf};
-use vlindercli::domain::Agent;
+use vlinderd::domain::Agent;
 
 const AGENT_FIXTURES: &str = "tests/fixtures/agents";
 

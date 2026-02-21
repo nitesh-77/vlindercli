@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
-use vlindercli::domain::{
+use vlinderd::domain::{
     Agent, Job, JobId, JobStatus, Model, ModelType, Protocol, Provider,
     Requirements, ResourceId, RuntimeType, ServiceConfig, ServiceType, SubmissionId,
 };
-use vlindercli::registry_service::proto;
+use vlinderd::registry_service::proto;
 
 // ============================================================================
 // ResourceId round-trip

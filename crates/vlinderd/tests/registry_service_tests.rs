@@ -6,10 +6,10 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use vlindercli::domain::{Agent, Registry, Requirements, RuntimeType, SecretStore, SubmissionId};
-use vlindercli::registry::InMemoryRegistry;
-use vlindercli::registry_service::{GrpcRegistryClient, RegistryServiceServer};
-use vlindercli::secret_store::InMemorySecretStore;
+use vlinderd::domain::{Agent, Registry, Requirements, RuntimeType, SecretStore, SubmissionId};
+use vlinderd::registry::InMemoryRegistry;
+use vlinderd::registry_service::{GrpcRegistryClient, RegistryServiceServer};
+use vlinderd::secret_store::InMemorySecretStore;
 
 fn test_secret_store() -> Arc<dyn SecretStore> {
     Arc::new(InMemorySecretStore::new())

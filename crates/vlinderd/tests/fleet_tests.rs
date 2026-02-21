@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use vlindercli::domain::{Fleet, FleetManifest};
+use vlinderd::domain::{Fleet, FleetManifest};
 
 const FLEET_FIXTURES: &str = "tests/fixtures/fleets";
 

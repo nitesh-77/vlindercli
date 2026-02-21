@@ -7,15 +7,15 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use vlindercli::config::{conversations_dir, Config};
-use vlindercli::session_server::SessionServer;
-use vlindercli::supervisor::Supervisor;
-use vlindercli::worker::run_worker_loop;
-use vlindercli::worker_role::WorkerRole;
+use vlinderd::config::{conversations_dir, Config};
+use vlinderd::session_server::SessionServer;
+use vlinderd::supervisor::Supervisor;
+use vlinderd::worker::run_worker_loop;
+use vlinderd::worker_role::WorkerRole;
 
 fn main() {
     let config = Config::load();
-    vlindercli::tracing_setup::init_tracing(&config);
+    vlinderd::tracing_setup::init_tracing(&config);
 
     if let Some(role) = WorkerRole::from_env() {
         run_as_worker(role);
