@@ -3138,7 +3138,6 @@ dependencies = [
  "async-openai",
  "base64",
  "chrono",
- "dirs",
  "ed25519-dalek",
  "futures",
  "rand",

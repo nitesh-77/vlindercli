@@ -15,7 +15,6 @@ base64 = "0.22.1"
 ed25519-dalek = { version = "2", features = ["rand_core"] }
 rand = "0.8"
 toml = "0.8"
-dirs = "6"
 semver = "1"
 async-openai = { version = "0.32", default-features = false, features = ["chat-completion-types"] }
 

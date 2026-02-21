@@ -1,10 +1,8 @@
 //! Repository trait for Registry persistence.
 
 use std::collections::HashMap;
-use std::path::Path;
 
-use super::{Agent, ImageDigest, Model, ModelType, Mount, Prompts, Provider, Requirements, ResourceId, ServiceConfig, ServiceType};
-use super::path::AbsolutePath;
+use super::{Agent, ImageDigest, Model, ModelType, Prompts, Provider, Requirements, ResourceId, ServiceConfig, ServiceType};
 use super::runtime::RuntimeType;
 
 /// Repository for persisting Registry state.
@@ -92,7 +90,7 @@ impl StoredModel {
 /// Stored agent representation for persistence.
 ///
 /// Scalar fields stored directly; complex nested fields (requirements,
-/// prompts, mounts) serialized as JSON strings.
+/// prompts) serialized as JSON strings.
 #[derive(Debug)]
 pub struct StoredAgent {
     pub name: String,
@@ -105,7 +103,6 @@ pub struct StoredAgent {
     pub vector_storage: Option<String>,
     pub requirements_json: String,
     pub prompts_json: Option<String>,
-    pub mounts_json: String,
     /// Base64-encoded Ed25519 public key (ADR 084).
     pub public_key: Option<String>,
 }
@@ -126,18 +123,10 @@ impl StoredAgent {
             direct_summarize: p.direct_summarize.clone(),
         });
 
-        let mounts: Vec<MountJson> = agent.mounts.iter().map(|m| MountJson {
-            host_path: m.host_path.to_string(),
-            guest_path: m.guest_path.to_string_lossy().to_string(),
-            readonly: m.readonly,
-        }).collect();
-
         let requirements_json = serde_json::to_string(&requirements)
             .map_err(|e| RepositoryError::Serialization(e.to_string()))?;
         let prompts_json = prompts.map(|p| serde_json::to_string(&p))
             .transpose()
-            .map_err(|e| RepositoryError::Serialization(e.to_string()))?;
-        let mounts_json = serde_json::to_string(&mounts)
             .map_err(|e| RepositoryError::Serialization(e.to_string()))?;
 
         Ok(Self {
@@ -151,7 +140,6 @@ impl StoredAgent {
             vector_storage: agent.vector_storage.as_ref().map(|r| r.as_str().to_string()),
             requirements_json,
             prompts_json,
-            mounts_json,
             public_key: agent.public_key.as_ref().map(|k| {
                 base64::Engine::encode(&base64::engine::general_purpose::STANDARD, k)
             }),
@@ -177,22 +165,7 @@ impl StoredAgent {
             .transpose()
             .map_err(|e| RepositoryError::Serialization(e.to_string()))?;
 
-        let mount_jsons: Vec<MountJson> = serde_json::from_str(&self.mounts_json)
-            .map_err(|e| RepositoryError::Serialization(e.to_string()))?;
-
         let models = requirements.models;
-
-        let mounts = mount_jsons.into_iter().map(|m| {
-            let host_path = AbsolutePath::from_absolute(Path::new(&m.host_path))
-                .ok_or_else(|| RepositoryError::Serialization(
-                    format!("mount host_path is not absolute: {}", m.host_path)
-                ))?;
-            Ok(Mount {
-                host_path,
-                guest_path: m.guest_path.into(),
-                readonly: m.readonly,
-            })
-        }).collect::<Result<Vec<_>, RepositoryError>>()?;
 
         let public_key = self.public_key.as_ref()
             .map(|b64| base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b64))
@@ -219,7 +192,6 @@ impl StoredAgent {
                 reduce_summaries: p.reduce_summaries,
                 direct_summarize: p.direct_summarize,
             }),
-            mounts,
         })
     }
 }
@@ -239,13 +211,6 @@ struct PromptsJson {
     map_summarize: Option<String>,
     reduce_summaries: Option<String>,
     direct_summarize: Option<String>,
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-struct MountJson {
-    host_path: String,
-    guest_path: String,
-    readonly: bool,
 }
 
 #[cfg(test)]
@@ -270,7 +235,6 @@ mod tests {
                 services: HashMap::new(),
             },
             prompts: None,
-            mounts: vec![],
         }
     }
 
@@ -309,13 +273,6 @@ mod tests {
                 reduce_summaries: None,
                 direct_summarize: None,
             }),
-            mounts: vec![
-                Mount {
-                    host_path: AbsolutePath::from_absolute(Path::new("/data/notes")).unwrap(),
-                    guest_path: "/mnt/notes".into(),
-                    readonly: true,
-                },
-            ],
         }
     }
 
@@ -336,7 +293,6 @@ mod tests {
         assert!(restored.requirements.models.is_empty());
         assert!(restored.requirements.services.is_empty());
         assert!(restored.prompts.is_none());
-        assert!(restored.mounts.is_empty());
     }
 
     #[test]
@@ -374,11 +330,6 @@ mod tests {
         assert!(prompts.query_expansion.is_none());
         assert_eq!(prompts.answer_generation.as_deref(), Some("Generate answer"));
 
-        // Mounts
-        assert_eq!(restored.mounts.len(), 1);
-        assert_eq!(restored.mounts[0].host_path.to_string(), "/data/notes");
-        assert_eq!(restored.mounts[0].guest_path.to_string_lossy(), "/mnt/notes");
-        assert!(restored.mounts[0].readonly);
     }
 
     #[test]

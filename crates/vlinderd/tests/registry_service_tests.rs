@@ -73,7 +73,7 @@ fn grpc_register_and_get_agent() {
         requirements: empty_requirements(),
         object_storage: None,
         vector_storage: None,
-        mounts: vec![],
+
         source: None,
         prompts: None,
         image_digest: None,
@@ -108,7 +108,7 @@ fn grpc_list_agents() {
             requirements: empty_requirements(),
             object_storage: None,
             vector_storage: None,
-            mounts: vec![],
+
             source: None,
             prompts: None,
             image_digest: None,
@@ -138,7 +138,7 @@ fn grpc_job_lifecycle() {
         requirements: empty_requirements(),
         object_storage: None,
         vector_storage: None,
-        mounts: vec![],
+
         source: None,
         prompts: None,
         image_digest: None,

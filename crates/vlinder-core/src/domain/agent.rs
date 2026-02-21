@@ -1,18 +1,17 @@
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde::Serialize;
 
-use super::agent_manifest::{AgentManifest, MountConfig, ParseError, PromptsConfig, RequirementsConfig, ServiceConfig};
+use super::agent_manifest::{AgentManifest, ParseError, PromptsConfig, RequirementsConfig, ServiceConfig};
 use super::service_type::ServiceType;
 use super::image_digest::ImageDigest;
-use super::path::AbsolutePath;
 use super::resource_id::ResourceId;
 use super::runtime::RuntimeType;
 
 /// An agent with resolved paths, ready for execution.
 ///
-/// All paths (executable, mounts, model URIs) are resolved to absolute paths at load time.
+/// All paths (executable, model URIs) are resolved to absolute paths at load time.
 /// See ADR 020 for the manifest format, ADR 048 for identity model.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Agent {
@@ -21,7 +20,6 @@ pub struct Agent {
     pub source: Option<String>,
     pub requirements: Requirements,
     pub prompts: Option<Prompts>,
-    pub mounts: Vec<Mount>,
     /// Registry-assigned identity: `<registry_id>/agents/<name>`.
     /// Set by the registry during registration.
     pub id: ResourceId,
@@ -69,12 +67,6 @@ impl Agent {
     /// The `id` field is set to a placeholder. The registry assigns the real
     /// id (`<registry_id>/agents/<name>`) during registration.
     pub fn from_manifest(manifest: AgentManifest) -> Result<Agent, LoadError> {
-        // Validate mounts exist
-        let mut mounts = Vec::new();
-        for mount_config in manifest.mounts {
-            mounts.push(Mount::from_config(mount_config)?);
-        }
-
         let runtime = RuntimeType::from_str(&manifest.runtime)
             .ok_or_else(|| LoadError::Parse(format!("unknown runtime: {}", manifest.runtime)))?;
 
@@ -84,7 +76,6 @@ impl Agent {
             source: manifest.source,
             requirements: Requirements::from_config(manifest.requirements),
             prompts: manifest.prompts.map(|p| p.into()),
-            mounts,
             id: Self::placeholder_id(&manifest.name),
             runtime,
             executable: manifest.executable,
@@ -127,7 +118,6 @@ impl Agent {
 pub enum LoadError {
     Io(std::io::Error),
     Parse(String),
-    MountNotFound(String),
 }
 
 impl From<std::io::Error> for LoadError {
@@ -189,35 +179,6 @@ impl From<PromptsConfig> for Prompts {
     }
 }
 
-/// Resolved filesystem mount for WASI access
-#[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct Mount {
-    pub host_path: AbsolutePath,
-    pub guest_path: PathBuf,
-    pub readonly: bool,
-}
-
-impl Mount {
-    /// Create a Mount from config. Host path is already resolved to absolute.
-    fn from_config(config: MountConfig) -> Result<Mount, LoadError> {
-        let host_path = AbsolutePath::from_absolute(Path::new(&config.host_path))
-            .expect("AgentManifest::load() must produce absolute paths");
-
-        if !host_path.exists() {
-            return Err(LoadError::MountNotFound(format!(
-                "mount path does not exist: {}",
-                host_path
-            )));
-        }
-
-        Ok(Mount {
-            host_path,
-            guest_path: PathBuf::from(&config.guest_path),
-            readonly: config.mode == "ro",
-        })
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -242,7 +203,6 @@ mod tests {
         assert_eq!(agent.description, "Echoes input");
         assert_eq!(agent.runtime, RuntimeType::Container);
         assert_eq!(agent.executable, "localhost/echo:latest");
-        assert!(agent.mounts.is_empty());
         assert!(agent.prompts.is_none());
         assert!(agent.object_storage.is_none());
         assert!(agent.vector_storage.is_none());

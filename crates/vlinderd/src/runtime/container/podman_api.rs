@@ -8,7 +8,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::domain::{ContainerId, ImageDigest, ImageRef, Mount};
+use crate::domain::{ContainerId, ImageDigest, ImageRef};
 
 use super::podman::{Podman, PodmanError, RunTarget};
 use super::unix_transport::unix_agent;
@@ -55,7 +55,7 @@ impl Podman for PodmanApiClient {
         ImageDigest::parse(body.digest).ok()
     }
 
-    fn run(&self, image: RunTarget<'_>, mounts: &[Mount]) -> Result<ContainerId, PodmanError> {
+    fn run(&self, image: RunTarget<'_>) -> Result<ContainerId, PodmanError> {
         // Build the container spec
         let port_mapping = vec![PortMapping {
             container_port: 8080,
@@ -63,21 +63,9 @@ impl Podman for PodmanApiClient {
             protocol: "tcp".to_string(),
         }];
 
-        // Convert domain::Mount directly to API mount structs — no string round-trip
-        let api_mounts: Vec<ApiMount> = mounts.iter().map(|m| {
-            let mode = if m.readonly { "ro" } else { "rw" };
-            ApiMount {
-                source: m.host_path.to_string(),
-                destination: m.guest_path.display().to_string(),
-                mount_type: "bind".to_string(),
-                options: vec![mode.to_string()],
-            }
-        }).collect();
-
         let spec = ContainerCreateSpec {
             image: image.as_str().to_string(),
             portmappings: Some(port_mapping),
-            mounts: if api_mounts.is_empty() { None } else { Some(api_mounts) },
         };
 
         // Create container
@@ -189,8 +177,6 @@ struct ContainerCreateSpec {
     image: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     portmappings: Option<Vec<PortMapping>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    mounts: Option<Vec<ApiMount>>,
 }
 
 #[derive(Serialize)]
@@ -198,17 +184,6 @@ struct PortMapping {
     container_port: u16,
     host_port: u16,
     protocol: String,
-}
-
-/// API-specific mount struct for the Podman REST API JSON body.
-/// Distinct from domain::Mount — this is a wire format, not a domain type.
-#[derive(Serialize)]
-struct ApiMount {
-    destination: String,
-    source: String,
-    #[serde(rename = "type")]
-    mount_type: String,
-    options: Vec<String>,
 }
 
 #[derive(Deserialize)]

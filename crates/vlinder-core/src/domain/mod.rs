@@ -48,7 +48,7 @@ pub mod workers;
 // Agent & Fleet
 // ============================================================================
 
-pub use agent::{Agent, LoadError as AgentLoadError, Mount, Prompts, Requirements};
+pub use agent::{Agent, LoadError as AgentLoadError, Prompts, Requirements};
 pub use container_id::ContainerId;
 pub use image_digest::ImageDigest;
 pub use operation::Operation;

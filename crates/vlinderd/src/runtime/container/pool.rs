@@ -118,7 +118,7 @@ impl ContainerPool {
                 .unwrap_or(RunTarget::Ref(&image_ref)),
         };
 
-        let container_id = self.podman.run(run_target, &agent.mounts)
+        let container_id = self.podman.run(run_target)
             .map_err(|e| e.to_string())?;
 
         // Capture image metadata for diagnostics (ADR 073)

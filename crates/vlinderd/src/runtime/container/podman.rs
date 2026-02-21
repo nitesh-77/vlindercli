@@ -7,7 +7,7 @@
 
 use std::fmt;
 
-use crate::domain::{ContainerId, ImageDigest, ImageRef, Mount};
+use crate::domain::{ContainerId, ImageDigest, ImageRef};
 
 // ── Error type ──────────────────────────────────────────────────────
 
@@ -71,7 +71,7 @@ pub(crate) trait Podman: Send {
     fn engine_version(&self) -> Option<semver::Version>;
 
     /// Start a detached container and return its ID.
-    fn run(&self, image: RunTarget<'_>, mounts: &[Mount]) -> Result<ContainerId, PodmanError>;
+    fn run(&self, image: RunTarget<'_>) -> Result<ContainerId, PodmanError>;
 
     /// Return the content-addressed digest for an image.
     fn image_digest(&self, image_ref: &ImageRef) -> Option<ImageDigest>;

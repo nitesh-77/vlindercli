@@ -27,8 +27,3 @@ services = ["infer", "embed", "object-storage", "vector-storage"]
 [requirements.storage]
 object = true
 vector = true
-
-[[mounts]]
-host_path = "mnt"
-guest_path = "/"
-mode = "rw"

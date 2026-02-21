@@ -14,8 +14,3 @@ services = ["infer", "embed", "get_file", "put_file", "store_embedding", "search
 [requirements.models]
 phi3 = "file://./models/phi3.toml"
 nomic-embed = "file://./models/nomic-embed.toml"
-
-[[mounts]]
-host_path = "mnt"
-guest_path = "/"
-mode = "rw"

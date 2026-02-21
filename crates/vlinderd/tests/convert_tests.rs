@@ -80,7 +80,7 @@ fn agent_domain_to_proto_preserves_fields() {
             services,
         },
         prompts: None,
-        mounts: vec![],
+
         object_storage: Some(ResourceId::new("sqlite:///data/obj.db")),
         vector_storage: None,
     };
@@ -112,7 +112,7 @@ fn agent_proto_to_domain_round_trip() {
             protocol: proto::Protocol::Anthropic as i32,
             models: vec!["anthropic/claude-3.5-sonnet".to_string()],
         }],
-        mounts: vec![],
+
         models: vec![],
         object_storage: None,
         vector_storage: None,
@@ -153,7 +153,7 @@ fn agent_models_survive_proto_round_trip() {
             services,
         },
         prompts: None,
-        mounts: vec![],
+
         object_storage: None,
         vector_storage: None,
     };
@@ -181,7 +181,7 @@ fn agent_proto_missing_id_fails() {
         runtime: "container".to_string(),
         executable: "x".to_string(),
         services: vec![],
-        mounts: vec![],
+
         models: vec![],
         object_storage: None,
         vector_storage: None,

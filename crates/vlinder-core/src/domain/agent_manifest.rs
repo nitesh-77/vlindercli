@@ -10,7 +10,7 @@ use super::service_type::ServiceType;
 
 /// Agent manifest as read from agent.toml.
 ///
-/// Relative paths (models, mounts, storage) are resolved against
+/// Relative paths (executable, storage URIs) are resolved against
 /// the manifest's directory during loading.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct AgentManifest {
@@ -27,8 +27,6 @@ pub struct AgentManifest {
     pub requirements: RequirementsConfig,
     #[serde(default)]
     pub prompts: Option<PromptsConfig>,
-    #[serde(default)]
-    pub mounts: Vec<MountConfig>,
     /// Object storage resource ID (e.g., "sqlite:///path/to/objects.db")
     #[serde(default)]
     pub object_storage: Option<ResourceId>,
@@ -42,7 +40,6 @@ impl AgentManifest {
     ///
     /// Resolves relative paths to absolute:
     /// - `executable` → resolved only for file-based runtimes
-    /// - `mounts[].host_path` → absolute paths
     pub fn load(path: &Path) -> Result<AgentManifest, ParseError> {
         let content = std::fs::read_to_string(path)?;
         let mut manifest: AgentManifest = toml::from_str(&content)?;
@@ -61,11 +58,6 @@ impl AgentManifest {
         }
 
         // Models are registry names (ADR 094) — no URI resolution needed.
-
-        // Resolve mount host paths to absolute
-        for mount in &mut manifest.mounts {
-            mount.host_path = resolve_host_path(&mount.host_path, &agent_dir);
-        }
 
         // Resolve storage URIs (sqlite:// paths need to be absolute)
         if let Some(ref storage) = manifest.object_storage {
@@ -120,22 +112,6 @@ fn resolve_executable_path(executable: &str, agent_dir: &Path) -> Result<String,
     }
 
     Ok(format!("file://{}", exe_path.display()))
-}
-
-/// Resolve a host path, making relative paths absolute.
-///
-/// Handles tilde expansion: `~/foo` → `/home/user/foo`.
-fn resolve_host_path(host_path: &str, agent_dir: &Path) -> String {
-    if let Some(rest) = host_path.strip_prefix("~/") {
-        if let Some(home) = dirs::home_dir() {
-            return home.join(rest).display().to_string();
-        }
-    }
-    if Path::new(host_path).is_absolute() {
-        host_path.to_string()
-    } else {
-        agent_dir.join(host_path).display().to_string()
-    }
 }
 
 /// Resolve a storage URI, making relative sqlite:// paths absolute.
@@ -236,19 +212,6 @@ pub struct PromptsConfig {
     pub map_summarize: Option<String>,
     pub reduce_summaries: Option<String>,
     pub direct_summarize: Option<String>,
-}
-
-/// Mount declaration as declared in agent.toml
-#[derive(Clone, Debug, PartialEq, Deserialize)]
-pub struct MountConfig {
-    pub host_path: String,
-    pub guest_path: String,
-    #[serde(default = "default_mount_mode")]
-    pub mode: String,
-}
-
-fn default_mount_mode() -> String {
-    "rw".to_string()
 }
 
 #[cfg(test)]

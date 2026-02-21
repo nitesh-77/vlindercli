@@ -84,35 +84,6 @@ fn manifest_parses_requirements() {
 }
 
 #[test]
-fn manifest_parses_mounts() {
-    let manifest: AgentManifest = parse_manifest(r#"
-        name = "test-agent"
-        description = "A test agent"
-        runtime = "container"
-        executable = "localhost/test-agent:latest"
-
-        [requirements]
-
-
-        [[mounts]]
-        host_path = "data"
-        guest_path = "/data"
-        mode = "ro"
-
-        [[mounts]]
-        host_path = "output"
-        guest_path = "/output"
-        mode = "rw"
-    "#).unwrap();
-
-    assert_eq!(manifest.mounts.len(), 2);
-    assert_eq!(manifest.mounts[0].host_path, "data");
-    assert_eq!(manifest.mounts[0].guest_path, "/data");
-    assert_eq!(manifest.mounts[0].mode, "ro");
-    assert_eq!(manifest.mounts[1].mode, "rw");
-}
-
-#[test]
 fn manifest_defaults_empty_optional_fields() {
     let manifest: AgentManifest = parse_manifest(r#"
         name = "minimal"
@@ -126,7 +97,6 @@ fn manifest_defaults_empty_optional_fields() {
 
     assert!(manifest.source.is_none());
     assert!(manifest.prompts.is_none());
-    assert!(manifest.mounts.is_empty());
     assert!(manifest.requirements.models.is_empty());
 }
 
@@ -172,36 +142,6 @@ fn agent_has_model_from_manifest() {
     assert!(agent.has_model("phi3"));
     assert!(agent.has_model("nomic-embed-text"));
     assert!(!agent.has_model("llama3"));
-}
-
-#[test]
-fn agent_no_mounts_when_none_declared() {
-    let agent = Agent::load(&agent_fixture("echo-agent")).unwrap();
-
-    // No mounts declared → no filesystem access (ADR 019)
-    assert!(agent.mounts.is_empty());
-}
-
-#[test]
-fn agent_explicit_mounts_from_manifest() {
-    let agent = Agent::load(&agent_fixture("mount-test-agent")).unwrap();
-
-    assert_eq!(agent.mounts.len(), 2);
-
-    // Mounts are resolved to absolute paths
-    assert!(agent.mounts[0].host_path.to_string().ends_with("data"));
-    assert_eq!(agent.mounts[0].guest_path, PathBuf::from("/data"));
-    assert!(agent.mounts[0].readonly);
-
-    assert!(agent.mounts[1].host_path.to_string().ends_with("output"));
-    assert_eq!(agent.mounts[1].guest_path, PathBuf::from("/output"));
-    assert!(!agent.mounts[1].readonly);
-}
-
-#[test]
-fn agent_load_fails_for_missing_mount() {
-    let result = Agent::load(&agent_fixture("missing-mount-agent"));
-    assert!(result.is_err(), "Should fail when mount path doesn't exist");
 }
 
 #[test]

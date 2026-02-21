@@ -7,9 +7,9 @@ use super::fleet;
 /// Run the bundled support fleet.
 ///
 /// Syntactic sugar for `vlinder fleet run -p <bundled-support-fleet>`.
-/// Ensures the logs directory exists so the log-analyst mount succeeds.
+/// Ensures the logs directory exists for log output.
 pub fn execute() {
-    // Ensure logs directory exists for the log-analyst mount
+    // Ensure logs directory exists for log output
     let logs = logs_dir();
     if !logs.exists() {
         std::fs::create_dir_all(&logs).unwrap_or_else(|e| {

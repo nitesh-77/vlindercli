@@ -64,7 +64,6 @@ impl SqliteRegistryRepository {
                 vector_storage TEXT,
                 requirements_json TEXT NOT NULL,
                 prompts_json TEXT,
-                mounts_json TEXT NOT NULL,
                 public_key BLOB
             )",
             [],
@@ -159,9 +158,9 @@ impl RegistryRepository for SqliteRegistryRepository {
 
         conn.execute(
             "INSERT OR REPLACE INTO agents (name, description, source, runtime, executable,
-             image_digest, object_storage, vector_storage, requirements_json, prompts_json, mounts_json,
+             image_digest, object_storage, vector_storage, requirements_json, prompts_json,
              public_key)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             rusqlite::params![
                 stored.name,
                 stored.description,
@@ -173,7 +172,6 @@ impl RegistryRepository for SqliteRegistryRepository {
                 stored.vector_storage,
                 stored.requirements_json,
                 stored.prompts_json,
-                stored.mounts_json,
                 stored.public_key,
             ],
         ).map_err(|e| RepositoryError::Database(e.to_string()))?;
@@ -187,7 +185,7 @@ impl RegistryRepository for SqliteRegistryRepository {
             .prepare(
                 "SELECT name, description, source, runtime, executable,
                  image_digest, object_storage, vector_storage,
-                 requirements_json, prompts_json, mounts_json, public_key
+                 requirements_json, prompts_json, public_key
                  FROM agents"
             )
             .map_err(|e| RepositoryError::Database(e.to_string()))?;
@@ -205,8 +203,7 @@ impl RegistryRepository for SqliteRegistryRepository {
                     vector_storage: row.get(7)?,
                     requirements_json: row.get(8)?,
                     prompts_json: row.get(9)?,
-                    mounts_json: row.get(10)?,
-                    public_key: row.get(11)?,
+                    public_key: row.get(10)?,
                 })
             })
             .map_err(|e| RepositoryError::Database(e.to_string()))?;
@@ -245,10 +242,9 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
     use crate::domain::{
-        Agent, ImageDigest, ModelType, Mount, Prompts, Provider,
+        Agent, ImageDigest, ModelType, Prompts, Provider,
         Requirements, ResourceId, RuntimeType,
     };
-    use crate::domain::AbsolutePath;
 
     fn test_model(name: &str) -> Model {
         Model {
@@ -332,12 +328,10 @@ mod tests {
                 services: HashMap::new(),
             },
             prompts: None,
-            mounts: vec![],
         }
     }
 
     fn full_test_agent() -> Agent {
-        use std::path::Path;
         use crate::domain::{Provider, Protocol, ServiceConfig, ServiceType};
         let mut models = HashMap::new();
         models.insert("phi3".to_string(), "phi3:latest".to_string());
@@ -372,13 +366,6 @@ mod tests {
                 reduce_summaries: None,
                 direct_summarize: None,
             }),
-            mounts: vec![
-                Mount {
-                    host_path: AbsolutePath::from_absolute(Path::new("/data/notes")).unwrap(),
-                    guest_path: "/mnt/notes".into(),
-                    readonly: true,
-                },
-            ],
         }
     }
 
@@ -455,8 +442,6 @@ mod tests {
         assert_eq!(infer.protocol, crate::domain::Protocol::OpenAi);
         assert_eq!(infer.models, vec!["phi3:latest"]);
         assert!(restored.prompts.as_ref().unwrap().intent_recognition.is_some());
-        assert_eq!(restored.mounts.len(), 1);
-        assert!(restored.mounts[0].readonly);
     }
 
     #[test]

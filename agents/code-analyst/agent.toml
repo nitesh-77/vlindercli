@@ -4,8 +4,3 @@ runtime = "container"
 executable = "localhost/vlinder-code-analyst:latest"
 
 [requirements]
-
-[[mounts]]
-host_path = "../.."
-guest_path = "/source"
-mode = "ro"

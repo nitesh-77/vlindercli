@@ -66,7 +66,7 @@ message Agent {
   VectorStorageConfig vector_storage = 7;
   string runtime = 8;     // Runtime type (e.g., "container")
   string executable = 9;  // Native artifact ref (e.g., OCI image)
-  repeated Mount mounts = 10;  // Host→guest filesystem mounts (ADR 057)
+  reserved 10;  // Was: mounts (removed — future: S3-compatible volumes via sidecar)
   repeated ModelAlias models = 11;  // Agent's model alias → URI map
 }
 
@@ -100,12 +100,6 @@ enum Protocol {
   PROTOCOL_UNSPECIFIED = 0;
   PROTOCOL_OPENAI = 1;
   PROTOCOL_ANTHROPIC = 2;
-}
-
-message Mount {
-  string host_path = 1;   // Absolute path on host
-  string guest_path = 2;  // Path inside container
-  bool readonly = 3;
 }
 
 message ObjectStorageConfig {

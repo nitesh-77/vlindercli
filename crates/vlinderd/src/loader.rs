@@ -96,7 +96,6 @@ impl From<AgentLoadError> for LoadError {
         match e {
             AgentLoadError::Io(e) => LoadError::Io(e),
             AgentLoadError::Parse(s) => LoadError::Parse(s),
-            AgentLoadError::MountNotFound(s) => LoadError::Validation(s),
         }
     }
 }

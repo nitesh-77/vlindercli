@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use vlinder_core::domain::{
-    AbsolutePath, Agent, Job, JobId, JobStatus, Model, ModelType, Mount,
+    Agent, Job, JobId, JobStatus, Model, ModelType,
     Protocol, Provider, Requirements, ResourceId, RuntimeType, ServiceConfig, ServiceType,
     SubmissionId,
 };
@@ -102,11 +102,6 @@ impl From<Agent> for proto::Agent {
             }),
             runtime: agent.runtime.as_str().to_string(),
             executable: agent.executable,
-            mounts: agent.mounts.into_iter().map(|m| proto::Mount {
-                host_path: m.host_path.to_string(),
-                guest_path: m.guest_path.to_string_lossy().to_string(),
-                readonly: m.readonly,
-            }).collect(),
             models: agent.requirements.models.into_iter()
                 .map(|(alias, name)| proto::ModelAlias {
                     alias,
@@ -156,12 +151,6 @@ impl TryFrom<proto::Agent> for Agent {
             vector_storage: agent.vector_storage
                 .and_then(|cfg| cfg.resource_id)
                 .map(|r| r.into()),
-            mounts: agent.mounts.into_iter().map(|m| Mount {
-                host_path: AbsolutePath::from_absolute(std::path::Path::new(&m.host_path))
-                    .expect("mount host_path from gRPC should be absolute"),
-                guest_path: std::path::PathBuf::from(m.guest_path),
-                readonly: m.readonly,
-            }).collect(),
             source: None,
             prompts: None,
             image_digest: None,

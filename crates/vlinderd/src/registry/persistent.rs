@@ -377,7 +377,6 @@ mod tests {
                 services: HashMap::new(),
             },
             prompts: None,
-            mounts: vec![],
         }
     }
 

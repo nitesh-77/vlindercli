@@ -588,7 +588,6 @@ mod tests {
                 services: HashMap::new(),
             },
             prompts: None,
-            mounts: vec![],
         }
     }
 
@@ -638,7 +637,6 @@ mod tests {
                 services: HashMap::new(),
             },
             prompts: None,
-            mounts: vec![],
             object_storage: None,
             vector_storage: None,
         }

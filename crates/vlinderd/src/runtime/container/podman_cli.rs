@@ -5,7 +5,7 @@
 
 use std::process::Command;
 
-use crate::domain::{ContainerId, ImageDigest, ImageRef, Mount};
+use crate::domain::{ContainerId, ImageDigest, ImageRef};
 
 use super::podman::{Podman, PodmanError, RunTarget};
 
@@ -25,18 +25,12 @@ impl Podman for PodmanCliClient {
             })
     }
 
-    fn run(&self, image: RunTarget<'_>, mounts: &[Mount]) -> Result<ContainerId, PodmanError> {
+    fn run(&self, image: RunTarget<'_>) -> Result<ContainerId, PodmanError> {
         let mut podman_args = vec![
             "run".to_string(), "-d".to_string(),
             "--pull=never".to_string(),
             "-p".to_string(), ":8080".to_string(),
         ];
-
-        for m in mounts {
-            let mode = if m.readonly { "ro" } else { "rw" };
-            podman_args.push("-v".to_string());
-            podman_args.push(format!("{}:{}:{}", m.host_path, m.guest_path.display(), mode));
-        }
 
         podman_args.push(image.as_str().to_string());
 
