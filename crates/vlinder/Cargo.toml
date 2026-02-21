@@ -5,14 +5,15 @@ edition = "2021"
 publish = false
 
 [dependencies]
-vlindercli = { path = "../.." }
 vlinder-core = { path = "../vlinder-core" }
 vlinder-proto = { path = "../vlinder-proto" }
 clap = { version = "4", features = ["derive"] }
 dirs = "6"
 indicatif = "0.17"
 reedline = "0.37"
+serde = { version = "1", features = ["derive"] }
 termimad = "0.30"
+toml = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "registry"] }
 tracing-appender = "0.2"

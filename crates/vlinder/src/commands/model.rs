@@ -4,7 +4,7 @@ use std::sync::Arc;
 use clap::Subcommand;
 
 use vlinder_proto::catalog_service::{GrpcCatalogClient, ping_catalog_service};
-use vlindercli::config::Config;
+use crate::config::CliConfig;
 use vlinder_core::domain::{Model, ModelCatalog, Registry};
 
 #[derive(Subcommand, Debug, PartialEq)]
@@ -48,7 +48,7 @@ pub enum ModelCommand {
 }
 
 pub fn execute(cmd: ModelCommand) {
-    let config = Config::load();
+    let config = CliConfig::load();
 
     match cmd {
         ModelCommand::Add { name, catalog, endpoint: _ } => {
@@ -98,22 +98,22 @@ pub fn execute(cmd: ModelCommand) {
     }
 }
 
-fn open_registry(config: &Config) -> Option<Arc<dyn Registry>> {
+fn open_registry(config: &CliConfig) -> Option<Arc<dyn Registry>> {
     super::connect::open_registry(config)
 }
 
 /// Connect to a catalog backend via the daemon's gRPC catalog service.
-fn open_catalog(catalog_name: &str, config: &Config) -> Option<Box<dyn ModelCatalog>> {
+fn open_catalog(catalog_name: &str, config: &CliConfig) -> Option<Box<dyn ModelCatalog>> {
     if !CATALOGS.contains(&catalog_name) {
         eprintln!("Unknown catalog: {}. Supported: ollama, openrouter", catalog_name);
         return None;
     }
 
-    let catalog_addr = if config.distributed.catalog_addr.starts_with("http://")
-        || config.distributed.catalog_addr.starts_with("https://") {
-        config.distributed.catalog_addr.clone()
+    let catalog_addr = if config.daemon.catalog_addr.starts_with("http://")
+        || config.daemon.catalog_addr.starts_with("https://") {
+        config.daemon.catalog_addr.clone()
     } else {
-        format!("http://{}", config.distributed.catalog_addr)
+        format!("http://{}", config.daemon.catalog_addr)
     };
 
     if ping_catalog_service(&catalog_addr).is_none() {
@@ -131,7 +131,7 @@ fn open_catalog(catalog_name: &str, config: &Config) -> Option<Box<dyn ModelCata
 }
 
 /// Resolve a model from name — either a TOML manifest path or a catalog lookup.
-fn resolve_model(name: &str, catalog: &str, config: &Config) -> Option<Model> {
+fn resolve_model(name: &str, catalog: &str, config: &CliConfig) -> Option<Model> {
     if Path::new(name).extension().is_some_and(|ext| ext == "toml") {
         match Model::load(Path::new(name)) {
             Ok(m) => Some(m),
@@ -156,7 +156,7 @@ fn resolve_model(name: &str, catalog: &str, config: &Config) -> Option<Model> {
 /// Known catalogs in display order.
 const CATALOGS: &[&str] = &["ollama", "openrouter"];
 
-fn list_available(catalog_name: &str, filter: Option<&str>, config: &Config) {
+fn list_available(catalog_name: &str, filter: Option<&str>, config: &CliConfig) {
     let catalogs: Vec<&str> = if catalog_name == "all" {
         CATALOGS.to_vec()
     } else if CATALOGS.contains(&catalog_name) {
@@ -166,18 +166,10 @@ fn list_available(catalog_name: &str, filter: Option<&str>, config: &Config) {
         return;
     };
 
-    let show_all = catalogs.len() > 1;
     println!("Tip: use --catalog <name> to pick a catalog, or pass a filter to narrow results.");
     println!();
 
     for name in &catalogs {
-        // When showing all catalogs, skip OpenRouter if no API key is configured
-        if show_all && *name == "openrouter" && config.openrouter.api_key.is_empty() {
-            println!("openrouter: set VLINDER_OPENROUTER_API_KEY to browse OpenRouter models.");
-            println!();
-            continue;
-        }
-
         let Some(catalog) = open_catalog(name, config) else {
             continue;
         };

@@ -156,7 +156,7 @@ reset:
 
     echo ""
     echo "=== Reset complete ==="
-    echo "Preserved: ~/.vlinder/config.toml, ~/.vlinder/nats.conf"
+    echo "Preserved: ~/.vlinder/config.toml, ~/.vlinder/client.toml, ~/.vlinder/nats.conf"
     echo ""
     echo "Next steps:"
     echo "  1. Rebuild:  just build-everything"

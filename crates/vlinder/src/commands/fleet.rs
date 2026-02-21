@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::Subcommand;
 
-use vlindercli::config::Config;
+use crate::config::CliConfig;
 use vlinder_core::domain::{AgentManifest, Fleet, Harness, agent_routing_key};
 
 use super::connect::{connect_harness, connect_registry, open_dag_store, read_latest_state};
@@ -78,7 +78,7 @@ fn scaffold(name: &str) {
 }
 
 pub fn run(path: Option<PathBuf>) {
-    let config = Config::load();
+    let config = CliConfig::load();
     let fleet_path = path.unwrap_or_else(|| {
         std::env::current_dir().expect("Failed to get current directory")
     });
@@ -151,7 +151,7 @@ pub fn run(path: Option<PathBuf>) {
 }
 
 /// Read the latest state for an agent from the DAG store (ADR 079).
-fn apply_latest_state(config: &Config, harness: &mut dyn Harness, agent_name: &str) {
+fn apply_latest_state(config: &CliConfig, harness: &mut dyn Harness, agent_name: &str) {
     let store = open_dag_store(config);
     let Some(store) = store else { return };
     if let Some(state) = read_latest_state(store.as_ref(), agent_name) {

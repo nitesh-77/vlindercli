@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use vlindercli::config::logs_dir;
+use crate::config::{logs_dir, vlinder_dir};
 
 use super::fleet;
 
@@ -36,7 +36,7 @@ pub fn execute() {
 
 fn bundled_fleet_path() -> PathBuf {
     // Production: ~/.vlinder/support-fleet (written by installer)
-    let installed = vlindercli::config::vlinder_dir().join("support-fleet");
+    let installed = vlinder_dir().join("support-fleet");
     if installed.exists() {
         return installed;
     }

@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use clap::{Subcommand, ValueEnum};
 
-use vlindercli::config::Config;
+use crate::config::CliConfig;
 use vlinder_core::domain::{AgentManifest, Harness, Registry};
 
 use super::connect::{connect_harness, connect_registry, open_dag_store, read_latest_state};
@@ -78,7 +78,7 @@ pub fn execute(cmd: AgentCommand) {
 }
 
 fn deploy(path: Option<PathBuf>) {
-    let config = Config::load();
+    let config = CliConfig::load();
     let agent_path = path.unwrap_or_else(|| {
         std::env::current_dir().expect("Failed to get current directory")
     });
@@ -107,7 +107,7 @@ fn deploy(path: Option<PathBuf>) {
 }
 
 fn run(name: &str) {
-    let config = Config::load();
+    let config = CliConfig::load();
     let registry = connect_registry(&config);
 
     // Look up already-deployed agent by name (ADR 103)
@@ -142,7 +142,7 @@ fn run(name: &str) {
 
 /// Read the latest state for an agent from the DAG store (ADR 079)
 /// and initialize the harness with it (state continuity across sessions).
-fn apply_latest_state(config: &Config, harness: &mut dyn Harness, agent_name: &str) {
+fn apply_latest_state(config: &CliConfig, harness: &mut dyn Harness, agent_name: &str) {
     let store = open_dag_store(config);
     let Some(store) = store else { return };
     if let Some(state) = read_latest_state(store.as_ref(), agent_name) {
@@ -152,7 +152,7 @@ fn apply_latest_state(config: &Config, harness: &mut dyn Harness, agent_name: &s
 }
 
 fn list() {
-    let config = Config::load();
+    let config = CliConfig::load();
     let registry = open_registry(&config);
     let Some(registry) = registry else { return };
 
@@ -168,7 +168,7 @@ fn list() {
 }
 
 fn get(name: &str) {
-    let config = Config::load();
+    let config = CliConfig::load();
     let registry = open_registry(&config);
     let Some(registry) = registry else { return };
 
@@ -195,7 +195,7 @@ fn get(name: &str) {
     }
 }
 
-fn open_registry(config: &Config) -> Option<Arc<dyn Registry>> {
+fn open_registry(config: &CliConfig) -> Option<Arc<dyn Registry>> {
     super::connect::open_registry(config)
 }
 

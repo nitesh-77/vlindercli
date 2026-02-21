@@ -5,15 +5,15 @@
 
 use std::sync::Arc;
 
-use vlindercli::config::Config;
+use crate::config::CliConfig;
 use vlinder_core::domain::{DagStore, Harness, Registry};
 use vlinder_proto::harness_service::{GrpcHarnessClient, ping_harness};
 use vlinder_proto::registry_service::{GrpcRegistryClient, ping_registry};
 use vlinder_proto::state_service::GrpcStateClient;
 
 /// Connect to the registry via gRPC, exiting on failure.
-pub fn connect_registry(config: &Config) -> Arc<dyn Registry> {
-    let registry_addr = normalize_addr(&config.distributed.registry_addr);
+pub fn connect_registry(config: &CliConfig) -> Arc<dyn Registry> {
+    let registry_addr = normalize_addr(&config.daemon.registry_addr);
 
     if ping_registry(&registry_addr).is_none() {
         eprintln!("Cannot reach registry at {}. Is the daemon running?", registry_addr);
@@ -27,8 +27,8 @@ pub fn connect_registry(config: &Config) -> Arc<dyn Registry> {
 }
 
 /// Connect to the registry via gRPC, returning None on failure.
-pub fn open_registry(config: &Config) -> Option<Arc<dyn Registry>> {
-    let registry_addr = normalize_addr(&config.distributed.registry_addr);
+pub fn open_registry(config: &CliConfig) -> Option<Arc<dyn Registry>> {
+    let registry_addr = normalize_addr(&config.daemon.registry_addr);
 
     if ping_registry(&registry_addr).is_none() {
         eprintln!("Cannot reach registry at {}. Is the daemon running?", registry_addr);
@@ -45,8 +45,8 @@ pub fn open_registry(config: &Config) -> Option<Arc<dyn Registry>> {
 }
 
 /// Connect to the harness via gRPC, exiting on failure.
-pub fn connect_harness(config: &Config) -> Box<dyn Harness> {
-    let harness_addr = normalize_addr(&config.distributed.harness_addr);
+pub fn connect_harness(config: &CliConfig) -> Box<dyn Harness> {
+    let harness_addr = normalize_addr(&config.daemon.harness_addr);
 
     if ping_harness(&harness_addr).is_none() {
         eprintln!("Cannot reach harness at {}. Is the daemon running?", harness_addr);
@@ -60,8 +60,8 @@ pub fn connect_harness(config: &Config) -> Box<dyn Harness> {
 }
 
 /// Open the DagStore via gRPC state service.
-pub fn open_dag_store(config: &Config) -> Option<Box<dyn DagStore>> {
-    let state_addr = normalize_addr(&config.distributed.state_addr);
+pub fn open_dag_store(config: &CliConfig) -> Option<Box<dyn DagStore>> {
+    let state_addr = normalize_addr(&config.daemon.state_addr);
     match GrpcStateClient::connect(&state_addr) {
         Ok(client) => Some(Box::new(client)),
         Err(e) => {

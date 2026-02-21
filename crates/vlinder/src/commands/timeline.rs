@@ -14,7 +14,7 @@ use std::process::Command;
 
 use clap::Subcommand;
 
-use vlindercli::config::{Config, conversations_dir};
+use crate::config::{CliConfig, conversations_dir};
 use vlinder_core::domain::{AgentManifest, TimelineId, agent_routing_key};
 
 use super::connect::{connect_harness, connect_registry, open_dag_store};
@@ -179,7 +179,7 @@ fn checkout(dir: &Path, target: &str) {
         // commit subject: "complete: <agent> → <harness>".
         if let Some(ref subj) = subject {
             if let Some(agent_name) = parse_agent_from_subject(subj) {
-                if let Some(store) = open_dag_store(&Config::load()) {
+                if let Some(store) = open_dag_store(&CliConfig::load()) {
                     match store.set_checkout_state(&agent_name, &state) {
                         Ok(()) => {}
                         Err(e) => {
@@ -239,7 +239,7 @@ fn repair(dir: &Path, path: Option<PathBuf>) {
     }
 
     // 4. Create repair branch with unique name (repair-YYYY-MM-DD-N)
-    let config = Config::load();
+    let config = CliConfig::load();
     let date = chrono::Utc::now().format("%Y-%m-%d").to_string();
     let dag_store = open_dag_store(&config);
 
@@ -403,7 +403,7 @@ fn promote(dir: &Path) {
     let broken_name = format!("broken-{}", date);
 
     // Update timeline rows (ADR 093): seal old main, rename both
-    if let Some(store) = open_dag_store(&Config::load()) {
+    if let Some(store) = open_dag_store(&CliConfig::load()) {
         let _ = store.ensure_main_timeline();
 
         if let Ok(Some(old_main)) = store.get_timeline_by_branch("main") {

@@ -1,13 +1,11 @@
 //! CLI tracing setup — stderr + rolling JSON log file.
 
-use std::path::PathBuf;
-
 use tracing_subscriber::{fmt, EnvFilter, Layer, layer::SubscriberExt, util::SubscriberInitExt};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 
 /// Initialize tracing with the given filter string (e.g., "warn,vlinder=debug").
 pub fn init_tracing(filter: &str) {
-    let logs_dir = logs_dir();
+    let logs_dir = crate::config::logs_dir();
     std::fs::create_dir_all(&logs_dir).expect("Failed to create logs directory");
 
     let file_appender = RollingFileAppender::builder()
@@ -36,18 +34,4 @@ pub fn init_tracing(filter: &str) {
         .with(stderr_layer)
         .with(file_layer)
         .init();
-}
-
-fn logs_dir() -> PathBuf {
-    vlinder_dir().join("logs")
-}
-
-fn vlinder_dir() -> PathBuf {
-    std::env::var("VLINDER_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            dirs::home_dir()
-                .expect("Could not determine home directory")
-                .join(".vlinder")
-        })
 }

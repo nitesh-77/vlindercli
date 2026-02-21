@@ -3118,15 +3118,16 @@ dependencies = [
  "dirs",
  "indicatif",
  "reedline",
+ "serde",
  "tempfile",
  "termimad",
+ "toml",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
  "ureq",
  "vlinder-core",
  "vlinder-proto",
- "vlindercli",
 ]
 
 [[package]]

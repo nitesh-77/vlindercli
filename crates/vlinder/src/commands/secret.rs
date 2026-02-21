@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use clap::Subcommand;
 
-use vlindercli::config::Config;
+use crate::config::CliConfig;
 use vlinder_core::domain::SecretStore;
 use vlinder_proto::secret_service::GrpcSecretClient;
 
@@ -30,8 +30,8 @@ pub fn execute(cmd: SecretCommand) {
 }
 
 fn open_store() -> Arc<dyn SecretStore> {
-    let config = Config::load();
-    let addr = &config.distributed.secret_addr;
+    let config = CliConfig::load();
+    let addr = &config.daemon.secret_addr;
     match GrpcSecretClient::connect(addr) {
         Ok(client) => Arc::new(client),
         Err(e) => {
