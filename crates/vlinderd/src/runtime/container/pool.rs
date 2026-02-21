@@ -10,7 +10,7 @@ use std::sync::Arc;
 use crate::config::Config;
 use crate::domain::{Agent, ImageRef, QueueBridge, ContainerDiagnostics, ContainerRuntimeInfo, InvokeMessage};
 
-use super::pod::{Container, Pod, Sidecar};
+use super::pod::{Container, Pod};
 use super::podman::{Podman, RunTarget, resolve_socket};
 use super::podman_api::PodmanApiClient;
 use super::podman_cli::PodmanCliClient;
@@ -82,10 +82,10 @@ impl ContainerPool {
 
     /// If a container is already running for `name`, update its bridge with the
     /// new invoke context and return the host port and bridge.
-    pub(crate) fn get_port(&self, name: &str, invoke: &InvokeMessage) -> Option<(u16, Arc<QueueBridge>)> {
-        self.pods.get(name).map(|pod| {
-            pod.bridge.update_invoke(invoke.clone());
-            (pod.container.host_port, Arc::clone(&pod.bridge))
+    pub(crate) fn get_port(&mut self, name: &str, invoke: &InvokeMessage) -> Option<(u16, Arc<QueueBridge>)> {
+        self.pods.get_mut(name).map(|pod| {
+            pod.sidecar.set_context(invoke);
+            (pod.container.host_port, Arc::clone(pod.sidecar.bridge()))
         })
     }
 
@@ -100,9 +100,9 @@ impl ContainerPool {
         agent: &Agent,
         invoke: &InvokeMessage,
     ) -> Result<(u16, Arc<QueueBridge>), String> {
-        let sidecar = Sidecar::new(&self.config, agent)
+        let mut sidecar = super::pod::Sidecar::new(&self.config, agent)
             .map_err(|e| e.to_string())?;
-        let bridge = sidecar.build_bridge(invoke);
+        sidecar.set_context(invoke);
         // image_ref always records *which* image, not *which bytes*
         let image_ref = ImageRef::parse(&agent.executable)
             .unwrap_or_else(|_| ImageRef::parse("unknown/unknown").unwrap());
@@ -139,7 +139,7 @@ impl ContainerPool {
             "Container started"
         );
 
-        let bridge_clone = Arc::clone(&bridge);
+        let bridge = Arc::clone(sidecar.bridge());
         self.pods.insert(name.to_string(), Pod {
             container: Container {
                 container_id,
@@ -148,10 +148,9 @@ impl ContainerPool {
                 image_digest,
             },
             sidecar,
-            bridge,
         });
 
-        Ok((host_port, bridge_clone))
+        Ok((host_port, bridge))
     }
 
     /// Evict a stale container — stop, remove, and drop the bridge (ADR 073).
@@ -198,7 +197,7 @@ impl ContainerPool {
 
     /// Retrieve the final state hash from the bridge for a named container.
     pub(crate) fn final_state(&self, name: &str) -> Option<String> {
-        self.pods.get(name).and_then(|pod| pod.bridge.final_state())
+        self.pods.get(name).and_then(|pod| pod.sidecar.bridge().final_state())
     }
 }
 

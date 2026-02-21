@@ -19,13 +19,17 @@ pub(super) struct Container {
     pub(super) image_digest: Option<ImageDigest>,
 }
 
-/// The sidecar half of a Pod — mediates between queue and container.
+/// The sidecar half of a Pod — the agent's reality controller.
+///
+/// Controls what the agent container sees: connections, state, invoke
+/// context. The bridge is the current context — swapped per submission.
 pub(super) struct Sidecar {
     config: Config,
     queue: Arc<dyn MessageQueue + Send + Sync>,
     registry: Arc<dyn Registry>,
     kv_backend: Option<ObjectStorageType>,
     vec_backend: Option<VectorStorageType>,
+    bridge: Option<Arc<QueueBridge>>,
 }
 
 impl Sidecar {
@@ -36,14 +40,14 @@ impl Sidecar {
             .and_then(|uri| ObjectStorageType::from_scheme(uri.scheme()));
         let vec_backend = agent.vector_storage.as_ref()
             .and_then(|uri| VectorStorageType::from_scheme(uri.scheme()));
-        Ok(Self { config: config.clone(), queue, registry, kv_backend, vec_backend })
+        Ok(Self { config: config.clone(), queue, registry, kv_backend, vec_backend, bridge: None })
     }
 
-    pub(super) fn build_bridge(&self, invoke: &InvokeMessage) -> Arc<QueueBridge> {
-        // Bootstrap state to root ("") if agent uses KV but no prior state exists (ADR 055).
+    /// Set the current context for this sidecar.
+    pub(super) fn set_context(&mut self, invoke: &InvokeMessage) {
         let initial_state = invoke.state.clone()
             .or_else(|| self.kv_backend.as_ref().map(|_| String::new()));
-        Arc::new(QueueBridge {
+        self.bridge = Some(Arc::new(QueueBridge {
             queue: Arc::clone(&self.queue),
             registry: Arc::clone(&self.registry),
             current_state: std::sync::RwLock::new(initial_state),
@@ -52,7 +56,11 @@ impl Sidecar {
             vec_backend: self.vec_backend,
             sequence: SequenceCounter::new(),
             pending_replies: std::sync::RwLock::new(std::collections::HashMap::new()),
-        })
+        }));
+    }
+
+    pub(super) fn bridge(&self) -> &Arc<QueueBridge> {
+        self.bridge.as_ref().expect("bridge not set — call set_context first")
     }
 }
 
@@ -60,5 +68,4 @@ impl Sidecar {
 pub(super) struct Pod {
     pub(super) container: Container,
     pub(super) sidecar: Sidecar,
-    pub(super) bridge: Arc<QueueBridge>,
 }
