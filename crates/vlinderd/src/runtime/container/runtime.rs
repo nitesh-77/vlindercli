@@ -11,7 +11,7 @@ use std::time::Instant;
 
 use crate::config::Config;
 use crate::domain::{
-    Agent, AgentId, QueueBridge, Registry, ResourceId, RoutingKey, Runtime,
+    Agent, AgentId, Registry, ResourceId, RoutingKey, Runtime,
     RuntimeType, CompleteMessage, ExpectsReply, HarnessType,
     InvokeDiagnostics, InvokeMessage, MessageQueue,
 };
@@ -60,15 +60,6 @@ impl ContainerRuntime {
         &self.registry
     }
 
-    /// Ensure a container is running for this agent. Starts one lazily if needed.
-    /// Returns the host port and bridge for dispatch.
-    fn ensure_container(&mut self, agent: &Agent, invoke: &InvokeMessage) -> Result<(u16, Arc<QueueBridge>), String> {
-        if let Some(result) = self.pool.get_port(&agent.name, invoke) {
-            return Ok(result);
-        }
-        self.pool.start(&agent.name, agent, invoke)
-    }
-
     /// Route a CompleteMessage to the correct destination (harness or delegating agent).
     fn send_reply(&self, complete: CompleteMessage, reply_key: &Option<RoutingKey>) {
         if let Some(ref key) = reply_key {
@@ -91,7 +82,7 @@ impl ContainerRuntime {
         reply_key: Option<RoutingKey>,
         is_retry: bool,
     ) -> bool {
-        let (host_port, bridge) = match self.ensure_container(agent, &invoke) {
+        let (host_port, bridge) = match self.pool.ensure(&agent.name, agent, &invoke) {
             Ok(result) => result,
             Err(e) => {
                 tracing::error!(event = "dispatch.failed", agent = %name, error = %e, "Failed to start container");

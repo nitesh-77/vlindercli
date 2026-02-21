@@ -80,9 +80,22 @@ impl ContainerPool {
         })
     }
 
+    /// Ensure a container is running for this agent. Returns existing or starts new.
+    pub(crate) fn ensure(
+        &mut self,
+        name: &str,
+        agent: &Agent,
+        invoke: &InvokeMessage,
+    ) -> Result<(u16, Arc<QueueBridge>), String> {
+        if let Some(result) = self.get_port(name, invoke) {
+            return Ok(result);
+        }
+        self.start(name, agent, invoke)
+    }
+
     /// If a container is already running for `name`, update its bridge with the
     /// new invoke context and return the host port and bridge.
-    pub(crate) fn get_port(&mut self, name: &str, invoke: &InvokeMessage) -> Option<(u16, Arc<QueueBridge>)> {
+    fn get_port(&mut self, name: &str, invoke: &InvokeMessage) -> Option<(u16, Arc<QueueBridge>)> {
         self.pods.get_mut(name).map(|pod| {
             pod.sidecar.set_context(invoke);
             (pod.container.host_port, Arc::clone(pod.sidecar.bridge()))
@@ -94,7 +107,7 @@ impl ContainerPool {
     /// Builds the QueueBridge, selects the image reference based on the image
     /// policy, runs the container via Podman, discovers the mapped port, and
     /// waits for readiness.
-    pub(crate) fn start(
+    fn start(
         &mut self,
         name: &str,
         agent: &Agent,
