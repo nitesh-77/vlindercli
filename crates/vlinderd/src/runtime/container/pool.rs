@@ -28,13 +28,45 @@ struct Container {
 /// The sidecar half of a Pod — mediates between queue and container.
 pub(super) struct Sidecar {
     config: Config,
-    pub(super) bridge: Arc<QueueBridge>,
+    queue: Arc<dyn MessageQueue + Send + Sync>,
+    registry: Arc<dyn Registry>,
+    kv_backend: Option<ObjectStorageType>,
+    vec_backend: Option<VectorStorageType>,
+}
+
+impl Sidecar {
+    fn new(config: &Config, agent: &Agent) -> Result<Self, Box<dyn std::error::Error>> {
+        let queue = crate::queue_factory::recording_from_config(config)?;
+        let registry = crate::registry_factory::from_config(config)?;
+        let kv_backend = agent.object_storage.as_ref()
+            .and_then(|uri| ObjectStorageType::from_scheme(uri.scheme()));
+        let vec_backend = agent.vector_storage.as_ref()
+            .and_then(|uri| VectorStorageType::from_scheme(uri.scheme()));
+        Ok(Self { config: config.clone(), queue, registry, kv_backend, vec_backend })
+    }
+
+    fn build_bridge(&self, invoke: &InvokeMessage) -> Arc<QueueBridge> {
+        // Bootstrap state to root ("") if agent uses KV but no prior state exists (ADR 055).
+        let initial_state = invoke.state.clone()
+            .or_else(|| self.kv_backend.as_ref().map(|_| String::new()));
+        Arc::new(QueueBridge {
+            queue: Arc::clone(&self.queue),
+            registry: Arc::clone(&self.registry),
+            current_state: std::sync::RwLock::new(initial_state),
+            invoke: std::sync::RwLock::new(invoke.clone()),
+            kv_backend: self.kv_backend,
+            vec_backend: self.vec_backend,
+            sequence: SequenceCounter::new(),
+            pending_replies: std::sync::RwLock::new(std::collections::HashMap::new()),
+        })
+    }
 }
 
 /// A Pod = Container + Sidecar. The deployable unit managed by the pool.
 struct Pod {
     container: Container,
     sidecar: Sidecar,
+    bridge: Arc<QueueBridge>,
 }
 
 /// Image resolution policy for container agents (ADR 073).
@@ -64,8 +96,6 @@ impl ImagePolicy {
 pub(crate) struct ContainerPool {
     pods: HashMap<String, Pod>,
     config: Config,
-    queue: Arc<dyn MessageQueue + Send + Sync>,
-    registry: Arc<dyn Registry>,
     engine_version: Option<semver::Version>,
     image_policy: ImagePolicy,
     podman: Box<dyn Podman>,
@@ -76,8 +106,6 @@ impl ContainerPool {
     ///
     /// Selects socket API or CLI based on the `podman_socket` config value (ADR 077).
     pub(crate) fn new(config: &Config) -> Result<Self, Box<dyn std::error::Error>> {
-        let queue = crate::queue_factory::recording_from_config(config)?;
-        let registry = crate::registry_factory::from_config(config)?;
         let image_policy = ImagePolicy::from_config(&config.runtime.image_policy);
         let podman: Box<dyn Podman> = match resolve_socket(&config.runtime.podman_socket) {
             Some(path) => {
@@ -100,8 +128,6 @@ impl ContainerPool {
         Ok(Self {
             pods: HashMap::new(),
             config: config.clone(),
-            queue,
-            registry,
             engine_version,
             image_policy,
             podman,
@@ -112,8 +138,8 @@ impl ContainerPool {
     /// new invoke context and return the host port and bridge.
     pub(crate) fn get_port(&self, name: &str, invoke: &InvokeMessage) -> Option<(u16, Arc<QueueBridge>)> {
         self.pods.get(name).map(|pod| {
-            pod.sidecar.bridge.update_invoke(invoke.clone());
-            (pod.container.host_port, Arc::clone(&pod.sidecar.bridge))
+            pod.bridge.update_invoke(invoke.clone());
+            (pod.container.host_port, Arc::clone(&pod.bridge))
         })
     }
 
@@ -128,7 +154,9 @@ impl ContainerPool {
         agent: &Agent,
         invoke: &InvokeMessage,
     ) -> Result<(u16, Arc<QueueBridge>), String> {
-        let bridge = self.build_bridge(agent, invoke);
+        let sidecar = Sidecar::new(&self.config, agent)
+            .map_err(|e| e.to_string())?;
+        let bridge = sidecar.build_bridge(invoke);
         // image_ref always records *which* image, not *which bytes*
         let image_ref = ImageRef::parse(&agent.executable)
             .unwrap_or_else(|_| ImageRef::parse("unknown/unknown").unwrap());
@@ -173,32 +201,11 @@ impl ContainerPool {
                 image_ref,
                 image_digest,
             },
-            sidecar: Sidecar { config: self.config.clone(), bridge },
+            sidecar,
+            bridge,
         });
 
         Ok((host_port, bridge_clone))
-    }
-
-    /// Build the QueueBridge for a new container.
-    fn build_bridge(&self, agent: &Agent, invoke: &InvokeMessage) -> Arc<QueueBridge> {
-        let kv_backend = agent.object_storage.as_ref()
-            .and_then(|uri| ObjectStorageType::from_scheme(uri.scheme()));
-        let vec_backend = agent.vector_storage.as_ref()
-            .and_then(|uri| VectorStorageType::from_scheme(uri.scheme()));
-
-        // Bootstrap state to root ("") if agent uses KV but no prior state exists (ADR 055).
-        let initial_state = invoke.state.clone()
-            .or_else(|| kv_backend.as_ref().map(|_| String::new()));
-        Arc::new(QueueBridge {
-            queue: Arc::clone(&self.queue),
-            registry: Arc::clone(&self.registry),
-            current_state: std::sync::RwLock::new(initial_state),
-            invoke: std::sync::RwLock::new(invoke.clone()),
-            kv_backend,
-            vec_backend,
-            sequence: SequenceCounter::new(),
-            pending_replies: std::sync::RwLock::new(std::collections::HashMap::new()),
-        })
     }
 
     /// Evict a stale container — stop, remove, and drop the bridge (ADR 073).
@@ -245,7 +252,7 @@ impl ContainerPool {
 
     /// Retrieve the final state hash from the bridge for a named container.
     pub(crate) fn final_state(&self, name: &str) -> Option<String> {
-        self.pods.get(name).and_then(|pod| pod.sidecar.bridge.final_state())
+        self.pods.get(name).and_then(|pod| pod.bridge.final_state())
     }
 }
 
