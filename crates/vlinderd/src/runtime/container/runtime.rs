@@ -1,35 +1,24 @@
-//! ContainerRuntime — tick-loop orchestrator for OCI container agents.
+//! ContainerRuntime — thin orchestrator for OCI container agents.
 //!
-//! Polls queues for invoke and delegate work, dispatches to containers,
-//! sweeps completed tasks, and handles retry on container death (ADR 073).
-//! Agents are state machines driven by POST /handle (ADR 075).
+//! Owns a registry and a pool. On each tick, tells the pool to ensure
+//! containers are running and reap dead sidecar threads. All dispatch
+//! logic lives in Sidecar; all container lifecycle logic lives in Pool.
 
-use std::collections::HashMap;
 use std::sync::Arc;
-use std::thread;
-use std::time::Instant;
 
 use crate::config::Config;
-use crate::domain::{
-    Agent, AgentId, Registry, ResourceId, RoutingKey, Runtime,
-    RuntimeType, CompleteMessage, ExpectsReply, HarnessType,
-    InvokeDiagnostics, InvokeMessage, MessageQueue,
-};
+use crate::domain::{Registry, ResourceId, Runtime, RuntimeType};
 
-use super::dispatch::{DispatchError, RunningTask, dispatch_state_machine};
 use super::pool::ContainerPool;
 
 pub struct ContainerRuntime {
     id: ResourceId,
-    queue: Arc<dyn MessageQueue + Send + Sync>,
     registry: Arc<dyn Registry>,
-    running: HashMap<String, RunningTask>,
     pool: ContainerPool,
 }
 
 impl ContainerRuntime {
     pub fn new(config: &Config) -> Result<Self, Box<dyn std::error::Error>> {
-        let queue = crate::queue_factory::recording_from_config(config)?;
         let registry = crate::registry_factory::from_config(config)?;
 
         let registry_id = ResourceId::new(&config.distributed.registry_addr);
@@ -41,222 +30,15 @@ impl ContainerRuntime {
         ));
         Ok(Self {
             id,
-            queue,
             registry,
-            running: HashMap::new(),
             pool: ContainerPool::new(config)?,
         })
-    }
-
-    /// Access the queue (test-only, for integration test setup).
-    #[cfg(any(test, feature = "test-support"))]
-    pub fn queue(&self) -> &Arc<dyn MessageQueue + Send + Sync> {
-        &self.queue
     }
 
     /// Access the registry (test-only, for integration test setup).
     #[cfg(any(test, feature = "test-support"))]
     pub fn registry(&self) -> &Arc<dyn Registry> {
         &self.registry
-    }
-
-    /// Route a CompleteMessage to the correct destination (harness or delegating agent).
-    fn send_reply(&self, complete: CompleteMessage, reply_key: &Option<RoutingKey>) {
-        if let Some(ref key) = reply_key {
-            self.queue.send_delegate_reply(complete, key).unwrap();
-        } else {
-            self.queue.send_complete(complete).unwrap();
-        }
-    }
-
-    /// Dispatch an invocation to a container and track it as a running task.
-    ///
-    /// Ensures the container is running, spawns the state machine dispatch on a
-    /// thread, and inserts the RunningTask. On container-start failure, sends an
-    /// error reply and returns false.
-    fn dispatch(
-        &mut self,
-        name: &str,
-        agent: &Agent,
-        invoke: InvokeMessage,
-        reply_key: Option<RoutingKey>,
-        is_retry: bool,
-    ) -> bool {
-        let (host_port, bridge) = match self.pool.ensure(&agent.name, agent, &invoke) {
-            Ok(result) => result,
-            Err(e) => {
-                tracing::error!(event = "dispatch.failed", agent = %name, error = %e, "Failed to start container");
-                let complete = invoke.create_reply(
-                    format!("[error] container start failed: {}", e).into_bytes()
-                );
-                self.send_reply(complete, &reply_key);
-                return false;
-            }
-        };
-
-        let payload = invoke.payload.clone();
-        let session_id = invoke.session.as_str().to_string();
-        let handle = thread::spawn(move || {
-            dispatch_state_machine(host_port, &payload, &session_id, bridge)
-        });
-
-        self.running.insert(name.to_string(), RunningTask {
-            handle, invoke, reply_key, started_at: Instant::now(), is_retry,
-        });
-        true
-    }
-
-    // ========================================================================
-    // Tick phases
-    // ========================================================================
-
-    /// Join finished dispatch threads, handle results, retry on container death (ADR 073).
-    fn sweep_completed(&mut self) -> bool {
-        let finished: Vec<String> = self.running.iter()
-            .filter(|(_, task)| task.handle.is_finished())
-            .map(|(name, _)| name.clone())
-            .collect();
-
-        if finished.is_empty() {
-            return false;
-        }
-
-        for name in finished {
-            let task = self.running.remove(&name).unwrap();
-            let result = task.handle.join().unwrap();
-
-            match result {
-                Ok(output) => {
-                    let final_state = self.pool.final_state(&name);
-                    let duration_ms = task.started_at.elapsed().as_millis() as u64;
-                    let diagnostics = self.pool.diagnostics(&name, duration_ms);
-                    let complete = task.invoke.create_reply_with_diagnostics(output, final_state, diagnostics);
-
-                    tracing::info!(
-                        event = "dispatch.completed",
-                        agent = %name,
-                        delegated = task.reply_key.is_some(),
-                        duration_ms = duration_ms,
-                        "Task completed"
-                    );
-
-                    self.send_reply(complete, &task.reply_key);
-                }
-                Err(DispatchError::ContainerDead(ref reason)) if !task.is_retry => {
-                    // First failure — evict and retry once (ADR 073)
-                    tracing::warn!(
-                        event = "container.dead",
-                        agent = %name,
-                        reason = %reason,
-                        "Dispatch failed — evicting and retrying"
-                    );
-                    self.pool.evict(&name);
-
-                    let agent = self.registry.get_agent_by_name(&name);
-
-                    if let Some(agent) = agent {
-                        self.dispatch(&name, &agent, task.invoke, task.reply_key, true);
-                    } else {
-                        tracing::error!(event = "dispatch.agent_gone", agent = %name, "Agent not found after eviction");
-                        let complete = task.invoke.create_reply(
-                            format!("[error] agent {} not found after container eviction", name).into_bytes()
-                        );
-                        self.send_reply(complete, &task.reply_key);
-                    }
-                }
-                Err(DispatchError::ContainerDead(reason)) => {
-                    // Retry also failed — give up (ADR 073)
-                    tracing::error!(
-                        event = "dispatch.retry_exhausted",
-                        agent = %name,
-                        reason = %reason,
-                        "Retry dispatch also failed — giving up"
-                    );
-                    self.pool.evict(&name);
-                    let complete = task.invoke.create_reply(
-                        format!("[error] container dead after retry: {}", reason).into_bytes()
-                    );
-                    self.send_reply(complete, &task.reply_key);
-                }
-            }
-        }
-
-        true
-    }
-
-    /// Poll invoke queues for idle container agents, dispatch work.
-    fn dispatch_invokes(&mut self) -> bool {
-        let mut did_work = false;
-        let container_agents = self.registry.get_agents_by_runtime(RuntimeType::Container);
-
-        for agent in &container_agents {
-            if self.running.contains_key(&agent.name) {
-                continue;
-            }
-
-            if let Ok((invoke, ack)) = self.queue.receive_invoke(&agent.name) {
-                let _ = ack();
-
-                tracing::info!(
-                    event = "dispatch.started",
-                    sha = %invoke.submission,
-                    session = %invoke.session,
-                    agent = %agent.name,
-                    "Dispatching to container"
-                );
-
-                self.dispatch(&agent.name, agent, invoke, None, false);
-                did_work = true;
-            }
-        }
-
-        did_work
-    }
-
-    /// Poll delegate queues for idle container agents, dispatch delegated work (ADR 056).
-    fn dispatch_delegates(&mut self) -> bool {
-        let mut did_work = false;
-        let container_agents = self.registry.get_agents_by_runtime(RuntimeType::Container);
-
-        for agent in &container_agents {
-            if self.running.contains_key(&agent.name) {
-                continue;
-            }
-
-            if let Ok((delegate, ack)) = self.queue.receive_delegate(&agent.name) {
-                let _ = ack();
-
-                tracing::info!(
-                    event = "delegation.received",
-                    sha = %delegate.submission,
-                    session = %delegate.session,
-                    agent = %agent.name,
-                    caller = %delegate.caller,
-                    "Dispatching delegated work"
-                );
-
-                // Build a synthetic InvokeMessage so the container sees a normal invocation
-                let invoke = InvokeMessage::new(
-                    delegate.timeline.clone(),
-                    delegate.submission.clone(),
-                    delegate.session.clone(),
-                    HarnessType::Cli,  // placeholder — delegated work doesn't route to harness
-                    RuntimeType::Container,
-                    AgentId::new(&agent.name),
-                    delegate.payload.clone(),
-                    None,
-                    InvokeDiagnostics {
-                        harness_version: env!("CARGO_PKG_VERSION").to_string(),
-                        history_turns: 0,
-                    },
-                );
-
-                self.dispatch(&agent.name, agent, invoke, Some(delegate.reply_routing_key()), false);
-                did_work = true;
-            }
-        }
-
-        did_work
     }
 }
 
@@ -276,11 +58,7 @@ impl Runtime for ContainerRuntime {
     }
 
     fn tick(&mut self) -> bool {
-        let mut did_work = false;
-        did_work |= self.sweep_completed();
-        did_work |= self.dispatch_invokes();
-        did_work |= self.dispatch_delegates();
-        did_work
+        self.pool.tick(self.registry.as_ref())
     }
 
     fn shutdown(&mut self) {

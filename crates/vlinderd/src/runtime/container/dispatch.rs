@@ -7,26 +7,10 @@
 
 use std::io::Read;
 use std::sync::Arc;
-use std::thread::JoinHandle;
-use std::time::Instant;
 
 use serde_json::json;
 
-use crate::domain::{AgentAction, SdkContract, AgentEvent, InvokeMessage, RoutingKey};
-
-/// Tracks an in-flight invocation dispatched to a container.
-pub(crate) struct RunningTask {
-    pub(crate) handle: JoinHandle<Result<Vec<u8>, DispatchError>>,
-    pub(crate) invoke: InvokeMessage,
-    /// For delegated work: the routing key for the reply (ADR 096 §7).
-    /// None for harness-invoked work (uses normal send_complete).
-    pub(crate) reply_key: Option<RoutingKey>,
-    /// Wall-clock start time for duration measurement.
-    pub(crate) started_at: Instant,
-    /// True if this is a retry after dispatch-failure eviction (ADR 073).
-    /// Prevents infinite retry loops — at most one retry per invocation.
-    pub(crate) is_retry: bool,
-}
+use crate::domain::{AgentAction, SdkContract, AgentEvent};
 
 /// Dispatch failure classification (ADR 073).
 ///

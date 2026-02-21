@@ -1,6 +1,9 @@
 //! Integration tests for ContainerRuntime (long-running model).
 //!
-//! Requires: podman installed + `just build-echo-container`
+//! Requires: podman installed + `just build-echo-container` + NATS running.
+//! The sidecar creates its own queue from config, so these tests require
+//! shared queue infrastructure (NATS) — in-memory queues won't work.
+//!
 //! Compile with: cargo test --features test-support
 
 #![cfg(feature = "test-support")]
@@ -15,10 +18,12 @@ use vlinderd::runtime::ContainerRuntime;
 #[test]
 #[ignore] // Run via: just run-integration-tests
 fn container_runtime_executes_echo_agent() {
-    let mut runtime = ContainerRuntime::new(&Config::for_test()).unwrap();
+    let config = Config::for_test();
+    let mut runtime = ContainerRuntime::new(&config).unwrap();
 
-    // Use the runtime's own queue and registry for test setup
-    let queue = runtime.queue().clone();
+    // Use the runtime's registry and a queue from config for test setup.
+    // The sidecar creates its own queue — requires shared infra (NATS) to work.
+    let queue = vlinderd::queue_factory::recording_from_config(&config).unwrap();
     let registry = runtime.registry().clone();
 
     registry.register_runtime(RuntimeType::Container);
@@ -49,28 +54,24 @@ fn container_runtime_executes_echo_agent() {
     );
     queue.send_invoke(invoke).unwrap();
 
-    // First tick starts container (lazy) and dispatches work
-    assert!(runtime.tick());
-
-    // Keep ticking until complete
+    // Tick until work completes
     let start = std::time::Instant::now();
     loop {
-        if runtime.tick() {
-            break;
-        }
+        runtime.tick();
         if start.elapsed() > std::time::Duration::from_secs(60) {
             panic!("container did not complete within 60 seconds");
         }
+        // Check for completion
+        if let Ok((complete, ack)) = queue.receive_complete(&submission, "cli") {
+            assert_eq!(
+                String::from_utf8(complete.payload).unwrap(),
+                "hello from container"
+            );
+            ack().unwrap();
+            break;
+        }
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
-
-    // Verify CompleteMessage (submission-scoped consumer, ADR 052)
-    let (complete, ack) = queue.receive_complete(&submission, "cli").unwrap();
-    assert_eq!(
-        String::from_utf8(complete.payload).unwrap(),
-        "hello from container"
-    );
-    ack().unwrap();
 
     // Explicit shutdown (stops containers)
     runtime.shutdown();

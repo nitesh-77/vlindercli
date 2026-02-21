@@ -1,16 +1,16 @@
 //! ContainerPool — manages the lifecycle of long-running OCI containers.
 //!
 //! Owns the pod map, Podman engine, and image resolution policy.
-//! The tick-loop scheduler in `ContainerRuntime` delegates all container
-//! lifecycle operations here: lazy start, eviction, shutdown, diagnostics.
+//! Each pod is a container + sidecar thread. The pool starts containers,
+//! spawns sidecar threads, reaps dead threads, and shuts everything down.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::thread::{self, JoinHandle};
 
 use crate::config::Config;
-use crate::domain::{Agent, ImageRef, QueueBridge, ContainerDiagnostics, ContainerRuntimeInfo, InvokeMessage};
+use crate::domain::{Agent, ContainerId, ImageRef, Registry, RuntimeType};
 
-use super::pod::{Container, Pod};
+use super::pod::{Container, Sidecar};
 use super::podman::{Podman, RunTarget, resolve_socket};
 use super::podman_api::PodmanApiClient;
 use super::podman_cli::PodmanCliClient;
@@ -35,10 +35,16 @@ impl ImagePolicy {
     }
 }
 
+/// A running pod: container ID (for stop/remove) + sidecar thread handle.
+struct Pod {
+    container_id: ContainerId,
+    handle: JoinHandle<()>,
+}
+
 /// Manages the lifecycle of long-running OCI containers.
 ///
-/// Maps agent names to running containers, lazily starts them on first
-/// invocation, and tears them down on eviction or shutdown.
+/// Maps agent names to running pods, starts containers with sidecar threads,
+/// reaps dead threads, and tears everything down on shutdown.
 pub(crate) struct ContainerPool {
     pods: HashMap<String, Pod>,
     config: Config,
@@ -80,43 +86,18 @@ impl ContainerPool {
         })
     }
 
-    /// Ensure a container is running for this agent. Returns existing or starts new.
-    pub(crate) fn ensure(
-        &mut self,
-        name: &str,
-        agent: &Agent,
-        invoke: &InvokeMessage,
-    ) -> Result<(u16, Arc<QueueBridge>), String> {
-        if let Some(result) = self.get_port(name, invoke) {
-            return Ok(result);
-        }
-        self.start(name, agent, invoke)
-    }
-
-    /// If a container is already running for `name`, update its bridge with the
-    /// new invoke context and return the host port and bridge.
-    fn get_port(&mut self, name: &str, invoke: &InvokeMessage) -> Option<(u16, Arc<QueueBridge>)> {
-        self.pods.get_mut(name).map(|pod| {
-            pod.sidecar.set_context(invoke);
-            (pod.container.host_port, Arc::clone(pod.sidecar.bridge()))
-        })
-    }
-
-    /// Start a new container for `agent`.
+    /// Start a container and sidecar thread for `agent`.
     ///
-    /// Builds the QueueBridge, selects the image reference based on the image
-    /// policy, runs the container via Podman, discovers the mapped port, and
-    /// waits for readiness.
-    fn start(
-        &mut self,
-        name: &str,
-        agent: &Agent,
-        invoke: &InvokeMessage,
-    ) -> Result<(u16, Arc<QueueBridge>), String> {
-        let mut sidecar = super::pod::Sidecar::new(&self.config, agent)
+    /// Runs the container via Podman, spawns a sidecar thread running
+    /// `Sidecar::run()`, and stores the pod in the map.
+    pub(crate) fn start(&mut self, name: &str, agent: &Agent) -> Result<(), String> {
+        if self.pods.contains_key(name) {
+            return Ok(());
+        }
+
+        let sidecar = Sidecar::new(&self.config, agent)
             .map_err(|e| e.to_string())?;
-        sidecar.set_context(invoke);
-        // image_ref always records *which* image, not *which bytes*
+
         let image_ref = ImageRef::parse(&agent.executable)
             .unwrap_or_else(|_| ImageRef::parse("unknown/unknown").unwrap());
 
@@ -152,65 +133,74 @@ impl ContainerPool {
             "Container started"
         );
 
-        let bridge = Arc::clone(sidecar.bridge());
-        self.pods.insert(name.to_string(), Pod {
-            container: Container {
-                container_id,
-                host_port,
-                image_ref,
-                image_digest,
-            },
-            sidecar,
+        let container = Container {
+            container_id: container_id.clone(),
+            image_ref,
+            image_digest,
+        };
+
+        let engine_version = self.engine_version.clone();
+        let agent_name = name.to_string();
+        let handle = thread::spawn(move || {
+            sidecar.run(agent_name, host_port, container, engine_version);
         });
 
-        Ok((host_port, bridge))
+        self.pods.insert(name.to_string(), Pod { container_id, handle });
+        Ok(())
     }
 
-    /// Evict a stale container — stop, remove, and drop the bridge (ADR 073).
-    ///
-    /// Called when dispatch detects a transport error (container dead).
-    pub(crate) fn evict(&mut self, agent_name: &str) {
-        if let Some(pod) = self.pods.remove(agent_name) {
+    /// Check which sidecar threads have exited (container died), clean up those pods.
+    fn reap_dead(&mut self) {
+        let finished: Vec<String> = self.pods.iter()
+            .filter(|(_, pod)| pod.handle.is_finished())
+            .map(|(name, _)| name.clone())
+            .collect();
+
+        for name in finished {
+            let pod = self.pods.remove(&name).unwrap();
             tracing::warn!(
-                event = "container.evicted",
-                agent = %agent_name,
-                container = %pod.container.container_id,
-                "Evicting stale container"
+                event = "sidecar.reaped",
+                agent = %name,
+                container = %pod.container_id,
+                "Sidecar thread exited — stopping container"
             );
-            self.podman.stop_and_remove(&pod.container.container_id, 2);
+            self.podman.stop_and_remove(&pod.container_id, 2);
         }
+    }
+
+    /// Start pods for agents that don't have one yet.
+    fn ensure_containers(&mut self, registry: &dyn Registry) {
+        let agents = registry.get_agents_by_runtime(RuntimeType::Container);
+        for agent in &agents {
+            if self.pods.contains_key(&agent.name) {
+                continue;
+            }
+            if let Err(e) = self.start(&agent.name, agent) {
+                tracing::error!(
+                    event = "container.start_failed",
+                    agent = %agent.name,
+                    error = %e,
+                    "Failed to start container"
+                );
+            }
+        }
+    }
+
+    /// Tick: ensure containers are running, reap dead sidecar threads.
+    pub(crate) fn tick(&mut self, registry: &dyn Registry) -> bool {
+        let before = self.pods.len();
+        self.reap_dead();
+        self.ensure_containers(registry);
+        // Did work if pods changed (reaped or started)
+        self.pods.len() != before
     }
 
     /// Shut down all managed containers.
     pub(crate) fn shutdown(&mut self) {
         for (name, pod) in self.pods.drain() {
-            tracing::info!(event = "container.stopped", agent = %name, container = %pod.container.container_id, "Stopping container");
-            self.podman.stop_and_remove(&pod.container.container_id, 5);
+            tracing::info!(event = "container.stopped", agent = %name, container = %pod.container_id, "Stopping container");
+            self.podman.stop_and_remove(&pod.container_id, 5);
         }
-    }
-
-    /// Build ContainerDiagnostics from cached metadata (ADR 073).
-    pub(crate) fn diagnostics(&self, agent_name: &str, duration_ms: u64) -> ContainerDiagnostics {
-        match self.pods.get(agent_name) {
-            Some(pod) => ContainerDiagnostics {
-                stderr: Vec::new(),
-                runtime: ContainerRuntimeInfo {
-                    engine_version: self.engine_version.as_ref()
-                        .map(|v| v.to_string())
-                        .unwrap_or_else(|| "unknown".to_string()),
-                    image_ref: Some(pod.container.image_ref.clone()),
-                    image_digest: pod.container.image_digest.clone(),
-                    container_id: pod.container.container_id.clone(),
-                },
-                duration_ms,
-            },
-            None => ContainerDiagnostics::placeholder(duration_ms),
-        }
-    }
-
-    /// Retrieve the final state hash from the bridge for a named container.
-    pub(crate) fn final_state(&self, name: &str) -> Option<String> {
-        self.pods.get(name).and_then(|pod| pod.sidecar.bridge().final_state())
     }
 }
 
