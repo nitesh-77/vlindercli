@@ -7,9 +7,9 @@ use std::sync::Arc;
 
 use vlindercli::config::Config;
 use vlindercli::domain::{DagStore, Harness, Registry};
-use vlindercli::harness_service::{GrpcHarnessClient, ping_harness};
-use vlindercli::registry_service::{GrpcRegistryClient, ping_registry};
-use vlindercli::state_service::GrpcStateClient;
+use vlinder_proto::harness_service::{GrpcHarnessClient, ping_harness};
+use vlinder_proto::registry_service::{GrpcRegistryClient, ping_registry};
+use vlinder_proto::state_service::GrpcStateClient;
 
 /// Connect to the registry via gRPC, exiting on failure.
 pub fn connect_registry(config: &Config) -> Arc<dyn Registry> {

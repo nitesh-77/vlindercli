@@ -3119,6 +3119,7 @@ dependencies = [
  "tempfile",
  "tracing",
  "ureq",
+ "vlinder-proto",
  "vlindercli",
 ]
 
