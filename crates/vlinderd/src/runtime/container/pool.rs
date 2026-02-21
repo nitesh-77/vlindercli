@@ -7,8 +7,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::config::RuntimeConfig;
-use crate::domain::{Agent, ContainerId, ImageDigest, ImageRef, QueueBridge, ContainerDiagnostics, ContainerRuntimeInfo, InvokeMessage};
+use crate::config::Config;
+use crate::domain::{Agent, ContainerId, ImageDigest, ImageRef, MessageQueue, ObjectStorageType, QueueBridge, Registry, ContainerDiagnostics, ContainerRuntimeInfo, InvokeMessage, SequenceCounter, VectorStorageType};
 
 use super::podman::{Podman, RunTarget, resolve_socket};
 use super::podman_api::PodmanApiClient;
@@ -52,6 +52,8 @@ impl ImagePolicy {
 /// invocation, and tears them down on eviction or shutdown.
 pub(crate) struct ContainerPool {
     containers: HashMap<String, ManagedContainer>,
+    queue: Arc<dyn MessageQueue + Send + Sync>,
+    registry: Arc<dyn Registry>,
     engine_version: Option<semver::Version>,
     image_policy: ImagePolicy,
     podman: Box<dyn Podman>,
@@ -61,9 +63,11 @@ impl ContainerPool {
     /// Create a new pool, detecting the Podman engine version.
     ///
     /// Selects socket API or CLI based on the `podman_socket` config value (ADR 077).
-    pub(crate) fn new(config: &RuntimeConfig) -> Self {
-        let image_policy = ImagePolicy::from_config(&config.image_policy);
-        let podman: Box<dyn Podman> = match resolve_socket(&config.podman_socket) {
+    pub(crate) fn new(config: &Config) -> Result<Self, Box<dyn std::error::Error>> {
+        let queue = crate::queue_factory::recording_from_config(config)?;
+        let registry = crate::registry_factory::from_config(config)?;
+        let image_policy = ImagePolicy::from_config(&config.runtime.image_policy);
+        let podman: Box<dyn Podman> = match resolve_socket(&config.runtime.podman_socket) {
             Some(path) => {
                 tracing::info!(event = "podman.socket", path = %path.display(), "Using Podman socket API");
                 Box::new(PodmanApiClient::new(&path))
@@ -81,12 +85,14 @@ impl ContainerPool {
             tracing::warn!(event = "podman.not_found", "Podman not detected — container runtime degraded");
         }
         tracing::info!(event = "runtime.image_policy", policy = ?image_policy, "Container image policy");
-        Self {
+        Ok(Self {
             containers: HashMap::new(),
+            queue,
+            registry,
             engine_version,
             image_policy,
             podman,
-        }
+        })
     }
 
     /// If a container is already running for `name`, update its bridge with the
@@ -98,16 +104,18 @@ impl ContainerPool {
         })
     }
 
-    /// Start a new container for `agent`, wiring it to `bridge`.
+    /// Start a new container for `agent`.
     ///
-    /// Selects the image reference based on the image policy, runs the container
-    /// via Podman, discovers the mapped port, and waits for readiness.
+    /// Builds the QueueBridge, selects the image reference based on the image
+    /// policy, runs the container via Podman, discovers the mapped port, and
+    /// waits for readiness.
     pub(crate) fn start(
         &mut self,
         name: &str,
         agent: &Agent,
-        bridge: Arc<QueueBridge>,
+        invoke: &InvokeMessage,
     ) -> Result<(u16, Arc<QueueBridge>), String> {
+        let bridge = self.build_bridge(agent, invoke);
         // image_ref always records *which* image, not *which bytes*
         let image_ref = ImageRef::parse(&agent.executable)
             .unwrap_or_else(|_| ImageRef::parse("unknown/unknown").unwrap());
@@ -154,6 +162,28 @@ impl ContainerPool {
         });
 
         Ok((host_port, bridge_clone))
+    }
+
+    /// Build the QueueBridge for a new container.
+    fn build_bridge(&self, agent: &Agent, invoke: &InvokeMessage) -> Arc<QueueBridge> {
+        let kv_backend = agent.object_storage.as_ref()
+            .and_then(|uri| ObjectStorageType::from_scheme(uri.scheme()));
+        let vec_backend = agent.vector_storage.as_ref()
+            .and_then(|uri| VectorStorageType::from_scheme(uri.scheme()));
+
+        // Bootstrap state to root ("") if agent uses KV but no prior state exists (ADR 055).
+        let initial_state = invoke.state.clone()
+            .or_else(|| kv_backend.as_ref().map(|_| String::new()));
+        Arc::new(QueueBridge {
+            queue: Arc::clone(&self.queue),
+            registry: Arc::clone(&self.registry),
+            current_state: std::sync::RwLock::new(initial_state),
+            invoke: std::sync::RwLock::new(invoke.clone()),
+            kv_backend,
+            vec_backend,
+            sequence: SequenceCounter::new(),
+            pending_replies: std::sync::RwLock::new(std::collections::HashMap::new()),
+        })
     }
 
     /// Evict a stale container — stop, remove, and drop the bridge (ADR 073).

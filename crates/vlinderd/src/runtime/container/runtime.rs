@@ -11,9 +11,9 @@ use std::time::Instant;
 
 use crate::config::Config;
 use crate::domain::{
-    Agent, AgentId, ObjectStorageType, QueueBridge, Registry, ResourceId, RoutingKey, Runtime,
-    RuntimeType, VectorStorageType, CompleteMessage, ExpectsReply, HarnessType,
-    InvokeDiagnostics, InvokeMessage, MessageQueue, SequenceCounter,
+    Agent, AgentId, QueueBridge, Registry, ResourceId, RoutingKey, Runtime,
+    RuntimeType, CompleteMessage, ExpectsReply, HarnessType,
+    InvokeDiagnostics, InvokeMessage, MessageQueue,
 };
 
 use super::dispatch::{DispatchError, RunningTask, dispatch_state_machine};
@@ -44,7 +44,7 @@ impl ContainerRuntime {
             queue,
             registry,
             running: HashMap::new(),
-            pool: ContainerPool::new(&config.runtime),
+            pool: ContainerPool::new(config)?,
         })
     }
 
@@ -66,35 +66,7 @@ impl ContainerRuntime {
         if let Some(result) = self.pool.get_port(&agent.name, invoke) {
             return Ok(result);
         }
-        let bridge = self.build_bridge(agent, invoke);
-        self.pool.start(&agent.name, agent, bridge)
-    }
-
-    /// Build the QueueBridge for a new container.
-    ///
-    /// Needs `queue` + `registry` to construct the QueueBridge, which is why
-    /// this lives on ContainerRuntime rather than ContainerPool.
-    fn build_bridge(&self, agent: &Agent, invoke: &InvokeMessage) -> Arc<QueueBridge> {
-        // Extract storage backends from agent config
-        let kv_backend = agent.object_storage.as_ref()
-            .and_then(|uri| ObjectStorageType::from_scheme(uri.scheme()));
-        let vec_backend = agent.vector_storage.as_ref()
-            .and_then(|uri| VectorStorageType::from_scheme(uri.scheme()));
-
-        // Create QueueBridge.
-        // Bootstrap state to root ("") if agent uses KV but no prior state exists (ADR 055).
-        let initial_state = invoke.state.clone()
-            .or_else(|| kv_backend.as_ref().map(|_| String::new()));
-        Arc::new(QueueBridge {
-            queue: Arc::clone(&self.queue),
-            registry: Arc::clone(&self.registry),
-            current_state: std::sync::RwLock::new(initial_state),
-            invoke: std::sync::RwLock::new(invoke.clone()),
-            kv_backend,
-            vec_backend,
-            sequence: SequenceCounter::new(),
-            pending_replies: std::sync::RwLock::new(std::collections::HashMap::new()),
-        })
+        self.pool.start(&agent.name, agent, invoke)
     }
 
     /// Route a CompleteMessage to the correct destination (harness or delegating agent).
