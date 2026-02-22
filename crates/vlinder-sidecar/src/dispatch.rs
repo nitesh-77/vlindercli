@@ -2,7 +2,7 @@
 //!
 //! The platform drives the agent by calling POST /handle in a loop.
 //! The agent returns an `AgentAction` (what service it needs), the platform
-//! executes it via `SdkContract`, and sends the result back as an `AgentEvent`.
+//! executes it via `QueueBridge`, and sends the result back as an `AgentEvent`.
 //! The loop continues until the agent returns `Complete`.
 
 use std::io::Read;
@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use serde_json::json;
 
-use vlinder_core::domain::{AgentAction, AgentEvent, SdkContract};
+use vlinder_core::domain::{AgentAction, AgentEvent, QueueBridge};
 
 /// Dispatch failure classification (ADR 073).
 ///
@@ -76,14 +76,14 @@ fn post_handle(host_port: u16, event: &AgentEvent, session_id: &str) -> Result<A
 ///
 /// 1. Send `AgentEvent::Invoke` with the input payload and empty state
 /// 2. Receive `AgentAction` from the agent
-/// 3. Execute the requested service call via `SdkContract`
+/// 3. Execute the requested service call via `QueueBridge`
 /// 4. Send the result back as an `AgentEvent`
 /// 5. Repeat until `AgentAction::Complete`
 pub fn dispatch_state_machine(
     host_port: u16,
     payload: &[u8],
     session_id: &str,
-    bridge: Arc<dyn SdkContract>,
+    bridge: Arc<QueueBridge>,
 ) -> Result<Vec<u8>, DispatchError> {
     let input = String::from_utf8_lossy(payload).to_string();
     let mut event = AgentEvent::Invoke {

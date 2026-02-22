@@ -1,8 +1,7 @@
 //! Agent SDK specification (ADR 074, 075).
 //!
-//! The complete contract between agents and the platform, expressed at three levels:
+//! The wire format between agents and the platform:
 //!
-//! - `SdkContract` trait: the 11 operations agents can request (kv, vector, infer, embed, delegate)
 //! - `AgentAction` enum: agent → platform wire format (POST /handle response body)
 //! - `AgentEvent` enum: platform → agent wire format (POST /handle request body)
 //!
@@ -11,37 +10,6 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-
-// ============================================================================
-// SdkContract — the operations
-// ============================================================================
-
-/// The agent SDK contract — what operations agents can request.
-///
-/// Each method maps to one `AgentAction` variant and one `AgentEvent` variant.
-/// The platform fulfills these via `QueueBridge` (or any other implementation).
-pub trait SdkContract: Send + Sync {
-    // -- Object storage --
-    fn kv_get(&self, path: &str) -> Result<Vec<u8>, String>;
-    fn kv_put(&self, path: &str, content: &str) -> Result<(), String>;
-    fn kv_list(&self, prefix: &str) -> Result<Vec<String>, String>;
-    fn kv_delete(&self, path: &str) -> Result<bool, String>;
-
-    // -- Vector storage --
-    fn vector_store(&self, key: &str, vector: &[f32], metadata: &str) -> Result<(), String>;
-    fn vector_search(&self, vector: &[f32], limit: u32) -> Result<Vec<VectorMatch>, String>;
-    fn vector_delete(&self, key: &str) -> Result<bool, String>;
-
-    // -- Inference --
-    fn infer(&self, model: &str, prompt: &str, max_tokens: u32) -> Result<String, String>;
-
-    // -- Embedding --
-    fn embed(&self, model: &str, text: &str) -> Result<Vec<f32>, String>;
-
-    // -- Delegation (ADR 056) --
-    fn delegate(&self, target_agent: &str, input: &str) -> Result<String, String>;
-    fn wait(&self, handle: &str) -> Result<Vec<u8>, String>;
-}
 
 // ============================================================================
 // AgentAction — agent → platform (POST /handle response)

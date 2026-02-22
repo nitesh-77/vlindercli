@@ -1,7 +1,7 @@
-//! QueueBridge — queue-backed implementation of SdkContract (ADR 074, 076).
+//! QueueBridge — queue-backed agent SDK (ADR 074, 076).
 //!
 //! Routes typed platform service calls through the MessageQueue.
-//! Each trait method builds the appropriate request, sends it to the
+//! Each method builds the appropriate request, sends it to the
 //! queue, and polls for a response.
 //!
 //! State tracking (ADR 055): For KV operations, injects the current
@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use super::{
-    AgentId, SdkContract, ObjectStorageType, Operation, Registry, RoutingKey, ServiceBackend,
+    AgentId, ObjectStorageType, Operation, Registry, RoutingKey, ServiceBackend,
     VectorMatch, VectorStorageType, DelegateMessage, DelegateDiagnostics, ContainerDiagnostics,
     InferenceBackendType, EmbeddingBackendType, InvokeMessage, MessageQueue, Nonce,
     RequestMessage, RequestDiagnostics, SequenceCounter,
@@ -127,14 +127,12 @@ impl QueueBridge {
             Ok(())
         }
     }
-}
 
-// ============================================================================
-// SdkContract trait implementation
-// ============================================================================
+    // ========================================================================
+    // SDK operations
+    // ========================================================================
 
-impl SdkContract for QueueBridge {
-    fn kv_get(&self, path: &str) -> Result<Vec<u8>, String> {
+    pub fn kv_get(&self, path: &str) -> Result<Vec<u8>, String> {
         let backend = self.kv_backend
             .ok_or("agent called kv-get but has no object_storage configured")?;
         let state = self.current_state.read().unwrap().clone();
@@ -145,7 +143,7 @@ impl SdkContract for QueueBridge {
         Ok(response)
     }
 
-    fn kv_put(&self, path: &str, content: &str) -> Result<(), String> {
+    pub fn kv_put(&self, path: &str, content: &str) -> Result<(), String> {
         let backend = self.kv_backend
             .ok_or("agent called kv-put but has no object_storage configured")?;
         let state = self.current_state.read().unwrap().clone();
@@ -156,7 +154,7 @@ impl SdkContract for QueueBridge {
         Ok(())
     }
 
-    fn kv_list(&self, prefix: &str) -> Result<Vec<String>, String> {
+    pub fn kv_list(&self, prefix: &str) -> Result<Vec<String>, String> {
         let backend = self.kv_backend
             .ok_or("agent called kv-list but has no object_storage configured")?;
         let req = KvListRequest { path: prefix.to_string() };
@@ -167,7 +165,7 @@ impl SdkContract for QueueBridge {
             .map_err(|e| format!("kv-list response parse error: {}", e))
     }
 
-    fn kv_delete(&self, path: &str) -> Result<bool, String> {
+    pub fn kv_delete(&self, path: &str) -> Result<bool, String> {
         let backend = self.kv_backend
             .ok_or("agent called kv-delete but has no object_storage configured")?;
         let req = KvDeleteRequest { path: path.to_string() };
@@ -177,7 +175,7 @@ impl SdkContract for QueueBridge {
         Ok(response == b"ok")
     }
 
-    fn vector_store(&self, key: &str, vector: &[f32], metadata: &str) -> Result<(), String> {
+    pub fn vector_store(&self, key: &str, vector: &[f32], metadata: &str) -> Result<(), String> {
         let backend = self.vec_backend
             .ok_or("agent called vector-store but has no vector_storage configured")?;
         let req = VectorStoreRequest { key: key.to_string(), vector: vector.to_vec(), metadata: metadata.to_string() };
@@ -187,7 +185,7 @@ impl SdkContract for QueueBridge {
         Ok(())
     }
 
-    fn vector_search(&self, vector: &[f32], limit: u32) -> Result<Vec<VectorMatch>, String> {
+    pub fn vector_search(&self, vector: &[f32], limit: u32) -> Result<Vec<VectorMatch>, String> {
         let backend = self.vec_backend
             .ok_or("agent called vector-search but has no vector_storage configured")?;
         let req = VectorSearchRequest { vector: vector.to_vec(), limit };
@@ -198,7 +196,7 @@ impl SdkContract for QueueBridge {
             .map_err(|e| format!("vector-search response parse error: {}", e))
     }
 
-    fn vector_delete(&self, key: &str) -> Result<bool, String> {
+    pub fn vector_delete(&self, key: &str) -> Result<bool, String> {
         let backend = self.vec_backend
             .ok_or("agent called vector-delete but has no vector_storage configured")?;
         let req = VectorDeleteRequest { key: key.to_string() };
@@ -208,7 +206,7 @@ impl SdkContract for QueueBridge {
         Ok(response == b"ok")
     }
 
-    fn infer(&self, model: &str, prompt: &str, max_tokens: u32) -> Result<String, String> {
+    pub fn infer(&self, model: &str, prompt: &str, max_tokens: u32) -> Result<String, String> {
         let agent_id = self.invoke.read().unwrap().agent_id.clone();
         let backend_str = self.registry.resolve_model_backend(agent_id.as_str(), model)?;
         let backend = InferenceBackendType::from_str(&backend_str)
@@ -221,7 +219,7 @@ impl SdkContract for QueueBridge {
             .map_err(|e| format!("infer response not valid UTF-8: {}", e))
     }
 
-    fn embed(&self, model: &str, text: &str) -> Result<Vec<f32>, String> {
+    pub fn embed(&self, model: &str, text: &str) -> Result<Vec<f32>, String> {
         let agent_id = self.invoke.read().unwrap().agent_id.clone();
         let backend_str = self.registry.resolve_model_backend(agent_id.as_str(), model)?;
         let backend = EmbeddingBackendType::from_str(&backend_str)
@@ -234,7 +232,7 @@ impl SdkContract for QueueBridge {
             .map_err(|e| format!("embed response parse error: {}", e))
     }
 
-    fn delegate(&self, target_agent: &str, input: &str) -> Result<String, String> {
+    pub fn delegate(&self, target_agent: &str, input: &str) -> Result<String, String> {
         let _agent = self.registry.get_agent_by_name(target_agent)
             .ok_or_else(|| format!("delegate: target agent '{}' not found", target_agent))?;
 
@@ -275,7 +273,7 @@ impl SdkContract for QueueBridge {
         Ok(handle)
     }
 
-    fn wait(&self, handle: &str) -> Result<Vec<u8>, String> {
+    pub fn wait(&self, handle: &str) -> Result<Vec<u8>, String> {
         let sha = self.invoke.read().unwrap().submission.to_string();
         let reply_key = self.pending_replies.read().unwrap().get(handle).cloned()
             .ok_or_else(|| format!("wait: unknown delegation handle '{}'", handle))?;
