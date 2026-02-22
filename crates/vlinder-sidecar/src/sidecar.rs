@@ -4,29 +4,26 @@
 //! container. Owns queue and registry connections, mediates all
 //! communication between the agent container and the platform.
 
+use std::io::Read;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use vlinder_core::domain::{
     AgentId, CompleteMessage, ContainerDiagnostics, ContainerId, ContainerRuntimeInfo,
-    ExpectsReply, HarnessType, ImageDigest, ImageRef, InvokeDiagnostics, InvokeMessage,
-    MessageQueue, ObjectStorageType, Registry, RoutingKey, RuntimeType,
-    SequenceCounter, VectorStorageType,
+    ExpectsReply, HarnessType, ImageDigest, ImageRef, InvokeDiagnostics,
+    InvokeMessage, MessageQueue, ObjectStorageType, RoutingKey,
+    RuntimeType, SequenceCounter, VectorStorageType,
 };
 
 use crate::queue_bridge::QueueBridge;
-
 use crate::config::SidecarConfig;
-use crate::dispatch::{dispatch_state_machine, DispatchError};
 use crate::factory;
+use crate::http_server;
 
 /// The sidecar process — mediates between the platform queue and the agent container.
 pub struct Sidecar {
     queue: Arc<dyn MessageQueue + Send + Sync>,
-    registry: Arc<dyn Registry>,
-    kv_backend: Option<ObjectStorageType>,
-    vec_backend: Option<VectorStorageType>,
-    bridge: Option<Arc<QueueBridge>>,
+    bridge: Arc<QueueBridge>,
     /// Agent container port (localhost inside the pod).
     container_port: u16,
     /// Agent name (queue subscription key).
@@ -37,6 +34,8 @@ pub struct Sidecar {
     image_digest: Option<ImageDigest>,
     /// Container ID (diagnostics).
     container_id: ContainerId,
+    /// A sync HTTP client for communicating with the agent container.
+    http_client: ureq::Agent,
 }
 
 impl Sidecar {
@@ -64,38 +63,45 @@ impl Sidecar {
             .map(|id| ContainerId::new(id))
             .unwrap_or_else(ContainerId::unknown);
 
-        Ok(Self {
-            queue,
-            registry,
+        // A placeholder invoke message. This will be updated per-invocation.
+        let placeholder_invoke = InvokeMessage::new(
+            vlinder_core::domain::TimelineId::main(),
+            vlinder_core::domain::SubmissionId::new(),
+            vlinder_core::domain::SessionId::new(),
+            HarnessType::Cli,
+            RuntimeType::Container,
+            AgentId::new("placeholder"),
+            Vec::new(),
+            None,
+            InvokeDiagnostics { harness_version: "".to_string(), history_turns: 0 },
+        );
+
+        let bridge = Arc::new(QueueBridge {
+            queue: Arc::clone(&queue),
+            registry: Arc::clone(&registry),
+            current_state: std::sync::RwLock::new(None),
+            invoke: std::sync::RwLock::new(placeholder_invoke),
             kv_backend,
             vec_backend,
-            bridge: None,
+            sequence: SequenceCounter::new(),
+            pending_replies: std::sync::RwLock::new(std::collections::HashMap::new()),
+        });
+
+        Ok(Self {
+            queue,
+            bridge,
             container_port: config.container_port,
             agent_name: config.agent.clone(),
             image_ref,
             image_digest,
             container_id,
+            http_client: ureq::Agent::new(),
         })
     }
 
-    /// Set the current invocation context.
-    fn set_context(&mut self, invoke: &InvokeMessage) {
-        let initial_state = invoke.state.clone()
-            .or_else(|| self.kv_backend.as_ref().map(|_| String::new()));
-        self.bridge = Some(Arc::new(QueueBridge {
-            queue: Arc::clone(&self.queue),
-            registry: Arc::clone(&self.registry),
-            current_state: std::sync::RwLock::new(initial_state),
-            invoke: std::sync::RwLock::new(invoke.clone()),
-            kv_backend: self.kv_backend,
-            vec_backend: self.vec_backend,
-            sequence: SequenceCounter::new(),
-            pending_replies: std::sync::RwLock::new(std::collections::HashMap::new()),
-        }));
-    }
-
-    fn bridge(&self) -> &Arc<QueueBridge> {
-        self.bridge.as_ref().expect("bridge not set — call set_context first")
+    /// Set the current invocation context for the QueueBridge.
+    fn set_context(&self, invoke: &InvokeMessage) {
+        self.bridge.update_invoke(invoke.clone());
     }
 
     /// Route a CompleteMessage to the correct destination.
@@ -107,40 +113,49 @@ impl Sidecar {
         }
     }
 
-    /// Handle a single invocation: set context, dispatch, send reply.
+    /// Handle a single invocation: set context, POST to agent, get final response.
     fn handle_invoke(
-        &mut self,
+        &self,
         invoke: &InvokeMessage,
         reply_key: &Option<RoutingKey>,
-    ) -> Result<(), DispatchError> {
+    ) -> Result<(), String> {
         let started_at = Instant::now();
         self.set_context(invoke);
-        let bridge = Arc::clone(self.bridge());
 
-        let payload = &invoke.payload;
-        let session_id = invoke.session.as_str();
+        let agent_url = format!("http://127.0.0.1:{}/invoke", self.container_port);
+        let payload = invoke.payload.clone();
 
-        match dispatch_state_machine(self.container_port, payload, session_id, bridge) {
-            Ok(output) => {
-                let final_state = self.bridge().final_state();
+        match self.http_client.post(&agent_url).send_bytes(&payload) {
+            Ok(response) => {
+                let mut output = Vec::new();
+                response.into_reader().read_to_end(&mut output)
+                    .map_err(|e| format!("Failed to read agent response body: {}", e))?;
+                let final_state = self.bridge.final_state();
                 let duration_ms = started_at.elapsed().as_millis() as u64;
                 let diagnostics = self.build_diagnostics(duration_ms);
                 let complete = invoke.create_reply_with_diagnostics(output, final_state, diagnostics);
                 self.send_reply(complete, reply_key);
                 Ok(())
             }
-            Err(DispatchError::ContainerDead(ref reason)) => {
+            Err(ureq::Error::Status(code, response)) => {
+                let err_body = response.into_string().unwrap_or_else(|_| "unknown error".to_string());
                 tracing::warn!(
-                    event = "container.dead",
+                    event = "container.error",
                     container = %self.container_id,
-                    reason = %reason,
-                    "Container dead during dispatch"
+                    status = code,
+                    reason = %err_body,
+                    "Agent container returned an error"
                 );
-                let complete = invoke.create_reply(
-                    format!("[error] container dead: {}", reason).into_bytes()
-                );
+                let complete = invoke.create_reply(format!("[error] agent container error: {}", err_body).into_bytes());
                 self.send_reply(complete, reply_key);
-                Err(DispatchError::ContainerDead(reason.clone()))
+                Err(format!("Agent returned error: {}", err_body))
+            }
+            Err(e) => {
+                let msg = format!("Request to agent failed: {}", e);
+                tracing::warn!(event = "container.unreachable", error = %msg);
+                let complete = invoke.create_reply(format!("[error] {}", msg).into_bytes());
+                self.send_reply(complete, reply_key);
+                Err(msg)
             }
         }
     }
@@ -160,13 +175,9 @@ impl Sidecar {
     }
 
     /// Wait for the agent container to become ready.
-    ///
-    /// Retries GET /health on localhost:{port} until the container responds
-    /// or 60 seconds elapse. Inside a pod, the agent container shares the
-    /// network namespace — localhost is the right address.
     fn wait_for_agent(&self) -> Result<(), String> {
         let url = format!("http://127.0.0.1:{}/health", self.container_port);
-        let deadline = Instant::now() + std::time::Duration::from_secs(60);
+        let deadline = Instant::now() + Duration::from_secs(60);
 
         tracing::info!(
             event = "sidecar.waiting",
@@ -183,7 +194,7 @@ impl Sidecar {
                 ));
             }
 
-            match ureq::get(&url).call() {
+            match self.http_client.get(&url).call() {
                 Ok(_) => {
                     tracing::info!(
                         event = "sidecar.agent_ready",
@@ -192,22 +203,24 @@ impl Sidecar {
                     );
                     return Ok(());
                 }
-                Err(_) => {
-                    std::thread::sleep(std::time::Duration::from_millis(100));
+                _ => {
+                    std::thread::sleep(Duration::from_millis(100));
                 }
             }
         }
     }
 
     /// Main loop: wait for agent, then poll invoke/delegate queues until container death.
-    pub fn run(mut self) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn run(self) -> Result<(), Box<dyn std::error::Error>> {
         self.wait_for_agent()
             .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
+
+        // Spawn the internal HTTP server for the agent to call back to
+        http_server::spawn_server(Arc::clone(&self.bridge));
 
         tracing::info!(event = "sidecar.started", agent = %self.agent_name, "Sidecar loop started");
 
         loop {
-            // Poll invoke queue
             if let Ok((invoke, ack)) = self.queue.receive_invoke(&self.agent_name) {
                 let _ = ack();
                 tracing::info!(
@@ -220,11 +233,7 @@ impl Sidecar {
                 if self.handle_invoke(&invoke, &None).is_err() {
                     break;
                 }
-                continue;
-            }
-
-            // Poll delegate queue
-            if let Ok((delegate, ack)) = self.queue.receive_delegate(&self.agent_name) {
+            } else if let Ok((delegate, ack)) = self.queue.receive_delegate(&self.agent_name) {
                 let _ = ack();
                 tracing::info!(
                     event = "delegation.received",
@@ -252,11 +261,9 @@ impl Sidecar {
                 if self.handle_invoke(&invoke, &reply_key).is_err() {
                     break;
                 }
-                continue;
+            } else {
+                std::thread::sleep(Duration::from_millis(50));
             }
-
-            // Nothing to do — yield before polling again
-            std::thread::sleep(std::time::Duration::from_millis(50));
         }
 
         tracing::info!(event = "sidecar.stopped", agent = %self.agent_name, "Sidecar loop exited");

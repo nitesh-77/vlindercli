@@ -5,8 +5,8 @@
 //! agent container to be healthy, then enters the dispatch loop.
 
 mod config;
-mod dispatch;
 mod factory;
+mod http_server;
 mod queue_bridge;
 mod sidecar;
 

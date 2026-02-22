@@ -55,7 +55,7 @@ pub use image_digest::ImageDigest;
 pub use operation::Operation;
 pub use service_type::ServiceType;
 pub use image_ref::ImageRef;
-pub use sdk::{AgentAction, AgentEvent, VectorMatch};
+pub use sdk::VectorMatch;
 
 // ============================================================================
 // Message Queue (protocol types + trait)

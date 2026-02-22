@@ -11,6 +11,8 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
+use base64::Engine as _;
+
 use vlinder_core::domain::{
     AgentId, ObjectStorageType, Operation, Registry, RoutingKey, ServiceBackend,
     VectorMatch, VectorStorageType, DelegateMessage, DelegateDiagnostics, ContainerDiagnostics,
@@ -44,6 +46,7 @@ pub struct QueueBridge {
     pub current_state: RwLock<Option<String>>,
     /// Maps delegation handles (nonce strings) to reply routing keys (ADR 096 §7).
     /// Populated by delegate(), consumed by wait().
+    #[allow(dead_code)]
     pub pending_replies: RwLock<HashMap<String, RoutingKey>>,
 }
 
@@ -69,7 +72,7 @@ impl QueueBridge {
     // Private helpers
     // ========================================================================
 
-    /// Send a service request through the queue and poll for the response.
+    /// Send a service request through the queue and block for the response.
     fn send_service_request(
         &self,
         service: ServiceBackend,
@@ -77,6 +80,7 @@ impl QueueBridge {
         payload: Vec<u8>,
     ) -> Result<Vec<u8>, String> {
         let seq = self.sequence.next();
+
         let invoke = self.invoke.read().unwrap();
         let sha = invoke.submission.to_string();
 
@@ -106,7 +110,7 @@ impl QueueBridge {
         );
         drop(invoke);
 
-        tracing::debug!(sha = %sha, event = "service.request", service = %request.service, seq = %seq, "sending service request");
+        tracing::debug!(sha = %sha, event = "service.request", service = %request.service, "sending service request");
 
         let response = self.queue.call_service(request)
             .map_err(|e| format!("service call error: {}", e))?;
@@ -147,13 +151,16 @@ impl QueueBridge {
         let backend = self.kv_backend
             .ok_or("agent called kv-put but has no object_storage configured")?;
         let state = self.current_state.read().unwrap().clone();
-        let req = KvPutRequest { path: path.to_string(), content: content.to_string(), state };
+        // KV worker expects content as base64 (wire protocol for binary safety)
+        let encoded = base64::engine::general_purpose::STANDARD.encode(content.as_bytes());
+        let req = KvPutRequest { path: path.to_string(), content: encoded, state };
         let payload = serde_json::to_vec(&req).map_err(|e| format!("serialize error: {}", e))?;
         let response = self.send_service_request(ServiceBackend::Kv(backend), Operation::Put, payload)?;
         Self::check_worker_error(&response)?;
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn kv_list(&self, prefix: &str) -> Result<Vec<String>, String> {
         let backend = self.kv_backend
             .ok_or("agent called kv-list but has no object_storage configured")?;
@@ -232,6 +239,7 @@ impl QueueBridge {
             .map_err(|e| format!("embed response parse error: {}", e))
     }
 
+    #[allow(dead_code)]
     pub fn delegate(&self, target_agent: &str, input: &str) -> Result<String, String> {
         let _agent = self.registry.get_agent_by_name(target_agent)
             .ok_or_else(|| format!("delegate: target agent '{}' not found", target_agent))?;
@@ -273,6 +281,7 @@ impl QueueBridge {
         Ok(handle)
     }
 
+    #[allow(dead_code)]
     pub fn wait(&self, handle: &str) -> Result<Vec<u8>, String> {
         let sha = self.invoke.read().unwrap().submission.to_string();
         let reply_key = self.pending_replies.read().unwrap().get(handle).cloned()
@@ -287,7 +296,6 @@ impl QueueBridge {
                 Ok((complete, ack)) => {
                     let payload = complete.payload.clone();
                     let _ = ack();
-                    // Clean up stored reply key
                     self.pending_replies.write().unwrap().remove(handle);
                     tracing::info!(
                         sha = %sha, event = "delegation.completed",
@@ -299,7 +307,7 @@ impl QueueBridge {
                 }
                 Err(_) => {
                     poll_count += 1;
-                    if poll_count % 5000 == 0 {
+                    if poll_count % 100 == 0 {
                         tracing::warn!(
                             sha = %sha,
                             handle = %handle, polls = poll_count,
@@ -309,7 +317,7 @@ impl QueueBridge {
                     }
                 }
             }
-            std::thread::sleep(std::time::Duration::from_millis(1));
+            std::thread::sleep(std::time::Duration::from_millis(10));
         }
     }
 }

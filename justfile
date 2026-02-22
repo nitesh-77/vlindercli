@@ -117,18 +117,12 @@ reset:
         echo "  - No vlinder processes running"
     fi
 
-    # 2. Podman: stop and remove all vlinder containers and pods
+    # 2. Podman: nuke everything (this machine only uses Podman for Vlinder)
     echo "  Cleaning Podman..."
-    for pod in $(podman pod ls --format '{{{{.Name}}}}' 2>/dev/null | grep -i vlinder || true); do
-        podman pod rm -f "$pod" 2>/dev/null || true
-    done
-    for ctr in $(podman ps -a --format '{{{{.Names}}}}' 2>/dev/null | grep -i vlinder || true); do
-        podman rm -f "$ctr" 2>/dev/null || true
-    done
-    for img in $(podman images --format '{{{{.Repository}}}}:{{{{.Tag}}}}' 2>/dev/null | grep '^localhost/' || true); do
-        podman rmi -f "$img" 2>/dev/null || true
-    done
-    podman system prune -f 2>/dev/null || true
+    podman pod rm -a -f 2>/dev/null || true
+    podman rm -a -f 2>/dev/null || true
+    podman rmi -a -f 2>/dev/null || true
+    podman system prune -a -f --volumes 2>/dev/null || true
     echo "  ✓ Podman clean"
 
     # 3. NATS JetStream streams
