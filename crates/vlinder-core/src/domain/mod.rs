@@ -9,7 +9,6 @@
 
 mod agent;
 mod sdk;
-mod queue_bridge;
 mod dag;
 mod state;
 pub mod registry_memory;
@@ -57,7 +56,6 @@ pub use operation::Operation;
 pub use service_type::ServiceType;
 pub use image_ref::ImageRef;
 pub use sdk::{AgentAction, AgentEvent, VectorMatch};
-pub use queue_bridge::QueueBridge;
 
 // ============================================================================
 // Message Queue (protocol types + trait)

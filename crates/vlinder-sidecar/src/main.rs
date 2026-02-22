@@ -7,6 +7,7 @@
 mod config;
 mod dispatch;
 mod factory;
+mod queue_bridge;
 mod sidecar;
 
 use config::SidecarConfig;

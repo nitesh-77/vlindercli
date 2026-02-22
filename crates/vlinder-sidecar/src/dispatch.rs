@@ -10,7 +10,9 @@ use std::sync::Arc;
 
 use serde_json::json;
 
-use vlinder_core::domain::{AgentAction, AgentEvent, QueueBridge};
+use vlinder_core::domain::{AgentAction, AgentEvent};
+
+use crate::queue_bridge::QueueBridge;
 
 /// Dispatch failure classification (ADR 073).
 ///

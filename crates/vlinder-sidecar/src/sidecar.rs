@@ -10,9 +10,11 @@ use std::time::Instant;
 use vlinder_core::domain::{
     AgentId, CompleteMessage, ContainerDiagnostics, ContainerId, ContainerRuntimeInfo,
     ExpectsReply, HarnessType, ImageDigest, ImageRef, InvokeDiagnostics, InvokeMessage,
-    MessageQueue, ObjectStorageType, QueueBridge, Registry, RoutingKey, RuntimeType,
+    MessageQueue, ObjectStorageType, Registry, RoutingKey, RuntimeType,
     SequenceCounter, VectorStorageType,
 };
+
+use crate::queue_bridge::QueueBridge;
 
 use crate::config::SidecarConfig;
 use crate::dispatch::{dispatch_state_machine, DispatchError};

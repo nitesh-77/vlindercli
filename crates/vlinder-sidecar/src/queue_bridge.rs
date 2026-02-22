@@ -11,14 +11,14 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-use super::{
+use vlinder_core::domain::{
     AgentId, ObjectStorageType, Operation, Registry, RoutingKey, ServiceBackend,
     VectorMatch, VectorStorageType, DelegateMessage, DelegateDiagnostics, ContainerDiagnostics,
     InferenceBackendType, EmbeddingBackendType, InvokeMessage, MessageQueue, Nonce,
     RequestMessage, RequestDiagnostics, SequenceCounter,
 };
 
-use super::service_payloads::{
+use vlinder_core::domain::service_payloads::{
     KvGetRequest, KvPutRequest, KvListRequest, KvDeleteRequest,
     VectorStoreRequest, VectorSearchRequest, VectorDeleteRequest,
     InferRequest, EmbedRequest,
@@ -317,8 +317,8 @@ impl QueueBridge {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::queue::InMemoryQueue;
-    use crate::domain::{
+    use vlinder_core::queue::InMemoryQueue;
+    use vlinder_core::domain::{
         HarnessType, InvokeDiagnostics, RuntimeType, SessionId, SubmissionId, TimelineId,
         SecretStore, InMemoryRegistry, InMemorySecretStore,
     };
@@ -381,7 +381,6 @@ mod tests {
 
     #[test]
     fn kv_get_request_includes_state() {
-        use crate::domain::service_payloads::KvGetRequest;
         let req = KvGetRequest {
             path: "/notes".to_string(),
             state: Some("sha256:prev".to_string()),
@@ -396,7 +395,6 @@ mod tests {
 
     #[test]
     fn kv_get_request_omits_state_when_none() {
-        use crate::domain::service_payloads::KvGetRequest;
         let req = KvGetRequest {
             path: "/x".to_string(),
             state: None,
