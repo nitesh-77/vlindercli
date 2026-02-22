@@ -117,10 +117,10 @@ impl MessageQueue for InMemoryQueue {
         let mut typed = self.typed_queues.lock().unwrap();
 
         if let Some(queue) = typed.get_mut(&reply_key) {
-            if let Some(ObservableMessage::Response(msg)) = queue.front() {
-                let msg = msg.clone();
-                queue.pop_front();
-                return Ok((msg, Box::new(|| Ok(()))));
+            if let Some(ObservableMessage::Response(_)) = queue.front() {
+                if let Some(ObservableMessage::Response(msg)) = queue.pop_front() {
+                    return Ok((msg, Box::new(|| Ok(()))));
+                }
             }
         }
 

@@ -465,7 +465,7 @@ impl RequestMessage {
 /// Response message: Service → Runtime
 ///
 /// Service responds to a request, echoing all dimensions for traceability.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Debug, Serialize)]
 pub struct ResponseMessage {
     pub id: MessageId,
     pub protocol_version: String,
@@ -759,7 +759,7 @@ impl ExpectsReply for RequestMessage {
 ///
 /// Used for polymorphic handling when the specific message type isn't known
 /// at compile time (e.g., receiving from a queue).
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub enum ObservableMessage {
     Invoke(InvokeMessage),
     Request(RequestMessage),
