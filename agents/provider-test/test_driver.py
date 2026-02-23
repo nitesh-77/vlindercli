@@ -12,9 +12,11 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_POST(self):
-        """Call GET http://openrouter.vlinder.local/ and return the response."""
+        """Call POST http://openrouter.vlinder.local/ and return the response."""
         try:
-            req = Request("http://openrouter.vlinder.local/")
+            length = int(self.headers.get("Content-Length", 0))
+            data = self.rfile.read(length)
+            req = Request("http://openrouter.vlinder.local/", data=data, method="POST")
             with urlopen(req, timeout=5) as resp:
                 body = resp.read()
             self.send_response(200)

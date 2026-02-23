@@ -48,7 +48,7 @@ build-support-fleet: build-support-agent build-log-analyst build-code-analyst
 # =============================================================================
 
 # Build everything needed to run agents: CLI + sidecar + agent container images
-build-everything: build build-sidecar build-todoapp build-echo-container
+build-everything: build build-sidecar build-todoapp build-echo-container build-provider-test
 
 # Run a specific agent (usage: just run pensieve-container)
 # Uses ~/.vlinder by default (no VLINDER_DIR override needed)
