@@ -10,7 +10,7 @@
 use std::io::Read;
 
 use tiny_http::{Method, StatusCode};
-use vlinder_core::domain::{HttpMethod, ProviderHost};
+use vlinder_core::domain::{HttpMethod, ProviderHost, ProviderRoute};
 
 /// Convert a core `HttpMethod` into the `tiny_http::Method` the server needs.
 fn to_tiny_method(m: HttpMethod) -> Method {
@@ -80,49 +80,51 @@ mod tests {
     use super::*;
 
     fn test_hosts() -> Vec<ProviderHost> {
-        vec![vlinder_infer_openrouter::provider_host()]
+        vec![ProviderHost::new("test.vlinder.local", vec![
+            ProviderRoute::new::<String, String>(HttpMethod::Post, "/test"),
+        ])]
     }
 
     #[test]
-    fn post_root_valid_string_returns_200() {
+    fn matching_route_returns_200() {
         let hosts = test_hosts();
-        let (status, body) = route(&hosts, &Method::Post, "openrouter.vlinder.local", "/", b"\"hello\"");
+        let (status, body) = route(&hosts, &Method::Post, "test.vlinder.local", "/test", b"\"hello\"");
         assert_eq!(status, 200);
         assert_eq!(body, b"ok");
     }
 
     #[test]
-    fn post_root_invalid_json_returns_400() {
+    fn invalid_payload_returns_400() {
         let hosts = test_hosts();
-        let (status, _) = route(&hosts, &Method::Post, "openrouter.vlinder.local", "/", b"not json");
+        let (status, _) = route(&hosts, &Method::Post, "test.vlinder.local", "/test", b"not json");
         assert_eq!(status, 400);
     }
 
     #[test]
-    fn post_without_host_returns_404() {
+    fn missing_host_returns_404() {
         let hosts = test_hosts();
-        let (status, _) = route(&hosts, &Method::Post, "", "/", b"\"hello\"");
+        let (status, _) = route(&hosts, &Method::Post, "", "/test", b"\"hello\"");
         assert_eq!(status, 404);
     }
 
     #[test]
-    fn post_wrong_host_returns_404() {
+    fn wrong_host_returns_404() {
         let hosts = test_hosts();
-        let (status, _) = route(&hosts, &Method::Post, "invalid.vlinder.local", "/", b"\"hello\"");
+        let (status, _) = route(&hosts, &Method::Post, "other.vlinder.local", "/test", b"\"hello\"");
         assert_eq!(status, 404);
     }
 
     #[test]
-    fn get_openrouter_returns_404() {
+    fn wrong_method_returns_404() {
         let hosts = test_hosts();
-        let (status, _) = route(&hosts, &Method::Get, "openrouter.vlinder.local", "/", b"");
+        let (status, _) = route(&hosts, &Method::Get, "test.vlinder.local", "/test", b"");
         assert_eq!(status, 404);
     }
 
     #[test]
-    fn post_unknown_path_returns_404() {
+    fn wrong_path_returns_404() {
         let hosts = test_hosts();
-        let (status, _) = route(&hosts, &Method::Post, "openrouter.vlinder.local", "/v1/chat/completions", b"\"hello\"");
+        let (status, _) = route(&hosts, &Method::Post, "test.vlinder.local", "/other", b"\"hello\"");
         assert_eq!(status, 404);
     }
 }
