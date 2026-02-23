@@ -6,6 +6,9 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::routing_key::ServiceBackend;
+use super::operation::Operation;
+
 /// Model provider — the service that hosts and serves the model.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -47,12 +50,14 @@ impl std::fmt::Display for PayloadError {
 /// Validates that raw bytes can be deserialized as the expected type.
 pub type TypeValidator = fn(&[u8]) -> Result<(), PayloadError>;
 
-/// A single route: method + path + request/response type validators.
+/// A single route: method + path + request/response type validators + queue routing.
 pub struct ProviderRoute {
     pub method: HttpMethod,
     pub path: String,
     pub validate_request: TypeValidator,
     pub validate_response: TypeValidator,
+    pub service_backend: ServiceBackend,
+    pub operation: Operation,
 }
 
 /// A provider host: hostname + its routes.
@@ -62,7 +67,12 @@ pub struct ProviderHost {
 }
 
 impl ProviderRoute {
-    pub fn new<Req, Resp>(method: HttpMethod, path: impl Into<String>) -> Self
+    pub fn new<Req, Resp>(
+        method: HttpMethod,
+        path: impl Into<String>,
+        service_backend: ServiceBackend,
+        operation: Operation,
+    ) -> Self
     where
         Req: serde::de::DeserializeOwned,
         Resp: serde::de::DeserializeOwned,
@@ -80,6 +90,8 @@ impl ProviderRoute {
                     .map(|_| ())
                     .map_err(|e| PayloadError::InvalidPayload(e.to_string()))
             },
+            service_backend,
+            operation,
         }
     }
 }

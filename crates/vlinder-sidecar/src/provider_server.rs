@@ -7,10 +7,8 @@
 //! This module is pure plumbing — it matches incoming requests against the
 //! declared routes and converts `HttpMethod` to `tiny_http::Method`.
 
-use std::io::Read;
-
 use tiny_http::{Method, StatusCode};
-use vlinder_core::domain::{HttpMethod, ProviderHost, ProviderRoute};
+use vlinder_core::domain::{HttpMethod, ProviderHost};
 
 /// Convert a core `HttpMethod` into the `tiny_http::Method` the server needs.
 fn to_tiny_method(m: HttpMethod) -> Method {
@@ -80,8 +78,14 @@ mod tests {
     use super::*;
 
     fn test_hosts() -> Vec<ProviderHost> {
+        use vlinder_core::domain::{InferenceBackendType, Operation, ServiceBackend};
         vec![ProviderHost::new("test.vlinder.local", vec![
-            ProviderRoute::new::<String, String>(HttpMethod::Post, "/test"),
+            ProviderRoute::new::<String, String>(
+                HttpMethod::Post,
+                "/test",
+                ServiceBackend::Infer(InferenceBackendType::Ollama),
+                Operation::Run,
+            ),
         ])]
     }
 

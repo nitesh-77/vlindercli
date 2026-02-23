@@ -2,7 +2,7 @@
 //! for the OpenRouter inference backend.
 
 use async_openai::types::chat::{CreateChatCompletionRequest, CreateChatCompletionResponse};
-use vlinder_core::domain::{HttpMethod, ProviderHost, ProviderRoute};
+use vlinder_core::domain::{HttpMethod, InferenceBackendType, Operation, ProviderHost, ProviderRoute, ServiceBackend};
 
 /// The virtual hostname the sidecar will serve for OpenRouter.
 pub const HOSTNAME: &str = "openrouter.vlinder.local";
@@ -11,7 +11,10 @@ pub const HOSTNAME: &str = "openrouter.vlinder.local";
 pub fn provider_host() -> ProviderHost {
     ProviderHost::new(HOSTNAME, vec![
         ProviderRoute::new::<CreateChatCompletionRequest, CreateChatCompletionResponse>(
-            HttpMethod::Post, "/v1/chat/completions",
+            HttpMethod::Post,
+            "/v1/chat/completions",
+            ServiceBackend::Infer(InferenceBackendType::OpenRouter),
+            Operation::Run,
         ),
     ])
 }
@@ -43,6 +46,20 @@ mod tests {
         let route = &host.routes[0];
         assert_eq!(route.method, HttpMethod::Post);
         assert_eq!(route.path, "/v1/chat/completions");
+    }
+
+    #[test]
+    fn route_has_correct_service_backend() {
+        let host = provider_host();
+        let route = &host.routes[0];
+        assert_eq!(route.service_backend, ServiceBackend::Infer(InferenceBackendType::OpenRouter));
+    }
+
+    #[test]
+    fn route_has_correct_operation() {
+        let host = provider_host();
+        let route = &host.routes[0];
+        assert_eq!(route.operation, Operation::Run);
     }
 
     #[test]
