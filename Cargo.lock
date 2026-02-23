@@ -150,19 +150,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "async-openai"
-version = "0.33.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b3ef6d66e53b3ec8ed4bae8e6dcdda75c0f5b4f67faba78fac1b09434cb4f2fc"
-dependencies = [
- "bytes",
- "derive_builder",
- "getrandom 0.3.4",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "async-stream"
 version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3243,7 +3230,7 @@ name = "vlinder-core"
 version = "0.1.0"
 dependencies = [
  "async-nats",
- "async-openai 0.32.4",
+ "async-openai",
  "base64",
  "chrono",
  "ed25519-dalek",
@@ -3257,15 +3244,6 @@ dependencies = [
  "toml",
  "tracing",
  "uuid",
-]
-
-[[package]]
-name = "vlinder-payloads"
-version = "0.1.0"
-dependencies = [
- "async-openai 0.33.0",
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -3301,7 +3279,7 @@ name = "vlinderd"
 version = "0.1.0"
 dependencies = [
  "async-nats",
- "async-openai 0.32.4",
+ "async-openai",
  "base64",
  "chrono",
  "clap",
