@@ -11,8 +11,8 @@ use std::time::{Duration, Instant};
 use vlinder_core::domain::{
     AgentId, CompleteMessage, ContainerDiagnostics, ContainerId, ContainerRuntimeInfo,
     ExpectsReply, HarnessType, ImageDigest, ImageRef, InvokeDiagnostics,
-    InvokeMessage, MessageQueue, ObjectStorageType, RoutingKey,
-    RuntimeType, SequenceCounter, VectorStorageType,
+    InvokeMessage, MessageQueue, ObjectStorageType, Provider, RoutingKey,
+    RuntimeType, SequenceCounter, ServiceType, VectorStorageType,
 };
 
 use crate::queue_bridge::QueueBridge;
@@ -49,6 +49,21 @@ impl Sidecar {
 
         let agent = registry.get_agent_by_name(&config.agent)
             .ok_or_else(|| format!("agent '{}' not found in registry", config.agent))?;
+
+        // If the agent requires OpenRouter for inference, start the provider server.
+        let needs_openrouter = agent
+            .requirements
+            .services
+            .get(&ServiceType::Infer)
+            .map(|svc| svc.provider == Provider::OpenRouter)
+            .unwrap_or(false);
+
+        if needs_openrouter {
+            tracing::info!(event = "provider_server.openrouter", agent = %config.agent, "Agent requires OpenRouter — starting provider server");
+            crate::provider_server::spawn_provider_server(vec![
+                crate::provider_server::openrouter_host(),
+            ]);
+        }
 
         let kv_backend = agent.object_storage.as_ref()
             .and_then(|uri| ObjectStorageType::from_scheme(uri.scheme()));
