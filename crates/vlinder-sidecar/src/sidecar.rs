@@ -11,11 +11,12 @@ use std::time::{Duration, Instant};
 use vlinder_core::domain::{
     AgentId, CompleteMessage, ContainerDiagnostics, ContainerId, ContainerRuntimeInfo,
     ExpectsReply, HarnessType, ImageDigest, ImageRef, InvokeDiagnostics,
-    InvokeMessage, MessageQueue, ObjectStorageType, Provider, RoutingKey,
-    RuntimeType, SequenceCounter, ServiceType, VectorStorageType,
+    InvokeMessage, MessageQueue, ObjectStorageType, RoutingKey,
+    RuntimeType, SequenceCounter, VectorStorageType,
 };
 
 use crate::queue_bridge::QueueBridge;
+use crate::provider_server::ProviderServer;
 use crate::config::SidecarConfig;
 use crate::factory;
 use crate::http_server;
@@ -49,21 +50,6 @@ impl Sidecar {
 
         let agent = registry.get_agent_by_name(&config.agent)
             .ok_or_else(|| format!("agent '{}' not found in registry", config.agent))?;
-
-        // If the agent requires OpenRouter for inference, start the provider server.
-        let needs_openrouter = agent
-            .requirements
-            .services
-            .get(&ServiceType::Infer)
-            .map(|svc| svc.provider == Provider::OpenRouter)
-            .unwrap_or(false);
-
-        if needs_openrouter {
-            tracing::info!(event = "provider_server.openrouter", agent = %config.agent, "Agent requires OpenRouter — starting provider server");
-            crate::provider_server::spawn_provider_server(vec![
-                vlinder_infer_openrouter::provider_host(),
-            ]);
-        }
 
         let kv_backend = agent.object_storage.as_ref()
             .and_then(|uri| ObjectStorageType::from_scheme(uri.scheme()));
@@ -136,6 +122,9 @@ impl Sidecar {
     ) -> Result<(), String> {
         let started_at = Instant::now();
         self.set_context(invoke);
+
+        // Spawn provider server for this invoke — drops when this method returns.
+        let _provider_server = ProviderServer::start(invoke);
 
         let agent_url = format!("http://127.0.0.1:{}/invoke", self.container_port);
         let payload = invoke.payload.clone();
