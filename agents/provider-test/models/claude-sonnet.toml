@@ -1,0 +1,4 @@
+name = "claude-sonnet"
+type = "inference"
+provider = "openrouter"
+model_path = "openrouter://anthropic/claude-sonnet-4"

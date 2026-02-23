@@ -38,9 +38,16 @@ impl Podman for PodmanCliClient {
 
     // ── Pod operations ────────────────────────────────────────────────
 
-    fn pod_create(&self, name: &str) -> Result<PodId, PodmanError> {
+    fn pod_create(&self, name: &str, host_aliases: &[String]) -> Result<PodId, PodmanError> {
+        let mut args = vec!["pod", "create", "--name", name];
+        let add_host_args: Vec<String> = host_aliases.iter()
+            .flat_map(|alias| vec!["--add-host".to_string(), alias.clone()])
+            .collect();
+        let add_host_refs: Vec<&str> = add_host_args.iter().map(|s| s.as_str()).collect();
+        args.extend(add_host_refs);
+
         let output = Command::new("podman")
-            .args(["pod", "create", "--name", name])
+            .args(&args)
             .output()
             .map_err(|e| PodmanError::Run(format!("failed to spawn podman: {}", e)))?;
 

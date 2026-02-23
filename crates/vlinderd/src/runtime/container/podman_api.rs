@@ -57,10 +57,12 @@ impl Podman for PodmanApiClient {
 
     // ── Pod operations ────────────────────────────────────────────────
 
-    fn pod_create(&self, name: &str) -> Result<PodId, PodmanError> {
+    fn pod_create(&self, name: &str, host_aliases: &[String]) -> Result<PodId, PodmanError> {
         let url = format!("{}/pods/create", API_BASE);
+        let hostadd = if host_aliases.is_empty() { None } else { Some(host_aliases.to_vec()) };
         let spec = PodCreateSpec {
             name: name.to_string(),
+            hostadd,
         };
 
         let mut resp = self.agent.post(&url)
@@ -164,6 +166,9 @@ struct ContainerCreateResponse {
 #[derive(Serialize)]
 struct PodCreateSpec {
     name: String,
+    /// Host aliases injected into `/etc/hosts` (`hostname:ip` pairs).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    hostadd: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]
@@ -239,9 +244,20 @@ mod tests {
 
     #[test]
     fn pod_create_spec_serialization() {
-        let spec = PodCreateSpec { name: "vlinder-echo".to_string() };
+        let spec = PodCreateSpec { name: "vlinder-echo".to_string(), hostadd: None };
         let json = serde_json::to_string(&spec).unwrap();
         assert!(json.contains("vlinder-echo"));
+        assert!(!json.contains("hostadd"));
+    }
+
+    #[test]
+    fn pod_create_spec_with_host_aliases() {
+        let spec = PodCreateSpec {
+            name: "vlinder-provider-test".to_string(),
+            hostadd: Some(vec!["openrouter.vlinder.local:127.0.0.1".to_string()]),
+        };
+        let json = serde_json::to_string(&spec).unwrap();
+        assert!(json.contains("openrouter.vlinder.local:127.0.0.1"));
     }
 
     #[test]

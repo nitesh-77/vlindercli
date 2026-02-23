@@ -18,6 +18,10 @@ build-echo-container:
 build-kv-bridge-agent:
     podman build -t localhost/kv-bridge-agent:latest agents/kv-bridge-agent/
 
+# Build provider-test agent (OCI image via Podman, exercises openrouter.vlinder.local)
+build-provider-test:
+    podman build -t localhost/provider-test:latest agents/provider-test/
+
 # Build todoapp agent (OCI image via Podman, OpenRouter integration test)
 build-todoapp:
     podman build -t localhost/todoapp:latest agents/todoapp/

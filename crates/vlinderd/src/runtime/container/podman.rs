@@ -63,7 +63,10 @@ pub(crate) trait Podman: Send {
     fn image_digest(&self, image_ref: &ImageRef) -> Option<ImageDigest>;
 
     /// Create a pod with the given name. Returns the pod ID.
-    fn pod_create(&self, name: &str) -> Result<PodId, PodmanError>;
+    ///
+    /// `host_aliases` are `hostname:ip` pairs injected into `/etc/hosts`
+    /// (e.g., `["openrouter.vlinder.local:127.0.0.1"]`).
+    fn pod_create(&self, name: &str, host_aliases: &[String]) -> Result<PodId, PodmanError>;
 
     /// Create a container inside a pod. No port mapping — containers in
     /// a pod share a network namespace (like k8s).

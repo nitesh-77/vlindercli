@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::config::Config;
-use crate::domain::{Agent, ImageRef, PodId, Registry, ResourceId, Runtime, RuntimeType};
+use crate::domain::{Agent, ImageRef, PodId, Provider, Registry, ResourceId, Runtime, RuntimeType};
 
 use super::podman::{Podman, RunTarget, resolve_socket};
 use super::podman_api::PodmanApiClient;
@@ -128,9 +128,14 @@ impl ContainerRuntime {
                 .unwrap_or(RunTarget::Ref(&image_ref)),
         };
 
-        // 1. Create pod
+        // 1. Create pod (with host aliases for provider hostnames)
+        let mut host_aliases = Vec::new();
+        if agent.requirements.services.values().any(|svc| svc.provider == Provider::OpenRouter) {
+            host_aliases.push("openrouter.vlinder.local:127.0.0.1".to_string());
+        }
+
         let pod_name = format!("vlinder-{}", name);
-        let pod_id = self.podman.pod_create(&pod_name)
+        let pod_id = self.podman.pod_create(&pod_name, &host_aliases)
             .map_err(|e| e.to_string())?;
 
         // 2. Add agent container (no env vars, no port mapping — shared network in pod)
