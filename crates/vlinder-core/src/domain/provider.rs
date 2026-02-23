@@ -29,10 +29,30 @@ pub enum HttpMethod {
     Delete,
 }
 
-/// A single route: method + path.
+/// Payload validation failure.
+#[derive(Debug)]
+pub enum PayloadError {
+    /// Bytes could not be deserialized as the expected type.
+    InvalidPayload(String),
+}
+
+impl std::fmt::Display for PayloadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PayloadError::InvalidPayload(msg) => write!(f, "invalid payload: {}", msg),
+        }
+    }
+}
+
+/// Validates that raw bytes can be deserialized as the expected type.
+pub type TypeValidator = fn(&[u8]) -> Result<(), PayloadError>;
+
+/// A single route: method + path + request/response type validators.
 pub struct ProviderRoute {
     pub method: HttpMethod,
     pub path: String,
+    pub validate_request: TypeValidator,
+    pub validate_response: TypeValidator,
 }
 
 /// A provider host: hostname + its routes.
@@ -42,8 +62,25 @@ pub struct ProviderHost {
 }
 
 impl ProviderRoute {
-    pub fn new(method: HttpMethod, path: impl Into<String>) -> Self {
-        Self { method, path: path.into() }
+    pub fn new<Req, Resp>(method: HttpMethod, path: impl Into<String>) -> Self
+    where
+        Req: serde::de::DeserializeOwned,
+        Resp: serde::de::DeserializeOwned,
+    {
+        Self {
+            method,
+            path: path.into(),
+            validate_request: |bytes| {
+                serde_json::from_slice::<Req>(bytes)
+                    .map(|_| ())
+                    .map_err(|e| PayloadError::InvalidPayload(e.to_string()))
+            },
+            validate_response: |bytes| {
+                serde_json::from_slice::<Resp>(bytes)
+                    .map(|_| ())
+                    .map_err(|e| PayloadError::InvalidPayload(e.to_string()))
+            },
+        }
     }
 }
 

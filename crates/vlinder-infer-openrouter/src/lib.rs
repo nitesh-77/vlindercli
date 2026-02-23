@@ -9,7 +9,7 @@ pub const HOSTNAME: &str = "openrouter.vlinder.local";
 /// Build the provider host declaration for OpenRouter.
 pub fn provider_host() -> ProviderHost {
     ProviderHost::new(HOSTNAME, vec![
-        ProviderRoute::new(HttpMethod::Post, "/"),
+        ProviderRoute::new::<String, String>(HttpMethod::Post, "/"),
     ])
 }
 

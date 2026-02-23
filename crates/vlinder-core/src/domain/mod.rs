@@ -96,7 +96,7 @@ pub use state::InMemoryStateStore;
 
 pub use path::{AbsolutePath, AbsoluteUri};
 pub use agent_manifest::{AgentManifest, ServiceConfig, Protocol};
-pub use provider::{Provider, HttpMethod, ProviderRoute, ProviderHost};
+pub use provider::{Provider, HttpMethod, PayloadError, TypeValidator, ProviderRoute, ProviderHost};
 pub use fleet::{Fleet, LoadError as FleetLoadError};
 pub use fleet_manifest::FleetManifest;
 
