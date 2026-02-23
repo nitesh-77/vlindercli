@@ -1,0 +1,44 @@
+//! OpenRouter provider — declares the hostname and routes
+//! for the OpenRouter inference backend.
+
+use vlinder_core::domain::{HttpMethod, ProviderHost, ProviderRoute};
+
+/// The virtual hostname the sidecar will serve for OpenRouter.
+pub const HOSTNAME: &str = "openrouter.vlinder.local";
+
+/// Build the provider host declaration for OpenRouter.
+pub fn provider_host() -> ProviderHost {
+    ProviderHost::new(HOSTNAME, vec![
+        ProviderRoute::new(HttpMethod::Get, "/"),
+    ])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hostname_is_openrouter_vlinder_local() {
+        assert_eq!(HOSTNAME, "openrouter.vlinder.local");
+    }
+
+    #[test]
+    fn provider_host_has_correct_hostname() {
+        let host = provider_host();
+        assert_eq!(host.hostname, "openrouter.vlinder.local");
+    }
+
+    #[test]
+    fn provider_host_has_one_route() {
+        let host = provider_host();
+        assert_eq!(host.routes.len(), 1);
+    }
+
+    #[test]
+    fn route_is_get_root() {
+        let host = provider_host();
+        let route = &host.routes[0];
+        assert_eq!(route.method, HttpMethod::Get);
+        assert_eq!(route.path, "/");
+    }
+}

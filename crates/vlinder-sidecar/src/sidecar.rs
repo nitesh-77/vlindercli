@@ -61,7 +61,7 @@ impl Sidecar {
         if needs_openrouter {
             tracing::info!(event = "provider_server.openrouter", agent = %config.agent, "Agent requires OpenRouter — starting provider server");
             crate::provider_server::spawn_provider_server(vec![
-                crate::provider_server::openrouter_host(),
+                vlinder_infer_openrouter::provider_host(),
             ]);
         }
 

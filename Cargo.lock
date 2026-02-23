@@ -3247,6 +3247,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "vlinder-infer-openrouter"
+version = "0.1.0"
+dependencies = [
+ "async-openai",
+ "serde_json",
+ "vlinder-core",
+]
+
+[[package]]
 name = "vlinder-proto"
 version = "0.1.0"
 dependencies = [
@@ -3271,6 +3280,7 @@ dependencies = [
  "tracing-subscriber",
  "ureq 2.12.1",
  "vlinder-core",
+ "vlinder-infer-openrouter",
  "vlinder-proto",
 ]
 

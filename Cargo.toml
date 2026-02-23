@@ -1,4 +1,4 @@
 [workspace]
 resolver = "2"
-members = ["crates/vlinderd", "crates/vlinder-core", "crates/vlinder-proto", "crates/vlinder", "crates/vlinder-sidecar"]
+members = ["crates/vlinderd", "crates/vlinder-core", "crates/vlinder-proto", "crates/vlinder", "crates/vlinder-sidecar", "crates/vlinder-infer-openrouter"]
 default-members = ["crates/vlinderd", "crates/vlinder"]

@@ -1,0 +1,10 @@
+[package]
+name = "vlinder-infer-openrouter"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+vlinder-core = { path = "../vlinder-core" }
+async-openai = { version = "0.32", default-features = false, features = ["chat-completion-types"] }
+serde_json = "1"

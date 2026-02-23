@@ -15,3 +15,40 @@ pub enum Provider {
     /// OpenRouter API (cloud LLMs via OpenAI-compatible endpoint).
     OpenRouter,
 }
+
+// ============================================================================
+// Provider server contract types (pure Rust — no HTTP framework dependency)
+// ============================================================================
+
+/// HTTP method for provider routes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HttpMethod {
+    Get,
+    Post,
+    Put,
+    Delete,
+}
+
+/// A single route: method + path.
+pub struct ProviderRoute {
+    pub method: HttpMethod,
+    pub path: String,
+}
+
+/// A provider host: hostname + its routes.
+pub struct ProviderHost {
+    pub hostname: String,
+    pub routes: Vec<ProviderRoute>,
+}
+
+impl ProviderRoute {
+    pub fn new(method: HttpMethod, path: impl Into<String>) -> Self {
+        Self { method, path: path.into() }
+    }
+}
+
+impl ProviderHost {
+    pub fn new(hostname: impl Into<String>, routes: Vec<ProviderRoute>) -> Self {
+        Self { hostname: hostname.into(), routes }
+    }
+}
