@@ -44,27 +44,25 @@
 //! Commits advance the current branch (HEAD). Sessions are distinguished by
 //! `Session:` trailers. Users can fork a branch to diverge from the timeline.
 //!
-//! Uses git plumbing commands (hash-object, mktree, commit-tree, update-ref)
-//! for writes. Runs `git checkout -f` after each commit to keep the working
-//! tree populated.
+//! Uses git2 (libgit2) for all git operations — no subprocess spawning, no
+//! file lock contention between processes.
 
-use std::io::Write;
-use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::path::Path;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
+use git2::{Repository, Oid, Signature, TreeBuilder, FileMode};
 
 use crate::domain::{DagWorker, ObservableMessage, Registry};
 
 /// DAG worker that writes commits to a git repository.
 pub struct GitDagWorker {
-    repo_path: PathBuf,
+    repo: Repository,
     registry_host: String,
     /// Registry access for looking up agent/model state at commit time.
     registry: Option<Arc<dyn Registry>>,
-    /// Last git commit hash — for commit chaining.
-    last_commit: Option<String>,
+    /// Last git commit OID — for commit chaining.
+    last_commit: Option<Oid>,
 }
 
 impl GitDagWorker {
@@ -74,113 +72,25 @@ impl GitDagWorker {
         registry_host: &str,
         registry: Option<Arc<dyn Registry>>,
     ) -> Result<Self, String> {
-        std::fs::create_dir_all(repo_path)
-            .map_err(|e| format!("failed to create repo directory: {}", e))?;
-
-        if !repo_path.join(".git").exists() {
-            let output = Command::new("git")
-                .args(["init"])
-                .current_dir(repo_path)
-                .output()
-                .map_err(|e| format!("git init failed: {}", e))?;
-
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                return Err(format!("git init failed: {}", stderr));
-            }
-        }
+        let repo = if repo_path.join(".git").exists() {
+            Repository::open(repo_path)
+        } else {
+            std::fs::create_dir_all(repo_path)
+                .map_err(|e| format!("failed to create repo directory: {}", e))?;
+            Repository::init(repo_path)
+        }.map_err(|e| format!("git repo open/init failed: {}", e))?;
 
         // Read current HEAD for commit chaining (resume after restart)
-        let last_commit = Command::new("git")
-            .args(["rev-parse", "--verify", "HEAD"])
-            .current_dir(repo_path)
-            .output()
-            .ok()
-            .filter(|o| o.status.success())
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+        let last_commit = repo.head().ok()
+            .and_then(|r| r.peel_to_commit().ok())
+            .map(|c| c.id());
 
         Ok(Self {
-            repo_path: repo_path.to_path_buf(),
+            repo,
             registry_host: registry_host.to_string(),
             registry,
             last_commit,
         })
-    }
-
-    /// Write a blob to the git object store. Returns the blob hash.
-    fn write_blob(&self, data: &[u8]) -> Result<String, String> {
-        let mut child = Command::new("git")
-            .args(["hash-object", "-w", "--stdin"])
-            .current_dir(&self.repo_path)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| format!("git hash-object spawn failed: {}", e))?;
-
-        child.stdin.take().unwrap().write_all(data)
-            .map_err(|e| format!("git hash-object write failed: {}", e))?;
-
-        let output = child.wait_with_output()
-            .map_err(|e| format!("git hash-object wait failed: {}", e))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("git hash-object failed: {}", stderr));
-        }
-
-        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
-    }
-
-    /// Write a scalar field as a plain-text blob. Returns a mktree entry line.
-    fn write_field(&self, name: &str, value: &str) -> Result<String, String> {
-        let blob = self.write_blob(value.as_bytes())?;
-        Ok(format!("100644 blob {}\t{}", blob, name))
-    }
-
-    /// Create a tree from mktree-format entries. Returns the tree hash.
-    fn make_tree_from_entries(&self, entries: &str) -> Result<String, String> {
-        let mut child = Command::new("git")
-            .args(["mktree"])
-            .current_dir(&self.repo_path)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| format!("git mktree spawn failed: {}", e))?;
-
-        child.stdin.take().unwrap().write_all(entries.as_bytes())
-            .map_err(|e| format!("git mktree write failed: {}", e))?;
-
-        let output = child.wait_with_output()
-            .map_err(|e| format!("git mktree wait failed: {}", e))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("git mktree failed: {}", stderr));
-        }
-
-        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
-    }
-
-    /// List top-level entries from a commit's tree. Returns mktree-compatible lines.
-    fn ls_tree(&self, commit: &str) -> Result<Vec<String>, String> {
-        let output = Command::new("git")
-            .args(["ls-tree", commit])
-            .current_dir(&self.repo_path)
-            .output()
-            .map_err(|e| format!("git ls-tree failed: {}", e))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("git ls-tree failed: {}", stderr));
-        }
-
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        Ok(stdout.lines()
-            .filter(|l| !l.is_empty())
-            .map(|l| l.to_string())
-            .collect())
     }
 
     /// Build a subtree for a single message — one file per field (ADR 078).
@@ -188,103 +98,92 @@ impl GitDagWorker {
         &self,
         msg: &ObservableMessage,
         created_at: DateTime<Utc>,
-    ) -> Result<String, String> {
-        let mut entries: Vec<String> = Vec::new();
+    ) -> Result<Oid, String> {
+        let mut tb = self.repo.treebuilder(None)
+            .map_err(|e| format!("treebuilder failed: {}", e))?;
+
         let created_at_str = created_at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
 
         // Common fields present on every message type
-        entries.push(self.write_field("session_id", msg.session().as_str())?);
-        entries.push(self.write_field("submission_id", msg.submission().as_str())?);
-        entries.push(self.write_field("protocol_version", msg.protocol_version())?);
-        entries.push(self.write_field("created_at", &created_at_str)?);
+        self.insert_field(&mut tb, "session_id", msg.session().as_str())?;
+        self.insert_field(&mut tb, "submission_id", msg.submission().as_str())?;
+        self.insert_field(&mut tb, "protocol_version", msg.protocol_version())?;
+        self.insert_field(&mut tb, "created_at", &created_at_str)?;
 
         // Payload — raw bytes, every message has one
-        let payload_blob = self.write_blob(msg.payload())?;
-        entries.push(format!("100644 blob {}\tpayload", payload_blob));
+        let payload_oid = self.write_blob(msg.payload())?;
+        tb.insert("payload", payload_oid, FileMode::Blob.into())
+            .map_err(|e| format!("insert payload failed: {}", e))?;
 
         // Type-specific fields + diagnostics
         match msg {
             ObservableMessage::Invoke(m) => {
-                entries.push(self.write_field("type", "invoke")?);
-                entries.push(self.write_field("harness", m.harness.as_str())?);
-                entries.push(self.write_field("runtime", m.runtime.as_str())?);
-                entries.push(self.write_field("agent_id", m.agent_id.as_str())?);
+                self.insert_field(&mut tb, "type", "invoke")?;
+                self.insert_field(&mut tb, "harness", m.harness.as_str())?;
+                self.insert_field(&mut tb, "runtime", m.runtime.as_str())?;
+                self.insert_field(&mut tb, "agent_id", m.agent_id.as_str())?;
                 if let Some(ref state) = m.state {
-                    entries.push(self.write_field("state", state)?);
+                    self.insert_field(&mut tb, "state", state)?;
                 }
-                self.write_diagnostics_toml(&m.diagnostics, &mut entries)?;
+                self.insert_diagnostics_toml(&mut tb, &m.diagnostics)?;
             }
             ObservableMessage::Request(m) => {
-                entries.push(self.write_field("type", "request")?);
-                entries.push(self.write_field("agent_id", m.agent_id.as_str())?);
-                entries.push(self.write_field("service", m.service.service_type().as_str())?);
-                entries.push(self.write_field("backend", m.service.backend_str())?);
-                entries.push(self.write_field("operation", m.operation.as_str())?);
-                entries.push(self.write_field("sequence", &m.sequence.as_u32().to_string())?);
+                self.insert_field(&mut tb, "type", "request")?;
+                self.insert_field(&mut tb, "agent_id", m.agent_id.as_str())?;
+                self.insert_field(&mut tb, "service", m.service.service_type().as_str())?;
+                self.insert_field(&mut tb, "backend", m.service.backend_str())?;
+                self.insert_field(&mut tb, "operation", m.operation.as_str())?;
+                self.insert_field(&mut tb, "sequence", &m.sequence.as_u32().to_string())?;
                 if let Some(ref state) = m.state {
-                    entries.push(self.write_field("state", state)?);
+                    self.insert_field(&mut tb, "state", state)?;
                 }
-                self.write_diagnostics_toml(&m.diagnostics, &mut entries)?;
+                self.insert_diagnostics_toml(&mut tb, &m.diagnostics)?;
             }
             ObservableMessage::Response(m) => {
-                entries.push(self.write_field("type", "response")?);
-                entries.push(self.write_field("agent_id", m.agent_id.as_str())?);
-                entries.push(self.write_field("service", m.service.service_type().as_str())?);
-                entries.push(self.write_field("backend", m.service.backend_str())?);
-                entries.push(self.write_field("operation", m.operation.as_str())?);
-                entries.push(self.write_field("sequence", &m.sequence.as_u32().to_string())?);
-                entries.push(self.write_field("correlation_id", m.correlation_id.as_str())?);
+                self.insert_field(&mut tb, "type", "response")?;
+                self.insert_field(&mut tb, "agent_id", m.agent_id.as_str())?;
+                self.insert_field(&mut tb, "service", m.service.service_type().as_str())?;
+                self.insert_field(&mut tb, "backend", m.service.backend_str())?;
+                self.insert_field(&mut tb, "operation", m.operation.as_str())?;
+                self.insert_field(&mut tb, "sequence", &m.sequence.as_u32().to_string())?;
+                self.insert_field(&mut tb, "correlation_id", m.correlation_id.as_str())?;
                 if let Some(ref state) = m.state {
-                    entries.push(self.write_field("state", state)?);
+                    self.insert_field(&mut tb, "state", state)?;
                 }
-                self.write_diagnostics_toml(&m.diagnostics, &mut entries)?;
+                self.insert_diagnostics_toml(&mut tb, &m.diagnostics)?;
             }
             ObservableMessage::Complete(m) => {
-                entries.push(self.write_field("type", "complete")?);
-                entries.push(self.write_field("agent_id", m.agent_id.as_str())?);
-                entries.push(self.write_field("harness", m.harness.as_str())?);
+                self.insert_field(&mut tb, "type", "complete")?;
+                self.insert_field(&mut tb, "agent_id", m.agent_id.as_str())?;
+                self.insert_field(&mut tb, "harness", m.harness.as_str())?;
                 if let Some(ref state) = m.state {
-                    entries.push(self.write_field("state", state)?);
+                    self.insert_field(&mut tb, "state", state)?;
                 }
-                // diagnostics.toml (stderr is #[serde(skip)])
-                self.write_diagnostics_toml(&m.diagnostics, &mut entries)?;
-                // stderr as separate binary blob
+                self.insert_diagnostics_toml(&mut tb, &m.diagnostics)?;
                 if !m.diagnostics.stderr.is_empty() {
-                    let blob = self.write_blob(&m.diagnostics.stderr)?;
-                    entries.push(format!("100644 blob {}\tstderr", blob));
+                    let oid = self.write_blob(&m.diagnostics.stderr)?;
+                    tb.insert("stderr", oid, FileMode::Blob.into())
+                        .map_err(|e| format!("insert stderr failed: {}", e))?;
                 }
             }
             ObservableMessage::Delegate(m) => {
-                entries.push(self.write_field("type", "delegate")?);
-                entries.push(self.write_field("caller_agent", m.caller.as_str())?);
-                entries.push(self.write_field("target_agent", m.target.as_str())?);
-                entries.push(self.write_field("nonce", m.nonce.as_str())?);
+                self.insert_field(&mut tb, "type", "delegate")?;
+                self.insert_field(&mut tb, "caller_agent", m.caller.as_str())?;
+                self.insert_field(&mut tb, "target_agent", m.target.as_str())?;
+                self.insert_field(&mut tb, "nonce", m.nonce.as_str())?;
                 if let Some(ref state) = m.state {
-                    entries.push(self.write_field("state", state)?);
+                    self.insert_field(&mut tb, "state", state)?;
                 }
-                self.write_diagnostics_toml(&m.diagnostics, &mut entries)?;
+                self.insert_diagnostics_toml(&mut tb, &m.diagnostics)?;
                 if !m.diagnostics.container.stderr.is_empty() {
-                    let blob = self.write_blob(&m.diagnostics.container.stderr)?;
-                    entries.push(format!("100644 blob {}\tstderr", blob));
+                    let oid = self.write_blob(&m.diagnostics.container.stderr)?;
+                    tb.insert("stderr", oid, FileMode::Blob.into())
+                        .map_err(|e| format!("insert stderr failed: {}", e))?;
                 }
             }
         }
 
-        let entries_str = entries.join("\n") + "\n";
-        self.make_tree_from_entries(&entries_str)
-    }
-
-    /// Serialize diagnostics to TOML and add as a blob entry.
-    fn write_diagnostics_toml<T: serde::Serialize>(
-        &self,
-        diagnostics: &T,
-        entries: &mut Vec<String>,
-    ) -> Result<(), String> {
-        let toml_str = toml::to_string_pretty(diagnostics)
-            .map_err(|e| format!("diagnostics TOML serialize failed: {}", e))?;
-        let blob = self.write_blob(toml_str.as_bytes())?;
-        entries.push(format!("100644 blob {}\tdiagnostics.toml", blob));
-        Ok(())
+        tb.write().map_err(|e| format!("write message subtree failed: {}", e))
     }
 
     /// Build the accumulated tree: all previous message directories + new one + metadata.
@@ -295,22 +194,21 @@ impl GitDagWorker {
         from: &str,
         _to: &str,
         msg_type: &str,
-    ) -> Result<String, String> {
-        // Start with parent tree entries (if any)
-        let mut entries: Vec<String> = if let Some(ref parent) = self.last_commit {
-            let mut existing = self.ls_tree(parent)?;
-            // Remove top-level metadata entries — we'll re-add them fresh
-            existing.retain(|e| {
-                !e.ends_with("\tagent.toml") &&
-                !e.ends_with("\tplatform.toml") &&
-                !e.ends_with("\tmodels")
-            });
-            existing
-        } else {
-            Vec::new()
-        };
+    ) -> Result<Oid, String> {
+        // Start from the parent commit's tree (if any)
+        let parent_tree = self.last_commit
+            .and_then(|oid| self.repo.find_commit(oid).ok())
+            .and_then(|c| c.tree().ok());
 
-        // Add new message directory: {YYYYMMDD-HHMMSS.mmm}-{sender}-{type}
+        let mut tb = self.repo.treebuilder(parent_tree.as_ref())
+            .map_err(|e| format!("treebuilder failed: {}", e))?;
+
+        // Remove top-level metadata — we re-add fresh copies
+        let _ = tb.remove("agent.toml");
+        let _ = tb.remove("platform.toml");
+        let _ = tb.remove("models");
+
+        // Add new message directory
         let msg_tree = self.build_message_subtree(msg, created_at)?;
         let msg_dir = format!(
             "{}-{}-{}",
@@ -318,7 +216,8 @@ impl GitDagWorker {
             from,
             msg_type,
         );
-        entries.push(format!("040000 tree {}\t{}", msg_tree, msg_dir));
+        tb.insert(&msg_dir, msg_tree, FileMode::Tree.into())
+            .map_err(|e| format!("insert message dir failed: {}", e))?;
 
         // Add top-level metadata from registry
         if let Some(ref registry) = self.registry {
@@ -326,14 +225,14 @@ impl GitDagWorker {
 
             if let Some(agent) = registry.get_agent_by_name(&agent_name) {
                 if let Ok(agent_toml) = toml::to_string_pretty(&agent) {
-                    if let Ok(blob) = self.write_blob(agent_toml.as_bytes()) {
-                        entries.push(format!("100644 blob {}\tagent.toml", blob));
+                    if let Ok(oid) = self.write_blob(agent_toml.as_bytes()) {
+                        let _ = tb.insert("agent.toml", oid, FileMode::Blob.into());
                     }
                 }
 
                 if !agent.requirements.models.is_empty() {
-                    if let Ok(models_tree) = self.build_models_subtree(registry, &agent.requirements.models) {
-                        entries.push(format!("040000 tree {}\tmodels", models_tree));
+                    if let Ok(models_oid) = self.build_models_subtree(registry, &agent.requirements.models) {
+                        let _ = tb.insert("models", models_oid, FileMode::Tree.into());
                     }
                 }
             }
@@ -344,14 +243,12 @@ impl GitDagWorker {
                 env!("VLINDER_GIT_SHA"),
                 self.registry_host,
             );
-            if let Ok(blob) = self.write_blob(platform_toml.as_bytes()) {
-                entries.push(format!("100644 blob {}\tplatform.toml", blob));
+            if let Ok(oid) = self.write_blob(platform_toml.as_bytes()) {
+                let _ = tb.insert("platform.toml", oid, FileMode::Blob.into());
             }
         }
 
-        // Join entries with newlines and create tree
-        let entries_str = entries.join("\n") + "\n";
-        self.make_tree_from_entries(&entries_str)
+        tb.write().map_err(|e| format!("write accumulated tree failed: {}", e))
     }
 
     /// Build a models/ subtree with one TOML file per model.
@@ -359,98 +256,55 @@ impl GitDagWorker {
         &self,
         registry: &Arc<dyn Registry>,
         models: &std::collections::HashMap<String, String>,
-    ) -> Result<String, String> {
-        let mut entries = String::new();
+    ) -> Result<Oid, String> {
+        let mut tb = self.repo.treebuilder(None)
+            .map_err(|e| format!("treebuilder failed: {}", e))?;
 
+        let mut has_entries = false;
         for (alias, model_name) in models {
             if let Some(model) = registry.get_model(model_name) {
                 if let Ok(model_toml) = toml::to_string_pretty(&model) {
-                    let blob = self.write_blob(model_toml.as_bytes())?;
+                    let oid = self.write_blob(model_toml.as_bytes())?;
                     let filename = format!("{}.toml", alias.replace('/', "-"));
-                    entries.push_str(&format!("100644 blob {}\t{}\n", blob, filename));
+                    tb.insert(&filename, oid, FileMode::Blob.into())
+                        .map_err(|e| format!("insert model failed: {}", e))?;
+                    has_entries = true;
                 }
             }
         }
 
-        if entries.is_empty() {
+        if !has_entries {
             return Err("no models to write".to_string());
         }
 
-        self.make_tree_from_entries(&entries)
+        tb.write().map_err(|e| format!("write models subtree failed: {}", e))
     }
 
-    /// Create a commit from a tree. Returns the commit hash.
-    fn commit_tree(
-        &self,
-        tree_hash: &str,
-        parent: Option<&str>,
-        message: &str,
-        author_name: &str,
-        author_email: &str,
-        author_date: &DateTime<Utc>,
-    ) -> Result<String, String> {
-        let mut args = vec!["commit-tree", tree_hash];
-        let parent_owned;
-        if let Some(p) = parent {
-            args.push("-p");
-            parent_owned = p.to_string();
-            args.push(&parent_owned);
-        }
-        args.push("-m");
-        args.push(message);
-
-        let date_value = format!("@{} +0000", author_date.timestamp());
-
-        let output = Command::new("git")
-            .args(&args)
-            .current_dir(&self.repo_path)
-            .env("GIT_AUTHOR_NAME", author_name)
-            .env("GIT_AUTHOR_EMAIL", author_email)
-            .env("GIT_AUTHOR_DATE", &date_value)
-            .env("GIT_COMMITTER_NAME", "vlinder")
-            .env("GIT_COMMITTER_EMAIL", "vlinder@localhost")
-            .output()
-            .map_err(|e| format!("git commit-tree failed: {}", e))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("git commit-tree failed: {}", stderr));
-        }
-
-        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    /// Write a blob to the git object store.
+    fn write_blob(&self, data: &[u8]) -> Result<Oid, String> {
+        self.repo.blob(data).map_err(|e| format!("blob write failed: {}", e))
     }
 
-    /// Update a ref to point to a commit.
-    fn update_ref(&self, refname: &str, commit_hash: &str) -> Result<(), String> {
-        let output = Command::new("git")
-            .args(["update-ref", refname, commit_hash])
-            .current_dir(&self.repo_path)
-            .output()
-            .map_err(|e| format!("git update-ref failed: {}", e))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("git update-ref failed: {}", stderr));
-        }
-
+    /// Write a scalar string field as a blob and insert into a tree builder.
+    fn insert_field(&self, tb: &mut TreeBuilder, name: &str, value: &str) -> Result<(), String> {
+        let oid = self.write_blob(value.as_bytes())?;
+        tb.insert(name, oid, FileMode::Blob.into())
+            .map_err(|e| format!("insert field '{}' failed: {}", name, e))?;
         Ok(())
     }
 
-    /// Run a git command and return stdout.
-    #[cfg(test)]
-    fn git(&self, args: &[&str]) -> Result<String, String> {
-        let output = Command::new("git")
-            .args(args)
-            .current_dir(&self.repo_path)
-            .output()
-            .map_err(|e| format!("git {} failed: {}", args.join(" "), e))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("git {} failed: {}", args.join(" "), stderr));
-        }
-
-        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    /// Serialize diagnostics to TOML and insert as a blob entry.
+    fn insert_diagnostics_toml<T: serde::Serialize>(
+        &self,
+        tb: &mut TreeBuilder,
+        diagnostics: &T,
+    ) -> Result<(), String> {
+        let toml_str = toml::to_string_pretty(diagnostics)
+            .map_err(|e| format!("diagnostics TOML serialize failed: {}", e))?;
+        let oid = self.write_blob(toml_str.as_bytes())?;
+        tb.insert("diagnostics.toml", oid, FileMode::Blob.into())
+            .map_err(|e| format!("insert diagnostics.toml failed: {}", e))?;
+        Ok(())
     }
 }
 
@@ -460,12 +314,11 @@ impl DagWorker for GitDagWorker {
             let (from, to, msg_type) = message_routing(msg);
 
             // 1. Build accumulated tree (all previous messages + new one)
-            let tree_hash = self.build_accumulated_tree(msg, created_at, &from, &to, msg_type)?;
+            let tree_oid = self.build_accumulated_tree(msg, created_at, &from, &to, msg_type)?;
+            let tree = self.repo.find_tree(tree_oid)
+                .map_err(|e| format!("find tree failed: {}", e))?;
 
-            // 2. Parent is the previous commit (chronological order)
-            let parent = self.last_commit.as_deref();
-
-            // 3. Build commit message with trailers for filtering
+            // 2. Build commit message with trailers for filtering
             let mut message = format!(
                 "{}: {} \u{2192} {}\n\nSession: {}\nSubmission: {}",
                 msg_type,
@@ -482,30 +335,37 @@ impl DagWorker for GitDagWorker {
                 message.push_str(&format!("\nProtocol-Version: {}", pv));
             }
 
-            // 4. Author = message sender (ADR 069)
+            // 3. Author = message sender (ADR 069), committer = platform
             let author_email = format!("{}@{}", from, self.registry_host);
+            let timestamp = git2::Time::new(created_at.timestamp(), 0);
+            let author = Signature::new(&from, &author_email, &timestamp)
+                .map_err(|e| format!("author signature failed: {}", e))?;
+            let committer = Signature::new("vlinder", "vlinder@localhost", &timestamp)
+                .map_err(|e| format!("committer signature failed: {}", e))?;
 
-            // 5. Create commit
-            let commit_hash = self.commit_tree(
-                &tree_hash,
-                parent,
+            // 4. Parent is the previous commit (chronological order)
+            let parent_commit = self.last_commit
+                .and_then(|oid| self.repo.find_commit(oid).ok());
+            let parents: Vec<&git2::Commit> = parent_commit.iter().collect();
+
+            // 5. Create commit on HEAD
+            let commit_oid = self.repo.commit(
+                Some("HEAD"),
+                &author,
+                &committer,
                 &message,
-                &from,
-                &author_email,
-                &created_at,
-            )?;
+                &tree,
+                &parents,
+            ).map_err(|e| format!("commit failed: {}", e))?;
 
-            // 6. Advance current branch (HEAD follows the symbolic ref)
-            self.update_ref("HEAD", &commit_hash)?;
+            // 6. Sync working tree so files are visible in the directory
+            let mut checkout = git2::build::CheckoutBuilder::new();
+            checkout.force();
+            self.repo.checkout_head(Some(&mut checkout))
+                .map_err(|e| format!("checkout failed: {}", e))?;
 
-            // 7. Sync working tree so files are visible in the directory
-            let _ = Command::new("git")
-                .args(["checkout", "-f"])
-                .current_dir(&self.repo_path)
-                .output();
-
-            // 8. Track last commit
-            self.last_commit = Some(commit_hash);
+            // 7. Track last commit
+            self.last_commit = Some(commit_oid);
 
             Ok(())
         })();
@@ -576,6 +436,7 @@ fn message_state(msg: &ObservableMessage) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::Command;
     use crate::domain::{
         AgentId, InvokeMessage, RequestMessage, ResponseMessage, CompleteMessage, DelegateMessage,
         ObservableMessage, HarnessType, TimelineId, SubmissionId, SessionId, Sequence, Nonce,
@@ -631,7 +492,6 @@ mod tests {
     }
 
     fn test_response(payload: &[u8], epoch_secs: i64) -> (ObservableMessage, DateTime<Utc>) {
-        // Build a request first to derive the response
         let request = RequestMessage::new(
             TimelineId::main(),
             SubmissionId::from("sub-1".to_string()),
@@ -732,6 +592,23 @@ mod tests {
         (worker, tmp, registry)
     }
 
+    /// Run a git command against the test repo. Tests still use the CLI to
+    /// verify that git2-written objects are readable by standard git.
+    fn git(repo_path: &Path, args: &[&str]) -> Result<String, String> {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(repo_path)
+            .output()
+            .map_err(|e| format!("git {} failed: {}", args.join(" "), e))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("git {} failed: {}", args.join(" "), stderr));
+        }
+
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    }
+
     // --- Basic commit tests ---
 
     #[test]
@@ -750,49 +627,43 @@ mod tests {
 
     #[test]
     fn commit_advances_main() {
-        let (mut worker, _tmp) = test_worker();
+        let (mut worker, tmp) = test_worker();
         let (msg, ts) = test_invoke(b"hello", 1000);
 
         worker.on_observable_message(&msg, ts);
 
-        let sha = worker.git(&["rev-parse", "--verify", "main"]).unwrap();
+        let sha = git(tmp.path(), &["rev-parse", "--verify", "main"]).unwrap();
         assert_eq!(sha.len(), 40);
         assert!(sha.chars().all(|c| c.is_ascii_hexdigit()));
     }
 
     #[test]
     fn commit_message_first_line() {
-        let (mut worker, _tmp) = test_worker();
+        let (mut worker, tmp) = test_worker();
         let (msg, ts) = test_invoke(b"payload", 1000);
 
         worker.on_observable_message(&msg, ts);
 
-        let subject = worker.git(&["log", "-1", "--format=%s", "main"]).unwrap();
+        let subject = git(tmp.path(), &["log", "-1", "--format=%s", "main"]).unwrap();
         assert_eq!(subject, "invoke: cli \u{2192} support-agent");
     }
 
     #[test]
     fn commit_message_trailers() {
-        let (mut worker, _tmp) = test_worker();
+        let (mut worker, tmp) = test_worker();
         let (msg, ts) = test_invoke(b"payload", 1000);
 
         worker.on_observable_message(&msg, ts);
 
-        let body = worker.git(&["log", "-1", "--format=%b", "main"]).unwrap();
+        let body = git(tmp.path(), &["log", "-1", "--format=%b", "main"]).unwrap();
         assert!(body.contains("Session: sess-1"), "body: {}", body);
         assert!(body.contains("Submission: sub-1"), "body: {}", body);
     }
 
-    /// Writer side of the trailer contract. Verifies GitDagWorker writes
-    /// Session/Submission/State trailers that git's `%(trailers:key=…,valueonly)`
-    /// format can extract.
-    ///
-    /// Reader side: `commands::timeline::tests::checkout_reads_trailers`.
     #[test]
     fn complete_trailers_readable_by_timeline() {
-        let (mut worker, _tmp) = test_worker();
+        let (mut worker, tmp) = test_worker();
 
-        // Write invoke + complete with a state hash
         let (invoke, ts1) = test_invoke(b"question", 1000);
         worker.on_observable_message(&invoke, ts1);
 
@@ -809,14 +680,13 @@ mod tests {
         let ts2 = DateTime::from_timestamp(1001, 0).unwrap();
         worker.on_observable_message(&ObservableMessage::Complete(complete), ts2);
 
-        // Read trailers using the same format string as read_trailer()
-        let session = worker.git(&[
+        let session = git(tmp.path(), &[
             "log", "-1", "--format=%(trailers:key=Session,valueonly)", "main"
         ]).unwrap();
-        let submission = worker.git(&[
+        let submission = git(tmp.path(), &[
             "log", "-1", "--format=%(trailers:key=Submission,valueonly)", "main"
         ]).unwrap();
-        let state = worker.git(&[
+        let state = git(tmp.path(), &[
             "log", "-1", "--format=%(trailers:key=State,valueonly)", "main"
         ]).unwrap();
 
@@ -827,34 +697,34 @@ mod tests {
 
     #[test]
     fn author_is_message_sender() {
-        let (mut worker, _tmp) = test_worker();
+        let (mut worker, tmp) = test_worker();
         let (msg, ts) = test_invoke(b"data", 1000);
 
         worker.on_observable_message(&msg, ts);
 
-        let author = worker.git(&["log", "-1", "--format=%an <%ae>", "main"]).unwrap();
+        let author = git(tmp.path(), &["log", "-1", "--format=%an <%ae>", "main"]).unwrap();
         assert_eq!(author, "cli <cli@registry.local:9000>");
     }
 
     #[test]
     fn committer_is_platform() {
-        let (mut worker, _tmp) = test_worker();
+        let (mut worker, tmp) = test_worker();
         let (msg, ts) = test_invoke(b"data", 1000);
 
         worker.on_observable_message(&msg, ts);
 
-        let committer = worker.git(&["log", "-1", "--format=%cn <%ce>", "main"]).unwrap();
+        let committer = git(tmp.path(), &["log", "-1", "--format=%cn <%ce>", "main"]).unwrap();
         assert_eq!(committer, "vlinder <vlinder@localhost>");
     }
 
     #[test]
     fn author_date_matches_node() {
-        let (mut worker, _tmp) = test_worker();
+        let (mut worker, tmp) = test_worker();
         let (msg, ts) = test_invoke(b"data", 1700000000);
 
         worker.on_observable_message(&msg, ts);
 
-        let date = worker.git(&["log", "-1", "--format=%at", "main"]).unwrap();
+        let date = git(tmp.path(), &["log", "-1", "--format=%at", "main"]).unwrap();
         assert_eq!(date, "1700000000");
     }
 
@@ -862,13 +732,13 @@ mod tests {
 
     #[test]
     fn invoke_directory_has_per_field_files() {
-        let (mut worker, _tmp) = test_worker();
+        let (mut worker, tmp) = test_worker();
         let (msg, ts) = test_invoke(b"my-payload", 1000);
 
         worker.on_observable_message(&msg, ts);
 
         let dir = "19700101-001640.000-cli-invoke";
-        let show = |field: &str| worker.git(&["show", &format!("main:{}/{}", dir, field)]);
+        let show = |field: &str| git(tmp.path(), &["show", &format!("main:{}/{}", dir, field)]);
 
         assert_eq!(show("type").unwrap(), "invoke");
         assert_eq!(show("session_id").unwrap(), "sess-1");
@@ -878,9 +748,7 @@ mod tests {
         assert!(show("agent_id").unwrap().contains("support-agent"));
         assert_eq!(show("payload").unwrap(), "my-payload");
         assert_eq!(show("created_at").unwrap(), "1970-01-01T00:16:40.000Z");
-        // protocol_version is set by the constructor
         assert!(!show("protocol_version").unwrap().is_empty());
-        // diagnostics.toml present with typed fields
         let diag = show("diagnostics.toml").unwrap();
         assert!(diag.contains("harness_version"), "diag: {}", diag);
         assert!(diag.contains("history_turns"), "diag: {}", diag);
@@ -888,13 +756,13 @@ mod tests {
 
     #[test]
     fn request_directory_has_service_fields() {
-        let (mut worker, _tmp) = test_worker();
+        let (mut worker, tmp) = test_worker();
         let (msg, ts) = test_request(b"prompt", 1001);
 
         worker.on_observable_message(&msg, ts);
 
         let dir = "19700101-001641.000-support-agent-request";
-        let show = |field: &str| worker.git(&["show", &format!("main:{}/{}", dir, field)]);
+        let show = |field: &str| git(tmp.path(), &["show", &format!("main:{}/{}", dir, field)]);
 
         assert_eq!(show("type").unwrap(), "request");
         assert_eq!(show("service").unwrap(), "infer");
@@ -906,25 +774,24 @@ mod tests {
 
     #[test]
     fn response_directory_has_correlation_id() {
-        let (mut worker, _tmp) = test_worker();
+        let (mut worker, tmp) = test_worker();
         let (msg, ts) = test_response(b"answer", 1002);
 
         worker.on_observable_message(&msg, ts);
 
         let dir = "19700101-001642.000-infer.ollama-response";
-        let show = |field: &str| worker.git(&["show", &format!("main:{}/{}", dir, field)]);
+        let show = |field: &str| git(tmp.path(), &["show", &format!("main:{}/{}", dir, field)]);
 
         assert_eq!(show("type").unwrap(), "response");
         assert!(show("correlation_id").is_ok(), "should have correlation_id");
         assert_eq!(show("service").unwrap(), "infer");
-        // ServiceDiagnostics contains token counts
         let diag = show("diagnostics.toml").unwrap();
         assert!(diag.contains("duration_ms"), "diag: {}", diag);
     }
 
     #[test]
     fn complete_directory_has_harness_and_stderr() {
-        let (mut worker, _tmp) = test_worker();
+        let (mut worker, tmp) = test_worker();
         let msg_inner = CompleteMessage::new(
             TimelineId::main(),
             SubmissionId::from("sub-1".to_string()),
@@ -950,12 +817,11 @@ mod tests {
         worker.on_observable_message(&msg, ts);
 
         let dir = "19700101-001643.000-support-agent-complete";
-        let show = |field: &str| worker.git(&["show", &format!("main:{}/{}", dir, field)]);
+        let show = |field: &str| git(tmp.path(), &["show", &format!("main:{}/{}", dir, field)]);
 
         assert_eq!(show("type").unwrap(), "complete");
         assert_eq!(show("harness").unwrap(), "cli");
         assert_eq!(show("stderr").unwrap(), "WARN: something");
-        // diagnostics.toml should NOT contain stderr (it's #[serde(skip)])
         let diag = show("diagnostics.toml").unwrap();
         assert!(diag.contains("duration_ms"), "diag: {}", diag);
         assert!(!diag.contains("stderr"), "stderr should be stripped from diagnostics: {}", diag);
@@ -963,13 +829,13 @@ mod tests {
 
     #[test]
     fn delegate_directory_has_caller_target_reply() {
-        let (mut worker, _tmp) = test_worker();
+        let (mut worker, tmp) = test_worker();
         let (msg, ts) = test_delegate(b"delegate-payload", 1004);
 
         worker.on_observable_message(&msg, ts);
 
         let dir = "19700101-001644.000-coordinator-delegate";
-        let show = |field: &str| worker.git(&["show", &format!("main:{}/{}", dir, field)]);
+        let show = |field: &str| git(tmp.path(), &["show", &format!("main:{}/{}", dir, field)]);
 
         assert_eq!(show("type").unwrap(), "delegate");
         assert_eq!(show("caller_agent").unwrap(), "coordinator");
@@ -979,7 +845,7 @@ mod tests {
 
     #[test]
     fn state_file_present_when_state_set() {
-        let (mut worker, _tmp) = test_worker();
+        let (mut worker, tmp) = test_worker();
         let invoke = InvokeMessage::new(
             TimelineId::main(),
             SubmissionId::from("sub-1".to_string()),
@@ -997,31 +863,31 @@ mod tests {
         worker.on_observable_message(&msg, ts);
 
         let dir = "19700101-001640.000-cli-invoke";
-        let state = worker.git(&["show", &format!("main:{}/state", dir)]).unwrap();
+        let state = git(tmp.path(), &["show", &format!("main:{}/state", dir)]).unwrap();
         assert_eq!(state, "abc123state");
     }
 
     #[test]
     fn state_file_absent_when_no_state() {
-        let (mut worker, _tmp) = test_worker();
+        let (mut worker, tmp) = test_worker();
         let (msg, ts) = test_invoke(b"hello", 1000);
 
         worker.on_observable_message(&msg, ts);
 
         let dir = "19700101-001640.000-cli-invoke";
-        let result = worker.git(&["show", &format!("main:{}/state", dir)]);
+        let result = git(tmp.path(), &["show", &format!("main:{}/state", dir)]);
         assert!(result.is_err(), "should not have state file when None");
     }
 
     #[test]
     fn stderr_file_absent_when_empty() {
-        let (mut worker, _tmp) = test_worker();
+        let (mut worker, tmp) = test_worker();
         let (msg, ts) = test_complete(b"done", 1000);
 
         worker.on_observable_message(&msg, ts);
 
         let dir = "19700101-001640.000-support-agent-complete";
-        let result = worker.git(&["show", &format!("main:{}/stderr", dir)]);
+        let result = git(tmp.path(), &["show", &format!("main:{}/stderr", dir)]);
         assert!(result.is_err(), "should not have stderr when empty");
     }
 
@@ -1029,7 +895,7 @@ mod tests {
 
     #[test]
     fn messages_accumulate_in_tree() {
-        let (mut worker, _tmp) = test_worker();
+        let (mut worker, tmp) = test_worker();
 
         let (m1, t1) = test_invoke(b"q", 1000);
         worker.on_observable_message(&m1, t1);
@@ -1040,7 +906,7 @@ mod tests {
         let (m3, t3) = test_response(b"a", 1002);
         worker.on_observable_message(&m3, t3);
 
-        let ls = worker.git(&["ls-tree", "--name-only", "main"]).unwrap();
+        let ls = git(tmp.path(), &["ls-tree", "--name-only", "main"]).unwrap();
         assert!(ls.contains("19700101-001640.000-cli-invoke"), "ls: {}", ls);
         assert!(ls.contains("19700101-001641.000-support-agent-request"), "ls: {}", ls);
         assert!(ls.contains("19700101-001642.000-infer.ollama-response"), "ls: {}", ls);
@@ -1048,35 +914,35 @@ mod tests {
 
     #[test]
     fn commits_chain_correctly() {
-        let (mut worker, _tmp) = test_worker();
+        let (mut worker, tmp) = test_worker();
 
         let (m1, t1) = test_invoke(b"first", 1000);
         worker.on_observable_message(&m1, t1);
-        let commit1 = worker.git(&["rev-parse", "main"]).unwrap();
+        let commit1 = git(tmp.path(), &["rev-parse", "main"]).unwrap();
 
         let (m2, t2) = test_request(b"second", 1001);
         worker.on_observable_message(&m2, t2);
-        let commit2 = worker.git(&["rev-parse", "main"]).unwrap();
+        let commit2 = git(tmp.path(), &["rev-parse", "main"]).unwrap();
 
         assert_ne!(commit1, commit2);
-        let parent = worker.git(&["log", "-1", "--format=%P", "main"]).unwrap();
+        let parent = git(tmp.path(), &["log", "-1", "--format=%P", "main"]).unwrap();
         assert_eq!(parent, commit1);
     }
 
     #[test]
     fn first_commit_is_root() {
-        let (mut worker, _tmp) = test_worker();
+        let (mut worker, tmp) = test_worker();
         let (msg, ts) = test_invoke(b"first", 1000);
 
         worker.on_observable_message(&msg, ts);
 
-        let parent = worker.git(&["log", "-1", "--format=%P", "main"]).unwrap();
+        let parent = git(tmp.path(), &["log", "-1", "--format=%P", "main"]).unwrap();
         assert_eq!(parent, "");
     }
 
     #[test]
     fn all_five_message_types_produce_commits() {
-        let (mut worker, _tmp) = test_worker();
+        let (mut worker, tmp) = test_worker();
 
         let (m1, t1) = test_invoke(b"1", 1000);
         worker.on_observable_message(&m1, t1);
@@ -1089,7 +955,7 @@ mod tests {
         let (m5, t5) = test_complete(b"5", 1004);
         worker.on_observable_message(&m5, t5);
 
-        let count = worker.git(&["rev-list", "--count", "main"]).unwrap();
+        let count = git(tmp.path(), &["rev-list", "--count", "main"]).unwrap();
         assert_eq!(count, "5");
     }
 
@@ -1097,23 +963,23 @@ mod tests {
 
     #[test]
     fn commit_tree_contains_agent_toml_when_registry_available() {
-        let (mut worker, _tmp, _registry) = test_worker_with_registry();
+        let (mut worker, tmp, _registry) = test_worker_with_registry();
         let (msg, ts) = test_invoke(b"hello", 1000);
 
         worker.on_observable_message(&msg, ts);
 
-        let content = worker.git(&["show", "main:agent.toml"]).unwrap();
+        let content = git(tmp.path(), &["show", "main:agent.toml"]).unwrap();
         assert!(content.contains("support-agent"), "agent.toml: {}", content);
     }
 
     #[test]
     fn commit_tree_contains_platform_toml() {
-        let (mut worker, _tmp, _registry) = test_worker_with_registry();
+        let (mut worker, tmp, _registry) = test_worker_with_registry();
         let (msg, ts) = test_invoke(b"hello", 1000);
 
         worker.on_observable_message(&msg, ts);
 
-        let content = worker.git(&["show", "main:platform.toml"]).unwrap();
+        let content = git(tmp.path(), &["show", "main:platform.toml"]).unwrap();
         assert!(content.contains("version"), "platform.toml: {}", content);
         assert!(content.contains("registry_host"), "platform.toml: {}", content);
     }
@@ -1149,7 +1015,7 @@ mod tests {
         let (m3, t3) = test_complete(b"3", 2000);
         worker.on_observable_message(&m3, t3);
 
-        let count = worker.git(&["rev-list", "--count", "main"]).unwrap();
+        let count = git(tmp.path(), &["rev-list", "--count", "main"]).unwrap();
         assert_eq!(count, "3");
     }
 }
