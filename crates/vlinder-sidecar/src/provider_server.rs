@@ -103,7 +103,7 @@ fn request_loop(
                 let _ = request.as_reader().read_to_end(&mut body);
 
                 let (status, response_body) = match match_route(&hosts, request.method(), &host, &path, &body) {
-                    Ok(route) => forward_to_queue(&*queue, &invoke, &sequence, &state, route, &body),
+                    Ok(route) => forward_to_queue(&*queue, &invoke, &sequence, &state, route, body),
                     Err(err) => err,
                 };
 
@@ -202,7 +202,7 @@ fn forward_to_queue(
     sequence: &SequenceCounter,
     state: &RwLock<Option<String>>,
     route: &ProviderRoute,
-    body: &[u8],
+    body: Vec<u8>,
 ) -> (u16, Vec<u8>) {
     let seq = sequence.next();
     let received_at_ms = std::time::SystemTime::now()
@@ -225,7 +225,7 @@ fn forward_to_queue(
         route.service_backend,
         route.operation,
         seq,
-        body.to_vec(),
+        body,
         state.read().unwrap().clone(),
         diagnostics,
     );
