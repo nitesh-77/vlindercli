@@ -1,71 +1,57 @@
-//! Vector Storage Service Handler - embedding operations over queues.
+//! SQLite-vec worker — receives vector storage requests from the queue,
+//! opens SqliteVectorStorage per agent, and sends responses back.
 //!
-//! Queues:
-//! - `vector-store`: Store an embedding
-//! - `vector-search`: Search by vector similarity
-//! - `vector-delete`: Delete an embedding
+//! Follows the same pattern as OllamaWorker / OpenRouterWorker:
+//! the worker lives in the provider crate, next to the route declarations.
 
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-use crate::domain::registry::Registry;
-use crate::domain::service_payloads::{VectorStoreRequest, VectorSearchRequest, VectorDeleteRequest};
-use crate::domain::{VectorStorage, ResourceId};
-use crate::domain::{MessageQueue, Operation, RequestMessage, ResponseMessage, ServiceDiagnostics, ServiceType};
+use vlinder_core::domain::Registry;
+use vlinder_core::domain::{MessageQueue, Operation, RequestMessage, ResponseMessage, ServiceDiagnostics, ServiceType};
 
-/// Factory function that opens vector storage from a URI.
-pub type OpenVectorStorage = Box<dyn Fn(&ResourceId) -> Result<Arc<dyn VectorStorage>, String> + Send + Sync>;
+use crate::storage::SqliteVectorStorage;
+use crate::types::{SqliteVecStoreRequest, SqliteVecSearchRequest, SqliteVecDeleteRequest};
 
 // ============================================================================
-// Handler
+// Worker
 // ============================================================================
 
-pub struct VectorServiceWorker {
+pub struct SqliteVecWorker {
     queue: Arc<dyn MessageQueue + Send + Sync>,
     registry: Arc<dyn Registry>,
-    stores: RwLock<HashMap<String, Arc<dyn VectorStorage>>>,
+    stores: RwLock<HashMap<String, Arc<SqliteVectorStorage>>>,
     backend: String,
-    open_storage: OpenVectorStorage,
 }
 
-impl VectorServiceWorker {
-    /// Create a new vector storage worker for a specific backend.
-    ///
-    /// The `open_storage` factory is called to lazy-load stores from
-    /// agent metadata. Injected so the worker doesn't depend on
-    /// concrete storage implementations.
+impl SqliteVecWorker {
     pub fn new(
         queue: Arc<dyn MessageQueue + Send + Sync>,
         registry: Arc<dyn Registry>,
         backend: &str,
-        open_storage: OpenVectorStorage,
     ) -> Self {
         Self {
             queue,
             registry,
             stores: RwLock::new(HashMap::new()),
             backend: backend.to_string(),
-            open_storage,
         }
     }
 
     /// Get storage for an agent, opening lazily if needed.
-    fn get_or_open(&self, agent_id: &str) -> Result<Arc<dyn VectorStorage>, String> {
-        // Check cache first
+    fn get_or_open(&self, agent_id: &str) -> Result<Arc<SqliteVectorStorage>, String> {
         if let Some(storage) = self.stores.read().unwrap().get(agent_id) {
             return Ok(storage.clone());
         }
 
-        // Look up agent in Registry
         let agent = self.registry.get_agent_by_name(agent_id)
             .ok_or_else(|| format!("unknown agent: {}", agent_id))?;
         let uri = agent.vector_storage
             .ok_or_else(|| format!("agent has no vector_storage declared: {}", agent_id))?;
+        let path = uri.path()
+            .ok_or_else(|| format!("vector_storage URI has no path: {}", uri.as_str()))?;
 
-        // Open storage via injected factory
-        let storage = (self.open_storage)(&uri)?;
-
-        // Cache and return
+        let storage = Arc::new(SqliteVectorStorage::open_at(std::path::Path::new(path))?);
         self.stores.write().unwrap().insert(agent_id.to_string(), storage.clone());
         Ok(storage)
     }
@@ -79,7 +65,6 @@ impl VectorServiceWorker {
     }
 
     fn try_store(&self) -> bool {
-        // Receive typed RequestMessage (ADR 044)
         match self.queue.receive_request(ServiceType::Vec, &self.backend, Operation::Store) {
             Ok((request, ack)) => {
                 let start = std::time::Instant::now();
@@ -143,7 +128,7 @@ impl VectorServiceWorker {
     }
 
     fn handle_store(&self, request: &RequestMessage) -> Vec<u8> {
-        let req: VectorStoreRequest = match serde_json::from_slice(request.payload.legacy_bytes()) {
+        let req: SqliteVecStoreRequest = match serde_json::from_slice(request.payload.legacy_bytes()) {
             Ok(r) => r,
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
@@ -160,7 +145,7 @@ impl VectorServiceWorker {
     }
 
     fn handle_search(&self, request: &RequestMessage) -> Vec<u8> {
-        let req: VectorSearchRequest = match serde_json::from_slice(request.payload.legacy_bytes()) {
+        let req: SqliteVecSearchRequest = match serde_json::from_slice(request.payload.legacy_bytes()) {
             Ok(r) => r,
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
@@ -190,7 +175,7 @@ impl VectorServiceWorker {
     }
 
     fn handle_delete(&self, request: &RequestMessage) -> Vec<u8> {
-        let req: VectorDeleteRequest = match serde_json::from_slice(request.payload.legacy_bytes()) {
+        let req: SqliteVecDeleteRequest = match serde_json::from_slice(request.payload.legacy_bytes()) {
             Ok(r) => r,
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
@@ -200,7 +185,6 @@ impl VectorServiceWorker {
             Err(e) => return format!("[error] {}", e).into_bytes(),
         };
 
-        // Call trait method directly (no pure function needed for simple delete)
         match store.delete_embedding(&req.key) {
             Ok(true) => b"ok".to_vec(),
             Ok(false) => b"not_found".to_vec(),
@@ -212,12 +196,12 @@ impl VectorServiceWorker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{Agent, AgentId, Registry};
-    use crate::domain::InMemoryRegistry;
-    use crate::domain::{Operation, RequestDiagnostics, Sequence, ServiceBackend, SessionId, SubmissionId, TimelineId, VectorStorageType};
-    use crate::domain::SecretStore;
-    use crate::domain::InMemorySecretStore;
-    use crate::queue::InMemoryQueue;
+    use vlinder_core::domain::{Agent, AgentId, Registry};
+    use vlinder_core::domain::InMemoryRegistry;
+    use vlinder_core::domain::{Operation, RequestDiagnostics, Sequence, ServiceBackend, SessionId, SubmissionId, TimelineId, VectorStorageType};
+    use vlinder_core::domain::SecretStore;
+    use vlinder_core::domain::InMemorySecretStore;
+    use vlinder_core::queue::InMemoryQueue;
 
     fn test_secret_store() -> Arc<dyn SecretStore> {
         Arc::new(InMemorySecretStore::new())
@@ -235,37 +219,36 @@ mod tests {
         SubmissionId::from("sub-test-123".to_string())
     }
 
-    fn test_agent_with_vector_storage() -> Agent {
-        let manifest = r#"
+    fn test_agent_with_vector_storage(db_path: &std::path::Path) -> Agent {
+        let uri = format!("sqlite://{}", db_path.display());
+        let manifest = format!(
+            r#"
             name = "test-agent"
             description = "Test agent for vector storage"
             runtime = "container"
             executable = "localhost/test-agent:latest"
-            vector_storage = "memory://"
+            vector_storage = "{}"
             [requirements]
-
-        "#;
-        Agent::from_toml(manifest).unwrap()
-    }
-
-    fn test_open_vector_storage() -> OpenVectorStorage {
-        Box::new(|_uri: &ResourceId| {
-            Ok(Arc::new(crate::domain::InMemoryVectorStorage::new()) as Arc<dyn VectorStorage>)
-        })
+            "#,
+            uri
+        );
+        Agent::from_toml(&manifest).unwrap()
     }
 
     #[test]
     fn vector_search_response_echoes_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("vec.db");
+
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
         let registry = InMemoryRegistry::new(test_secret_store());
-        registry.register_runtime(crate::domain::RuntimeType::Container);
-        registry.register_vector_storage(crate::domain::VectorStorageType::InMemory);
-        let agent = test_agent_with_vector_storage();
+        registry.register_runtime(vlinder_core::domain::RuntimeType::Container);
+        registry.register_vector_storage(VectorStorageType::SqliteVec);
+        let agent = test_agent_with_vector_storage(&db_path);
         registry.register_agent(agent).unwrap();
         let registry: Arc<dyn Registry> = Arc::new(registry);
-        let handler = VectorServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry), "memory", test_open_vector_storage());
+        let handler = SqliteVecWorker::new(Arc::clone(&queue), Arc::clone(&registry), "sqlite-vec");
 
-        // Store an embedding first
         let embedding: Vec<f32> = (0..768).map(|i| i as f32 * 0.001).collect();
         let store_payload = serde_json::json!({
             "key": "doc1",
@@ -275,7 +258,7 @@ mod tests {
         let store_request = RequestMessage::new(
             TimelineId::main(),
             test_submission(), SessionId::new(), test_agent_id(),
-            ServiceBackend::Vec(VectorStorageType::InMemory), Operation::Store, Sequence::first(),
+            ServiceBackend::Vec(VectorStorageType::SqliteVec), Operation::Store, Sequence::first(),
             serde_json::to_vec(&store_payload).unwrap(),
             Some("state-vec".to_string()),
             test_request_diag(),
@@ -286,7 +269,6 @@ mod tests {
         ack().unwrap();
         assert_eq!(store_resp.state, Some("state-vec".to_string()), "store should echo request.state");
 
-        // Search — also with state
         let search_payload = serde_json::json!({
             "vector": embedding,
             "limit": 1
@@ -294,7 +276,7 @@ mod tests {
         let search_request = RequestMessage::new(
             TimelineId::main(),
             test_submission(), SessionId::new(), test_agent_id(),
-            ServiceBackend::Vec(VectorStorageType::InMemory), Operation::Search, Sequence::from(2),
+            ServiceBackend::Vec(VectorStorageType::SqliteVec), Operation::Search, Sequence::from(2),
             serde_json::to_vec(&search_payload).unwrap(),
             Some("state-vec2".to_string()),
             test_request_diag(),
@@ -308,19 +290,18 @@ mod tests {
 
     #[test]
     fn handles_store_and_search() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("vec.db");
+
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
         let registry = InMemoryRegistry::new(test_secret_store());
-        registry.register_runtime(crate::domain::RuntimeType::Container);
-        registry.register_vector_storage(crate::domain::VectorStorageType::InMemory);
-
-        // Register test agent with memory:// vector storage
-        let agent = test_agent_with_vector_storage();
+        registry.register_runtime(vlinder_core::domain::RuntimeType::Container);
+        registry.register_vector_storage(VectorStorageType::SqliteVec);
+        let agent = test_agent_with_vector_storage(&db_path);
         registry.register_agent(agent).unwrap();
-
         let registry: Arc<dyn Registry> = Arc::new(registry);
-        let handler = VectorServiceWorker::new(Arc::clone(&queue), Arc::clone(&registry), "memory", test_open_vector_storage());
+        let handler = SqliteVecWorker::new(Arc::clone(&queue), Arc::clone(&registry), "sqlite-vec");
 
-        // Store embedding - worker will lazy-open storage from agent's URI
         let embedding: Vec<f32> = (0..768).map(|i| i as f32 * 0.001).collect();
         let store_payload = serde_json::json!({
             "key": "doc1",
@@ -329,44 +310,33 @@ mod tests {
         });
         let store_request = RequestMessage::new(
             TimelineId::main(),
-            test_submission(),
-            SessionId::new(),
-            test_agent_id(),
-            ServiceBackend::Vec(VectorStorageType::InMemory),
-            Operation::Store,
-            Sequence::first(),
+            test_submission(), SessionId::new(), test_agent_id(),
+            ServiceBackend::Vec(VectorStorageType::SqliteVec), Operation::Store, Sequence::first(),
             serde_json::to_vec(&store_payload).unwrap(),
             None,
             test_request_diag(),
         );
 
         queue.send_request(store_request.clone()).unwrap();
-
         assert!(handler.tick());
         let (response, ack) = queue.receive_response(&store_request).unwrap();
         assert_eq!(response.payload.legacy_bytes(), b"ok");
         ack().unwrap();
 
-        // Search
         let search_payload = serde_json::json!({
             "vector": embedding,
             "limit": 1
         });
         let search_request = RequestMessage::new(
             TimelineId::main(),
-            test_submission(),
-            SessionId::new(),
-            test_agent_id(),
-            ServiceBackend::Vec(VectorStorageType::InMemory),
-            Operation::Search,
-            Sequence::from(2),
+            test_submission(), SessionId::new(), test_agent_id(),
+            ServiceBackend::Vec(VectorStorageType::SqliteVec), Operation::Search, Sequence::from(2),
             serde_json::to_vec(&search_payload).unwrap(),
             None,
             test_request_diag(),
         );
 
         queue.send_request(search_request.clone()).unwrap();
-
         assert!(handler.tick());
         let (response, ack) = queue.receive_response(&search_request).unwrap();
         let results: Vec<serde_json::Value> = serde_json::from_slice(response.payload.legacy_bytes()).unwrap();

@@ -5,8 +5,6 @@
 
 pub mod dag;
 mod object;
-mod vector;
 
 pub use dag::{reconstruct_observable_message, build_dag_node};
 pub use object::{ObjectServiceWorker, OpenObjectStorage, OpenStateStore};
-pub use vector::{VectorServiceWorker, OpenVectorStorage};

@@ -16,6 +16,7 @@ test-support = []
 vlinder-core = { path = "../vlinder-core" }
 vlinder-ollama = { path = "../vlinder-ollama" }
 vlinder-infer-openrouter = { path = "../vlinder-infer-openrouter" }
+vlinder-sqlite-vec = { path = "../vlinder-sqlite-vec" }
 vlinder-proto = { path = "../vlinder-proto" }
 clap = { version = "4", features = ["derive"] }
 dirs = "6"

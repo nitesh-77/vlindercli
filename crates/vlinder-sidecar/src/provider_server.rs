@@ -16,6 +16,7 @@ use tiny_http::{Method, StatusCode};
 use vlinder_core::domain::{
     HttpMethod, InvokeMessage, MessageQueue, Provider, ProviderHost, ProviderRoute,
     RequestDiagnostics, RequestMessage, SequenceCounter, ServiceType,
+    VectorStorageType,
 };
 
 use crate::config::SidecarConfig;
@@ -171,6 +172,15 @@ fn build_context(invoke: &InvokeMessage) -> Option<(Vec<ProviderHost>, Arc<dyn M
 
     if needs_ollama_infer || needs_ollama_embed {
         hosts.push(vlinder_ollama::provider_host(needs_ollama_infer, needs_ollama_embed));
+    }
+
+    let needs_sqlite_vec = agent.vector_storage.as_ref()
+        .and_then(|uri| VectorStorageType::from_scheme(uri.scheme()))
+        .map(|t| t == VectorStorageType::SqliteVec)
+        .unwrap_or(false);
+
+    if needs_sqlite_vec {
+        hosts.push(vlinder_sqlite_vec::provider_host());
     }
 
     if hosts.is_empty() {

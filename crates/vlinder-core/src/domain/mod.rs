@@ -8,7 +8,6 @@
 //! is the authoritative source for the runtime's abstract protocol.
 
 mod agent;
-mod sdk;
 mod dag;
 mod state;
 pub mod registry_memory;
@@ -24,7 +23,6 @@ mod catalog;
 mod fleet;
 mod fleet_manifest;
 pub mod harness;
-mod inference;
 mod model;
 mod provider;
 mod registry;
@@ -54,7 +52,6 @@ pub use image_digest::ImageDigest;
 pub use operation::Operation;
 pub use service_type::ServiceType;
 pub use image_ref::ImageRef;
-pub use sdk::VectorMatch;
 
 // ============================================================================
 // Message Queue (protocol types + trait)
@@ -104,25 +101,17 @@ pub use fleet_manifest::FleetManifest;
 // ============================================================================
 
 pub use storage::{
-    ObjectStorage, ObjectStorageType, VectorStorage, VectorStorageType,
-    ObjectStorageManifest, VectorStorageManifest,
+    ObjectStorage, ObjectStorageType, VectorStorageType,
+    ObjectStorageManifest,
 };
 #[cfg(test)]
-pub use storage::{InMemoryObjectStorage, InMemoryVectorStorage};
+pub use storage::InMemoryObjectStorage;
 
 // ============================================================================
 // Resource ID (registry key)
 // ============================================================================
 
 pub use resource_id::ResourceId;
-
-// ============================================================================
-// Inference (config + trait)
-// ============================================================================
-
-pub use inference::{
-    Inference, InferenceBackend, InferenceKind,
-};
 
 // ============================================================================
 // Model

@@ -1,30 +1,15 @@
-//! Vector storage (embeddings)
-//!
-//! SQLite implementation of the VectorStorage trait using sqlite-vec
-//! for efficient similarity search. The trait is defined in the domain module.
+//! SQLite-backed vector storage using sqlite-vec.
 
-use crate::config;
-use crate::domain::VectorStorage;
 use rusqlite::{params, Connection};
 use sqlite_vec::sqlite3_vec_init;
 use std::sync::{Arc, Mutex};
 use zerocopy::AsBytes;
 
-// ============================================================================
-// SQLite Implementation
-// ============================================================================
-
-/// SQLite-backed vector storage using sqlite-vec.
 pub struct SqliteVectorStorage {
     conn: Arc<Mutex<Connection>>,
 }
 
 impl SqliteVectorStorage {
-    /// Open vector storage for an agent (derives path from agent name).
-    pub fn open(agent_name: &str) -> Result<Self, String> {
-        Self::open_at(&config::agent_db_path(agent_name))
-    }
-
     /// Open vector storage at a specific path.
     pub fn open_at(db_path: &std::path::Path) -> Result<Self, String> {
         if let Some(parent) = db_path.parent() {
@@ -32,7 +17,6 @@ impl SqliteVectorStorage {
                 .map_err(|e| format!("failed to create storage directory: {}", e))?;
         }
 
-        // Register sqlite-vec extension
         unsafe {
             rusqlite::ffi::sqlite3_auto_extension(Some(std::mem::transmute(
                 sqlite3_vec_init as *const (),
@@ -58,10 +42,8 @@ impl SqliteVectorStorage {
             conn: Arc::new(Mutex::new(conn)),
         })
     }
-}
 
-impl VectorStorage for SqliteVectorStorage {
-    fn store_embedding(&self, key: &str, vector: &[f32], metadata: &str) -> Result<(), String> {
+    pub fn store_embedding(&self, key: &str, vector: &[f32], metadata: &str) -> Result<(), String> {
         if vector.len() != 768 {
             return Err(format!("expected 768 dimensions, got {}", vector.len()));
         }
@@ -69,7 +51,6 @@ impl VectorStorage for SqliteVectorStorage {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
 
         // sqlite-vec virtual tables don't support INSERT OR REPLACE
-        // Delete first if exists, then insert
         let _ = conn.execute("DELETE FROM vec_items WHERE key = ?", params![key]);
 
         conn.execute(
@@ -79,7 +60,7 @@ impl VectorStorage for SqliteVectorStorage {
         Ok(())
     }
 
-    fn search_by_vector(&self, query_vector: &[f32], limit: u32) -> Result<Vec<(String, String, f64)>, String> {
+    pub fn search_by_vector(&self, query_vector: &[f32], limit: u32) -> Result<Vec<(String, String, f64)>, String> {
         if query_vector.len() != 768 {
             return Err(format!("expected 768 dimensions, got {}", query_vector.len()));
         }
@@ -108,7 +89,7 @@ impl VectorStorage for SqliteVectorStorage {
         Ok(results)
     }
 
-    fn delete_embedding(&self, key: &str) -> Result<bool, String> {
+    pub fn delete_embedding(&self, key: &str) -> Result<bool, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let rows_affected = conn.execute("DELETE FROM vec_items WHERE key = ?", params![key])
             .map_err(|e| format!("failed to delete embedding: {}", e))?;

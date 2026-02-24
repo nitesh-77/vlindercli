@@ -101,25 +101,6 @@ pub trait ObjectStorage: Send + Sync {
 }
 
 // ============================================================================
-// VectorStorage Trait
-// ============================================================================
-
-/// Vector storage for embedding operations.
-///
-/// Implementations provide similarity search over embedded vectors.
-/// Each embedding has a key, a 768-dimensional vector, and metadata.
-pub trait VectorStorage: Send + Sync {
-    /// Store an embedding with the given key.
-    fn store_embedding(&self, key: &str, vector: &[f32], metadata: &str) -> Result<(), String>;
-
-    /// Search for similar embeddings. Returns (key, metadata, distance) tuples.
-    fn search_by_vector(&self, query_vector: &[f32], limit: u32) -> Result<Vec<(String, String, f64)>, String>;
-
-    /// Delete an embedding by key. Returns true if it existed.
-    fn delete_embedding(&self, key: &str) -> Result<bool, String>;
-}
-
-// ============================================================================
 // ObjectStorageManifest
 // ============================================================================
 
@@ -131,21 +112,6 @@ pub trait VectorStorage: Send + Sync {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ObjectStorageManifest {
     /// SQLite-backed storage.
-    Sqlite { path: PathBuf },
-}
-
-// ============================================================================
-// VectorStorageManifest
-// ============================================================================
-
-/// Manifest for vector storage configuration.
-///
-/// Vector storage is configured independently from object storage.
-/// All paths are resolved at manifest creation time.
-#[derive(Clone, Debug, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum VectorStorageManifest {
-    /// SQLite-backed storage with sqlite-vec.
     Sqlite { path: PathBuf },
 }
 
@@ -204,69 +170,6 @@ impl ObjectStorage for InMemoryObjectStorage {
             .cloned()
             .collect())
     }
-}
-
-/// In-memory vector storage for tests.
-/// Uses brute-force euclidean distance for similarity search.
-#[cfg(test)]
-pub struct InMemoryVectorStorage {
-    items: Mutex<HashMap<String, (Vec<f32>, String)>>,
-}
-
-#[cfg(test)]
-impl InMemoryVectorStorage {
-    pub fn new() -> Self {
-        InMemoryVectorStorage {
-            items: Mutex::new(HashMap::new()),
-        }
-    }
-}
-
-#[cfg(test)]
-impl VectorStorage for InMemoryVectorStorage {
-    fn store_embedding(&self, key: &str, vector: &[f32], metadata: &str) -> Result<(), String> {
-        if vector.len() != 768 {
-            return Err(format!("expected 768 dimensions, got {}", vector.len()));
-        }
-
-        let mut items = self.items.lock().map_err(|e| e.to_string())?;
-        items.insert(key.to_string(), (vector.to_vec(), metadata.to_string()));
-        Ok(())
-    }
-
-    fn search_by_vector(&self, query_vector: &[f32], limit: u32) -> Result<Vec<(String, String, f64)>, String> {
-        if query_vector.len() != 768 {
-            return Err(format!("expected 768 dimensions, got {}", query_vector.len()));
-        }
-
-        let items = self.items.lock().map_err(|e| e.to_string())?;
-
-        let mut results: Vec<(String, String, f64)> = items.iter()
-            .map(|(key, (vector, metadata))| {
-                let distance = euclidean_distance(query_vector, vector);
-                (key.clone(), metadata.clone(), distance)
-            })
-            .collect();
-
-        results.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
-        results.truncate(limit as usize);
-
-        Ok(results)
-    }
-
-    fn delete_embedding(&self, key: &str) -> Result<bool, String> {
-        let mut items = self.items.lock().map_err(|e| e.to_string())?;
-        Ok(items.remove(key).is_some())
-    }
-}
-
-#[cfg(test)]
-fn euclidean_distance(a: &[f32], b: &[f32]) -> f64 {
-    a.iter()
-        .zip(b.iter())
-        .map(|(x, y)| (x - y).powi(2) as f64)
-        .sum::<f64>()
-        .sqrt()
 }
 
 #[cfg(test)]
@@ -362,156 +265,6 @@ mod tests {
         storage.put_file("/文档/日记.txt", "今日の天気は晴れです".as_bytes()).unwrap();
         let content = storage.get_file("/文档/日记.txt").unwrap().unwrap();
         assert_eq!(String::from_utf8(content).unwrap(), "今日の天気は晴れです");
-    }
-
-    // ========================================================================
-    // VectorStorage trait contract
-    // ========================================================================
-
-    fn make_test_vector(seed: f32) -> Vec<f32> {
-        (0..768).map(|i| (i as f32 * seed).sin()).collect()
-    }
-
-    #[test]
-    fn vector_store_and_search() {
-        let storage = InMemoryVectorStorage::new();
-
-        let vec1 = make_test_vector(1.0);
-        let vec2 = make_test_vector(2.0);
-        let vec3 = make_test_vector(1.1);
-
-        storage.store_embedding("doc1", &vec1, "first document").unwrap();
-        storage.store_embedding("doc2", &vec2, "second document").unwrap();
-        storage.store_embedding("doc3", &vec3, "third document").unwrap();
-
-        let results = storage.search_by_vector(&vec1, 3).unwrap();
-        assert_eq!(results.len(), 3);
-        assert_eq!(results[0].0, "doc1");
-        assert_eq!(results[0].1, "first document");
-        assert!(results[0].2 < 0.0001);
-    }
-
-    #[test]
-    fn vector_wrong_dimensions() {
-        let storage = InMemoryVectorStorage::new();
-
-        let wrong_vec: Vec<f32> = vec![1.0, 2.0, 3.0];
-        let result = storage.store_embedding("bad", &wrong_vec, "");
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("768"));
-
-        let search_result = storage.search_by_vector(&wrong_vec, 10);
-        assert!(search_result.is_err());
-    }
-
-    #[test]
-    fn vector_delete() {
-        let storage = InMemoryVectorStorage::new();
-
-        let vec1 = make_test_vector(1.0);
-        storage.store_embedding("to-delete", &vec1, "temp").unwrap();
-
-        let results = storage.search_by_vector(&vec1, 1).unwrap();
-        assert_eq!(results.len(), 1);
-
-        let deleted = storage.delete_embedding("to-delete").unwrap();
-        assert!(deleted);
-
-        let results = storage.search_by_vector(&vec1, 1).unwrap();
-        assert_eq!(results.len(), 0);
-
-        let deleted_again = storage.delete_embedding("to-delete").unwrap();
-        assert!(!deleted_again);
-    }
-
-    #[test]
-    fn vector_overwrite() {
-        let storage = InMemoryVectorStorage::new();
-
-        let vec1 = make_test_vector(1.0);
-        let vec2 = make_test_vector(2.0);
-
-        storage.store_embedding("doc", &vec1, "original").unwrap();
-        storage.store_embedding("doc", &vec2, "updated").unwrap();
-
-        let results = storage.search_by_vector(&vec2, 1).unwrap();
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].0, "doc");
-        assert_eq!(results[0].1, "updated");
-        assert!(results[0].2 < 0.0001);
-    }
-
-    #[test]
-    fn vector_search_empty() {
-        let storage = InMemoryVectorStorage::new();
-
-        let vec1 = make_test_vector(1.0);
-        let results = storage.search_by_vector(&vec1, 10).unwrap();
-        assert!(results.is_empty());
-    }
-
-    #[test]
-    fn vector_search_respects_limit() {
-        let storage = InMemoryVectorStorage::new();
-
-        for i in 0..5 {
-            let vec = make_test_vector(i as f32);
-            storage.store_embedding(&format!("doc{}", i), &vec, "").unwrap();
-        }
-
-        let query = make_test_vector(0.0);
-
-        let results = storage.search_by_vector(&query, 2).unwrap();
-        assert_eq!(results.len(), 2);
-
-        let results = storage.search_by_vector(&query, 10).unwrap();
-        assert_eq!(results.len(), 5);
-    }
-
-    #[test]
-    fn vector_search_orders_by_distance() {
-        let storage = InMemoryVectorStorage::new();
-
-        let base: Vec<f32> = vec![1.0; 768];
-        let close: Vec<f32> = vec![1.1; 768];
-        let medium: Vec<f32> = vec![2.0; 768];
-        let far: Vec<f32> = vec![10.0; 768];
-
-        storage.store_embedding("far", &far, "").unwrap();
-        storage.store_embedding("close", &close, "").unwrap();
-        storage.store_embedding("medium", &medium, "").unwrap();
-
-        let results = storage.search_by_vector(&base, 3).unwrap();
-        assert_eq!(results[0].0, "close");
-        assert_eq!(results[1].0, "medium");
-        assert_eq!(results[2].0, "far");
-
-        assert!(results[0].2 < results[1].2);
-        assert!(results[1].2 < results[2].2);
-    }
-
-    #[test]
-    fn vector_unicode_metadata() {
-        let storage = InMemoryVectorStorage::new();
-
-        let vec1 = make_test_vector(1.0);
-
-        storage.store_embedding("doc1", &vec1, "文档摘要：这是一个测试").unwrap();
-        storage.store_embedding("doc2", &make_test_vector(2.0), "Party notes").unwrap();
-
-        let results = storage.search_by_vector(&vec1, 2).unwrap();
-        assert_eq!(results[0].1, "文档摘要：这是一个测试");
-    }
-
-    #[test]
-    fn vector_search_limit_zero() {
-        let storage = InMemoryVectorStorage::new();
-
-        let vec1 = make_test_vector(1.0);
-        storage.store_embedding("doc1", &vec1, "test").unwrap();
-
-        let results = storage.search_by_vector(&vec1, 0).unwrap();
-        assert!(results.is_empty());
     }
 }
 

@@ -92,25 +92,4 @@ pub struct KvPutResponse {
     pub state: String,
 }
 
-// ============================================================================
-// Vector Service
-// ============================================================================
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct VectorStoreRequest {
-    pub key: String,
-    pub vector: Vec<f32>,
-    pub metadata: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct VectorSearchRequest {
-    pub vector: Vec<f32>,
-    pub limit: u32,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct VectorDeleteRequest {
-    pub key: String,
-}
 

@@ -3297,6 +3297,20 @@ dependencies = [
  "vlinder-infer-openrouter",
  "vlinder-ollama",
  "vlinder-proto",
+ "vlinder-sqlite-vec",
+]
+
+[[package]]
+name = "vlinder-sqlite-vec"
+version = "0.1.0"
+dependencies = [
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sqlite-vec",
+ "tempfile",
+ "vlinder-core",
+ "zerocopy 0.7.35",
 ]
 
 [[package]]
@@ -3338,6 +3352,7 @@ dependencies = [
  "vlinder-infer-openrouter",
  "vlinder-ollama",
  "vlinder-proto",
+ "vlinder-sqlite-vec",
  "zerocopy 0.7.35",
 ]
 

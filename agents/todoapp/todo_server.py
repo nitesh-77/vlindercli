@@ -45,14 +45,20 @@ class VlinderClient:
         self._post("/services/kv/put", {"path": path, "content": content})
 
     def vector_store(self, key, vector, metadata):
-        self._post("/services/vector/store", {"key": key, "vector": vector, "metadata": metadata})
+        requests.post(
+            "http://sqlite-vec.vlinder.local/store",
+            json={"key": key, "vector": vector, "metadata": metadata}, timeout=60)
 
     def vector_search(self, vector, limit=5):
-        response = self._post("/services/vector/search", {"vector": vector, "limit": limit})
+        response = requests.post(
+            "http://sqlite-vec.vlinder.local/search",
+            json={"vector": vector, "limit": limit}, timeout=60)
         return response.json()
-    
+
     def vector_delete(self, key):
-        self._post("/services/vector/delete", {"key": key})
+        requests.post(
+            "http://sqlite-vec.vlinder.local/delete",
+            json={"key": key}, timeout=60)
 
     def infer(self, model, prompt, max_tokens=256):
         response = requests.post(

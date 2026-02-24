@@ -2,13 +2,9 @@
 
 use std::sync::Arc;
 
-use crate::domain::{
-    ObjectStorage, ObjectStorageManifest,
-    VectorStorage, VectorStorageManifest,
-};
+use crate::domain::{ObjectStorage, ObjectStorageManifest};
 
 use super::object::SqliteObjectStorage;
-use super::vector::SqliteVectorStorage;
 
 // ============================================================================
 // Manifest-based dispatch (new)
@@ -20,17 +16,6 @@ pub fn open_object_storage_from(manifest: &ObjectStorageManifest) -> Result<Arc<
         ObjectStorageManifest::Sqlite { path } => {
             SqliteObjectStorage::open_at(path)
                 .map(|s| Arc::new(s) as Arc<dyn ObjectStorage>)
-                .map_err(DispatchError::Sqlite)
-        }
-    }
-}
-
-/// Open vector storage from a manifest.
-pub fn open_vector_storage_from(manifest: &VectorStorageManifest) -> Result<Arc<dyn VectorStorage>, DispatchError> {
-    match manifest {
-        VectorStorageManifest::Sqlite { path } => {
-            SqliteVectorStorage::open_at(path)
-                .map(|s| Arc::new(s) as Arc<dyn VectorStorage>)
                 .map_err(DispatchError::Sqlite)
         }
     }
@@ -55,25 +40,6 @@ pub fn open_object_storage_from_uri(uri: &ResourceId) -> Result<Arc<dyn ObjectSt
             })?;
             SqliteObjectStorage::open_at(Path::new(path))
                 .map(|s| Arc::new(s) as Arc<dyn ObjectStorage>)
-                .map_err(DispatchError::Sqlite)
-        }
-        Some(scheme) => Err(DispatchError::UnknownScheme(scheme.to_string())),
-        None => Err(DispatchError::InvalidUri("missing scheme".to_string())),
-    }
-}
-
-/// Open vector storage from a URI.
-///
-/// Dispatches based on URI scheme:
-/// - `sqlite://path` → SQLite storage at path
-pub fn open_vector_storage_from_uri(uri: &ResourceId) -> Result<Arc<dyn VectorStorage>, DispatchError> {
-    match uri.scheme() {
-        Some("sqlite") => {
-            let path = uri.path().ok_or_else(|| {
-                DispatchError::InvalidUri("sqlite URI missing path".to_string())
-            })?;
-            SqliteVectorStorage::open_at(Path::new(path))
-                .map(|s| Arc::new(s) as Arc<dyn VectorStorage>)
                 .map_err(DispatchError::Sqlite)
         }
         Some(scheme) => Err(DispatchError::UnknownScheme(scheme.to_string())),
@@ -112,21 +78,5 @@ mod tests {
 
         obj.put_file("/test.txt", b"hello").unwrap();
         assert_eq!(obj.get_file("/test.txt").unwrap(), Some(b"hello".to_vec()));
-    }
-
-    #[test]
-    fn vector_storage_from_sqlite_manifest() {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("vec.db");
-
-        let manifest = VectorStorageManifest::Sqlite { path: db_path };
-        let vec = open_vector_storage_from(&manifest).unwrap();
-
-        let embedding: Vec<f32> = (0..768).map(|i| i as f32 * 0.001).collect();
-        vec.store_embedding("doc1", &embedding, "test doc").unwrap();
-
-        let results = vec.search_by_vector(&embedding, 1).unwrap();
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].0, "doc1");
     }
 }

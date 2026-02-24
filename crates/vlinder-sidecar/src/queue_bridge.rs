@@ -15,14 +15,13 @@ use base64::Engine as _;
 
 use vlinder_core::domain::{
     AgentId, ObjectStorageType, Operation, Registry, RoutingKey, ServiceBackend,
-    VectorMatch, VectorStorageType, DelegateMessage, DelegateDiagnostics, ContainerDiagnostics,
+    VectorStorageType, DelegateMessage, DelegateDiagnostics, ContainerDiagnostics,
     InvokeMessage, MessageQueue, Nonce,
     RequestMessage, RequestDiagnostics, SequenceCounter,
 };
 
 use vlinder_core::domain::service_payloads::{
     KvGetRequest, KvPutRequest, KvListRequest, KvDeleteRequest,
-    VectorStoreRequest, VectorSearchRequest, VectorDeleteRequest,
 };
 
 /// Routes agent SDK calls to the appropriate backend service.
@@ -37,6 +36,7 @@ pub struct QueueBridge {
     pub invoke: RwLock<InvokeMessage>,
     /// Resolved backends from agent config (None if agent didn't declare storage)
     pub kv_backend: Option<ObjectStorageType>,
+    #[allow(dead_code)]
     pub vec_backend: Option<VectorStorageType>,
     /// Sequence counter — incremented per service call, reset per invocation
     pub sequence: SequenceCounter,
@@ -181,36 +181,6 @@ impl QueueBridge {
         Ok(response == b"ok")
     }
 
-    pub fn vector_store(&self, key: &str, vector: &[f32], metadata: &str) -> Result<(), String> {
-        let backend = self.vec_backend
-            .ok_or("agent called vector-store but has no vector_storage configured")?;
-        let req = VectorStoreRequest { key: key.to_string(), vector: vector.to_vec(), metadata: metadata.to_string() };
-        let payload = serde_json::to_vec(&req).map_err(|e| format!("serialize error: {}", e))?;
-        let response = self.send_service_request(ServiceBackend::Vec(backend), Operation::Store, payload)?;
-        Self::check_worker_error(&response)?;
-        Ok(())
-    }
-
-    pub fn vector_search(&self, vector: &[f32], limit: u32) -> Result<Vec<VectorMatch>, String> {
-        let backend = self.vec_backend
-            .ok_or("agent called vector-search but has no vector_storage configured")?;
-        let req = VectorSearchRequest { vector: vector.to_vec(), limit };
-        let payload = serde_json::to_vec(&req).map_err(|e| format!("serialize error: {}", e))?;
-        let response = self.send_service_request(ServiceBackend::Vec(backend), Operation::Search, payload)?;
-        Self::check_worker_error(&response)?;
-        serde_json::from_slice(&response)
-            .map_err(|e| format!("vector-search response parse error: {}", e))
-    }
-
-    pub fn vector_delete(&self, key: &str) -> Result<bool, String> {
-        let backend = self.vec_backend
-            .ok_or("agent called vector-delete but has no vector_storage configured")?;
-        let req = VectorDeleteRequest { key: key.to_string() };
-        let payload = serde_json::to_vec(&req).map_err(|e| format!("serialize error: {}", e))?;
-        let response = self.send_service_request(ServiceBackend::Vec(backend), Operation::Delete, payload)?;
-        Self::check_worker_error(&response)?;
-        Ok(response == b"ok")
-    }
 
     #[allow(dead_code)]
     pub fn delegate(&self, target_agent: &str, input: &str) -> Result<String, String> {

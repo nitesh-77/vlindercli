@@ -28,9 +28,6 @@ pub fn spawn_server(bridge: Arc<QueueBridge>) {
                 "/services/kv/get" => handle_kv_get(&bridge, &body),
                 "/services/kv/put" => handle_kv_put(&bridge, &body),
                 "/services/kv/delete" => handle_kv_delete(&bridge, &body),
-                "/services/vector/store" => handle_vector_store(&bridge, &body),
-                "/services/vector/search" => handle_vector_search(&bridge, &body),
-                "/services/vector/delete" => handle_vector_delete(&bridge, &body),
                 _ => {
                     let _ = request.respond(
                         tiny_http::Response::from_string("not found")
@@ -70,24 +67,6 @@ struct KvDeleteRequest {
     path: String,
 }
 
-#[derive(Deserialize)]
-struct VectorStoreRequest {
-    key: String,
-    vector: Vec<f32>,
-    metadata: String,
-}
-
-#[derive(Deserialize)]
-struct VectorSearchRequest {
-    vector: Vec<f32>,
-    limit: u32,
-}
-
-#[derive(Deserialize)]
-struct VectorDeleteRequest {
-    key: String,
-}
-
 // =============================================================================
 // Handlers
 // =============================================================================
@@ -112,24 +91,4 @@ fn handle_kv_delete(bridge: &QueueBridge, body: &str) -> Result<Vec<u8>, String>
     serde_json::to_vec(&deleted).map_err(|e| format!("serialize error: {}", e))
 }
 
-fn handle_vector_store(bridge: &QueueBridge, body: &str) -> Result<Vec<u8>, String> {
-    let req: VectorStoreRequest = serde_json::from_str(body)
-        .map_err(|e| format!("parse error: {}", e))?;
-    bridge.vector_store(&req.key, &req.vector, &req.metadata)?;
-    Ok(b"OK".to_vec())
-}
-
-fn handle_vector_search(bridge: &QueueBridge, body: &str) -> Result<Vec<u8>, String> {
-    let req: VectorSearchRequest = serde_json::from_str(body)
-        .map_err(|e| format!("parse error: {}", e))?;
-    let matches = bridge.vector_search(&req.vector, req.limit)?;
-    serde_json::to_vec(&matches).map_err(|e| format!("serialize error: {}", e))
-}
-
-fn handle_vector_delete(bridge: &QueueBridge, body: &str) -> Result<Vec<u8>, String> {
-    let req: VectorDeleteRequest = serde_json::from_str(body)
-        .map_err(|e| format!("parse error: {}", e))?;
-    let deleted = bridge.vector_delete(&req.key)?;
-    serde_json::to_vec(&deleted).map_err(|e| format!("serialize error: {}", e))
-}
 

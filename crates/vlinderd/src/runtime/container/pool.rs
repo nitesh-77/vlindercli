@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::config::Config;
-use crate::domain::{Agent, ImageRef, PodId, Provider, Registry, ResourceId, Runtime, RuntimeType};
+use crate::domain::{Agent, ImageRef, PodId, Provider, Registry, ResourceId, Runtime, RuntimeType, VectorStorageType};
 
 use super::podman::{Podman, RunTarget, resolve_socket};
 use super::podman_api::PodmanApiClient;
@@ -135,6 +135,13 @@ impl ContainerRuntime {
         }
         if agent.requirements.services.values().any(|svc| svc.provider == Provider::Ollama) {
             host_aliases.push("ollama.vlinder.local:127.0.0.1".to_string());
+        }
+        let needs_sqlite_vec = agent.vector_storage.as_ref()
+            .and_then(|uri| VectorStorageType::from_scheme(uri.scheme()))
+            .map(|t| t == VectorStorageType::SqliteVec)
+            .unwrap_or(false);
+        if needs_sqlite_vec {
+            host_aliases.push(format!("{}:127.0.0.1", vlinder_sqlite_vec::HOSTNAME));
         }
 
         let pod_name = format!("vlinder-{}", name);

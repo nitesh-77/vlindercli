@@ -344,7 +344,7 @@ fn run_storage_object_memory_worker(config: &Config, shutdown: &AtomicBool) {
 }
 
 fn run_storage_vector_sqlite_worker(config: &Config, shutdown: &AtomicBool) {
-    use crate::domain::workers::VectorServiceWorker;
+    use vlinder_sqlite_vec::SqliteVecWorker;
 
     use crate::registry_service::GrpcRegistryClient;
 
@@ -356,11 +356,7 @@ fn run_storage_vector_sqlite_worker(config: &Config, shutdown: &AtomicBool) {
             .expect("Failed to connect to registry")
     );
 
-    let open_storage = Box::new(|uri: &crate::domain::ResourceId| {
-        crate::storage::dispatch::open_vector_storage_from_uri(uri)
-            .map_err(|e| e.to_string())
-    });
-    let worker = VectorServiceWorker::new(queue, registry, "sqlite-vec", open_storage);
+    let worker = SqliteVecWorker::new(queue, registry, "sqlite-vec");
 
     tracing::info!(registry = %registry_addr, "SQLite-vec vector storage worker ready");
 
@@ -371,7 +367,7 @@ fn run_storage_vector_sqlite_worker(config: &Config, shutdown: &AtomicBool) {
 }
 
 fn run_storage_vector_memory_worker(config: &Config, shutdown: &AtomicBool) {
-    use crate::domain::workers::VectorServiceWorker;
+    use vlinder_sqlite_vec::SqliteVecWorker;
 
     use crate::registry_service::GrpcRegistryClient;
 
@@ -383,11 +379,7 @@ fn run_storage_vector_memory_worker(config: &Config, shutdown: &AtomicBool) {
             .expect("Failed to connect to registry")
     );
 
-    let open_storage = Box::new(|uri: &crate::domain::ResourceId| {
-        crate::storage::dispatch::open_vector_storage_from_uri(uri)
-            .map_err(|e| e.to_string())
-    });
-    let worker = VectorServiceWorker::new(queue, registry, "memory", open_storage);
+    let worker = SqliteVecWorker::new(queue, registry, "memory");
 
     tracing::info!(registry = %registry_addr, "In-memory vector storage worker ready");
 
