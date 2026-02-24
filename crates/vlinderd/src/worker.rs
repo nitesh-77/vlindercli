@@ -577,9 +577,21 @@ fn run_dag_git_worker(_config: &Config, shutdown: &AtomicBool) {
                 }
                 let payload = msg.payload.to_vec();
 
+                let info = msg.info().ok();
+                let num_delivered = info.as_ref().map(|i| i.delivered);
+                let stream_seq = info.as_ref().map(|i| i.stream_sequence);
+                tracing::debug!(
+                    subject = subject.as_str(),
+                    stream_seq = ?stream_seq,
+                    num_delivered = ?num_delivered,
+                    "DAG git received NATS message",
+                );
+
                 if let Some(observable) = reconstruct_observable_message(&subject, &headers, &payload) {
                     let created_at = chrono::Utc::now();
                     git_worker.on_observable_message(&observable, created_at);
+                } else {
+                    tracing::warn!(subject = subject.as_str(), "DAG git could not reconstruct message");
                 }
 
                 let _ = rt.block_on(async { msg.ack().await });

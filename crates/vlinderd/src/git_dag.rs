@@ -348,9 +348,18 @@ impl DagWorker for GitDagWorker {
                 .and_then(|oid| self.repo.find_commit(oid).ok());
             let parents: Vec<&git2::Commit> = parent_commit.iter().collect();
 
-            // 5. Create commit on HEAD
+            tracing::debug!(
+                msg_type,
+                from = from.as_str(),
+                to = to.as_str(),
+                last_commit = ?self.last_commit,
+                session = %msg.session(),
+                "Committing message",
+            );
+
+            // 5. Create commit object (no ref update — we own the chain)
             let commit_oid = self.repo.commit(
-                Some("HEAD"),
+                None,
                 &author,
                 &committer,
                 &message,
@@ -358,14 +367,32 @@ impl DagWorker for GitDagWorker {
                 &parents,
             ).map_err(|e| format!("commit failed: {}", e))?;
 
-            // 6. Sync working tree so files are visible in the directory
+            // 6. Advance HEAD — matches `git update-ref HEAD <hash>`:
+            //    - HEAD attached (normal): advances the branch it points to
+            //    - HEAD detached (time-travel): advances detached HEAD only,
+            //      leaving the branch untouched
+            let reflog_msg = format!("{}: {} → {}", msg_type, from, to);
+            if self.repo.head_detached().unwrap_or(false) {
+                self.repo.set_head_detached(commit_oid)
+                    .map_err(|e| format!("set_head_detached failed: {}", e))?;
+            } else {
+                let branch = self.repo.find_reference("HEAD").ok()
+                    .and_then(|r| r.symbolic_target().map(|s| s.to_string()))
+                    .unwrap_or_else(|| "refs/heads/main".to_string());
+                self.repo.reference(&branch, commit_oid, true, &reflog_msg)
+                    .map_err(|e| format!("ref update failed: {}", e))?;
+            }
+
+            // 7. Sync working tree so files are visible in the directory
             let mut checkout = git2::build::CheckoutBuilder::new();
             checkout.force();
             self.repo.checkout_head(Some(&mut checkout))
                 .map_err(|e| format!("checkout failed: {}", e))?;
 
-            // 7. Track last commit
+            // 8. Track last commit
             self.last_commit = Some(commit_oid);
+
+            tracing::debug!(commit = %commit_oid, "Commit succeeded");
 
             Ok(())
         })();
@@ -1017,5 +1044,163 @@ mod tests {
 
         let count = git(tmp.path(), &["rev-list", "--count", "main"]).unwrap();
         assert_eq!(count, "3");
+    }
+
+    // --- Time-travel resilience tests ---
+    //
+    // Time-travel detaches HEAD at an earlier commit. The dag worker must:
+    //   - Keep writing commits (chained via last_commit, not HEAD)
+    //   - NOT advance main (main is the "present")
+    //   - Advance detached HEAD only
+    // This matches `git update-ref HEAD <hash>` semantics.
+
+    #[test]
+    fn commit_succeeds_after_head_moved_backwards() {
+        let (mut worker, tmp) = test_worker();
+
+        let (m1, t1) = test_invoke(b"1", 1000);
+        worker.on_observable_message(&m1, t1);
+        let commit1 = git(tmp.path(), &["rev-parse", "main"]).unwrap();
+
+        let (m2, t2) = test_request(b"2", 1001);
+        worker.on_observable_message(&m2, t2);
+
+        let (m3, t3) = test_response(b"3", 1002);
+        worker.on_observable_message(&m3, t3);
+        let main_before = git(tmp.path(), &["rev-parse", "main"]).unwrap();
+
+        // Simulate time-travel: detach HEAD at commit 1
+        git(tmp.path(), &["checkout", &commit1]).unwrap();
+
+        // Worker writes another message — must not fail
+        let (m4, t4) = test_complete(b"4", 1003);
+        worker.on_observable_message(&m4, t4);
+
+        // main must NOT have moved — it stays at commit 3
+        let main_after = git(tmp.path(), &["rev-parse", "main"]).unwrap();
+        assert_eq!(main_before, main_after, "main should not advance during time-travel");
+
+        // HEAD (detached) should have advanced to include commit 4
+        let head_count = git(tmp.path(), &["rev-list", "--count", "HEAD"]).unwrap();
+        assert_eq!(head_count, "4");
+    }
+
+    #[test]
+    fn commit_succeeds_after_head_detached() {
+        let (mut worker, tmp) = test_worker();
+
+        let (m1, t1) = test_invoke(b"1", 1000);
+        worker.on_observable_message(&m1, t1);
+        let main_before = git(tmp.path(), &["rev-parse", "main"]).unwrap();
+
+        // Detach HEAD
+        git(tmp.path(), &["checkout", "--detach", &main_before]).unwrap();
+
+        // Worker writes — must succeed
+        let (m2, t2) = test_request(b"2", 1001);
+        worker.on_observable_message(&m2, t2);
+
+        // main stays at 1 commit, HEAD advanced to 2
+        let main_count = git(tmp.path(), &["rev-list", "--count", "main"]).unwrap();
+        assert_eq!(main_count, "1", "main should not advance when detached");
+        let head_count = git(tmp.path(), &["rev-list", "--count", "HEAD"]).unwrap();
+        assert_eq!(head_count, "2");
+    }
+
+    #[test]
+    fn main_advances_after_returning_from_time_travel() {
+        let (mut worker, tmp) = test_worker();
+
+        let (m1, t1) = test_invoke(b"1", 1000);
+        worker.on_observable_message(&m1, t1);
+        let commit1 = git(tmp.path(), &["rev-parse", "main"]).unwrap();
+
+        let (m2, t2) = test_request(b"2", 1001);
+        worker.on_observable_message(&m2, t2);
+
+        let (m3, t3) = test_response(b"3", 1002);
+        worker.on_observable_message(&m3, t3);
+        let main_before = git(tmp.path(), &["rev-parse", "main"]).unwrap();
+
+        // Time-travel: detach HEAD at commit 1
+        git(tmp.path(), &["checkout", &commit1]).unwrap();
+
+        // Write during time-travel
+        let (m4, t4) = test_complete(b"4", 1003);
+        worker.on_observable_message(&m4, t4);
+
+        // main unchanged
+        assert_eq!(git(tmp.path(), &["rev-parse", "main"]).unwrap(), main_before);
+
+        // Return to main
+        git(tmp.path(), &["checkout", "main"]).unwrap();
+
+        // Write after returning — main should advance now
+        let (m5, t5) = test_invoke(b"5", 1004);
+        worker.on_observable_message(&m5, t5);
+
+        let main_count = git(tmp.path(), &["rev-list", "--count", "main"]).unwrap();
+        assert_eq!(main_count, "5", "main should advance after re-attach");
+
+        // Internal chain is linear: 5 → 4 → 3 → 2 → 1
+        let log = git(tmp.path(), &["log", "--format=%H", "main"]).unwrap();
+        let commits: Vec<&str> = log.lines().collect();
+        assert_eq!(commits.len(), 5);
+        for i in 0..4 {
+            let parent = git(tmp.path(), &["log", "-1", "--format=%P", commits[i]]).unwrap();
+            assert_eq!(parent, commits[i + 1], "commit {} parent mismatch", i);
+        }
+    }
+
+    #[test]
+    fn tree_accumulates_correctly_during_time_travel() {
+        let (mut worker, tmp) = test_worker();
+
+        let (m1, t1) = test_invoke(b"1", 1000);
+        worker.on_observable_message(&m1, t1);
+        let commit1 = git(tmp.path(), &["rev-parse", "main"]).unwrap();
+
+        let (m2, t2) = test_request(b"2", 1001);
+        worker.on_observable_message(&m2, t2);
+
+        // Time-travel backwards
+        git(tmp.path(), &["checkout", &commit1]).unwrap();
+
+        // Write a third message during time-travel
+        let (m3, t3) = test_response(b"3", 1002);
+        worker.on_observable_message(&m3, t3);
+
+        // The tree at HEAD (detached) should have all 3 message directories
+        let ls = git(tmp.path(), &["ls-tree", "--name-only", "HEAD"]).unwrap();
+        assert!(ls.contains("19700101-001640.000-cli-invoke"), "missing invoke: {}", ls);
+        assert!(ls.contains("19700101-001641.000-support-agent-request"), "missing request: {}", ls);
+        assert!(ls.contains("19700101-001642.000-infer.ollama-response"), "missing response: {}", ls);
+    }
+
+    #[test]
+    fn working_tree_updated_during_time_travel() {
+        let (mut worker, tmp) = test_worker();
+
+        let (m1, t1) = test_invoke(b"first", 1000);
+        worker.on_observable_message(&m1, t1);
+        let commit1 = git(tmp.path(), &["rev-parse", "main"]).unwrap();
+
+        let (m2, t2) = test_request(b"second", 1001);
+        worker.on_observable_message(&m2, t2);
+
+        // Time-travel backwards
+        git(tmp.path(), &["checkout", &commit1]).unwrap();
+
+        // Write after time-travel
+        let (m3, t3) = test_response(b"third", 1002);
+        worker.on_observable_message(&m3, t3);
+
+        // Working tree should have all 3 directories visible on disk
+        let invoke_dir = "19700101-001640.000-cli-invoke";
+        let request_dir = "19700101-001641.000-support-agent-request";
+        let response_dir = "19700101-001642.000-infer.ollama-response";
+        assert!(tmp.path().join(invoke_dir).join("payload").exists());
+        assert!(tmp.path().join(request_dir).join("payload").exists());
+        assert!(tmp.path().join(response_dir).join("payload").exists());
     }
 }
