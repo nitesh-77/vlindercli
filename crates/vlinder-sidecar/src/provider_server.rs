@@ -2,25 +2,37 @@
 //!
 //! Spawned per invoke, dies when the invoke completes. Self-contained: reads
 //! config from env, connects to the registry, checks the agent's requirements,
-//! and builds its own host table from linked provider crates.
+//! builds its own host table from linked provider crates, and connects to the
+//! message queue. Incoming requests are matched against the host table and
+//! forwarded to NATS via `call_service()`.
 //!
 //! The only input is the `InvokeMessage`.
 
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use tiny_http::{Method, StatusCode};
-use vlinder_core::domain::{HttpMethod, InvokeMessage, Provider, ProviderHost, ServiceType};
+use vlinder_core::domain::{
+    HttpMethod, InvokeMessage, MessageQueue, Provider, ProviderHost, ProviderRoute,
+    RequestDiagnostics, RequestMessage, SequenceCounter, ServiceType,
+};
 
 use crate::config::SidecarConfig;
 use crate::factory;
 
 /// A running provider server, scoped to one invoke.
 ///
-/// Shuts down automatically when dropped.
+/// Shuts down automatically when dropped: the `Drop` impl sets the signal
+/// and joins the thread.
 pub struct ProviderServer {
-    shutdown: Arc<AtomicBool>,
+    /// Shared flag between this struct and the request loop thread.
+    /// Both sides hold an `Arc` to the same `AtomicBool` — the struct
+    /// keeps this handle so `Drop` can write `true`, while the thread
+    /// holds a clone so it can read the flag each loop iteration.
+    /// `Arc` is needed because `std::thread::spawn` moves captured values
+    /// into the thread, so a plain reference wouldn't work.
+    shutdown_signal: Arc<AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
@@ -28,57 +40,90 @@ impl ProviderServer {
     /// Start the provider server on port 80.
     ///
     /// Connects to the registry, looks up the agent from `invoke.agent_id`,
-    /// checks which providers are needed, and serves their hostnames.
-    /// Returns `None` if the agent doesn't need any providers.
+    /// checks which providers are needed, connects to the queue, and serves
+    /// their hostnames. Returns `None` if the agent doesn't need any providers.
     pub fn start(invoke: &InvokeMessage) -> Option<Self> {
-        let hosts = discover_hosts(invoke);
-        if hosts.is_empty() {
-            return None;
-        }
+        let (hosts, queue, invoke) = build_context(invoke)?;
 
         let server = tiny_http::Server::http("0.0.0.0:80")
             .expect("failed to bind provider server on port 80");
         tracing::info!(event = "provider_server.listening", port = 80, "Provider server started");
 
-        Some(Self::spawn(server, hosts))
+        Some(Self::start_request_loop(server, hosts, queue, invoke))
     }
 
-    /// Spawn the request-handling thread.
-    fn spawn(server: tiny_http::Server, hosts: Vec<ProviderHost>) -> Self {
-        let shutdown = Arc::new(AtomicBool::new(false));
-        let shutdown_flag = Arc::clone(&shutdown);
+    /// Spawn the request loop on a background thread.
+    ///
+    /// Creates the shutdown signal, clones it for the thread, and hands
+    /// everything to `request_loop` running on a new thread.
+    fn start_request_loop(
+        server: tiny_http::Server,
+        hosts: Vec<ProviderHost>,
+        queue: Arc<dyn MessageQueue + Send + Sync>,
+        invoke: InvokeMessage,
+    ) -> Self {
+        let shutdown_signal = Arc::new(AtomicBool::new(false));
+
+        // Second handle to the same AtomicBool — this one moves into the
+        // thread, while `shutdown_signal` stays on the struct for Drop.
+        let should_stop = Arc::clone(&shutdown_signal);
 
         let thread = std::thread::spawn(move || {
-            while !shutdown_flag.load(Ordering::Relaxed) {
-                match server.recv_timeout(Duration::from_millis(100)) {
-                    Ok(Some(mut request)) => {
-                        let host = extract_host(&request).to_string();
-                        let path = request.url().to_string();
-
-                        let mut body = Vec::new();
-                        let _ = request.as_reader().read_to_end(&mut body);
-
-                        let (status, response_body) = route(&hosts, request.method(), &host, &path, &body);
-                        let response = tiny_http::Response::from_data(response_body)
-                            .with_status_code(StatusCode(status));
-                        let _ = request.respond(response);
-                    }
-                    Ok(None) => continue,   // timeout, check shutdown flag
-                    Err(_) => break,         // server error, exit
-                }
-            }
-            tracing::info!(event = "provider_server.stopped", "Provider server stopped");
+            request_loop(should_stop, server, hosts, queue, invoke);
         });
 
-        Self { shutdown, thread: Some(thread) }
+        Self { shutdown_signal, thread: Some(thread) }
     }
 }
 
-/// Discover which provider hosts the agent needs.
+/// The main request loop — runs on a background thread for the lifetime of
+/// an invoke.
+///
+/// Each incoming HTTP request is matched against the virtual host table
+/// and forwarded to the message queue. Sequence numbers and state are
+/// tracked across requests within the invoke. Runs until `should_stop`
+/// is set to `true` or the server encounters an error.
+fn request_loop(
+    should_stop: Arc<AtomicBool>,
+    server: tiny_http::Server,
+    hosts: Vec<ProviderHost>,
+    queue: Arc<dyn MessageQueue + Send + Sync>,
+    invoke: InvokeMessage,
+) {
+    let sequence = SequenceCounter::new();
+    let state: RwLock<Option<String>> = RwLock::new(None);
+
+    while !should_stop.load(Ordering::Relaxed) {
+        match server.recv_timeout(Duration::from_millis(100)) {
+            Ok(Some(mut request)) => {
+                let host = extract_host(&request).to_string();
+                let path = request.url().to_string();
+
+                let mut body = Vec::new();
+                let _ = request.as_reader().read_to_end(&mut body);
+
+                let (status, response_body) = match match_route(&hosts, request.method(), &host, &path, &body) {
+                    Ok(route) => forward_to_queue(&*queue, &invoke, &sequence, &state, route, &body),
+                    Err(err) => err,
+                };
+
+                let response = tiny_http::Response::from_data(response_body)
+                    .with_status_code(StatusCode(status));
+                let _ = request.respond(response);
+            }
+            Ok(None) => continue,   // timeout, check shutdown flag
+            Err(_) => break,         // server error, exit
+        }
+    }
+    tracing::info!(event = "provider_server.stopped", "Provider server stopped");
+}
+
+/// Build the provider server context: hosts, queue, and invoke.
 ///
 /// Reads config from env, connects to the registry, looks up the agent,
-/// and checks its service requirements against linked provider crates.
-fn discover_hosts(invoke: &InvokeMessage) -> Vec<ProviderHost> {
+/// checks its service requirements, and connects to the message queue.
+/// Returns `None` if the agent doesn't need any providers.
+fn build_context(invoke: &InvokeMessage) -> Option<(Vec<ProviderHost>, Arc<dyn MessageQueue + Send + Sync>, InvokeMessage)> {
     let config = SidecarConfig::from_env()
         .expect("failed to parse sidecar config from env");
     let registry = factory::connect_registry(&config.registry_url)
@@ -100,15 +145,99 @@ fn discover_hosts(invoke: &InvokeMessage) -> Vec<ProviderHost> {
         hosts.push(vlinder_infer_openrouter::provider_host());
     }
 
-    hosts
+    if hosts.is_empty() {
+        return None;
+    }
+
+    let queue = factory::connect_queue(&config.nats_url, &config.state_url)
+        .expect("failed to connect to queue from provider server");
+
+    Some((hosts, queue, invoke.clone()))
 }
 
-impl Drop for ProviderServer {
-    fn drop(&mut self) {
-        self.shutdown.store(true, Ordering::Relaxed);
-        if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
+/// Extract the Host header value from a request, or "" if absent.
+fn extract_host(request: &tiny_http::Request) -> &str {
+    request
+        .headers()
+        .iter()
+        .find(|h| h.field.as_str().as_str().eq_ignore_ascii_case("host"))
+        .map(|h| h.value.as_str())
+        .unwrap_or("")
+}
+
+/// Match a request against the virtual host table (pure function).
+///
+/// Matches hostname first, then (method, path) within that host.
+/// Validates the request body against the route's declared type.
+/// Returns the matched route on success, or an HTTP error tuple on failure.
+fn match_route<'a>(
+    hosts: &'a [ProviderHost],
+    method: &Method,
+    host: &str,
+    path: &str,
+    body: &[u8],
+) -> Result<&'a ProviderRoute, (u16, Vec<u8>)> {
+    for vhost in hosts {
+        if vhost.hostname == host {
+            for r in &vhost.routes {
+                if to_tiny_method(r.method) == *method && r.path == path {
+                    if let Err(e) = (r.validate_request)(body) {
+                        return Err((400, e.to_string().into_bytes()));
+                    }
+                    return Ok(r);
+                }
+            }
         }
+    }
+    Err((404, b"not found".to_vec()))
+}
+
+/// Forward a matched request to the message queue.
+///
+/// Builds a `RequestMessage` from the route and invoke context,
+/// sends it via `queue.call_service()`, and returns the response.
+fn forward_to_queue(
+    queue: &dyn MessageQueue,
+    invoke: &InvokeMessage,
+    sequence: &SequenceCounter,
+    state: &RwLock<Option<String>>,
+    route: &ProviderRoute,
+    body: &[u8],
+) -> (u16, Vec<u8>) {
+    let seq = sequence.next();
+    let received_at_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+
+    let diagnostics = RequestDiagnostics {
+        sequence: seq.as_u32(),
+        endpoint: format!("/{}", route.service_backend.service_type().as_str()),
+        request_bytes: body.len() as u64,
+        received_at_ms,
+    };
+
+    let request = RequestMessage::new(
+        invoke.timeline.clone(),
+        invoke.submission.clone(),
+        invoke.session.clone(),
+        invoke.agent_id.clone(),
+        route.service_backend,
+        route.operation,
+        seq,
+        body.to_vec(),
+        state.read().unwrap().clone(),
+        diagnostics,
+    );
+
+    match queue.call_service(request) {
+        Ok(response) => {
+            if let Some(ref new_state) = response.state {
+                *state.write().unwrap() = Some(new_state.clone());
+            }
+            (200, response.payload.legacy_bytes().to_vec())
+        }
+        Err(e) => (502, format!("queue error: {}", e).into_bytes()),
     }
 }
 
@@ -122,41 +251,18 @@ fn to_tiny_method(m: HttpMethod) -> Method {
     }
 }
 
-/// Extract the Host header value from a request, or "" if absent.
-fn extract_host(request: &tiny_http::Request) -> &str {
-    request
-        .headers()
-        .iter()
-        .find(|h| h.field.as_str().as_str().eq_ignore_ascii_case("host"))
-        .map(|h| h.value.as_str())
-        .unwrap_or("")
-}
-
-/// Route a request through the virtual host table.
-///
-/// Matches hostname first, then (method, path) within that host.
-/// Validates the request body against the route's declared type.
-/// Returns 404 if no match, 400 if validation fails.
-fn route(hosts: &[ProviderHost], method: &Method, host: &str, path: &str, body: &[u8]) -> (u16, Vec<u8>) {
-    for vhost in hosts {
-        if vhost.hostname == host {
-            for r in &vhost.routes {
-                if to_tiny_method(r.method) == *method && r.path == path {
-                    if let Err(e) = (r.validate_request)(body) {
-                        return (400, e.to_string().into_bytes());
-                    }
-                    return (200, b"ok".to_vec());
-                }
-            }
+impl Drop for ProviderServer {
+    fn drop(&mut self) {
+        self.shutdown_signal.store(true, Ordering::Relaxed);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
         }
     }
-    (404, b"not found".to_vec())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vlinder_core::domain::ProviderRoute;
 
     fn test_hosts() -> Vec<ProviderHost> {
         use vlinder_core::domain::{InferenceBackendType, Operation, ServiceBackend};
@@ -171,45 +277,43 @@ mod tests {
     }
 
     #[test]
-    fn matching_route_returns_200() {
+    fn matching_route_returns_ok() {
         let hosts = test_hosts();
-        let (status, body) = route(&hosts, &Method::Post, "test.vlinder.local", "/test", b"\"hello\"");
-        assert_eq!(status, 200);
-        assert_eq!(body, b"ok");
+        assert!(match_route(&hosts, &Method::Post, "test.vlinder.local", "/test", b"\"hello\"").is_ok());
     }
 
     #[test]
     fn invalid_payload_returns_400() {
         let hosts = test_hosts();
-        let (status, _) = route(&hosts, &Method::Post, "test.vlinder.local", "/test", b"not json");
-        assert_eq!(status, 400);
+        let err = match_route(&hosts, &Method::Post, "test.vlinder.local", "/test", b"not json").err().unwrap();
+        assert_eq!(err.0, 400);
     }
 
     #[test]
     fn missing_host_returns_404() {
         let hosts = test_hosts();
-        let (status, _) = route(&hosts, &Method::Post, "", "/test", b"\"hello\"");
-        assert_eq!(status, 404);
+        let err = match_route(&hosts, &Method::Post, "", "/test", b"\"hello\"").err().unwrap();
+        assert_eq!(err.0, 404);
     }
 
     #[test]
     fn wrong_host_returns_404() {
         let hosts = test_hosts();
-        let (status, _) = route(&hosts, &Method::Post, "other.vlinder.local", "/test", b"\"hello\"");
-        assert_eq!(status, 404);
+        let err = match_route(&hosts, &Method::Post, "other.vlinder.local", "/test", b"\"hello\"").err().unwrap();
+        assert_eq!(err.0, 404);
     }
 
     #[test]
     fn wrong_method_returns_404() {
         let hosts = test_hosts();
-        let (status, _) = route(&hosts, &Method::Get, "test.vlinder.local", "/test", b"");
-        assert_eq!(status, 404);
+        let err = match_route(&hosts, &Method::Get, "test.vlinder.local", "/test", b"").err().unwrap();
+        assert_eq!(err.0, 404);
     }
 
     #[test]
     fn wrong_path_returns_404() {
         let hosts = test_hosts();
-        let (status, _) = route(&hosts, &Method::Post, "test.vlinder.local", "/other", b"\"hello\"");
-        assert_eq!(status, 404);
+        let err = match_route(&hosts, &Method::Post, "test.vlinder.local", "/other", b"\"hello\"").err().unwrap();
+        assert_eq!(err.0, 404);
     }
 }
