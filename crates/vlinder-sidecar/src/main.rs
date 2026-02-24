@@ -6,7 +6,6 @@
 
 mod config;
 mod factory;
-mod http_server;
 mod provider_server;
 mod queue_bridge;
 mod sidecar;

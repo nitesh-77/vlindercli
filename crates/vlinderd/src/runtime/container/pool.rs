@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::config::Config;
-use crate::domain::{Agent, ImageRef, PodId, Provider, Registry, ResourceId, Runtime, RuntimeType, VectorStorageType};
+use crate::domain::{Agent, ImageRef, ObjectStorageType, PodId, Provider, Registry, ResourceId, Runtime, RuntimeType, VectorStorageType};
 
 use super::podman::{Podman, RunTarget, resolve_socket};
 use super::podman_api::PodmanApiClient;
@@ -142,6 +142,12 @@ impl ContainerRuntime {
             .unwrap_or(false);
         if needs_sqlite_vec {
             host_aliases.push(format!("{}:127.0.0.1", vlinder_sqlite_vec::HOSTNAME));
+        }
+        let needs_sqlite_kv = agent.object_storage.as_ref()
+            .and_then(|uri| ObjectStorageType::from_scheme(uri.scheme()))
+            .is_some();
+        if needs_sqlite_kv {
+            host_aliases.push(format!("{}:127.0.0.1", vlinder_sqlite_kv::HOSTNAME));
         }
 
         let pod_name = format!("vlinder-{}", name);

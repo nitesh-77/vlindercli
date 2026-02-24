@@ -1,0 +1,7 @@
+name = "sqlite-kv-test"
+description = "Minimal agent exercising KV storage only"
+runtime = "container"
+executable = "localhost/sqlite-kv-test:latest"
+object_storage = "sqlite://data/objects.db"
+
+[requirements]

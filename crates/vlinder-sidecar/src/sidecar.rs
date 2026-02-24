@@ -11,15 +11,14 @@ use std::time::{Duration, Instant};
 use vlinder_core::domain::{
     AgentId, CompleteMessage, ContainerDiagnostics, ContainerId, ContainerRuntimeInfo,
     ExpectsReply, HarnessType, ImageDigest, ImageRef, InvokeDiagnostics,
-    InvokeMessage, MessageQueue, ObjectStorageType, RoutingKey,
-    RuntimeType, SequenceCounter, VectorStorageType,
+    InvokeMessage, MessageQueue, RoutingKey,
+    RuntimeType, SequenceCounter,
 };
 
 use crate::queue_bridge::QueueBridge;
 use crate::provider_server::ProviderServer;
 use crate::config::SidecarConfig;
 use crate::factory;
-use crate::http_server;
 
 /// The sidecar process — mediates between the platform queue and the agent container.
 pub struct Sidecar {
@@ -48,14 +47,6 @@ impl Sidecar {
         let queue = factory::connect_queue(&config.nats_url, &config.state_url)?;
         let registry = factory::connect_registry(&config.registry_url)?;
 
-        let agent = registry.get_agent_by_name(&config.agent)
-            .ok_or_else(|| format!("agent '{}' not found in registry", config.agent))?;
-
-        let kv_backend = agent.object_storage.as_ref()
-            .and_then(|uri| ObjectStorageType::from_scheme(uri.scheme()));
-        let vec_backend = agent.vector_storage.as_ref()
-            .and_then(|uri| VectorStorageType::from_scheme(uri.scheme()));
-
         let image_ref = config.image_ref.as_ref()
             .and_then(|r| ImageRef::parse(r).ok());
         let image_digest = config.image_digest.as_ref()
@@ -80,10 +71,7 @@ impl Sidecar {
         let bridge = Arc::new(QueueBridge {
             queue: Arc::clone(&queue),
             registry: Arc::clone(&registry),
-            current_state: std::sync::RwLock::new(None),
             invoke: std::sync::RwLock::new(placeholder_invoke),
-            kv_backend,
-            vec_backend,
             sequence: SequenceCounter::new(),
             pending_replies: std::sync::RwLock::new(std::collections::HashMap::new()),
         });
@@ -124,7 +112,7 @@ impl Sidecar {
         self.set_context(invoke);
 
         // Spawn provider server for this invoke — drops when this method returns.
-        let _provider_server = ProviderServer::start(invoke);
+        let provider_server = ProviderServer::start(invoke);
 
         let agent_url = format!("http://127.0.0.1:{}/invoke", self.container_port);
         let payload = invoke.payload.clone();
@@ -134,7 +122,8 @@ impl Sidecar {
                 let mut output = Vec::new();
                 response.into_reader().read_to_end(&mut output)
                     .map_err(|e| format!("Failed to read agent response body: {}", e))?;
-                let final_state = self.bridge.final_state();
+                let final_state = provider_server.as_ref()
+                    .and_then(|ps| ps.final_state());
                 let duration_ms = started_at.elapsed().as_millis() as u64;
                 let diagnostics = self.build_diagnostics(duration_ms);
                 let complete = invoke.create_reply_with_diagnostics(output, final_state, diagnostics);
@@ -218,9 +207,6 @@ impl Sidecar {
     pub fn run(self) -> Result<(), Box<dyn std::error::Error>> {
         self.wait_for_agent()
             .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
-
-        // Spawn the internal HTTP server for the agent to call back to
-        http_server::spawn_server(Arc::clone(&self.bridge));
 
         tracing::info!(event = "sidecar.started", agent = %self.agent_name, "Sidecar loop started");
 

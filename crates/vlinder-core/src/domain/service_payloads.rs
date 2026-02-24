@@ -1,16 +1,12 @@
 //! Shared request/response types for service message payloads.
 //!
-//! These types are the single source of truth for the wire format between
-//! QueueBridge (producer) and service workers (consumers). Both sides
-//! import from here, eliminating schema drift.
-//!
 //! `RequestPayload` and `ResponsePayload` are typed enums carried on
 //! `RequestMessage` and `ResponseMessage`. The `Legacy` variant wraps
 //! raw bytes for the existing JSON-over-bytes protocol. Protocol-specific
 //! variants (Anthropic, OpenAI, etc.) will replace `Legacy` once each
 //! service migrates to SDK types.
-
-use serde::{Deserialize, Serialize};
+//!
+//! KV types have moved to the vlinder-sqlite-kv provider crate.
 
 // ============================================================================
 // Typed Payload Enums
@@ -57,39 +53,3 @@ impl ResponsePayload {
         }
     }
 }
-
-// ============================================================================
-// KV Service (object storage)
-// ============================================================================
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct KvGetRequest {
-    pub path: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub state: Option<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct KvPutRequest {
-    pub path: String,
-    pub content: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub state: Option<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct KvListRequest {
-    pub path: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct KvDeleteRequest {
-    pub path: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct KvPutResponse {
-    pub state: String,
-}
-
-

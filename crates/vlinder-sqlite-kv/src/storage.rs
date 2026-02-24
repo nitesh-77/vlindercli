@@ -1,28 +1,17 @@
-//! Object storage (virtual filesystem)
+//! SQLite-backed object storage (virtual filesystem).
 //!
-//! SQLite implementation of the ObjectStorage trait.
-//! The trait is defined in the domain module.
+//! Concrete type with inherent methods — no ObjectStorage trait.
+//! Moved from vlinderd/src/storage/object.rs.
 
-use crate::config;
-use crate::domain::ObjectStorage;
 use rusqlite::{params, Connection};
 use std::sync::{Arc, Mutex};
 
-// ============================================================================
-// SQLite Implementation
-// ============================================================================
-
-/// SQLite-backed object storage.
+/// SQLite-backed object storage for agent files.
 pub struct SqliteObjectStorage {
     conn: Arc<Mutex<Connection>>,
 }
 
 impl SqliteObjectStorage {
-    /// Open object storage for an agent (derives path from agent name).
-    pub fn open(agent_name: &str) -> Result<Self, String> {
-        Self::open_at(&config::agent_db_path(agent_name))
-    }
-
     /// Open object storage at a specific path.
     pub fn open_at(db_path: &std::path::Path) -> Result<Self, String> {
         if let Some(parent) = db_path.parent() {
@@ -50,10 +39,8 @@ impl SqliteObjectStorage {
             conn: Arc::new(Mutex::new(conn)),
         })
     }
-}
 
-impl ObjectStorage for SqliteObjectStorage {
-    fn put_file(&self, path: &str, content: &[u8]) -> Result<(), String> {
+    pub fn put_file(&self, path: &str, content: &[u8]) -> Result<(), String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         conn.execute(
             "INSERT OR REPLACE INTO files (path, content, updated_at) VALUES (?, ?, unixepoch())",
@@ -62,7 +49,7 @@ impl ObjectStorage for SqliteObjectStorage {
         Ok(())
     }
 
-    fn get_file(&self, path: &str) -> Result<Option<Vec<u8>>, String> {
+    pub fn get_file(&self, path: &str) -> Result<Option<Vec<u8>>, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let mut stmt = conn.prepare("SELECT content FROM files WHERE path = ?")
             .map_err(|e| format!("failed to prepare query: {}", e))?;
@@ -78,14 +65,14 @@ impl ObjectStorage for SqliteObjectStorage {
         }
     }
 
-    fn delete_file(&self, path: &str) -> Result<bool, String> {
+    pub fn delete_file(&self, path: &str) -> Result<bool, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let rows_affected = conn.execute("DELETE FROM files WHERE path = ?", params![path])
             .map_err(|e| format!("failed to delete file: {}", e))?;
         Ok(rows_affected > 0)
     }
 
-    fn list_files(&self, dir_path: &str) -> Result<Vec<String>, String> {
+    pub fn list_files(&self, dir_path: &str) -> Result<Vec<String>, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let pattern = if dir_path == "/" || dir_path.is_empty() {
             "/%".to_string()
@@ -104,5 +91,76 @@ impl ObjectStorage for SqliteObjectStorage {
             files.push(path_result.map_err(|e| format!("failed to get path: {}", e))?);
         }
         Ok(files)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn put_and_get_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("objects.db");
+        let storage = SqliteObjectStorage::open_at(&db_path).unwrap();
+
+        storage.put_file("/docs/readme.txt", b"Hello, AgentFS!").unwrap();
+        let retrieved = storage.get_file("/docs/readme.txt").unwrap();
+        assert_eq!(retrieved, Some(b"Hello, AgentFS!".to_vec()));
+    }
+
+    #[test]
+    fn get_nonexistent_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("objects.db");
+        let storage = SqliteObjectStorage::open_at(&db_path).unwrap();
+
+        let result = storage.get_file("/does/not/exist.txt").unwrap();
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn delete_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("objects.db");
+        let storage = SqliteObjectStorage::open_at(&db_path).unwrap();
+
+        storage.put_file("/temp/data.bin", b"temporary").unwrap();
+        assert!(storage.get_file("/temp/data.bin").unwrap().is_some());
+
+        let deleted = storage.delete_file("/temp/data.bin").unwrap();
+        assert!(deleted);
+        assert!(storage.get_file("/temp/data.bin").unwrap().is_none());
+
+        let deleted_again = storage.delete_file("/temp/data.bin").unwrap();
+        assert!(!deleted_again);
+    }
+
+    #[test]
+    fn list_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("objects.db");
+        let storage = SqliteObjectStorage::open_at(&db_path).unwrap();
+
+        storage.put_file("/notes/day1.md", b"day 1").unwrap();
+        storage.put_file("/notes/day2.md", b"day 2").unwrap();
+        storage.put_file("/data/config.json", b"{}").unwrap();
+
+        let notes = storage.list_files("/notes").unwrap();
+        assert_eq!(notes.len(), 2);
+        assert!(notes.contains(&"/notes/day1.md".to_string()));
+        assert!(notes.contains(&"/notes/day2.md".to_string()));
+    }
+
+    #[test]
+    fn overwrite_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("objects.db");
+        let storage = SqliteObjectStorage::open_at(&db_path).unwrap();
+
+        storage.put_file("/config.yaml", b"version: 1").unwrap();
+        storage.put_file("/config.yaml", b"version: 2").unwrap();
+        let content = storage.get_file("/config.yaml").unwrap().unwrap();
+        assert_eq!(content, b"version: 2");
     }
 }

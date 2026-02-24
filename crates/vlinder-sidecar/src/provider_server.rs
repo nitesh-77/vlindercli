@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use tiny_http::{Method, StatusCode};
 use vlinder_core::domain::{
-    HttpMethod, InvokeMessage, MessageQueue, Provider, ProviderHost, ProviderRoute,
+    HttpMethod, InvokeMessage, MessageQueue, ObjectStorageType, Provider, ProviderHost, ProviderRoute,
     RequestDiagnostics, RequestMessage, SequenceCounter, ServiceType,
     VectorStorageType,
 };
@@ -35,6 +35,10 @@ pub struct ProviderServer {
     /// into the thread, so a plain reference wouldn't work.
     shutdown_signal: Arc<AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,
+    /// Shared state between the struct and the request loop.
+    /// Updated by kv-put responses, read by the sidecar dispatch loop
+    /// for the CompleteMessage.
+    state: Arc<RwLock<Option<String>>>,
 }
 
 impl ProviderServer {
@@ -44,13 +48,18 @@ impl ProviderServer {
     /// checks which providers are needed, connects to the queue, and serves
     /// their hostnames. Returns `None` if the agent doesn't need any providers.
     pub fn start(invoke: &InvokeMessage) -> Option<Self> {
-        let (hosts, queue, invoke) = build_context(invoke)?;
+        let (hosts, queue, invoke, initial_state) = build_context(invoke)?;
 
         let server = tiny_http::Server::http("0.0.0.0:80")
             .expect("failed to bind provider server on port 80");
         tracing::info!(event = "provider_server.listening", port = 80, "Provider server started");
 
-        Some(Self::start_request_loop(server, hosts, queue, invoke))
+        Some(Self::start_request_loop(server, hosts, queue, invoke, initial_state))
+    }
+
+    /// Read the final state hash after an invocation completes.
+    pub fn final_state(&self) -> Option<String> {
+        self.state.read().unwrap().clone()
     }
 
     /// Spawn the request loop on a background thread.
@@ -62,18 +71,21 @@ impl ProviderServer {
         hosts: Vec<ProviderHost>,
         queue: Arc<dyn MessageQueue + Send + Sync>,
         invoke: InvokeMessage,
+        initial_state: Option<String>,
     ) -> Self {
         let shutdown_signal = Arc::new(AtomicBool::new(false));
+        let state = Arc::new(RwLock::new(initial_state));
 
         // Second handle to the same AtomicBool — this one moves into the
         // thread, while `shutdown_signal` stays on the struct for Drop.
         let should_stop = Arc::clone(&shutdown_signal);
+        let state_clone = Arc::clone(&state);
 
         let thread = std::thread::spawn(move || {
-            request_loop(should_stop, server, hosts, queue, invoke);
+            request_loop(should_stop, server, hosts, queue, invoke, state_clone);
         });
 
-        Self { shutdown_signal, thread: Some(thread) }
+        Self { shutdown_signal, thread: Some(thread), state }
     }
 }
 
@@ -90,9 +102,9 @@ fn request_loop(
     hosts: Vec<ProviderHost>,
     queue: Arc<dyn MessageQueue + Send + Sync>,
     invoke: InvokeMessage,
+    state: Arc<RwLock<Option<String>>>,
 ) {
     let sequence = SequenceCounter::new();
-    let state: RwLock<Option<String>> = RwLock::new(None);
 
     while !should_stop.load(Ordering::Relaxed) {
         match server.recv_timeout(Duration::from_millis(100)) {
@@ -134,7 +146,7 @@ fn request_loop(
 /// Reads config from env, connects to the registry, looks up the agent,
 /// checks its service requirements, and connects to the message queue.
 /// Returns `None` if the agent doesn't need any providers.
-fn build_context(invoke: &InvokeMessage) -> Option<(Vec<ProviderHost>, Arc<dyn MessageQueue + Send + Sync>, InvokeMessage)> {
+fn build_context(invoke: &InvokeMessage) -> Option<(Vec<ProviderHost>, Arc<dyn MessageQueue + Send + Sync>, InvokeMessage, Option<String>)> {
     let config = SidecarConfig::from_env()
         .expect("failed to parse sidecar config from env");
     let registry = factory::connect_registry(&config.registry_url)
@@ -144,6 +156,7 @@ fn build_context(invoke: &InvokeMessage) -> Option<(Vec<ProviderHost>, Arc<dyn M
         .expect("agent not found in registry");
 
     let mut hosts = Vec::new();
+    let mut initial_state: Option<String> = None;
 
     let needs_openrouter = agent
         .requirements
@@ -183,6 +196,17 @@ fn build_context(invoke: &InvokeMessage) -> Option<(Vec<ProviderHost>, Arc<dyn M
         hosts.push(vlinder_sqlite_vec::provider_host());
     }
 
+    // KV storage: any agent with object_storage gets the sqlite-kv provider
+    let has_object_storage = agent.object_storage.as_ref()
+        .and_then(|uri| ObjectStorageType::from_scheme(uri.scheme()))
+        .is_some();
+
+    if has_object_storage {
+        hosts.push(vlinder_sqlite_kv::provider_host());
+        // Bootstrap state: use invoke.state, or "" if the agent has KV but no state yet
+        initial_state = Some(invoke.state.clone().unwrap_or_default());
+    }
+
     if hosts.is_empty() {
         return None;
     }
@@ -190,7 +214,7 @@ fn build_context(invoke: &InvokeMessage) -> Option<(Vec<ProviderHost>, Arc<dyn M
     let queue = factory::connect_queue(&config.nats_url, &config.state_url)
         .expect("failed to connect to queue from provider server");
 
-    Some((hosts, queue, invoke.clone()))
+    Some((hosts, queue, invoke.clone(), initial_state))
 }
 
 /// Extract the Host header value from a request, or "" if absent.

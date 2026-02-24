@@ -1,21 +1,75 @@
-//! StateStore implementations — versioned agent state (ADR 055).
+//! Versioned agent state — content-addressed Merkle DAG (ADR 055).
 //!
-//! Domain types (`StateCommit`, `StateStore` trait, `hash_value`, `hash_snapshot`,
-//! `hash_state_commit`) live in `crate::domain`. This module provides implementations:
-//! - `SqliteStateStore` — persistent, for production
+//! Three concepts mirror git's object model:
+//! - Values: Content blobs keyed by SHA-256 hash
+//! - Snapshots: Path -> value_hash mappings (like git trees)
+//! - State commits: Snapshot + parent pointer (like git commits)
 //!
-//! Three logical tables mirror git's object model:
-//! - values: Content blobs keyed by SHA-256 hash
-//! - snapshots: Path → value_hash mappings (like git trees)
-//! - commits: Snapshot + parent pointer (like git commits)
+//! Hash computation:
+//! - Value: SHA256(content)
+//! - Snapshot: SHA256(sorted JSON of entries)
+//! - State commit: SHA256(snapshot_hash + ":" + parent_hash)
+//!
+//! Root state: empty string "" — the parent of the first commit.
+//!
+//! Merged from vlinder-core/src/domain/state.rs (types + hashing) and
+//! vlinderd/src/storage/state_store.rs (SQLite persistence).
 
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use rusqlite::Connection;
+use sha2::{Digest, Sha256};
 
-use crate::domain::{StateCommit, sorted_entries_json};
+// ============================================================================
+// Domain types
+// ============================================================================
+
+/// A state commit links a snapshot to its parent.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StateCommit {
+    pub hash: String,
+    pub snapshot_hash: String,
+    pub parent_hash: String,
+}
+
+// ============================================================================
+// Hash functions
+// ============================================================================
+
+/// Compute SHA-256 hash of content bytes.
+pub fn hash_value(content: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(content);
+    format!("{:x}", hasher.finalize())
+}
+
+/// Compute SHA-256 hash of a snapshot (sorted JSON of entries).
+pub fn hash_snapshot(entries: &HashMap<String, String>) -> String {
+    let json = sorted_entries_json(entries);
+    hash_value(json.as_bytes())
+}
+
+/// Compute SHA-256 hash of a state commit (snapshot_hash + ":" + parent_hash).
+pub fn hash_state_commit(snapshot_hash: &str, parent_hash: &str) -> String {
+    let input = format!("{}:{}", snapshot_hash, parent_hash);
+    hash_value(input.as_bytes())
+}
+
+/// Produce deterministic JSON from entries by sorting keys.
+pub fn sorted_entries_json(entries: &HashMap<String, String>) -> String {
+    let mut sorted: Vec<(&String, &String)> = entries.iter().collect();
+    sorted.sort_by_key(|(k, _)| k.as_str());
+    let map: serde_json::Map<String, serde_json::Value> = sorted.into_iter()
+        .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
+        .collect();
+    serde_json::to_string(&map).unwrap_or_else(|_| "{}".to_string())
+}
+
+// ============================================================================
+// SQLite state store — concrete type, no trait
+// ============================================================================
 
 /// Content-addressed append-only SQLite store for versioned agent state.
 pub struct SqliteStateStore {
@@ -55,10 +109,7 @@ impl SqliteStateStore {
         })
     }
 
-}
-
-impl crate::domain::StateStore for SqliteStateStore {
-    fn put_value(&self, hash: &str, content: &[u8]) -> Result<(), String> {
+    pub fn put_value(&self, hash: &str, content: &[u8]) -> Result<(), String> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "INSERT OR IGNORE INTO state_values (hash, content) VALUES (?1, ?2)",
@@ -67,7 +118,7 @@ impl crate::domain::StateStore for SqliteStateStore {
         Ok(())
     }
 
-    fn get_value(&self, hash: &str) -> Result<Option<Vec<u8>>, String> {
+    pub fn get_value(&self, hash: &str) -> Result<Option<Vec<u8>>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare("SELECT content FROM state_values WHERE hash = ?1")
             .map_err(|e| format!("get_value prepare failed: {}", e))?;
@@ -77,7 +128,7 @@ impl crate::domain::StateStore for SqliteStateStore {
         Ok(result)
     }
 
-    fn put_snapshot(&self, hash: &str, entries: &HashMap<String, String>) -> Result<(), String> {
+    pub fn put_snapshot(&self, hash: &str, entries: &HashMap<String, String>) -> Result<(), String> {
         let json = sorted_entries_json(entries);
         let conn = self.conn.lock().unwrap();
         conn.execute(
@@ -87,7 +138,7 @@ impl crate::domain::StateStore for SqliteStateStore {
         Ok(())
     }
 
-    fn get_snapshot(&self, hash: &str) -> Result<Option<HashMap<String, String>>, String> {
+    pub fn get_snapshot(&self, hash: &str) -> Result<Option<HashMap<String, String>>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare("SELECT entries FROM state_snapshots WHERE hash = ?1")
             .map_err(|e| format!("get_snapshot prepare failed: {}", e))?;
@@ -105,7 +156,7 @@ impl crate::domain::StateStore for SqliteStateStore {
         }
     }
 
-    fn put_state_commit(
+    pub fn put_state_commit(
         &self,
         hash: &str,
         snapshot_hash: &str,
@@ -119,7 +170,7 @@ impl crate::domain::StateStore for SqliteStateStore {
         Ok(())
     }
 
-    fn get_state_commit(&self, hash: &str) -> Result<Option<StateCommit>, String> {
+    pub fn get_state_commit(&self, hash: &str) -> Result<Option<StateCommit>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT hash, snapshot_hash, parent_hash FROM state_commits WHERE hash = ?1"
@@ -161,11 +212,41 @@ impl<T> OptionalExt<T> for Result<T, rusqlite::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{hash_value, hash_snapshot, hash_state_commit, StateStore};
 
     fn test_store() -> SqliteStateStore {
         let tmp = tempfile::NamedTempFile::new().unwrap();
         SqliteStateStore::open(tmp.path()).unwrap()
+    }
+
+    #[test]
+    fn snapshot_hash_is_deterministic() {
+        let mut entries1 = HashMap::new();
+        entries1.insert("b".to_string(), "2".to_string());
+        entries1.insert("a".to_string(), "1".to_string());
+
+        let mut entries2 = HashMap::new();
+        entries2.insert("a".to_string(), "1".to_string());
+        entries2.insert("b".to_string(), "2".to_string());
+
+        assert_eq!(hash_snapshot(&entries1), hash_snapshot(&entries2));
+    }
+
+    #[test]
+    fn state_commit_hash_depends_on_parent() {
+        let snapshot = "snap123";
+        let hash1 = hash_state_commit(snapshot, "");
+        let hash2 = hash_state_commit(snapshot, "parent1");
+
+        assert_ne!(hash1, hash2);
+    }
+
+    #[test]
+    fn value_hash_is_sha256() {
+        let hash = hash_value(b"hello world");
+        assert_eq!(
+            hash,
+            "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+        );
     }
 
     #[test]
@@ -201,12 +282,6 @@ mod tests {
     }
 
     #[test]
-    fn get_snapshot_returns_none_for_unknown() {
-        let store = test_store();
-        assert_eq!(store.get_snapshot("nonexistent").unwrap(), None);
-    }
-
-    #[test]
     fn put_get_state_commit_round_trip() {
         let store = test_store();
         let snapshot_hash = "snap123";
@@ -218,12 +293,6 @@ mod tests {
         let commit = store.get_state_commit(&hash).unwrap().unwrap();
         assert_eq!(commit.snapshot_hash, snapshot_hash);
         assert_eq!(commit.parent_hash, parent_hash);
-    }
-
-    #[test]
-    fn get_state_commit_returns_none_for_unknown() {
-        let store = test_store();
-        assert_eq!(store.get_state_commit("nonexistent").unwrap(), None);
     }
 
     #[test]

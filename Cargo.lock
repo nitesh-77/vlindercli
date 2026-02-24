@@ -3285,7 +3285,6 @@ dependencies = [
 name = "vlinder-sidecar"
 version = "0.1.0"
 dependencies = [
- "base64",
  "semver",
  "serde",
  "serde_json",
@@ -3297,7 +3296,20 @@ dependencies = [
  "vlinder-infer-openrouter",
  "vlinder-ollama",
  "vlinder-proto",
+ "vlinder-sqlite-kv",
  "vlinder-sqlite-vec",
+]
+
+[[package]]
+name = "vlinder-sqlite-kv"
+version = "0.1.0"
+dependencies = [
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "vlinder-core",
 ]
 
 [[package]]
@@ -3352,6 +3364,7 @@ dependencies = [
  "vlinder-infer-openrouter",
  "vlinder-ollama",
  "vlinder-proto",
+ "vlinder-sqlite-kv",
  "vlinder-sqlite-vec",
  "zerocopy 0.7.35",
 ]

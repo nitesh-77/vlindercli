@@ -4,7 +4,6 @@ HTTP API version. The agent runs as a simple Flask server.
 """
 
 import json
-import os
 import requests
 from flask import Flask, request, Response
 
@@ -14,35 +13,25 @@ from flask import Flask, request, Response
 
 app = Flask(__name__)
 
-# The sidecar's internal API address is provided by an environment variable.
-# Defaulting to localhost:9000 for local testing.
-SIDECAR_API_ROOT = os.environ.get("VLINDER_SIDECAR_API", "http://127.0.0.1:9000")
-
 INFER_MODEL = "anthropic/claude-sonnet-4"
 EMBED_MODEL = "nomic-embed-text"
 TODOS_PATH = "/todos.json"
 
 
 class VlinderClient:
-    """A simple client for the Vlinder sidecar's internal HTTP API."""
-    def _post(self, path, payload):
-        url = f"{SIDECAR_API_ROOT}{path}"
-        try:
-            response = requests.post(url, json=payload, timeout=60)
-            response.raise_for_status()
-            return response
-        except requests.RequestException as e:
-            # Propagate errors as a 502 Bad Gateway response
-            error_message = f"Sidecar API request failed: {e}"
-            app.logger.error(error_message)
-            raise ConnectionError(error_message)
+    """A simple client for Vlinder provider hostnames."""
 
     def kv_get(self, path):
-        response = self._post("/services/kv/get", {"path": path})
+        response = requests.post(
+            "http://sqlite-kv.vlinder.local/get",
+            json={"path": path}, timeout=60)
+        response.raise_for_status()
         return response.content
 
     def kv_put(self, path, content):
-        self._post("/services/kv/put", {"path": path, "content": content})
+        requests.post(
+            "http://sqlite-kv.vlinder.local/put",
+            json={"path": path, "content": content}, timeout=60)
 
     def vector_store(self, key, vector, metadata):
         requests.post(
@@ -137,13 +126,13 @@ def invoke():
             query = text[7:].strip()
             if not query:
                 return "Usage: search <query>", 200
-            
+
             query_vector = client.embed(EMBED_MODEL, query)
             matches = client.vector_search(query_vector, 5)
-            
+
             if not matches:
                 return "No matching todos found.", 200
-            
+
             lines = ["Search results:"]
             for r in matches:
                 metadata = r.get("metadata", r.get("key", "?"))
@@ -179,7 +168,7 @@ def invoke():
                 return f"Usage: {'done' if is_done else 'undo'} <number>", 200
             if idx < 0 or idx >= len(todos):
                 return f"No todo #{idx + 1}. You have {len(todos)} todo(s).", 200
-            
+
             todos[idx]["done"] = is_done
             client.kv_put(TODOS_PATH, json.dumps(todos))
             verb = "Completed" if is_done else "Reopened"
@@ -196,7 +185,7 @@ def invoke():
                 return "Usage: remove <number>", 200
             if idx < 0 or idx >= len(todos):
                 return f"No todo #{idx + 1}. You have {len(todos)} todo(s).", 200
-            
+
             removed = todos.pop(idx)
             client.kv_put(TODOS_PATH, json.dumps(todos))
             client.vector_delete(removed["text"])
@@ -209,7 +198,7 @@ def invoke():
             client.kv_put(TODOS_PATH, json.dumps(remaining))
             # Note: This doesn't remove vectors of cleared items for simplicity
             return f"Cleared {removed_count} completed todo(s).\n\n{format_todos(remaining)}", 200
-        
+
         # --- Default to LLM (Ask) ---
         todo_list_str = format_todos(todos) if todos else "(empty list)"
         prompt_parts = [
@@ -220,7 +209,7 @@ def invoke():
             prompt_parts.append("Recent conversation:\n" + "\n".join(history))
         prompt_parts.append(f"The user asks: {text}")
         prompt_parts.append("Give a brief, helpful response.")
-        
+
         prompt = "\n\n".join(prompt_parts)
         response_text = client.infer(INFER_MODEL, prompt, 256)
         return response_text, 200

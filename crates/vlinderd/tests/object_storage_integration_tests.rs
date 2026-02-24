@@ -2,7 +2,7 @@
 //! Tests SQLite-specific behavior: persistence, isolation, security.
 
 use tempfile::TempDir;
-use vlinderd::storage::{ObjectStorage, SqliteObjectStorage};
+use vlinder_sqlite_kv::SqliteObjectStorage;
 
 #[test]
 fn sqlite_open_creates_db() {

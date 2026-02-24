@@ -61,38 +61,6 @@ pub fn run_worker_loop(role: WorkerRole, shutdown: Arc<AtomicBool>) {
 // Factory helpers
 // ============================================================================
 
-/// Build a state store factory that derives the SQLite path from the agent's
-/// object_storage URI in the registry. Moved out of ObjectServiceWorker so the
-/// worker depends only on the StateStore trait.
-fn make_state_store_factory(registry: Arc<dyn Registry>) -> crate::domain::workers::OpenStateStore {
-    Box::new(move |agent_id: &str| {
-        let agent = registry.get_agent_by_name(agent_id)
-            .ok_or_else(|| format!("unknown agent: {}", agent_id))?;
-        let uri = agent.object_storage
-            .ok_or_else(|| format!("agent has no object_storage declared: {}", agent_id))?;
-
-        let path = match uri.scheme() {
-            Some("sqlite") => {
-                let db_path = uri.path()
-                    .ok_or_else(|| "sqlite URI has no path".to_string())?;
-                let parent = std::path::Path::new(db_path).parent()
-                    .ok_or_else(|| "sqlite path has no parent".to_string())?;
-                parent.join("state.db")
-            }
-            Some("memory") => {
-                let dir = std::env::temp_dir().join("vlinder-state");
-                std::fs::create_dir_all(&dir).ok();
-                dir.join(format!("{}.db", agent_id.replace(['/', ':'], "_")))
-            }
-            _ => return Err("unsupported storage scheme for state store".to_string()),
-        };
-
-        let store: Arc<dyn crate::domain::StateStore> = Arc::new(
-            crate::storage::SqliteStateStore::open(&path)?
-        );
-        Ok(store)
-    })
-}
 
 // ============================================================================
 // Worker Implementations
@@ -287,25 +255,19 @@ fn run_inference_openrouter_worker(config: &Config, shutdown: &AtomicBool) {
 }
 
 fn run_storage_object_sqlite_worker(config: &Config, shutdown: &AtomicBool) {
-    use crate::domain::workers::ObjectServiceWorker;
+    use vlinder_sqlite_kv::KvWorker;
 
     use crate::registry_service::GrpcRegistryClient;
 
     let queue = crate::queue_factory::recording_from_config(config).expect("Failed to create queue");
 
-    // Connect to central registry via gRPC
     let registry_addr = grpc_registry_addr(config);
     let registry: Arc<dyn Registry> = Arc::new(
         GrpcRegistryClient::connect(&registry_addr)
             .expect("Failed to connect to registry")
     );
 
-    let open_storage = Box::new(|uri: &crate::domain::ResourceId| {
-        crate::storage::dispatch::open_object_storage_from_uri(uri)
-            .map_err(|e| e.to_string())
-    });
-    let open_state_store = make_state_store_factory(Arc::clone(&registry));
-    let worker = ObjectServiceWorker::new(queue, registry, "sqlite", open_storage, open_state_store);
+    let worker = KvWorker::new(queue, registry, "sqlite");
 
     tracing::info!(registry = %registry_addr, "SQLite object storage worker ready");
 
@@ -316,7 +278,7 @@ fn run_storage_object_sqlite_worker(config: &Config, shutdown: &AtomicBool) {
 }
 
 fn run_storage_object_memory_worker(config: &Config, shutdown: &AtomicBool) {
-    use crate::domain::workers::ObjectServiceWorker;
+    use vlinder_sqlite_kv::KvWorker;
 
     use crate::registry_service::GrpcRegistryClient;
 
@@ -328,12 +290,7 @@ fn run_storage_object_memory_worker(config: &Config, shutdown: &AtomicBool) {
             .expect("Failed to connect to registry")
     );
 
-    let open_storage = Box::new(|uri: &crate::domain::ResourceId| {
-        crate::storage::dispatch::open_object_storage_from_uri(uri)
-            .map_err(|e| e.to_string())
-    });
-    let open_state_store = make_state_store_factory(Arc::clone(&registry));
-    let worker = ObjectServiceWorker::new(queue, registry, "memory", open_storage, open_state_store);
+    let worker = KvWorker::new(queue, registry, "memory");
 
     tracing::info!(registry = %registry_addr, "In-memory object storage worker ready");
 

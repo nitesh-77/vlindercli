@@ -9,7 +9,6 @@
 
 mod agent;
 mod dag;
-mod state;
 pub mod registry_memory;
 mod container_id;
 mod pod_id;
@@ -78,15 +77,6 @@ pub use diagnostics::{
 pub use dag::{DagWorker, DagStore, DagNode, MessageType, Timeline, hash_dag_node, InMemoryDagStore};
 
 // ============================================================================
-// State (versioned agent state)
-// ============================================================================
-
-pub use state::{StateCommit, StateStore, hash_value, hash_snapshot, hash_state_commit};
-pub use state::sorted_entries_json;
-#[cfg(test)]
-pub use state::InMemoryStateStore;
-
-// ============================================================================
 // Paths
 // ============================================================================
 
@@ -97,15 +87,10 @@ pub use fleet::{Fleet, LoadError as FleetLoadError};
 pub use fleet_manifest::FleetManifest;
 
 // ============================================================================
-// Storage (config + traits)
+// Storage (config types only — implementations in provider crates)
 // ============================================================================
 
-pub use storage::{
-    ObjectStorage, ObjectStorageType, VectorStorageType,
-    ObjectStorageManifest,
-};
-#[cfg(test)]
-pub use storage::InMemoryObjectStorage;
+pub use storage::{ObjectStorageType, VectorStorageType};
 
 // ============================================================================
 // Resource ID (registry key)
