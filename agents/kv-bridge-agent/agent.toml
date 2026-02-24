@@ -1,7 +1,0 @@
-name = "kv-bridge-agent"
-description = "Test agent that exercises KV operations via provider hostname"
-runtime = "container"
-executable = "localhost/kv-bridge-agent:latest"
-object_storage = "sqlite://data/objects.db"
-
-[requirements]

@@ -14,10 +14,6 @@ build-sidecar:
 build-echo-container:
     podman build -t localhost/echo-container:latest agents/echo-container/
 
-# Build kv-bridge-agent (OCI image via Podman, exercises HTTP bridge)
-build-kv-bridge-agent:
-    podman build -t localhost/kv-bridge-agent:latest agents/kv-bridge-agent/
-
 # Build openrouter-test agent (OCI image via Podman, exercises openrouter.vlinder.local)
 build-openrouter-test:
     podman build -t localhost/openrouter-test:latest agents/openrouter-test/
