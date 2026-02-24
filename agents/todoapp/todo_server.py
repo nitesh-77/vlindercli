@@ -18,7 +18,7 @@ app = Flask(__name__)
 # Defaulting to localhost:9000 for local testing.
 SIDECAR_API_ROOT = os.environ.get("VLINDER_SIDECAR_API", "http://127.0.0.1:9000")
 
-INFER_MODEL = "inference_model"
+INFER_MODEL = "anthropic/claude-sonnet-4"
 EMBED_MODEL = "embedding_model"
 TODOS_PATH = "/todos.json"
 
@@ -55,8 +55,17 @@ class VlinderClient:
         self._post("/services/vector/delete", {"key": key})
 
     def infer(self, model, prompt, max_tokens=256):
-        response = self._post("/services/infer", {"model": model, "prompt": prompt, "max_tokens": max_tokens})
-        return response.text
+        response = requests.post(
+            "http://openrouter.vlinder.local/v1/chat/completions",
+            json={
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": max_tokens,
+            },
+            timeout=60,
+        )
+        response.raise_for_status()
+        return response.json()["choices"][0]["message"]["content"]
 
     def embed(self, model, text):
         response = self._post("/services/embed", {"model": model, "text": text})
