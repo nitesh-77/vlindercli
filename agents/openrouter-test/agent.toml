@@ -1,7 +1,7 @@
-name = "provider-test"
+name = "openrouter-test"
 description = "Test agent that calls openrouter.vlinder.local and returns the response"
 runtime = "container"
-executable = "localhost/provider-test:latest"
+executable = "localhost/openrouter-test:latest"
 
 [requirements]
 

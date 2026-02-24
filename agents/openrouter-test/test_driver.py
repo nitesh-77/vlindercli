@@ -1,4 +1,4 @@
-"""Provider test agent — uses the OpenAI SDK to talk to the local provider."""
+"""OpenRouter test agent — uses the OpenAI SDK to talk to openrouter.vlinder.local."""
 
 import sys
 import time
