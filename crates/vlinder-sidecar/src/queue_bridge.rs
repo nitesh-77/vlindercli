@@ -16,14 +16,14 @@ use base64::Engine as _;
 use vlinder_core::domain::{
     AgentId, ObjectStorageType, Operation, Registry, RoutingKey, ServiceBackend,
     VectorMatch, VectorStorageType, DelegateMessage, DelegateDiagnostics, ContainerDiagnostics,
-    InferenceBackendType, EmbeddingBackendType, InvokeMessage, MessageQueue, Nonce,
+    EmbeddingBackendType, InvokeMessage, MessageQueue, Nonce,
     RequestMessage, RequestDiagnostics, SequenceCounter,
 };
 
 use vlinder_core::domain::service_payloads::{
     KvGetRequest, KvPutRequest, KvListRequest, KvDeleteRequest,
     VectorStoreRequest, VectorSearchRequest, VectorDeleteRequest,
-    InferRequest, EmbedRequest,
+    EmbedRequest,
 };
 
 /// Routes agent SDK calls to the appropriate backend service.
@@ -211,19 +211,6 @@ impl QueueBridge {
         let response = self.send_service_request(ServiceBackend::Vec(backend), Operation::Delete, payload)?;
         Self::check_worker_error(&response)?;
         Ok(response == b"ok")
-    }
-
-    pub fn infer(&self, model: &str, prompt: &str, max_tokens: u32) -> Result<String, String> {
-        let agent_id = self.invoke.read().unwrap().agent_id.clone();
-        let backend_str = self.registry.resolve_model_backend(agent_id.as_str(), model)?;
-        let backend = InferenceBackendType::from_str(&backend_str)
-            .ok_or_else(|| format!("unknown inference backend: {}", backend_str))?;
-        let req = InferRequest { model: model.to_string(), prompt: prompt.to_string(), max_tokens };
-        let payload = serde_json::to_vec(&req).map_err(|e| format!("serialize error: {}", e))?;
-        let response = self.send_service_request(ServiceBackend::Infer(backend), Operation::Run, payload)?;
-        Self::check_worker_error(&response)?;
-        String::from_utf8(response)
-            .map_err(|e| format!("infer response not valid UTF-8: {}", e))
     }
 
     pub fn embed(&self, model: &str, text: &str) -> Result<Vec<f32>, String> {

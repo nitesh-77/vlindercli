@@ -31,7 +31,6 @@ pub fn spawn_server(bridge: Arc<QueueBridge>) {
                 "/services/vector/store" => handle_vector_store(&bridge, &body),
                 "/services/vector/search" => handle_vector_search(&bridge, &body),
                 "/services/vector/delete" => handle_vector_delete(&bridge, &body),
-                "/services/infer" => handle_infer(&bridge, &body),
                 "/services/embed" => handle_embed(&bridge, &body),
                 _ => {
                     let _ = request.respond(
@@ -91,13 +90,6 @@ struct VectorDeleteRequest {
 }
 
 #[derive(Deserialize)]
-struct InferRequest {
-    model: String,
-    prompt: String,
-    max_tokens: u32,
-}
-
-#[derive(Deserialize)]
 struct EmbedRequest {
     model: String,
     text: String,
@@ -146,13 +138,6 @@ fn handle_vector_delete(bridge: &QueueBridge, body: &str) -> Result<Vec<u8>, Str
         .map_err(|e| format!("parse error: {}", e))?;
     let deleted = bridge.vector_delete(&req.key)?;
     serde_json::to_vec(&deleted).map_err(|e| format!("serialize error: {}", e))
-}
-
-fn handle_infer(bridge: &QueueBridge, body: &str) -> Result<Vec<u8>, String> {
-    let req: InferRequest = serde_json::from_str(body)
-        .map_err(|e| format!("parse error: {}", e))?;
-    let text = bridge.infer(&req.model, &req.prompt, req.max_tokens)?;
-    Ok(text.into_bytes())
 }
 
 fn handle_embed(bridge: &QueueBridge, body: &str) -> Result<Vec<u8>, String> {

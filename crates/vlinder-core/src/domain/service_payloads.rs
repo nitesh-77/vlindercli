@@ -115,22 +115,6 @@ pub struct VectorDeleteRequest {
 }
 
 // ============================================================================
-// Inference Service
-// ============================================================================
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct InferRequest {
-    pub model: String,
-    pub prompt: String,
-    #[serde(default = "default_max_tokens")]
-    pub max_tokens: u32,
-}
-
-fn default_max_tokens() -> u32 {
-    256
-}
-
-// ============================================================================
 // Embedding Service
 // ============================================================================
 

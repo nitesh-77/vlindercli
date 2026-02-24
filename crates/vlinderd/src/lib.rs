@@ -6,7 +6,6 @@ pub mod config;
 pub mod embedding;
 pub mod git_dag;
 pub mod harness;
-pub mod inference;
 pub mod loader;
 pub mod queue_factory;
 pub mod registry;

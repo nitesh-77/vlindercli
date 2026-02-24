@@ -1,9 +1,8 @@
 //! Integration tests that require a running Ollama server.
 
 use vlinderd::catalog::OllamaCatalog;
-use vlinderd::domain::{EmbeddingEngine, Provider, InferenceEngine, ModelCatalog};
+use vlinderd::domain::{EmbeddingEngine, Provider, ModelCatalog};
 use vlinderd::embedding::OllamaEmbeddingEngine;
-use vlinderd::inference::OllamaInferenceEngine;
 
 #[test]
 #[ignore] // Run via: just run-integration-tests
@@ -31,13 +30,4 @@ fn embeds_with_ollama_server() {
     let result = engine.embed("Hello world");
     assert!(result.is_ok());
     assert!(!result.unwrap().is_empty());
-}
-
-#[test]
-#[ignore] // Run via: just run-integration-tests
-fn infers_with_ollama_server() {
-    let engine = OllamaInferenceEngine::new("http://localhost:11434", "phi3");
-    let result = engine.infer("Say hello", 10);
-    assert!(result.is_ok());
-    assert!(!result.unwrap().text.is_empty());
 }
