@@ -125,6 +125,10 @@ fn reconstruct_response(
         .and_then(|s| serde_json::from_str(s).ok())
         .unwrap_or_else(ServiceDiagnostics::placeholder);
 
+    let status_code = headers.get("status-code")
+        .and_then(|s| s.parse::<u16>().ok())
+        .unwrap_or(200);
+
     Some(ObservableMessage::Response(ResponseMessage {
         id: MessageId::from(headers.get("msg-id")?.clone()),
         protocol_version: headers.get("protocol-version").cloned().unwrap_or_default(),
@@ -144,6 +148,7 @@ fn reconstruct_response(
         correlation_id: MessageId::from(headers.get("correlation-id")?.clone()),
         state: headers.get("state").cloned(),
         diagnostics,
+        status_code,
     }))
 }
 

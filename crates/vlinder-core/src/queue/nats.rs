@@ -288,6 +288,7 @@ impl MessageQueue for NatsQueue {
             headers.insert("operation", msg.operation.as_str());
             headers.insert("sequence", msg.sequence.to_string());
             headers.insert("correlation-id", msg.correlation_id.as_str());
+            headers.insert("status-code", msg.status_code.to_string());
             if let Some(ref state) = msg.state {
                 headers.insert("state", state.as_str());
             }
@@ -422,6 +423,10 @@ impl MessageQueue for NatsQueue {
                 .and_then(|s| serde_json::from_str(&s).ok())
                 .unwrap_or_else(ServiceDiagnostics::placeholder);
 
+            let status_code = get_header(headers, "status-code").ok()
+                .and_then(|s| s.parse::<u16>().ok())
+                .unwrap_or(200);
+
             let msg = ResponseMessage {
                 id: MessageId::from(get_header(headers, "msg-id")?),
                 protocol_version: get_header(headers, "protocol-version").unwrap_or_default(),
@@ -439,6 +444,7 @@ impl MessageQueue for NatsQueue {
                 correlation_id: MessageId::from(get_header(headers, "correlation-id")?),
                 state: get_header(headers, "state").ok(),
                 diagnostics,
+                status_code,
             };
 
             Ok((msg, ack_fn))

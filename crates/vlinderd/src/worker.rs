@@ -277,22 +277,18 @@ fn run_inference_ollama_worker(config: &Config, shutdown: &AtomicBool) {
 }
 
 fn run_inference_openrouter_worker(config: &Config, shutdown: &AtomicBool) {
-    use crate::domain::workers::InferenceServiceWorker;
+    use vlinder_infer_openrouter::OpenRouterWorker;
 
-    use crate::registry_service::GrpcRegistryClient;
+    let queue = crate::queue_factory::recording_from_config(config)
+        .expect("Failed to create queue");
 
-    let queue = crate::queue_factory::recording_from_config(config).expect("Failed to create queue");
-
-    let registry_addr = grpc_registry_addr(config);
-    let registry: Arc<dyn Registry> = Arc::new(
-        GrpcRegistryClient::connect(&registry_addr)
-            .expect("Failed to connect to registry")
+    let worker = OpenRouterWorker::new(
+        queue,
+        config.openrouter.endpoint.clone(),
+        config.openrouter.api_key.clone(),
     );
 
-    let open_engine = Box::new(crate::inference::open_inference_engine);
-    let worker = InferenceServiceWorker::new(queue, registry, "openrouter", open_engine);
-
-    tracing::info!(registry = %registry_addr, "OpenRouter inference worker ready");
+    tracing::info!(endpoint = %config.openrouter.endpoint, "OpenRouter inference worker ready");
 
     while !shutdown.load(Ordering::Relaxed) {
         worker.tick();

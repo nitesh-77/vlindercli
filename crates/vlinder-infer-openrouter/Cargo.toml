@@ -8,3 +8,5 @@ publish = false
 vlinder-core = { path = "../vlinder-core" }
 async-openai = { version = "0.32", default-features = false, features = ["chat-completion-types"] }
 serde_json = "1"
+ureq = { version = "3", features = ["json"] }
+tracing = "0.1"

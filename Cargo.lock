@@ -3252,6 +3252,8 @@ version = "0.1.0"
 dependencies = [
  "async-openai",
  "serde_json",
+ "tracing",
+ "ureq 3.2.0",
  "vlinder-core",
 ]
 
@@ -3320,6 +3322,7 @@ dependencies = [
  "ureq 3.2.0",
  "uuid",
  "vlinder-core",
+ "vlinder-infer-openrouter",
  "vlinder-proto",
  "zerocopy 0.7.35",
 ]

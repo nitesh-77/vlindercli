@@ -1,5 +1,9 @@
 //! OpenRouter provider — declares the hostname and routes
-//! for the OpenRouter inference backend.
+//! for the OpenRouter inference backend, and the worker that
+//! processes inference requests.
+
+mod worker;
+pub use worker::OpenRouterWorker;
 
 use async_openai::types::chat::{CreateChatCompletionRequest, CreateChatCompletionResponse};
 use vlinder_core::domain::{HttpMethod, InferenceBackendType, Operation, ProviderHost, ProviderRoute, ServiceBackend};

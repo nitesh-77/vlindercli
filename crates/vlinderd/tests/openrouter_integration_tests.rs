@@ -3,8 +3,7 @@
 //! These tests skip gracefully if VLINDER_OPENROUTER_API_KEY is not set.
 
 use vlinderd::catalog::OpenRouterCatalog;
-use vlinderd::domain::{Provider, InferenceEngine, ModelCatalog};
-use vlinderd::inference::OpenRouterInferenceEngine;
+use vlinderd::domain::{Provider, ModelCatalog};
 
 /// Return the API key if set, or print a skip message and return None.
 fn openrouter_key_or_skip() -> Option<String> {
@@ -41,20 +40,4 @@ fn resolves_model_from_openrouter() {
     let model = model.unwrap();
     assert_eq!(model.provider, Provider::OpenRouter);
     assert!(model.id.as_str().starts_with("pending-registration://"));
-}
-
-#[test]
-#[ignore] // Run via: just run-integration-tests
-fn infers_with_openrouter_api() {
-    let Some(api_key) = openrouter_key_or_skip() else {
-        return;
-    };
-    let engine = OpenRouterInferenceEngine::new(
-        "https://openrouter.ai/api/v1",
-        api_key,
-        "anthropic/claude-sonnet-4-20250514",
-    );
-    let result = engine.infer("Say hello in one word", 10);
-    assert!(result.is_ok());
-    assert!(!result.unwrap().text.is_empty());
 }

@@ -98,6 +98,11 @@ fn request_loop(
             Ok(Some(mut request)) => {
                 let host = extract_host(&request).to_string();
                 let path = request.url().to_string();
+                tracing::info!(
+                    event = "provider_server.request_received",
+                    host = %host, path = %path, method = %request.method(),
+                    "Provider server received request"
+                );
 
                 let mut body = Vec::new();
                 let _ = request.as_reader().read_to_end(&mut body);
@@ -107,6 +112,11 @@ fn request_loop(
                     Err(err) => err,
                 };
 
+                tracing::info!(
+                    event = "provider_server.request_done",
+                    status = status, response_bytes = response_body.len(),
+                    "Provider server sending response"
+                );
                 let response = tiny_http::Response::from_data(response_body)
                     .with_status_code(StatusCode(status));
                 let _ = request.respond(response);
@@ -235,7 +245,7 @@ fn forward_to_queue(
             if let Some(ref new_state) = response.state {
                 *state.write().unwrap() = Some(new_state.clone());
             }
-            (200, response.payload.legacy_bytes().to_vec())
+            (response.status_code, response.payload.legacy_bytes().to_vec())
         }
         Err(e) => (502, format!("queue error: {}", e).into_bytes()),
     }

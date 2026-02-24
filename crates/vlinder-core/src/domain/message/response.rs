@@ -33,6 +33,9 @@ pub struct ResponseMessage {
     /// Diagnostics from the service worker (ADR 071).
     #[serde(skip)]
     pub diagnostics: ServiceDiagnostics,
+    /// HTTP status code for the response (used by provider server).
+    /// Defaults to 200. Workers set this to signal errors (e.g. 500).
+    pub status_code: u16,
 }
 
 impl ResponseMessage {
@@ -65,6 +68,7 @@ impl ResponseMessage {
             correlation_id: request.id.clone(),
             state: None,
             diagnostics,
+            status_code: 200,
         }
     }
 
