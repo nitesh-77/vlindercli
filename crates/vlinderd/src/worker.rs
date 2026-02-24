@@ -252,23 +252,14 @@ fn run_agent_container_worker(config: &Config, shutdown: &AtomicBool) {
 }
 
 fn run_inference_ollama_worker(config: &Config, shutdown: &AtomicBool) {
-    use crate::domain::workers::InferenceServiceWorker;
+    use vlinder_infer_ollama::OllamaWorker;
 
-    use crate::registry_service::GrpcRegistryClient;
+    let queue = crate::queue_factory::recording_from_config(config)
+        .expect("Failed to create queue");
 
-    let queue = crate::queue_factory::recording_from_config(config).expect("Failed to create queue");
+    let worker = OllamaWorker::new(queue, config.ollama.endpoint.clone());
 
-    // Connect to central registry via gRPC
-    let registry_addr = grpc_registry_addr(config);
-    let registry: Arc<dyn Registry> = Arc::new(
-        GrpcRegistryClient::connect(&registry_addr)
-            .expect("Failed to connect to registry")
-    );
-
-    let open_engine = Box::new(crate::inference::open_inference_engine);
-    let worker = InferenceServiceWorker::new(queue, registry, "ollama", open_engine);
-
-    tracing::info!(endpoint = %config.ollama.endpoint, registry = %registry_addr, "Ollama inference worker ready");
+    tracing::info!(endpoint = %config.ollama.endpoint, "Ollama inference worker ready");
 
     while !shutdown.load(Ordering::Relaxed) {
         worker.tick();

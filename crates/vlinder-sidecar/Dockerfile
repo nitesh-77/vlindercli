@@ -16,6 +16,7 @@ WORKDIR /build
 COPY Cargo.toml ./
 COPY crates/vlinder-core/Cargo.toml crates/vlinder-core/
 COPY crates/vlinder-proto/Cargo.toml crates/vlinder-proto/
+COPY crates/vlinder-infer-ollama/Cargo.toml crates/vlinder-infer-ollama/
 COPY crates/vlinder-infer-openrouter/Cargo.toml crates/vlinder-infer-openrouter/
 COPY crates/vlinder-sidecar/Cargo.toml crates/vlinder-sidecar/
 COPY crates/vlinderd/Cargo.toml crates/vlinderd/
@@ -23,6 +24,7 @@ COPY crates/vlinder/Cargo.toml crates/vlinder/
 
 # Stub out src directories so cargo can resolve the workspace
 RUN mkdir -p crates/vlinder-core/src && echo "" > crates/vlinder-core/src/lib.rs && \
+    mkdir -p crates/vlinder-infer-ollama/src && echo "" > crates/vlinder-infer-ollama/src/lib.rs && \
     mkdir -p crates/vlinder-infer-openrouter/src && echo "" > crates/vlinder-infer-openrouter/src/lib.rs && \
     mkdir -p crates/vlinder-proto/src && echo "" > crates/vlinder-proto/src/lib.rs && \
     mkdir -p crates/vlinder-sidecar/src && echo "fn main() {}" > crates/vlinder-sidecar/src/main.rs && \
@@ -38,12 +40,14 @@ RUN cargo build --release -p vlinder-sidecar 2>/dev/null || true
 
 # Copy actual source code
 COPY crates/vlinder-core/src crates/vlinder-core/src
+COPY crates/vlinder-infer-ollama/src crates/vlinder-infer-ollama/src
 COPY crates/vlinder-infer-openrouter/src crates/vlinder-infer-openrouter/src
 COPY crates/vlinder-proto/src crates/vlinder-proto/src
 COPY crates/vlinder-sidecar/src crates/vlinder-sidecar/src
 
 # Touch source files to invalidate the cache for actual compilation
 RUN touch crates/vlinder-core/src/lib.rs \
+          crates/vlinder-infer-ollama/src/lib.rs \
           crates/vlinder-infer-openrouter/src/lib.rs \
           crates/vlinder-proto/src/lib.rs \
           crates/vlinder-sidecar/src/main.rs

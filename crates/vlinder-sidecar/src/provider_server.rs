@@ -155,6 +155,17 @@ fn build_context(invoke: &InvokeMessage) -> Option<(Vec<ProviderHost>, Arc<dyn M
         hosts.push(vlinder_infer_openrouter::provider_host());
     }
 
+    let needs_ollama = agent
+        .requirements
+        .services
+        .get(&ServiceType::Infer)
+        .map(|svc| svc.provider == Provider::Ollama)
+        .unwrap_or(false);
+
+    if needs_ollama {
+        hosts.push(vlinder_infer_ollama::provider_host());
+    }
+
     if hosts.is_empty() {
         return None;
     }

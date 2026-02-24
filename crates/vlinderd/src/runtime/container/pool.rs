@@ -133,6 +133,9 @@ impl ContainerRuntime {
         if agent.requirements.services.values().any(|svc| svc.provider == Provider::OpenRouter) {
             host_aliases.push("openrouter.vlinder.local:127.0.0.1".to_string());
         }
+        if agent.requirements.services.values().any(|svc| svc.provider == Provider::Ollama) {
+            host_aliases.push("ollama.vlinder.local:127.0.0.1".to_string());
+        }
 
         let pod_name = format!("vlinder-{}", name);
         let pod_id = self.podman.pod_create(&pod_name, &host_aliases)

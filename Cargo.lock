@@ -3247,6 +3247,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "vlinder-infer-ollama"
+version = "0.1.0"
+dependencies = [
+ "async-openai",
+ "serde",
+ "serde_json",
+ "tracing",
+ "ureq 3.2.0",
+ "vlinder-core",
+]
+
+[[package]]
 name = "vlinder-infer-openrouter"
 version = "0.1.0"
 dependencies = [
@@ -3282,6 +3294,7 @@ dependencies = [
  "tracing-subscriber",
  "ureq 2.12.1",
  "vlinder-core",
+ "vlinder-infer-ollama",
  "vlinder-infer-openrouter",
  "vlinder-proto",
 ]
@@ -3322,6 +3335,7 @@ dependencies = [
  "ureq 3.2.0",
  "uuid",
  "vlinder-core",
+ "vlinder-infer-ollama",
  "vlinder-infer-openrouter",
  "vlinder-proto",
  "zerocopy 0.7.35",

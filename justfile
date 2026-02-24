@@ -22,6 +22,10 @@ build-kv-bridge-agent:
 build-openrouter-test:
     podman build -t localhost/openrouter-test:latest agents/openrouter-test/
 
+# Build ollama-test agent (OCI image via Podman, exercises all three ollama.vlinder.local endpoints)
+build-ollama-test:
+    podman build -t localhost/ollama-test:latest agents/ollama-test/
+
 # Build todoapp agent (OCI image via Podman, OpenRouter integration test)
 build-todoapp:
     podman build -t localhost/todoapp:latest agents/todoapp/
@@ -48,7 +52,7 @@ build-support-fleet: build-support-agent build-log-analyst build-code-analyst
 # =============================================================================
 
 # Build everything needed to run agents: CLI + sidecar + agent container images
-build-everything: build build-sidecar build-todoapp build-echo-container build-openrouter-test
+build-everything: build build-sidecar build-todoapp build-echo-container build-openrouter-test build-ollama-test
 
 # Run a specific agent (usage: just run pensieve-container)
 # Uses ~/.vlinder by default (no VLINDER_DIR override needed)

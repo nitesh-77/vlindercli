@@ -4,7 +4,7 @@
 //! Each service defines which operations it supports:
 //! - Kv: Get, Put, List, Delete
 //! - Vec: Store, Search, Delete
-//! - Infer: Run
+//! - Infer: Run, Chat, Generate
 //! - Embed: Run
 
 use serde::{Deserialize, Serialize};
@@ -20,6 +20,8 @@ pub enum Operation {
     Store,
     Search,
     Run,
+    Chat,
+    Generate,
 }
 
 impl Operation {
@@ -32,6 +34,8 @@ impl Operation {
             Operation::Store => "store",
             Operation::Search => "search",
             Operation::Run => "run",
+            Operation::Chat => "chat",
+            Operation::Generate => "generate",
         }
     }
 
@@ -44,6 +48,8 @@ impl Operation {
             "store" => Some(Operation::Store),
             "search" => Some(Operation::Search),
             "run" => Some(Operation::Run),
+            "chat" => Some(Operation::Chat),
+            "generate" => Some(Operation::Generate),
             _ => None,
         }
     }
@@ -64,6 +70,7 @@ mod tests {
         let ops = [
             Operation::Get, Operation::Put, Operation::List, Operation::Delete,
             Operation::Store, Operation::Search, Operation::Run,
+            Operation::Chat, Operation::Generate,
         ];
         for op in ops {
             assert_eq!(Operation::from_str(op.as_str()), Some(op));
