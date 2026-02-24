@@ -114,12 +114,3 @@ pub struct VectorDeleteRequest {
     pub key: String,
 }
 
-// ============================================================================
-// Embedding Service
-// ============================================================================
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct EmbedRequest {
-    pub model: String,
-    pub text: String,
-}

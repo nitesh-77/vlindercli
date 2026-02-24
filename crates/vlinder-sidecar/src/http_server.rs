@@ -31,7 +31,6 @@ pub fn spawn_server(bridge: Arc<QueueBridge>) {
                 "/services/vector/store" => handle_vector_store(&bridge, &body),
                 "/services/vector/search" => handle_vector_search(&bridge, &body),
                 "/services/vector/delete" => handle_vector_delete(&bridge, &body),
-                "/services/embed" => handle_embed(&bridge, &body),
                 _ => {
                     let _ = request.respond(
                         tiny_http::Response::from_string("not found")
@@ -89,12 +88,6 @@ struct VectorDeleteRequest {
     key: String,
 }
 
-#[derive(Deserialize)]
-struct EmbedRequest {
-    model: String,
-    text: String,
-}
-
 // =============================================================================
 // Handlers
 // =============================================================================
@@ -140,9 +133,3 @@ fn handle_vector_delete(bridge: &QueueBridge, body: &str) -> Result<Vec<u8>, Str
     serde_json::to_vec(&deleted).map_err(|e| format!("serialize error: {}", e))
 }
 
-fn handle_embed(bridge: &QueueBridge, body: &str) -> Result<Vec<u8>, String> {
-    let req: EmbedRequest = serde_json::from_str(body)
-        .map_err(|e| format!("parse error: {}", e))?;
-    let vector = bridge.embed(&req.model, &req.text)?;
-    serde_json::to_vec(&vector).map_err(|e| format!("serialize error: {}", e))
-}

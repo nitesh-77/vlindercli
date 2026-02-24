@@ -194,8 +194,6 @@ pub struct WorkerCounts {
     pub agent: AgentWorkerCounts,
     /// Inference service workers
     pub inference: InferenceWorkerCounts,
-    /// Embedding service workers
-    pub embedding: EmbeddingWorkerCounts,
     /// Storage service workers
     pub storage: StorageWorkerCounts,
 }
@@ -216,14 +214,6 @@ pub struct InferenceWorkerCounts {
     pub ollama: u32,
     /// OpenRouter inference workers
     pub openrouter: u32,
-}
-
-/// Embedding worker counts by engine.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(default)]
-pub struct EmbeddingWorkerCounts {
-    /// Ollama embedding workers
-    pub ollama: u32,
 }
 
 /// Storage worker counts by backend.
@@ -333,7 +323,6 @@ impl Default for WorkerCounts {
             harness: 1,
             agent: AgentWorkerCounts::default(),
             inference: InferenceWorkerCounts::default(),
-            embedding: EmbeddingWorkerCounts::default(),
             storage: StorageWorkerCounts::default(),
         }
     }
@@ -348,12 +337,6 @@ impl Default for AgentWorkerCounts {
 impl Default for InferenceWorkerCounts {
     fn default() -> Self {
         Self { ollama: 1, openrouter: 0 }
-    }
-}
-
-impl Default for EmbeddingWorkerCounts {
-    fn default() -> Self {
-        Self { ollama: 1 }
     }
 }
 
@@ -516,9 +499,6 @@ impl Config {
         }
         if let Ok(v) = std::env::var("VLINDER_WORKERS_INFERENCE_OPENROUTER") {
             self.distributed.workers.inference.openrouter = v.parse().unwrap_or(0);
-        }
-        if let Ok(v) = std::env::var("VLINDER_WORKERS_EMBEDDING_OLLAMA") {
-            self.distributed.workers.embedding.ollama = v.parse().unwrap_or(1);
         }
         if let Ok(v) = std::env::var("VLINDER_WORKERS_STORAGE_OBJECT_SQLITE") {
             self.distributed.workers.storage.object.sqlite = v.parse().unwrap_or(1);
@@ -704,7 +684,6 @@ mod tests {
         assert_eq!(config.distributed.workers.harness, 1);
         assert_eq!(config.distributed.workers.agent.container, 1);
         assert_eq!(config.distributed.workers.inference.ollama, 1);
-        assert_eq!(config.distributed.workers.embedding.ollama, 1);
         assert_eq!(config.distributed.workers.storage.object.sqlite, 1);
         assert_eq!(config.distributed.workers.storage.vector.sqlite, 1);
     }

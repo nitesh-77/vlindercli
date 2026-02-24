@@ -25,8 +25,6 @@ pub enum WorkerRole {
     InferenceOllama,
     /// OpenRouter inference service (cloud LLMs)
     InferenceOpenRouter,
-    /// Ollama embedding service
-    EmbeddingOllama,
     /// SQLite object storage service
     StorageObjectSqlite,
     /// In-memory object storage service
@@ -63,7 +61,6 @@ impl WorkerRole {
             WorkerRole::AgentContainer => "agent-container",
             WorkerRole::InferenceOllama => "inference-ollama",
             WorkerRole::InferenceOpenRouter => "inference-openrouter",
-            WorkerRole::EmbeddingOllama => "embedding-ollama",
             WorkerRole::StorageObjectSqlite => "storage-object-sqlite",
             WorkerRole::StorageObjectMemory => "storage-object-memory",
             WorkerRole::StorageVectorSqlite => "storage-vector-sqlite",
@@ -83,7 +80,6 @@ impl WorkerRole {
             WorkerRole::AgentContainer => "Container agent runtime",
             WorkerRole::InferenceOllama => "Ollama inference service",
             WorkerRole::InferenceOpenRouter => "OpenRouter inference service",
-            WorkerRole::EmbeddingOllama => "Ollama embedding service",
             WorkerRole::StorageObjectSqlite => "SQLite object storage",
             WorkerRole::StorageObjectMemory => "In-memory object storage",
             WorkerRole::StorageVectorSqlite => "SQLite-vec vector storage",
@@ -112,7 +108,6 @@ impl FromStr for WorkerRole {
             "agent-container" => Ok(WorkerRole::AgentContainer),
             "inference-ollama" => Ok(WorkerRole::InferenceOllama),
             "inference-openrouter" => Ok(WorkerRole::InferenceOpenRouter),
-            "embedding-ollama" => Ok(WorkerRole::EmbeddingOllama),
             "storage-object-sqlite" => Ok(WorkerRole::StorageObjectSqlite),
             "storage-object-memory" => Ok(WorkerRole::StorageObjectMemory),
             "storage-vector-sqlite" => Ok(WorkerRole::StorageVectorSqlite),
@@ -147,7 +142,6 @@ mod tests {
         assert_eq!("harness".parse::<WorkerRole>().unwrap(), WorkerRole::Harness);
         assert_eq!("agent-container".parse::<WorkerRole>().unwrap(), WorkerRole::AgentContainer);
         assert_eq!("inference-ollama".parse::<WorkerRole>().unwrap(), WorkerRole::InferenceOllama);
-        assert_eq!("embedding-ollama".parse::<WorkerRole>().unwrap(), WorkerRole::EmbeddingOllama);
         assert_eq!("storage-object-sqlite".parse::<WorkerRole>().unwrap(), WorkerRole::StorageObjectSqlite);
         assert_eq!("storage-vector-sqlite".parse::<WorkerRole>().unwrap(), WorkerRole::StorageVectorSqlite);
         assert_eq!("secret".parse::<WorkerRole>().unwrap(), WorkerRole::Secret);
@@ -161,6 +155,7 @@ mod tests {
         assert!("invalid".parse::<WorkerRole>().is_err());
         assert!("".parse::<WorkerRole>().is_err());
         // Old role names no longer valid
+        assert!("embedding-ollama".parse::<WorkerRole>().is_err());
         assert!("dag-capture".parse::<WorkerRole>().is_err());
         assert!("dag-sqlite".parse::<WorkerRole>().is_err());
     }
@@ -172,7 +167,6 @@ mod tests {
             WorkerRole::Harness,
             WorkerRole::AgentContainer,
             WorkerRole::InferenceOllama,
-            WorkerRole::EmbeddingOllama,
             WorkerRole::StorageObjectSqlite,
             WorkerRole::StorageVectorSqlite,
             WorkerRole::Secret,

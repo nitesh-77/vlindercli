@@ -14,7 +14,7 @@ test-support = []
 
 [dependencies]
 vlinder-core = { path = "../vlinder-core" }
-vlinder-infer-ollama = { path = "../vlinder-infer-ollama" }
+vlinder-ollama = { path = "../vlinder-ollama" }
 vlinder-infer-openrouter = { path = "../vlinder-infer-openrouter" }
 vlinder-proto = { path = "../vlinder-proto" }
 clap = { version = "4", features = ["derive"] }

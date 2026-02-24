@@ -252,13 +252,6 @@ impl Supervisor {
             }
         }
 
-        // Embedding workers
-        for _ in 0..counts.embedding.ollama {
-            if let Some(child) = spawn_worker(WorkerRole::EmbeddingOllama) {
-                workers.push(child);
-            }
-        }
-
         // Object storage workers
         for _ in 0..counts.storage.object.sqlite {
             if let Some(child) = spawn_worker(WorkerRole::StorageObjectSqlite) {

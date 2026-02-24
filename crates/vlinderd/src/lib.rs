@@ -3,7 +3,6 @@ pub use vlinder_core::queue;
 
 pub mod catalog;
 pub mod config;
-pub mod embedding;
 pub mod git_dag;
 pub mod harness;
 pub mod loader;

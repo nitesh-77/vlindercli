@@ -1,5 +1,5 @@
 name = "ollama-test"
-description = "Test agent that exercises all three Ollama endpoints via ollama.vlinder.local"
+description = "Test agent that exercises all four Ollama endpoints via ollama.vlinder.local"
 runtime = "container"
 executable = "localhost/ollama-test:latest"
 
@@ -7,7 +7,12 @@ executable = "localhost/ollama-test:latest"
 
 [requirements.models]
 inference_model = "phi3"
+embedding_model = "nomic-embed"
 
 [requirements.services.infer]
+provider = "ollama"
+protocol = "openai"
+
+[requirements.services.embed]
 provider = "ollama"
 protocol = "openai"

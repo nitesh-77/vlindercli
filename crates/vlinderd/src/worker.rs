@@ -44,7 +44,6 @@ pub fn run_worker_loop(role: WorkerRole, shutdown: Arc<AtomicBool>) {
         WorkerRole::AgentContainer => run_agent_container_worker(&config, &shutdown),
         WorkerRole::InferenceOllama => run_inference_ollama_worker(&config, &shutdown),
         WorkerRole::InferenceOpenRouter => run_inference_openrouter_worker(&config, &shutdown),
-        WorkerRole::EmbeddingOllama => run_embedding_ollama_worker(&config, &shutdown),
         WorkerRole::StorageObjectSqlite => run_storage_object_sqlite_worker(&config, &shutdown),
         WorkerRole::StorageObjectMemory => run_storage_object_memory_worker(&config, &shutdown),
         WorkerRole::StorageVectorSqlite => run_storage_vector_sqlite_worker(&config, &shutdown),
@@ -252,7 +251,7 @@ fn run_agent_container_worker(config: &Config, shutdown: &AtomicBool) {
 }
 
 fn run_inference_ollama_worker(config: &Config, shutdown: &AtomicBool) {
-    use vlinder_infer_ollama::OllamaWorker;
+    use vlinder_ollama::OllamaWorker;
 
     let queue = crate::queue_factory::recording_from_config(config)
         .expect("Failed to create queue");
@@ -280,31 +279,6 @@ fn run_inference_openrouter_worker(config: &Config, shutdown: &AtomicBool) {
     );
 
     tracing::info!(endpoint = %config.openrouter.endpoint, "OpenRouter inference worker ready");
-
-    while !shutdown.load(Ordering::Relaxed) {
-        worker.tick();
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    }
-}
-
-fn run_embedding_ollama_worker(config: &Config, shutdown: &AtomicBool) {
-    use crate::domain::workers::EmbeddingServiceWorker;
-
-    use crate::registry_service::GrpcRegistryClient;
-
-    let queue = crate::queue_factory::recording_from_config(config).expect("Failed to create queue");
-
-    // Connect to central registry via gRPC
-    let registry_addr = grpc_registry_addr(config);
-    let registry: Arc<dyn Registry> = Arc::new(
-        GrpcRegistryClient::connect(&registry_addr)
-            .expect("Failed to connect to registry")
-    );
-
-    let open_engine = Box::new(crate::embedding::open_embedding_engine);
-    let worker = EmbeddingServiceWorker::new(queue, registry, "ollama", open_engine);
-
-    tracing::info!(endpoint = %config.ollama.endpoint, registry = %registry_addr, "Ollama embedding worker ready");
 
     while !shutdown.load(Ordering::Relaxed) {
         worker.tick();

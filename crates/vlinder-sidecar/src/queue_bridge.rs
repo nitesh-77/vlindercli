@@ -16,14 +16,13 @@ use base64::Engine as _;
 use vlinder_core::domain::{
     AgentId, ObjectStorageType, Operation, Registry, RoutingKey, ServiceBackend,
     VectorMatch, VectorStorageType, DelegateMessage, DelegateDiagnostics, ContainerDiagnostics,
-    EmbeddingBackendType, InvokeMessage, MessageQueue, Nonce,
+    InvokeMessage, MessageQueue, Nonce,
     RequestMessage, RequestDiagnostics, SequenceCounter,
 };
 
 use vlinder_core::domain::service_payloads::{
     KvGetRequest, KvPutRequest, KvListRequest, KvDeleteRequest,
     VectorStoreRequest, VectorSearchRequest, VectorDeleteRequest,
-    EmbedRequest,
 };
 
 /// Routes agent SDK calls to the appropriate backend service.
@@ -211,19 +210,6 @@ impl QueueBridge {
         let response = self.send_service_request(ServiceBackend::Vec(backend), Operation::Delete, payload)?;
         Self::check_worker_error(&response)?;
         Ok(response == b"ok")
-    }
-
-    pub fn embed(&self, model: &str, text: &str) -> Result<Vec<f32>, String> {
-        let agent_id = self.invoke.read().unwrap().agent_id.clone();
-        let backend_str = self.registry.resolve_model_backend(agent_id.as_str(), model)?;
-        let backend = EmbeddingBackendType::from_str(&backend_str)
-            .ok_or_else(|| format!("unknown embedding backend: {}", backend_str))?;
-        let req = EmbedRequest { model: model.to_string(), text: text.to_string() };
-        let payload = serde_json::to_vec(&req).map_err(|e| format!("serialize error: {}", e))?;
-        let response = self.send_service_request(ServiceBackend::Embed(backend), Operation::Run, payload)?;
-        Self::check_worker_error(&response)?;
-        serde_json::from_slice(&response)
-            .map_err(|e| format!("embed response parse error: {}", e))
     }
 
     #[allow(dead_code)]

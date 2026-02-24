@@ -44,12 +44,11 @@ impl PersistentRegistry {
         // Register engine capabilities BEFORE loading models so validation works
         if config.distributed.workers.inference.ollama > 0 {
             inner.register_inference_engine(Provider::Ollama);
+            // Ollama worker handles both inference and embedding
+            inner.register_embedding_engine(Provider::Ollama);
         }
         if config.distributed.workers.inference.openrouter > 0 {
             inner.register_inference_engine(Provider::OpenRouter);
-        }
-        if config.distributed.workers.embedding.ollama > 0 {
-            inner.register_embedding_engine(Provider::Ollama);
         }
 
         // Load persisted models (each validated against registered engines)

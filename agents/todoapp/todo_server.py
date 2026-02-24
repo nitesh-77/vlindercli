@@ -19,7 +19,7 @@ app = Flask(__name__)
 SIDECAR_API_ROOT = os.environ.get("VLINDER_SIDECAR_API", "http://127.0.0.1:9000")
 
 INFER_MODEL = "anthropic/claude-sonnet-4"
-EMBED_MODEL = "embedding_model"
+EMBED_MODEL = "nomic-embed-text"
 TODOS_PATH = "/todos.json"
 
 
@@ -68,8 +68,13 @@ class VlinderClient:
         return response.json()["choices"][0]["message"]["content"]
 
     def embed(self, model, text):
-        response = self._post("/services/embed", {"model": model, "text": text})
-        return response.json()
+        response = requests.post(
+            "http://ollama.vlinder.local/api/embed",
+            json={"model": model, "input": text},
+            timeout=60,
+        )
+        response.raise_for_status()
+        return response.json()["embeddings"][0]
 
 client = VlinderClient()
 

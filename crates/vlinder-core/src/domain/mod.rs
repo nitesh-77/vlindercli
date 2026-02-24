@@ -21,7 +21,6 @@ mod message;
 mod message_queue;
 mod agent_manifest;
 mod catalog;
-mod embedding;
 mod fleet;
 mod fleet_manifest;
 pub mod harness;
@@ -123,16 +122,6 @@ pub use resource_id::ResourceId;
 
 pub use inference::{
     Inference, InferenceBackend, InferenceKind,
-};
-
-// ============================================================================
-// Embedding (config + trait)
-// ============================================================================
-
-pub use embedding::{
-    EmbeddingEngine,
-    Embedding, EmbeddingBackend, EmbeddingKind, NomicConfig,
-    InMemoryEmbedding,
 };
 
 // ============================================================================

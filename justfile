@@ -22,7 +22,7 @@ build-kv-bridge-agent:
 build-openrouter-test:
     podman build -t localhost/openrouter-test:latest agents/openrouter-test/
 
-# Build ollama-test agent (OCI image via Podman, exercises all three ollama.vlinder.local endpoints)
+# Build ollama-test agent (OCI image via Podman, exercises all four ollama.vlinder.local endpoints)
 build-ollama-test:
     podman build -t localhost/ollama-test:latest agents/ollama-test/
 

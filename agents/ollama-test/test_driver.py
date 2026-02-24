@@ -1,11 +1,13 @@
-"""Ollama test agent — exercises all three Ollama endpoints.
+"""Ollama test agent — exercises all four Ollama endpoints.
 
 On the first turn, presents a menu asking the user to pick an endpoint:
   1. OpenAI-compatible  (/v1/chat/completions)
   2. Ollama native chat (/api/chat)
   3. Ollama native generate (/api/generate)
+  4. Ollama native embed (/api/embed)
 
-Subsequent turns use the chosen endpoint to answer queries.
+Subsequent turns use the chosen endpoint to answer queries (1-3)
+or embed text (4).
 """
 
 import sys
@@ -19,6 +21,7 @@ from openai import OpenAI
 
 OLLAMA_BASE = "http://ollama.vlinder.local"
 MODEL = "phi3:latest"
+EMBED_MODEL = "nomic-embed-text"
 
 MENU = (
     "I will answer your query, but before that, I just need this one "
@@ -28,8 +31,9 @@ MENU = (
     "  1. OpenAI-compatible (/v1/chat/completions)\n"
     "  2. Ollama native chat (/api/chat)\n"
     "  3. Ollama native generate (/api/generate)\n"
+    "  4. Ollama native embed (/api/embed)\n"
     "\n"
-    "Please reply with 1, 2, or 3."
+    "Please reply with 1, 2, 3, or 4."
 )
 
 openai_client = OpenAI(
@@ -63,7 +67,7 @@ def parse_history(payload):
 
 
 def find_choice(turns):
-    """Walk the history to find the user's endpoint choice (1, 2, or 3).
+    """Walk the history to find the user's endpoint choice (1-4).
 
     The menu is the first agent turn. The choice is the user reply after it.
     """
@@ -73,7 +77,7 @@ def find_choice(turns):
             saw_menu = True
         elif role == "user" and saw_menu:
             stripped = text.strip()
-            if stripped in ("1", "2", "3"):
+            if stripped in ("1", "2", "3", "4"):
                 return int(stripped)
             saw_menu = False  # wasn't a valid choice, keep looking
     return None
@@ -134,16 +138,40 @@ def call_native_generate(user_message):
     return reply
 
 
+def call_embed(user_message):
+    """Endpoint 4: /api/embed via raw HTTP."""
+    log("using /api/embed")
+    t0 = time.monotonic()
+    resp = requests.post(
+        f"{OLLAMA_BASE}/api/embed",
+        json={
+            "model": EMBED_MODEL,
+            "input": user_message,
+        },
+        timeout=60,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    elapsed = time.monotonic() - t0
+    embedding = data["embeddings"][0]
+    dims = len(embedding)
+    preview = ", ".join(f"{v:.4f}" for v in embedding[:5])
+    log(f"embed ok, {dims} dimensions, {elapsed:.2f}s")
+    return f"Embedded ({dims} dimensions, {elapsed:.2f}s):\n[{preview}, ...]"
+
+
 ENDPOINT_FNS = {
     1: call_openai_compat,
     2: call_native_chat,
     3: call_native_generate,
+    4: call_embed,
 }
 
 ENDPOINT_NAMES = {
     1: "OpenAI-compatible (/v1/chat/completions)",
     2: "Ollama native chat (/api/chat)",
     3: "Ollama native generate (/api/generate)",
+    4: "Ollama native embed (/api/embed)",
 }
 
 
@@ -180,7 +208,7 @@ class Handler(BaseHTTPRequestHandler):
                     if role == "agent" and "Which endpoint should I use?" in text:
                         found_choice = False
                     elif role == "user" and not found_choice:
-                        if text.strip() in ("1", "2", "3"):
+                        if text.strip() in ("1", "2", "3", "4"):
                             found_choice = True
                             continue
                     if found_choice and role == "user":

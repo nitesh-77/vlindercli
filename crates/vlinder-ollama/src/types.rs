@@ -1,4 +1,4 @@
-//! Ollama native API types for `/api/chat` and `/api/generate`.
+//! Ollama native API types for `/api/chat`, `/api/generate`, and `/api/embed`.
 //!
 //! Minimal types covering required fields + optional metrics fields.
 //! Used for route validation (DeserializeOwned) and response parsing.
@@ -63,6 +63,21 @@ pub struct OllamaGenerateResponse {
     pub prompt_eval_count: Option<u32>,
     #[serde(default)]
     pub eval_count: Option<u32>,
+}
+
+// ============================================================================
+// /api/embed
+// ============================================================================
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct OllamaEmbedRequest {
+    pub model: String,
+    pub input: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct OllamaEmbedResponse {
+    pub embeddings: Vec<Vec<f32>>,
 }
 
 #[cfg(test)]
@@ -140,5 +155,27 @@ mod tests {
         let resp: OllamaGenerateResponse = serde_json::from_value(json).unwrap();
         assert_eq!(resp.prompt_eval_count, Some(8));
         assert_eq!(resp.eval_count, Some(12));
+    }
+
+    #[test]
+    fn embed_request_round_trip() {
+        let req = OllamaEmbedRequest {
+            model: "nomic-embed-text".to_string(),
+            input: "hello world".to_string(),
+        };
+        let json = serde_json::to_vec(&req).unwrap();
+        let back: OllamaEmbedRequest = serde_json::from_slice(&json).unwrap();
+        assert_eq!(back.model, "nomic-embed-text");
+        assert_eq!(back.input, "hello world");
+    }
+
+    #[test]
+    fn embed_response_parses() {
+        let json = serde_json::json!({
+            "embeddings": [[0.1, 0.2, 0.3]]
+        });
+        let resp: OllamaEmbedResponse = serde_json::from_value(json).unwrap();
+        assert_eq!(resp.embeddings.len(), 1);
+        assert_eq!(resp.embeddings[0], vec![0.1, 0.2, 0.3]);
     }
 }
