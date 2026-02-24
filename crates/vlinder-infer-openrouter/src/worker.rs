@@ -38,7 +38,7 @@ impl OpenRouterWorker {
                 let start = Instant::now();
 
                 let (response_payload, status_code, tokens_input, tokens_output, model) =
-                    match self.handle(&request.payload.legacy_bytes()) {
+                    match self.handle(&request.payload.as_slice()) {
                         Ok((body, usage_in, usage_out, model)) => {
                             (body, 200, usage_in, usage_out, model)
                         }
@@ -172,7 +172,7 @@ mod tests {
 
         let (response, ack) = queue.receive_response(&request).unwrap();
         assert_eq!(response.status_code, 400);
-        let body: serde_json::Value = serde_json::from_slice(response.payload.legacy_bytes()).unwrap();
+        let body: serde_json::Value = serde_json::from_slice(response.payload.as_slice()).unwrap();
         assert_eq!(body["error"]["type"], "invalid_request_error");
         assert!(body["error"]["message"].as_str().unwrap().len() > 0);
         ack().unwrap();
@@ -217,7 +217,7 @@ mod tests {
 
         let (response, ack) = queue.receive_response(&request).unwrap();
         assert_eq!(response.status_code, 500);
-        let body: serde_json::Value = serde_json::from_slice(response.payload.legacy_bytes()).unwrap();
+        let body: serde_json::Value = serde_json::from_slice(response.payload.as_slice()).unwrap();
         assert_eq!(body["error"]["type"], "server_error");
         assert!(body["error"]["message"].as_str().unwrap().len() > 0);
         ack().unwrap();

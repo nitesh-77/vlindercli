@@ -18,8 +18,8 @@ use tokio::runtime::Runtime;
 use crate::domain::{
     AgentId, CompleteMessage, ContainerDiagnostics, DelegateMessage, DelegateDiagnostics,
     HarnessType, InvokeDiagnostics, InvokeMessage, MessageId, MessageQueue, Nonce,
-    Operation, QueueError, RequestDiagnostics, RequestMessage, RequestPayload,
-    ResponseMessage, ResponsePayload, RoutingKey, RuntimeType, Sequence, ServiceBackend,
+    Operation, QueueError, RequestDiagnostics, RequestMessage,
+    ResponseMessage, RoutingKey, RuntimeType, Sequence, ServiceBackend,
     ServiceDiagnostics, ServiceType, SessionId, SubmissionId, TimelineId,
 };
 
@@ -262,7 +262,7 @@ impl MessageQueue for NatsQueue {
 
             self.inner
                 .jetstream
-                .publish_with_headers(subject, headers, msg.payload.legacy_bytes().to_vec().into())
+                .publish_with_headers(subject, headers, msg.payload.clone().into())
                 .await
                 .map_err(|e| QueueError::SendFailed(e.to_string()))?
                 .await
@@ -298,7 +298,7 @@ impl MessageQueue for NatsQueue {
 
             self.inner
                 .jetstream
-                .publish_with_headers(subject, headers, msg.payload.legacy_bytes().to_vec().into())
+                .publish_with_headers(subject, headers, msg.payload.clone().into())
                 .await
                 .map_err(|e| QueueError::SendFailed(e.to_string()))?
                 .await
@@ -399,7 +399,7 @@ impl MessageQueue for NatsQueue {
                 ).ok_or_else(|| QueueError::ReceiveFailed("invalid service/backend".to_string()))?,
                 operation: parse_operation(&get_header(headers, "operation")?)?,
                 sequence: Sequence::from(get_header(headers, "sequence")?.parse::<u32>().unwrap_or(1)),
-                payload: RequestPayload::Legacy(js_msg.payload.to_vec()),
+                payload: js_msg.payload.to_vec(),
                 state: get_header(headers, "state").ok(),
                 diagnostics,
             };
@@ -440,7 +440,7 @@ impl MessageQueue for NatsQueue {
                 ).ok_or_else(|| QueueError::ReceiveFailed("invalid service/backend".to_string()))?,
                 operation: parse_operation(&get_header(headers, "operation")?)?,
                 sequence: Sequence::from(get_header(headers, "sequence")?.parse::<u32>().unwrap_or(1)),
-                payload: ResponsePayload::Legacy(js_msg.payload.to_vec()),
+                payload: js_msg.payload.to_vec(),
                 correlation_id: MessageId::from(get_header(headers, "correlation-id")?),
                 state: get_header(headers, "state").ok(),
                 diagnostics,

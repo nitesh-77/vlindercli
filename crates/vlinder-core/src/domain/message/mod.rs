@@ -108,7 +108,7 @@ mod tests {
         assert_eq!(msg.service, ServiceBackend::Kv(ObjectStorageType::Sqlite));
         assert_eq!(msg.operation, Operation::Get);
         assert_eq!(msg.sequence.as_u32(), 1);
-        assert_eq!(msg.payload.legacy_bytes(), b"key");
+        assert_eq!(msg.payload.as_slice(), b"key");
     }
 
     #[test]
@@ -129,7 +129,7 @@ mod tests {
         assert_eq!(response.sequence, request.sequence);
         assert_ne!(response.id, request.id);
         assert_eq!(response.correlation_id, request.id);
-        assert_eq!(response.payload.legacy_bytes(), b"value");
+        assert_eq!(response.payload.as_slice(), b"value");
     }
 
     #[test]
@@ -186,7 +186,7 @@ mod tests {
         assert_eq!(response.operation, request.operation);
         assert_eq!(response.sequence, request.sequence);
         assert_eq!(response.correlation_id, request.id);
-        assert_eq!(response.payload.legacy_bytes(), b"value");
+        assert_eq!(response.payload.as_slice(), b"value");
     }
 
     // --- ObservableMessage tests ---

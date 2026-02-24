@@ -92,11 +92,10 @@ One hostname at a time. New provider hostnames coexist with legacy `/services/*`
 | Inference | Ollama | `ollama.vlinder.local` | Done |
 | Inference | OpenRouter | `openrouter.vlinder.local` | Done |
 | Embedding | Ollama | `ollama.vlinder.local` | Done |
-| KV | SQLite | `sqlite.vlinder.local` | Pending |
-| Vector | sqlite-vec | `sqlite-vec.vlinder.local` | Pending |
+| KV | SQLite | `sqlite-kv.vlinder.local` | Done |
+| Vector | sqlite-vec | `sqlite-vec.vlinder.local` | Done |
 
-Legacy endpoints removed: `/services/infer`, `/services/embed`.
-Legacy endpoints remaining: KV and vector operations in `QueueBridge`.
+Migration complete. All legacy endpoints (`/services/*`), `QueueBridge`, `http_server`, `RequestPayload`/`ResponsePayload` enums, and `legacy_bytes()` have been deleted.
 
 ## Consequences
 

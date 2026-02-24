@@ -37,7 +37,6 @@ mod operation;
 mod routing_key;
 mod service_type;
 mod storage;
-pub mod service_payloads;
 pub mod workers;
 
 // ============================================================================
@@ -62,7 +61,6 @@ pub use message::{
     InvokeMessage, RequestMessage, ResponseMessage, CompleteMessage, DelegateMessage,
     ExpectsReply, ObservableMessage,
 };
-pub use service_payloads::{RequestPayload, ResponsePayload};
 pub use message_queue::{Acknowledgement, MessageQueue, QueueError, agent_routing_key};
 pub use routing_key::{RoutingKey, AgentId, Nonce, ServiceBackend, InferenceBackendType, EmbeddingBackendType};
 pub use diagnostics::{

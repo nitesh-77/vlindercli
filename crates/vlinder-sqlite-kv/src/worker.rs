@@ -195,7 +195,7 @@ impl KvWorker {
     }
 
     fn handle_get(&self, request: &RequestMessage) -> Vec<u8> {
-        let req: KvGetRequest = match serde_json::from_slice(request.payload.legacy_bytes()) {
+        let req: KvGetRequest = match serde_json::from_slice(request.payload.as_slice()) {
             Ok(r) => r,
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
@@ -227,7 +227,7 @@ impl KvWorker {
 
     /// Returns (response_payload, new_state_option).
     fn handle_put(&self, request: &RequestMessage) -> (Vec<u8>, Option<String>) {
-        let req: KvPutRequest = match serde_json::from_slice(request.payload.legacy_bytes()) {
+        let req: KvPutRequest = match serde_json::from_slice(request.payload.as_slice()) {
             Ok(r) => r,
             Err(e) => return (format!("[error] invalid request: {}", e).into_bytes(), None),
         };
@@ -261,7 +261,7 @@ impl KvWorker {
     }
 
     fn handle_list(&self, request: &RequestMessage) -> Vec<u8> {
-        let req: KvListRequest = match serde_json::from_slice(request.payload.legacy_bytes()) {
+        let req: KvListRequest = match serde_json::from_slice(request.payload.as_slice()) {
             Ok(r) => r,
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
@@ -297,7 +297,7 @@ impl KvWorker {
     }
 
     fn handle_delete(&self, request: &RequestMessage) -> Vec<u8> {
-        let req: KvDeleteRequest = match serde_json::from_slice(request.payload.legacy_bytes()) {
+        let req: KvDeleteRequest = match serde_json::from_slice(request.payload.as_slice()) {
             Ok(r) => r,
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
@@ -479,7 +479,7 @@ mod tests {
         queue.send_request(put_request.clone()).unwrap();
         assert!(handler.tick());
         let (response, ack) = queue.receive_response(&put_request).unwrap();
-        assert_eq!(response.payload.legacy_bytes(), b"ok");
+        assert_eq!(response.payload.as_slice(), b"ok");
         ack().unwrap();
 
         // Get request
@@ -496,7 +496,7 @@ mod tests {
         queue.send_request(get_request.clone()).unwrap();
         assert!(handler.tick());
         let (response, ack) = queue.receive_response(&get_request).unwrap();
-        assert_eq!(response.payload.legacy_bytes(), b"hello world");
+        assert_eq!(response.payload.as_slice(), b"hello world");
         ack().unwrap();
     }
 
@@ -535,7 +535,7 @@ mod tests {
         ack().unwrap();
 
         // Response should be JSON with a state field
-        let resp: serde_json::Value = serde_json::from_slice(response.payload.legacy_bytes()).unwrap();
+        let resp: serde_json::Value = serde_json::from_slice(response.payload.as_slice()).unwrap();
         let state = resp["state"].as_str().unwrap();
         assert!(!state.is_empty());
         assert_eq!(state.len(), 64); // SHA-256 hex
@@ -571,7 +571,7 @@ mod tests {
         handler.tick();
         let (resp1, ack) = queue.receive_response(&req1).unwrap();
         ack().unwrap();
-        let state1: serde_json::Value = serde_json::from_slice(resp1.payload.legacy_bytes()).unwrap();
+        let state1: serde_json::Value = serde_json::from_slice(resp1.payload.as_slice()).unwrap();
         let hash1 = state1["state"].as_str().unwrap().to_string();
 
         // Second put chained from first — state via envelope
@@ -588,7 +588,7 @@ mod tests {
         handler.tick();
         let (resp2, ack) = queue.receive_response(&req2).unwrap();
         ack().unwrap();
-        let state2: serde_json::Value = serde_json::from_slice(resp2.payload.legacy_bytes()).unwrap();
+        let state2: serde_json::Value = serde_json::from_slice(resp2.payload.as_slice()).unwrap();
         let hash2 = state2["state"].as_str().unwrap().to_string();
 
         // Hashes should differ
@@ -608,7 +608,7 @@ mod tests {
         handler.tick();
         let (resp, ack) = queue.receive_response(&get_req).unwrap();
         ack().unwrap();
-        assert_eq!(resp.payload.legacy_bytes(), b"aaa");
+        assert_eq!(resp.payload.as_slice(), b"aaa");
     }
 
     #[test]
@@ -639,7 +639,7 @@ mod tests {
         handler.tick();
         let (resp1, ack) = queue.receive_response(&req1).unwrap();
         ack().unwrap();
-        let state1: serde_json::Value = serde_json::from_slice(resp1.payload.legacy_bytes()).unwrap();
+        let state1: serde_json::Value = serde_json::from_slice(resp1.payload.as_slice()).unwrap();
         let hash1 = state1["state"].as_str().unwrap().to_string();
 
         // Put /b.txt → state2
@@ -655,7 +655,7 @@ mod tests {
         handler.tick();
         let (resp2, ack) = queue.receive_response(&req2).unwrap();
         ack().unwrap();
-        let state2: serde_json::Value = serde_json::from_slice(resp2.payload.legacy_bytes()).unwrap();
+        let state2: serde_json::Value = serde_json::from_slice(resp2.payload.as_slice()).unwrap();
         let hash2 = state2["state"].as_str().unwrap().to_string();
 
         // List from state2 — should see both files
@@ -671,7 +671,7 @@ mod tests {
         handler.tick();
         let (resp, ack) = queue.receive_response(&list_req2).unwrap();
         ack().unwrap();
-        let files: Vec<String> = serde_json::from_slice(resp.payload.legacy_bytes()).unwrap();
+        let files: Vec<String> = serde_json::from_slice(resp.payload.as_slice()).unwrap();
         assert_eq!(files, vec!["/a.txt", "/b.txt"]);
 
         // List from state1 (time travel) — should only see /a.txt
@@ -687,7 +687,7 @@ mod tests {
         handler.tick();
         let (resp, ack) = queue.receive_response(&list_req1).unwrap();
         ack().unwrap();
-        let files: Vec<String> = serde_json::from_slice(resp.payload.legacy_bytes()).unwrap();
+        let files: Vec<String> = serde_json::from_slice(resp.payload.as_slice()).unwrap();
         assert_eq!(files, vec!["/a.txt"]);
     }
 

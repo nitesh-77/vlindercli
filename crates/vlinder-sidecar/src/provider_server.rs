@@ -297,7 +297,7 @@ fn forward_to_queue(
             if let Some(ref new_state) = response.state {
                 *state.write().unwrap() = Some(new_state.clone());
             }
-            (response.status_code, response.payload.legacy_bytes().to_vec())
+            (response.status_code, response.payload.clone())
         }
         Err(e) => (502, format!("queue error: {}", e).into_bytes()),
     }

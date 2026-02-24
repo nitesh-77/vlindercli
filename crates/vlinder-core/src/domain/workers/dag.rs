@@ -15,8 +15,8 @@ use chrono::Utc;
 use crate::domain::{
     AgentId, CompleteMessage, ContainerDiagnostics, DagNode, DelegateDiagnostics,
     DelegateMessage, HarnessType, InvokeDiagnostics, InvokeMessage, MessageId, MessageType,
-    Nonce, Operation, RequestDiagnostics, RequestMessage, RequestPayload, ResponseMessage,
-    ResponsePayload, RuntimeType, Sequence, ServiceBackend, ServiceDiagnostics, ServiceType,
+    Nonce, Operation, RequestDiagnostics, RequestMessage, ResponseMessage,
+    RuntimeType, Sequence, ServiceBackend, ServiceDiagnostics, ServiceType,
     SessionId, SubmissionId, TimelineId, hash_dag_node,
 };
 use crate::domain::message::ObservableMessage;
@@ -111,7 +111,7 @@ fn reconstruct_request(
         sequence: Sequence::from(
             headers.get("sequence")?.parse::<u32>().ok()?
         ),
-        payload: RequestPayload::Legacy(payload.to_vec()),
+        payload: payload.to_vec(),
         state: headers.get("state").cloned(),
         diagnostics,
     }))
@@ -144,7 +144,7 @@ fn reconstruct_response(
         sequence: Sequence::from(
             headers.get("sequence")?.parse::<u32>().ok()?
         ),
-        payload: ResponsePayload::Legacy(payload.to_vec()),
+        payload: payload.to_vec(),
         correlation_id: MessageId::from(headers.get("correlation-id")?.clone()),
         state: headers.get("state").cloned(),
         diagnostics,
@@ -428,7 +428,7 @@ mod tests {
             assert_eq!(m.service, ServiceBackend::Infer(InferenceBackendType::Ollama));
             assert_eq!(m.operation, Operation::Run);
             assert_eq!(m.sequence.as_u32(), 1);
-            assert_eq!(m.payload.legacy_bytes(), b"request-payload");
+            assert_eq!(m.payload.as_slice(), b"request-payload");
         }
     }
 
@@ -444,7 +444,7 @@ mod tests {
         if let ObservableMessage::Response(m) = &msg {
             assert_eq!(m.service, ServiceBackend::Infer(InferenceBackendType::Ollama));
             assert_eq!(m.correlation_id.as_str(), "msg-002");
-            assert_eq!(m.payload.legacy_bytes(), b"response-payload");
+            assert_eq!(m.payload.as_slice(), b"response-payload");
         }
     }
 

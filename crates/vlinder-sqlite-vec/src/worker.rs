@@ -128,7 +128,7 @@ impl SqliteVecWorker {
     }
 
     fn handle_store(&self, request: &RequestMessage) -> Vec<u8> {
-        let req: SqliteVecStoreRequest = match serde_json::from_slice(request.payload.legacy_bytes()) {
+        let req: SqliteVecStoreRequest = match serde_json::from_slice(request.payload.as_slice()) {
             Ok(r) => r,
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
@@ -145,7 +145,7 @@ impl SqliteVecWorker {
     }
 
     fn handle_search(&self, request: &RequestMessage) -> Vec<u8> {
-        let req: SqliteVecSearchRequest = match serde_json::from_slice(request.payload.legacy_bytes()) {
+        let req: SqliteVecSearchRequest = match serde_json::from_slice(request.payload.as_slice()) {
             Ok(r) => r,
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
@@ -175,7 +175,7 @@ impl SqliteVecWorker {
     }
 
     fn handle_delete(&self, request: &RequestMessage) -> Vec<u8> {
-        let req: SqliteVecDeleteRequest = match serde_json::from_slice(request.payload.legacy_bytes()) {
+        let req: SqliteVecDeleteRequest = match serde_json::from_slice(request.payload.as_slice()) {
             Ok(r) => r,
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
@@ -320,7 +320,7 @@ mod tests {
         queue.send_request(store_request.clone()).unwrap();
         assert!(handler.tick());
         let (response, ack) = queue.receive_response(&store_request).unwrap();
-        assert_eq!(response.payload.legacy_bytes(), b"ok");
+        assert_eq!(response.payload.as_slice(), b"ok");
         ack().unwrap();
 
         let search_payload = serde_json::json!({
@@ -339,7 +339,7 @@ mod tests {
         queue.send_request(search_request.clone()).unwrap();
         assert!(handler.tick());
         let (response, ack) = queue.receive_response(&search_request).unwrap();
-        let results: Vec<serde_json::Value> = serde_json::from_slice(response.payload.legacy_bytes()).unwrap();
+        let results: Vec<serde_json::Value> = serde_json::from_slice(response.payload.as_slice()).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0]["key"], "doc1");
         ack().unwrap();

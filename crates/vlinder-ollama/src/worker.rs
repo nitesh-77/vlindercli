@@ -62,7 +62,7 @@ impl OllamaWorker {
         operation: Operation,
     ) {
         let start = Instant::now();
-        let payload = request.payload.legacy_bytes();
+        let payload = request.payload.as_slice();
 
         let (response_payload, status_code, tokens_input, tokens_output, model) =
             match operation {
@@ -192,7 +192,7 @@ impl OllamaWorker {
         ack: Box<dyn FnOnce() -> Result<(), vlinder_core::domain::QueueError> + Send>,
     ) {
         let start = Instant::now();
-        let payload = request.payload.legacy_bytes();
+        let payload = request.payload.as_slice();
 
         let (response_payload, status_code, dimensions, model) = match self.handle_embed(payload) {
             Ok((body, dims, m)) => (body, 200, dims, m),

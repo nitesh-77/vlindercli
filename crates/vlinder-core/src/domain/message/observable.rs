@@ -75,8 +75,8 @@ impl ObservableMessage {
     pub fn payload(&self) -> &[u8] {
         match self {
             ObservableMessage::Invoke(m) => &m.payload,
-            ObservableMessage::Request(m) => m.payload.legacy_bytes(),
-            ObservableMessage::Response(m) => m.payload.legacy_bytes(),
+            ObservableMessage::Request(m) => &m.payload,
+            ObservableMessage::Response(m) => &m.payload,
             ObservableMessage::Complete(m) => &m.payload,
             ObservableMessage::Delegate(m) => &m.payload,
         }

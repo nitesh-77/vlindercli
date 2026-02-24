@@ -7,7 +7,6 @@ use super::identity::{MessageId, SubmissionId, SessionId, TimelineId, Sequence};
 use super::request::RequestMessage;
 use super::super::operation::Operation;
 use super::super::routing_key::{AgentId, RoutingKey, ServiceBackend};
-use super::super::service_payloads::ResponsePayload;
 use super::super::diagnostics::ServiceDiagnostics;
 
 /// Response message: Service → Runtime
@@ -25,7 +24,7 @@ pub struct ResponseMessage {
     pub operation: Operation,
     pub sequence: Sequence,
     #[serde(skip)]
-    pub payload: ResponsePayload,
+    pub payload: Vec<u8>,
     pub correlation_id: MessageId,
     /// State hash after this response (ADR 055).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -64,7 +63,7 @@ impl ResponseMessage {
             service: request.service,
             operation: request.operation,
             sequence: request.sequence,
-            payload: ResponsePayload::Legacy(payload),
+            payload,
             correlation_id: request.id.clone(),
             state: None,
             diagnostics,
