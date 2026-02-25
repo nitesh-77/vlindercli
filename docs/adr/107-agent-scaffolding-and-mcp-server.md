@@ -78,23 +78,33 @@ Served by `vlinderd`, not a standalone binary. The MCP server is another
 capability of the daemon, alongside the registry, harness, runtime, and
 provider services.
 
-**Platform source index.** The server uses tree-sitter to parse and index
-the vlindercli source code (Rust). This index is embedded at build time —
-same version, same commit as the binary. The platform's own code is the
-source of truth for the container contract, provider hostnames, message
-types, and delegation protocol. No documentation to drift.
+The server has four knowledge sources:
 
-**Developer code awareness.** The server also parses the developer's agent
-code live from disk. Tree-sitter grammars ship for:
+**1. Platform source (vlindercli).** Tree-sitter parses and indexes the
+vlindercli Rust source. This index is embedded at build time — same
+version, same commit as the binary. The platform's own code is the source
+of truth for the container contract, provider hostnames, message types, and
+delegation protocol. No documentation to drift.
 
-- **Rust** — vlindercli platform source (embedded)
-- **Python** — scaffolded agent code (live)
-- **TOML** — agent.toml, fleet.toml manifests (live)
+**2. Runtime state (~/.vlinder/).** The MCP server reads the `.vlinder/`
+directory: conversation payloads, logs, agent state. Today, debugging a
+failed agent means manually reading `~/.vlinder/conversations/*/payload`
+and `~/.vlinder/logs/`. The MCP server makes this queryable — any coding
+tool can ask "what happened?" instead of the developer spelunking through
+files. The platform dogfoods its own observability surface.
 
-This gives the MCP server cross-referencing ability: it knows what the
-platform offers (from embedded Rust source) and what the developer's agent
-uses (from their Python + TOML), and can bridge the two — flagging
-mismatches, suggesting wiring, answering structural questions.
+**3. Agent code.** The developer's agent code, parsed live from disk with
+tree-sitter. Grammars ship for the languages agents are written in
+(Python, TypeScript, Go, etc.) plus TOML for manifests. This gives
+cross-referencing ability: the server knows what the platform offers (from
+source #1) and what the developer's agent uses (from their code + TOML),
+and can bridge the two — flagging mismatches, suggesting wiring, answering
+structural questions.
+
+**4. Platform docs.** ADRs, README, and project documentation — embedded
+alongside the source. The server knows not just *what the code does* but
+*why it was designed that way*. A coding tool can ask "how does delegation
+work?" and get both the implementation and the rationale.
 
 **Tool-agnostic.** MCP is an open protocol. Any tool that speaks MCP gets
 full platform awareness: Claude Code, Gemini, Codex, Cursor, Lovable,
@@ -117,6 +127,9 @@ scaffolded project is the universal on-ramp.
   default integration path, not a bolt-on
 - `vlinderd` gains an MCP endpoint, adding tree-sitter as a build
   dependency
-- Platform source is embedded in the binary, increasing binary size
+- Platform source and docs are embedded in the binary, increasing binary
+  size
+- The `.vlinder/` directory becomes a first-class API surface, not just
+  files on disk — the MCP server is how coding tools observe agent runs
 - The CLAUDE.md remains useful as a fallback when vlinderd isn't running,
   but the MCP server is the primary channel for interactive development
