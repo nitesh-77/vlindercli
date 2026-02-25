@@ -22,6 +22,11 @@ service Registry {
   rpc RegisterModel(RegisterModelRequest) returns (RegisterModelResponse);
   rpc DeleteModel(DeleteModelRequest) returns (DeleteModelResponse);
 
+  // Fleet operations
+  rpc RegisterFleet(RegisterFleetRequest) returns (RegisterFleetResponse);
+  rpc GetFleet(GetFleetRequest) returns (GetFleetResponse);
+  rpc ListFleets(ListFleetsRequest) returns (ListFleetsResponse);
+
   // Job operations
   rpc CreateJob(CreateJobRequest) returns (CreateJobResponse);
   rpc GetJob(GetJobRequest) returns (GetJobResponse);
@@ -136,6 +141,40 @@ message ListAgentsRequest {}
 
 message ListAgentsResponse {
   repeated Agent agents = 1;
+}
+
+// =============================================================================
+// Fleet
+// =============================================================================
+
+message Fleet {
+  ResourceId id = 1;
+  string name = 2;
+  ResourceId entry = 3;          // Entry agent ResourceId
+  repeated ResourceId agents = 4; // All agent ResourceIds in the fleet
+}
+
+message RegisterFleetRequest {
+  Fleet fleet = 1;
+}
+
+message RegisterFleetResponse {
+  bool success = 1;
+  optional string error = 2;
+}
+
+message GetFleetRequest {
+  string name = 1;
+}
+
+message GetFleetResponse {
+  optional Fleet fleet = 1;
+}
+
+message ListFleetsRequest {}
+
+message ListFleetsResponse {
+  repeated Fleet fleets = 1;
 }
 
 // =============================================================================

@@ -11,6 +11,9 @@ use super::proto::{
     GetAgentRequest, GetAgentResponse, GetAgentByNameRequest,
     RegisterAgentRequest, RegisterAgentResponse,
     ListAgentsRequest, ListAgentsResponse,
+    RegisterFleetRequest, RegisterFleetResponse,
+    GetFleetRequest, GetFleetResponse,
+    ListFleetsRequest, ListFleetsResponse,
     GetModelRequest, GetModelResponse,
     ListModelsRequest, ListModelsResponse,
     RegisterModelRequest, RegisterModelResponse,
@@ -119,6 +122,51 @@ impl RegistryService for RegistryServiceServer {
             .collect();
 
         Ok(Response::new(ListAgentsResponse { agents }))
+    }
+
+    async fn register_fleet(
+        &self,
+        request: Request<RegisterFleetRequest>,
+    ) -> Result<Response<RegisterFleetResponse>, Status> {
+        let req = request.into_inner();
+        let fleet = req.fleet
+            .ok_or_else(|| Status::invalid_argument("missing fleet"))?;
+
+        let domain_fleet = fleet.try_into()
+            .map_err(|e: String| Status::invalid_argument(e))?;
+
+        match self.registry.register_fleet(domain_fleet) {
+            Ok(()) => Ok(Response::new(RegisterFleetResponse {
+                success: true,
+                error: None,
+            })),
+            Err(e) => Ok(Response::new(RegisterFleetResponse {
+                success: false,
+                error: Some(e.to_string()),
+            })),
+        }
+    }
+
+    async fn get_fleet(
+        &self,
+        request: Request<GetFleetRequest>,
+    ) -> Result<Response<GetFleetResponse>, Status> {
+        let req = request.into_inner();
+        let fleet = self.registry.get_fleet(&req.name).map(|f| f.into());
+
+        Ok(Response::new(GetFleetResponse { fleet }))
+    }
+
+    async fn list_fleets(
+        &self,
+        _request: Request<ListFleetsRequest>,
+    ) -> Result<Response<ListFleetsResponse>, Status> {
+        let fleets = self.registry.get_fleets()
+            .into_iter()
+            .map(|f| f.into())
+            .collect();
+
+        Ok(Response::new(ListFleetsResponse { fleets }))
     }
 
     async fn get_model(

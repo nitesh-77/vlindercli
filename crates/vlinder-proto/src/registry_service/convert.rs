@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use vlinder_core::domain::{
-    Agent, Job, JobId, JobStatus, Model, ModelType,
+    Agent, Fleet, Job, JobId, JobStatus, Model, ModelType,
     Protocol, Provider, Requirements, ResourceId, RuntimeType, ServiceConfig, ServiceType,
     SubmissionId,
 };
@@ -155,6 +155,34 @@ impl TryFrom<proto::Agent> for Agent {
             prompts: None,
             image_digest: None,
             public_key: None,
+        })
+    }
+}
+
+// =============================================================================
+// Fleet
+// =============================================================================
+
+impl From<Fleet> for proto::Fleet {
+    fn from(fleet: Fleet) -> Self {
+        Self {
+            id: Some(fleet.id.into()),
+            name: fleet.name,
+            entry: Some(fleet.entry.into()),
+            agents: fleet.agents.into_iter().map(|a| a.into()).collect(),
+        }
+    }
+}
+
+impl TryFrom<proto::Fleet> for Fleet {
+    type Error = String;
+
+    fn try_from(fleet: proto::Fleet) -> Result<Self, Self::Error> {
+        Ok(Self {
+            id: fleet.id.ok_or("missing fleet id")?.into(),
+            name: fleet.name,
+            entry: fleet.entry.ok_or("missing fleet entry")?.into(),
+            agents: fleet.agents.into_iter().map(|a| a.into()).collect(),
         })
     }
 }

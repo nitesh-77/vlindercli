@@ -323,18 +323,60 @@ impl Registry for GrpcRegistryClient {
         }
     }
 
-    // --- Fleet operations (stub — gRPC not yet wired) ---
+    // --- Fleet operations ---
 
-    fn register_fleet(&self, _fleet: Fleet) -> Result<(), RegistrationError> {
-        Err(RegistrationError::Remote("fleet registration not yet supported over gRPC".to_string()))
+    fn register_fleet(&self, fleet: Fleet) -> Result<(), RegistrationError> {
+        let proto_fleet: proto::Fleet = fleet.into();
+        let request = proto::RegisterFleetRequest {
+            fleet: Some(proto_fleet),
+        };
+
+        let response = self.runtime.block_on(async {
+            self.client.lock().unwrap()
+                .register_fleet(request)
+                .await
+        }).map_err(|e| RegistrationError::Remote(e.to_string()))?;
+
+        let resp = response.into_inner();
+        if resp.success {
+            Ok(())
+        } else {
+            Err(RegistrationError::Remote(
+                resp.error.unwrap_or_else(|| "unknown error".to_string())
+            ))
+        }
     }
 
-    fn get_fleet(&self, _name: &str) -> Option<Fleet> {
-        None
+    fn get_fleet(&self, name: &str) -> Option<Fleet> {
+        let request = proto::GetFleetRequest {
+            name: name.to_string(),
+        };
+
+        let response = self.runtime.block_on(async {
+            self.client.lock().unwrap()
+                .get_fleet(request)
+                .await
+        }).ok()?;
+
+        response.into_inner().fleet.and_then(|f| f.try_into().ok())
     }
 
     fn get_fleets(&self) -> Vec<Fleet> {
-        vec![]
+        let request = proto::ListFleetsRequest {};
+
+        let response = self.runtime.block_on(async {
+            self.client.lock().unwrap()
+                .list_fleets(request)
+                .await
+        });
+
+        match response {
+            Ok(resp) => resp.into_inner().fleets
+                .into_iter()
+                .filter_map(|f| f.try_into().ok())
+                .collect(),
+            Err(_) => vec![],
+        }
     }
 
     // --- Capability registration (no-op for client, server manages these) ---
