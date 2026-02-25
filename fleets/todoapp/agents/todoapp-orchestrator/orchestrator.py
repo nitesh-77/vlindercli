@@ -1,28 +1,18 @@
-"""todoapp-orchestrator — delegation smoke test.
+"""todoapp-orchestrator — exercises delegate/wait via echo-container.
 
-Delegates to all five test agents (echo-container, sqlite-kv-test,
-sqlite-vec-test, ollama-test, openrouter-test) in parallel, collects
-results, and returns a formatted report. Mirrors todoapp's full
-capability surface via delegation:
-
-  - Inference (OpenRouter) → openrouter-test
-  - Embeddings (Ollama)    → ollama-test
-  - KV storage             → sqlite-kv-test
-  - Vector storage         → sqlite-vec-test
-  - Basic I/O              → echo-container
+Delegates user input to echo-container and returns the result.
+Supports single delegation, parallel fan-out, and sequential chaining.
 
 Commands:
-    smoke               Run all delegates and report results.
-    echo <text>         Delegate to echo-container only.
-    kv <cmd> <args...>  Delegate to sqlite-kv-test (e.g. kv put /x hello).
-    vec <cmd> <args...> Delegate to sqlite-vec-test (e.g. vec store mykey data).
-    infer <text>        Delegate to openrouter-test.
-    embed <text>        Delegate to ollama-test (embedding endpoint).
-    help                Show usage.
+    echo <text>     Delegate once to echo-container.
+    fan <text>      Fan out to echo-container 3x in parallel, collect all.
+    chain <text>    Chain 3 sequential delegations (output feeds next input).
+    help            Show usage.
+
+Anything else delegates once to echo-container with the raw input.
 """
 
 import json
-import time
 import urllib.request
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
@@ -59,130 +49,56 @@ def parse_payload(raw):
 
 
 # =========================================================================
-# Ollama-test accepts "Option N:\n<input>" to skip its menu round-trip.
-# =========================================================================
-
-def ollama_embed_payload(text):
-    """Build an option-prefix payload that selects the embed endpoint."""
-    return f"Option 4:\n{text}"
-
-
-# =========================================================================
 # Commands
 # =========================================================================
 
-def run_smoke(user_input):
-    """Delegate to all five test agents in parallel, collect results."""
-    timestamp = str(int(time.time()))
-    kv_path = f"/smoke/{timestamp}"
-    kv_content = f"smoke-test-{timestamp}"
-    vec_key = f"smoke-{timestamp}"
-
-    results = {}
-    errors = {}
-
-    # Fire all five delegates (parallel fan-out)
-    handles = {}
-    targets = {
-        "echo": ("echo-container", user_input),
-        "kv-put": ("sqlite-kv-test", f"put {kv_path} {kv_content}"),
-        "vec-store": ("sqlite-vec-test", f"store {vec_key} smoke test data"),
-        "openrouter": ("openrouter-test", f"Reply in exactly 5 words: {user_input}"),
-        "ollama-embed": ("ollama-test", ollama_embed_payload(user_input)),
-    }
-
-    for name, (agent, payload) in targets.items():
-        try:
-            handles[name] = delegate(agent, payload)
-        except Exception as e:
-            errors[name] = str(e)
-
-    # Wait for all results (sequential collection)
-    for name, handle in handles.items():
-        try:
-            results[name] = wait_for(handle)
-        except Exception as e:
-            errors[name] = str(e)
-
-    # Fire follow-up reads (verify kv write persisted, vec can search)
-    follow_up_handles = {}
-    if "kv-put" in results:
-        try:
-            follow_up_handles["kv-get"] = delegate("sqlite-kv-test", f"get {kv_path}")
-        except Exception as e:
-            errors["kv-get"] = str(e)
-    if "vec-store" in results:
-        try:
-            follow_up_handles["vec-search"] = delegate("sqlite-vec-test", f"search {vec_key}")
-        except Exception as e:
-            errors["vec-search"] = str(e)
-
-    for name, handle in follow_up_handles.items():
-        try:
-            results[name] = wait_for(handle)
-        except Exception as e:
-            errors[name] = str(e)
-
-    # Format report
-    all_steps = ["echo", "kv-put", "kv-get", "vec-store", "vec-search",
-                 "openrouter", "ollama-embed"]
-    lines = ["=== Delegation Smoke Test ===", ""]
-    for name in all_steps:
-        if name in results:
-            # Truncate long results for readability
-            value = results[name].replace("\n", " ")
-            if len(value) > 200:
-                value = value[:200] + "..."
-            lines.append(f"[PASS] {name}: {value}")
-        elif name in errors:
-            lines.append(f"[FAIL] {name}: {errors[name][:200]}")
-
-    passed = sum(1 for n in all_steps if n in results)
-    failed = sum(1 for n in all_steps if n in errors)
-    lines.append("")
-    lines.append(f"--- {passed} passed, {failed} failed ---")
-
-    return "\n".join(lines)
-
-
 def run_echo(text):
-    """Delegate to echo-container."""
+    """Single delegation to echo-container."""
     handle = delegate("echo-container", text)
     return wait_for(handle)
 
 
-def run_kv(args_text):
-    """Delegate to sqlite-kv-test."""
-    handle = delegate("sqlite-kv-test", args_text)
-    return wait_for(handle)
+def run_fan(text):
+    """Fan out 3 delegations in parallel, collect results."""
+    handles = []
+    for i in range(3):
+        handles.append(delegate("echo-container", f"[{i+1}] {text}"))
+
+    lines = ["=== Fan-out (3 parallel delegations) ===", ""]
+    for i, handle in enumerate(handles):
+        try:
+            result = wait_for(handle).replace("\n", " ")
+            if len(result) > 200:
+                result = result[:200] + "..."
+            lines.append(f"[{i+1}] {result}")
+        except Exception as e:
+            lines.append(f"[{i+1}] ERROR: {e}")
+    return "\n".join(lines)
 
 
-def run_vec(args_text):
-    """Delegate to sqlite-vec-test."""
-    handle = delegate("sqlite-vec-test", args_text)
-    return wait_for(handle)
-
-
-def run_infer(text):
-    """Delegate to openrouter-test (OpenRouter inference)."""
-    handle = delegate("openrouter-test", text)
-    return wait_for(handle)
-
-
-def run_embed(text):
-    """Delegate to ollama-test (Ollama embedding)."""
-    handle = delegate("ollama-test", ollama_embed_payload(text))
-    return wait_for(handle)
+def run_chain(text):
+    """Chain 3 sequential delegations — each output feeds the next input."""
+    lines = ["=== Chain (3 sequential delegations) ===", ""]
+    current = text
+    for i in range(3):
+        try:
+            handle = delegate("echo-container", current)
+            current = wait_for(handle)
+            display = current.replace("\n", " ")
+            if len(display) > 200:
+                display = display[:200] + "..."
+            lines.append(f"step {i+1}: {display}")
+        except Exception as e:
+            lines.append(f"step {i+1}: ERROR: {e}")
+            break
+    return "\n".join(lines)
 
 
 USAGE = """todoapp-orchestrator commands:
-  smoke               Run all delegates and report results
-  echo <text>         Delegate to echo-container
-  kv <cmd> <args...>  Delegate to sqlite-kv-test
-  vec <cmd> <args...> Delegate to sqlite-vec-test
-  infer <text>        Delegate to openrouter-test (OpenRouter)
-  embed <text>        Delegate to ollama-test (Ollama embedding)
-  help                Show this message"""
+  echo <text>   Delegate once to echo-container
+  fan <text>    Fan out 3 parallel delegations
+  chain <text>  Chain 3 sequential delegations
+  help          Show this message"""
 
 
 def dispatch(text):
@@ -192,23 +108,17 @@ def dispatch(text):
     cmd = parts[0].lower()
     rest = parts[1] if len(parts) > 1 else ""
 
-    if cmd == "smoke":
-        return run_smoke(rest or "hello from orchestrator")
-    elif cmd == "echo":
+    if cmd == "echo":
         return run_echo(rest or "ping")
-    elif cmd == "kv":
-        return run_kv(rest) if rest else "usage: kv <put|get|list|delete> <args...>"
-    elif cmd == "vec":
-        return run_vec(rest) if rest else "usage: vec <store|search|delete> <args...>"
-    elif cmd == "infer":
-        return run_infer(rest or "Say hello in exactly 5 words.")
-    elif cmd == "embed":
-        return run_embed(rest or "hello world")
+    elif cmd == "fan":
+        return run_fan(rest or "hello")
+    elif cmd == "chain":
+        return run_chain(rest or "hello")
     elif cmd == "help":
         return USAGE
     else:
-        # Default: run smoke test with the full input
-        return run_smoke(text)
+        # Default: single echo delegation with raw input
+        return run_echo(text)
 
 
 # =========================================================================

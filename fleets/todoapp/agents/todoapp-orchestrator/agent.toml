@@ -1,11 +1,8 @@
 name = "todoapp-orchestrator"
 description = """
-Delegation smoke test — orchestrator that delegates to all test agents
-in parallel and collects results. Mirrors todoapp's capabilities
-(inference, embeddings, KV storage, vector storage) but delegates
-everything instead of calling providers directly.
-
-Exercises the full delegate/wait path through runtime.vlinder.local.
+Delegation test — orchestrator that delegates to echo-container.
+Exercises single delegation, parallel fan-out, and sequential chaining
+via runtime.vlinder.local.
 """
 runtime = "container"
 executable = "localhost/todoapp-orchestrator:latest"
