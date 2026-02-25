@@ -285,8 +285,8 @@ impl Registry for InMemoryRegistry {
             .cloned()
     }
 
-    fn agent_id(&self, name: &str) -> ResourceId {
-        self.agent_id_internal(name)
+    fn agent_id(&self, name: &str) -> Option<ResourceId> {
+        Some(self.agent_id_internal(name))
     }
 
     fn model_id(&self, name: &str) -> ResourceId {

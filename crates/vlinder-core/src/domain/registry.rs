@@ -178,7 +178,7 @@ pub trait Registry: Send + Sync {
     }
 
     /// Get the registry-issued ID for an agent name.
-    fn agent_id(&self, name: &str) -> ResourceId;
+    fn agent_id(&self, name: &str) -> Option<ResourceId>;
 
     /// Get an agent by ID.
     fn get_agent(&self, id: &ResourceId) -> Option<Agent>;

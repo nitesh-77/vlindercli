@@ -31,7 +31,7 @@ fn agent_registration() {
     registry.register_runtime(RuntimeType::Container);
 
     // Agent not found initially
-    let agent_id = registry.agent_id("echo-agent");
+    let agent_id = registry.agent_id("echo-agent").unwrap();
     assert!(registry.get_agent(&agent_id).is_none());
 
     // Register agent — registry assigns identity

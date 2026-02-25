@@ -98,7 +98,7 @@ impl Registry for PersistentRegistry {
         Ok(())
     }
 
-    fn agent_id(&self, name: &str) -> ResourceId {
+    fn agent_id(&self, name: &str) -> Option<ResourceId> {
         self.inner.agent_id(name)
     }
 

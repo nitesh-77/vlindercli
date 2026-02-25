@@ -141,7 +141,7 @@ impl Registry for GrpcRegistryClient {
         response.into_inner().agent.and_then(|a| a.try_into().ok())
     }
 
-    fn agent_id(&self, name: &str) -> ResourceId {
+    fn agent_id(&self, name: &str) -> Option<ResourceId> {
         // Query the server — only it knows its registry_id.
         let request = proto::GetAgentByNameRequest {
             name: name.to_string(),
@@ -151,14 +151,10 @@ impl Registry for GrpcRegistryClient {
             self.client.lock().unwrap()
                 .get_agent_by_name(request)
                 .await
-        }).expect("agent_id: registry server unreachable");
+        }).ok()?;
 
-        let agent = response.into_inner().agent
-            .unwrap_or_else(|| panic!("agent_id: agent '{}' not found on server", name));
-
-        agent.id
-            .unwrap_or_else(|| panic!("agent_id: server returned agent '{}' without id", name))
-            .into()
+        let agent = response.into_inner().agent?;
+        Some(agent.id?.into())
     }
 
     fn select_runtime(&self, agent: &Agent) -> Option<RuntimeType> {
