@@ -8,14 +8,17 @@
 //!
 //! The only input is the `InvokeMessage`.
 
+use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use tiny_http::{Method, StatusCode};
 use vlinder_core::domain::{
-    HttpMethod, InvokeMessage, MessageQueue, ObjectStorageType, Provider, ProviderHost, ProviderRoute,
-    RequestDiagnostics, RequestMessage, SequenceCounter, ServiceType,
+    AgentId, ContainerDiagnostics, DelegateDiagnostics, DelegateMessage,
+    HttpMethod, InvokeMessage, MessageQueue, Nonce, ObjectStorageType,
+    Provider, ProviderHost, ProviderRoute, Registry, RequestDiagnostics,
+    RequestMessage, RoutingKey, SequenceCounter, ServiceType,
     VectorStorageType,
 };
 
@@ -46,15 +49,16 @@ impl ProviderServer {
     ///
     /// Connects to the registry, looks up the agent from `invoke.agent_id`,
     /// checks which providers are needed, connects to the queue, and serves
-    /// their hostnames. Returns `None` if the agent doesn't need any providers.
+    /// their hostnames. Always starts — even agents with no provider services
+    /// need the server for delegation endpoints.
     pub fn start(invoke: &InvokeMessage) -> Option<Self> {
-        let (hosts, queue, invoke, initial_state) = build_context(invoke)?;
+        let (hosts, queue, registry, invoke, initial_state) = build_context(invoke);
 
         let server = tiny_http::Server::http("0.0.0.0:80")
             .expect("failed to bind provider server on port 80");
         tracing::info!(event = "provider_server.listening", port = 80, "Provider server started");
 
-        Some(Self::start_request_loop(server, hosts, queue, invoke, initial_state))
+        Some(Self::start_request_loop(server, hosts, queue, registry, invoke, initial_state))
     }
 
     /// Read the final state hash after an invocation completes.
@@ -70,6 +74,7 @@ impl ProviderServer {
         server: tiny_http::Server,
         hosts: Vec<ProviderHost>,
         queue: Arc<dyn MessageQueue + Send + Sync>,
+        registry: Arc<dyn Registry>,
         invoke: InvokeMessage,
         initial_state: Option<String>,
     ) -> Self {
@@ -82,7 +87,7 @@ impl ProviderServer {
         let state_clone = Arc::clone(&state);
 
         let thread = std::thread::spawn(move || {
-            request_loop(should_stop, server, hosts, queue, invoke, state_clone);
+            request_loop(should_stop, server, hosts, queue, registry, invoke, state_clone);
         });
 
         Self { shutdown_signal, thread: Some(thread), state }
@@ -92,37 +97,46 @@ impl ProviderServer {
 /// The main request loop — runs on a background thread for the lifetime of
 /// an invoke.
 ///
-/// Each incoming HTTP request is matched against the virtual host table
-/// and forwarded to the message queue. Sequence numbers and state are
-/// tracked across requests within the invoke. Runs until `should_stop`
-/// is set to `true` or the server encounters an error.
+/// Each incoming HTTP request is either:
+/// - routed to `runtime.vlinder.local` for delegation (delegate/wait), or
+/// - matched against the virtual host table and forwarded to the message queue.
+///
+/// Sequence numbers and state are tracked across requests within the invoke.
+/// Runs until `should_stop` is set to `true` or the server encounters an error.
 fn request_loop(
     should_stop: Arc<AtomicBool>,
     server: tiny_http::Server,
     hosts: Vec<ProviderHost>,
     queue: Arc<dyn MessageQueue + Send + Sync>,
+    registry: Arc<dyn Registry>,
     invoke: InvokeMessage,
     state: Arc<RwLock<Option<String>>>,
 ) {
     let sequence = SequenceCounter::new();
+    let mut pending_replies: HashMap<String, RoutingKey> = HashMap::new();
 
     while !should_stop.load(Ordering::Relaxed) {
         match server.recv_timeout(Duration::from_millis(100)) {
             Ok(Some(mut request)) => {
+                let method = request.method().clone();
                 let host = extract_host(&request).to_string();
                 let path = request.url().to_string();
                 tracing::info!(
                     event = "provider_server.request_received",
-                    host = %host, path = %path, method = %request.method(),
+                    host = %host, path = %path, method = %method,
                     "Provider server received request"
                 );
 
                 let mut body = Vec::new();
                 let _ = request.as_reader().read_to_end(&mut body);
 
-                let (status, response_body) = match match_route(&hosts, request.method(), &host, &path, &body) {
-                    Ok(route) => forward_to_queue(&*queue, &invoke, &sequence, &state, route, body),
-                    Err(err) => err,
+                let (status, response_body) = if host == "runtime.vlinder.local" {
+                    handle_runtime_request(&*queue, &*registry, &invoke, &mut pending_replies, &method, &path, &body)
+                } else {
+                    match match_route(&hosts, &method, &host, &path, &body) {
+                        Ok(route) => forward_to_queue(&*queue, &invoke, &sequence, &state, route, body),
+                        Err(err) => err,
+                    }
                 };
 
                 tracing::info!(
@@ -141,12 +155,13 @@ fn request_loop(
     tracing::info!(event = "provider_server.stopped", "Provider server stopped");
 }
 
-/// Build the provider server context: hosts, queue, and invoke.
+/// Build the provider server context: hosts, queue, registry, and invoke.
 ///
 /// Reads config from env, connects to the registry, looks up the agent,
 /// checks its service requirements, and connects to the message queue.
-/// Returns `None` if the agent doesn't need any providers.
-fn build_context(invoke: &InvokeMessage) -> Option<(Vec<ProviderHost>, Arc<dyn MessageQueue + Send + Sync>, InvokeMessage, Option<String>)> {
+/// Always returns a context — even agents with no provider services need
+/// the server for delegation endpoints on `runtime.vlinder.local`.
+fn build_context(invoke: &InvokeMessage) -> (Vec<ProviderHost>, Arc<dyn MessageQueue + Send + Sync>, Arc<dyn Registry>, InvokeMessage, Option<String>) {
     let config = SidecarConfig::from_env()
         .expect("failed to parse sidecar config from env");
     let registry = factory::connect_registry(&config.registry_url)
@@ -207,14 +222,10 @@ fn build_context(invoke: &InvokeMessage) -> Option<(Vec<ProviderHost>, Arc<dyn M
         initial_state = Some(invoke.state.clone().unwrap_or_default());
     }
 
-    if hosts.is_empty() {
-        return None;
-    }
-
     let queue = factory::connect_queue(&config.nats_url, &config.state_url)
         .expect("failed to connect to queue from provider server");
 
-    Some((hosts, queue, invoke.clone(), initial_state))
+    (hosts, queue, registry, invoke.clone(), initial_state)
 }
 
 /// Extract the Host header value from a request, or "" if absent.
@@ -225,6 +236,159 @@ fn extract_host(request: &tiny_http::Request) -> &str {
         .find(|h| h.field.as_str().as_str().eq_ignore_ascii_case("host"))
         .map(|h| h.value.as_str())
         .unwrap_or("")
+}
+
+// =========================================================================
+// Delegation handlers — runtime.vlinder.local
+// =========================================================================
+
+/// Dispatch requests to `runtime.vlinder.local`.
+///
+/// Routes POST /delegate and POST /wait; everything else is 404.
+fn handle_runtime_request(
+    queue: &dyn MessageQueue,
+    registry: &dyn Registry,
+    invoke: &InvokeMessage,
+    pending_replies: &mut HashMap<String, RoutingKey>,
+    method: &Method,
+    path: &str,
+    body: &[u8],
+) -> (u16, Vec<u8>) {
+    if *method == Method::Post && path == "/delegate" {
+        handle_delegate(queue, registry, invoke, pending_replies, body)
+    } else if *method == Method::Post && path == "/wait" {
+        handle_wait(queue, pending_replies, body)
+    } else {
+        (404, b"not found".to_vec())
+    }
+}
+
+/// Handle POST /delegate — enqueue a DelegateMessage, return a handle.
+///
+/// Expects JSON: `{"target": "<agent-name>", "input": "<payload>"}`.
+/// Validates the target exists in the registry, builds a DelegateMessage
+/// with a fresh nonce, sends it to the queue, and returns the nonce as
+/// the delegation handle for a subsequent /wait call.
+fn handle_delegate(
+    queue: &dyn MessageQueue,
+    registry: &dyn Registry,
+    invoke: &InvokeMessage,
+    pending_replies: &mut HashMap<String, RoutingKey>,
+    body: &[u8],
+) -> (u16, Vec<u8>) {
+    let parsed: serde_json::Value = match serde_json::from_slice(body) {
+        Ok(v) => v,
+        Err(e) => return (400, format!("invalid JSON: {}", e).into_bytes()),
+    };
+
+    let target_name = match parsed.get("target").and_then(|v| v.as_str()) {
+        Some(t) => t,
+        None => return (400, b"missing 'target' field".to_vec()),
+    };
+
+    let input = match parsed.get("input").and_then(|v| v.as_str()) {
+        Some(i) => i,
+        None => return (400, b"missing 'input' field".to_vec()),
+    };
+
+    // Fast-fail: target must be a registered agent.
+    if registry.get_agent_by_name(target_name).is_none() {
+        return (404, format!("target agent '{}' not found", target_name).into_bytes());
+    }
+
+    let caller = invoke.agent_id.clone();
+    let target = AgentId::new(target_name);
+    let nonce = Nonce::generate();
+
+    let delegate = DelegateMessage::new(
+        invoke.timeline.clone(),
+        invoke.submission.clone(),
+        invoke.session.clone(),
+        caller.clone(),
+        target.clone(),
+        input.as_bytes().to_vec(),
+        nonce.clone(),
+        None,
+        DelegateDiagnostics { container: ContainerDiagnostics::placeholder(0) },
+    );
+
+    let reply_key = delegate.reply_routing_key();
+    let handle = nonce.as_str().to_string();
+
+    tracing::info!(
+        event = "delegation.sent",
+        sha = %invoke.submission,
+        caller = %caller, target = %target,
+        nonce = %nonce, "Delegating to agent via provider server"
+    );
+
+    pending_replies.insert(handle.clone(), reply_key);
+
+    if let Err(e) = queue.send_delegate(delegate) {
+        return (502, format!("delegate send error: {}", e).into_bytes());
+    }
+
+    let response = format!(r#"{{"handle":"{}"}}"#, handle);
+    (200, response.into_bytes())
+}
+
+/// Handle POST /wait — block until a delegation reply arrives.
+///
+/// Expects JSON: `{"handle": "<nonce>"}`.
+/// Looks up the reply routing key from `pending_replies`, then polls
+/// `receive_delegate_reply` until the target agent's CompleteMessage
+/// arrives. Returns the raw output payload.
+fn handle_wait(
+    queue: &dyn MessageQueue,
+    pending_replies: &mut HashMap<String, RoutingKey>,
+    body: &[u8],
+) -> (u16, Vec<u8>) {
+    let parsed: serde_json::Value = match serde_json::from_slice(body) {
+        Ok(v) => v,
+        Err(e) => return (400, format!("invalid JSON: {}", e).into_bytes()),
+    };
+
+    let handle = match parsed.get("handle").and_then(|v| v.as_str()) {
+        Some(h) => h.to_string(),
+        None => return (400, b"missing 'handle' field".to_vec()),
+    };
+
+    let reply_key = match pending_replies.get(&handle) {
+        Some(k) => k.clone(),
+        None => return (404, format!("unknown delegation handle '{}'", handle).into_bytes()),
+    };
+
+    tracing::debug!(handle = %handle, "wait: polling for delegation result");
+    let poll_start = std::time::Instant::now();
+    let mut poll_count: u64 = 0;
+
+    loop {
+        match queue.receive_delegate_reply(&reply_key) {
+            Ok((complete, ack)) => {
+                let payload = complete.payload.clone();
+                let _ = ack();
+                pending_replies.remove(&handle);
+                tracing::info!(
+                    event = "delegation.completed",
+                    handle = %handle, polls = poll_count,
+                    elapsed = ?poll_start.elapsed(),
+                    "Delegation result received via provider server"
+                );
+                return (200, payload);
+            }
+            Err(_) => {
+                poll_count += 1;
+                if poll_count % 100 == 0 {
+                    tracing::warn!(
+                        handle = %handle, polls = poll_count,
+                        elapsed = ?poll_start.elapsed(),
+                        "wait: still waiting for delegation result"
+                    );
+                }
+            }
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
 }
 
 /// Match a request against the virtual host table (pure function).
