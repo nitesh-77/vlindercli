@@ -103,6 +103,24 @@ impl Agent {
         Self::from_manifest(manifest)
     }
 
+    /// Return a borrowed view of the user-declared configuration.
+    ///
+    /// Excludes registry-assigned fields (id, image_digest, public_key)
+    /// so two agents with the same declared config compare equal regardless
+    /// of registration state.
+    pub fn config(&self) -> AgentConfig<'_> {
+        AgentConfig {
+            name: &self.name,
+            description: &self.description,
+            runtime: &self.runtime,
+            executable: &self.executable,
+            requirements: &self.requirements,
+            prompts: &self.prompts,
+            object_storage: &self.object_storage,
+            vector_storage: &self.vector_storage,
+        }
+    }
+
     /// Check if this agent declares a model by alias.
     pub fn has_model(&self, alias: &str) -> bool {
         self.requirements.models.contains_key(alias)
@@ -112,6 +130,22 @@ impl Agent {
     pub fn model_name(&self, alias: &str) -> Option<&str> {
         self.requirements.models.get(alias).map(|s| s.as_str())
     }
+}
+
+/// Borrowed view of user-declared agent configuration.
+///
+/// Used for idempotency checks: two agents with identical configs are the
+/// same deployment, even if registry-assigned fields differ.
+#[derive(Debug, PartialEq)]
+pub struct AgentConfig<'a> {
+    pub name: &'a str,
+    pub description: &'a str,
+    pub runtime: &'a RuntimeType,
+    pub executable: &'a str,
+    pub requirements: &'a Requirements,
+    pub prompts: &'a Option<Prompts>,
+    pub object_storage: &'a Option<ResourceId>,
+    pub vector_storage: &'a Option<ResourceId>,
 }
 
 #[derive(Debug)]
@@ -292,5 +326,71 @@ mod tests {
         "#).unwrap();
 
         assert!(agent.model_name("nonexistent").is_none());
+    }
+
+    // ========================================================================
+    // AgentConfig
+    // ========================================================================
+
+    #[test]
+    fn config_equal_for_same_declaration() {
+        let a = make_agent(r#"
+            name = "echo"
+            description = "Echoes"
+            runtime = "container"
+            executable = "localhost/echo:latest"
+            [requirements]
+        "#).unwrap();
+
+        let b = make_agent(r#"
+            name = "echo"
+            description = "Echoes"
+            runtime = "container"
+            executable = "localhost/echo:latest"
+            [requirements]
+        "#).unwrap();
+
+        assert_eq!(a.config(), b.config());
+    }
+
+    #[test]
+    fn config_ignores_registry_assigned_fields() {
+        let mut a = make_agent(r#"
+            name = "echo"
+            description = "Echoes"
+            runtime = "container"
+            executable = "localhost/echo:latest"
+            [requirements]
+        "#).unwrap();
+
+        let b = a.clone();
+
+        // Simulate registry assigning fields
+        a.id = ResourceId::new("http://127.0.0.1:9000/agents/echo");
+        a.public_key = Some(vec![1, 2, 3]);
+
+        assert_ne!(a, b); // Agent-level equality sees the difference
+        assert_eq!(a.config(), b.config()); // Config-level equality ignores it
+    }
+
+    #[test]
+    fn config_differs_on_executable() {
+        let a = make_agent(r#"
+            name = "echo"
+            description = "Echoes"
+            runtime = "container"
+            executable = "localhost/echo:v1"
+            [requirements]
+        "#).unwrap();
+
+        let b = make_agent(r#"
+            name = "echo"
+            description = "Echoes"
+            runtime = "container"
+            executable = "localhost/echo:v2"
+            [requirements]
+        "#).unwrap();
+
+        assert_ne!(a.config(), b.config());
     }
 }

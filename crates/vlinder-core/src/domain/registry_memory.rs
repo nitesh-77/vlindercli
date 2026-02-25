@@ -104,9 +104,12 @@ impl Registry for InMemoryRegistry {
     fn register_agent(&self, mut agent: Agent) -> Result<(), RegistrationError> {
         let mut state = self.state.write().unwrap();
 
-        // Check name uniqueness
+        // Idempotency: same config → Ok, different config same name → error
         let agent_id = self.agent_id_internal(&agent.name);
-        if state.agents.contains_key(&agent_id) {
+        if let Some(existing) = state.agents.get(&agent_id) {
+            if existing.config() == agent.config() {
+                return Ok(());
+            }
             return Err(RegistrationError::DuplicateName(agent.name.clone()));
         }
 
@@ -736,6 +739,33 @@ mod tests {
 
         let result = registry.register_manifest(manifest2);
         assert!(matches!(result, Err(RegistrationError::ConfigMismatch(_))));
+    }
+
+    // --- register_agent idempotency ---
+
+    #[test]
+    fn register_agent_idempotent_same_config() {
+        let registry = InMemoryRegistry::new(test_secret_store());
+        registry.register_runtime(RuntimeType::Container);
+
+        let agent = minimal_agent("echo");
+        registry.register_agent(agent.clone()).unwrap();
+        registry.register_agent(agent).unwrap(); // should succeed
+    }
+
+    #[test]
+    fn register_agent_rejects_different_config_same_name() {
+        let registry = InMemoryRegistry::new(test_secret_store());
+        registry.register_runtime(RuntimeType::Container);
+
+        let agent1 = minimal_agent("echo");
+        registry.register_agent(agent1).unwrap();
+
+        let mut agent2 = minimal_agent("echo");
+        agent2.executable = "localhost/echo:v2".to_string();
+
+        let result = registry.register_agent(agent2);
+        assert!(matches!(result, Err(RegistrationError::DuplicateName(_))));
     }
 
     // --- Fleet registration tests ---
