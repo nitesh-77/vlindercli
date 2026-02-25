@@ -136,6 +136,41 @@ full platform awareness: Claude Code, Gemini, Codex, Cursor, Lovable,
 Copilot, Windsurf, and whatever ships next. The `.mcp.json` in the
 scaffolded project is the universal on-ramp.
 
+### MCPHarness: every agent is an MCP server
+
+The support fleet is not a special case. It's the first instance of a
+general pattern: **every agent and fleet deployed on Vlinder is
+automatically an MCP server.**
+
+The `MCPHarness` wraps the existing agent contract (HTTP health + invoke
+endpoints) in MCP protocol translation. The agent doesn't know or care —
+it receives invocations and returns responses as before. The harness
+handles the mapping:
+
+- MCP **tool calls** → agent invocations
+- Agent **responses** → MCP tool results
+- Fleet **delegation** → hidden behind a single MCP endpoint
+
+`vlinderd` becomes an MCP **router**. One MCP endpoint exposes every
+deployed agent and fleet as tools. The developer's `.mcp.json` points at
+one URL, and the tool surface grows with every deployed agent.
+
+What this means:
+
+- Build a code-review agent → it's instantly available as a tool in every
+  MCP-compatible IDE across the team
+- Build a fleet that triages bugs → Claude Code, Cursor, Gemini can call
+  it directly
+- Agents are composable not just within Vlinder (via delegation) but across
+  the entire MCP ecosystem
+- The support fleet from this ADR is just one fleet among many, not a
+  privileged special case
+
+The network effect: every agent deployed on Vlinder increases the tool
+surface available to every developer's coding assistant. The platform gets
+more valuable with every agent — not just for the author, but for everyone
+with access.
+
 ### The one-shot flow
 
 1. `vlinder agent new myagent` — scaffolds project with manifests, code
@@ -162,3 +197,9 @@ scaffolded project is the universal on-ramp.
   failure locks the developer out of platform knowledge
 - The support fleet's own conversations are observable in `~/.vlinder/`,
   making it possible to debug the debugger
+- Every deployed agent/fleet becomes an MCP tool — Vlinder is not just an
+  agent runtime but a tool distribution platform
+- `vlinderd` becomes an MCP router; one connection gives a coding tool
+  access to every agent the developer has deployed
+- Network effect: the platform's value grows with every deployed agent,
+  across every MCP-compatible tool
