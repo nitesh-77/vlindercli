@@ -78,7 +78,9 @@ Served by `vlinderd`, not a standalone binary. The MCP server is another
 capability of the daemon, alongside the registry, harness, runtime, and
 provider services.
 
-The server has four knowledge sources:
+The MCP server is backed by a **support agent fleet** — the platform's
+developer tooling runs on the platform itself. MCP requests route to
+specialist agents that reason over four knowledge sources:
 
 **1. Platform source (vlindercli).** Tree-sitter parses and indexes the
 vlindercli Rust source. This index is embedded at build time — same
@@ -86,25 +88,48 @@ version, same commit as the binary. The platform's own code is the source
 of truth for the container contract, provider hostnames, message types, and
 delegation protocol. No documentation to drift.
 
-**2. Runtime state (~/.vlinder/).** The MCP server reads the `.vlinder/`
+**2. Runtime state (~/.vlinder/).** The support fleet reads the `.vlinder/`
 directory: conversation payloads, logs, agent state. Today, debugging a
 failed agent means manually reading `~/.vlinder/conversations/*/payload`
-and `~/.vlinder/logs/`. The MCP server makes this queryable — any coding
-tool can ask "what happened?" instead of the developer spelunking through
-files. The platform dogfoods its own observability surface.
+and `~/.vlinder/logs/`. The fleet makes this queryable — any coding tool
+can ask "what happened?" instead of the developer spelunking through files.
+The platform dogfoods its own observability surface.
 
 **3. Agent code.** The developer's agent code, parsed live from disk with
 tree-sitter. Grammars ship for the languages agents are written in
 (Python, TypeScript, Go, etc.) plus TOML for manifests. This gives
-cross-referencing ability: the server knows what the platform offers (from
+cross-referencing ability: the fleet knows what the platform offers (from
 source #1) and what the developer's agent uses (from their code + TOML),
 and can bridge the two — flagging mismatches, suggesting wiring, answering
 structural questions.
 
 **4. Platform docs.** ADRs, README, and project documentation — embedded
-alongside the source. The server knows not just *what the code does* but
+alongside the source. The fleet knows not just *what the code does* but
 *why it was designed that way*. A coding tool can ask "how does delegation
 work?" and get both the implementation and the rationale.
+
+### Fallback: CLAUDE.md + SQLite RAG
+
+The support fleet requires a running daemon and healthy agents. When
+either is unavailable, the fallback path provides the same knowledge
+through static artifacts:
+
+- **CLAUDE.md** — the platform contract, checked into every scaffolded
+  project. Any coding tool can read it directly, no daemon needed.
+- **SQLite RAG** — embedded vectors over platform source, docs, and
+  runtime state. The same data the fleet agents query, pre-indexed into
+  the existing SQLite store. Direct access, no agent orchestration.
+
+Three tiers of availability:
+
+1. **Fleet running** — full reasoning, delegation, observable agent
+   conversations
+2. **Daemon running, fleet down** — MCP falls back to SQLite RAG queries
+3. **Nothing running** — CLAUDE.md in the repo
+
+The fleet doesn't add new data. It adds reasoning over data that's already
+queryable through SQLite. The fallback degrades gracefully from
+intelligence to retrieval to static docs.
 
 **Tool-agnostic.** MCP is an open protocol. Any tool that speaks MCP gets
 full platform awareness: Claude Code, Gemini, Codex, Cursor, Lovable,
@@ -130,6 +155,10 @@ scaffolded project is the universal on-ramp.
 - Platform source and docs are embedded in the binary, increasing binary
   size
 - The `.vlinder/` directory becomes a first-class API surface, not just
-  files on disk — the MCP server is how coding tools observe agent runs
-- The CLAUDE.md remains useful as a fallback when vlinderd isn't running,
-  but the MCP server is the primary channel for interactive development
+  files on disk
+- The support fleet is the platform's first dogfood consumer of fleets and
+  delegation — bugs in the fleet primitives surface here first
+- Graceful degradation: fleet → SQLite RAG → CLAUDE.md. No single point of
+  failure locks the developer out of platform knowledge
+- The support fleet's own conversations are observable in `~/.vlinder/`,
+  making it possible to debug the debugger
