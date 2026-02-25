@@ -10,11 +10,16 @@ use super::repl;
 
 #[derive(Subcommand, Debug, PartialEq)]
 pub enum FleetCommand {
-    /// Run a fleet interactively
-    Run {
+    /// Deploy a fleet manifest to the registry
+    Deploy {
         /// Path to fleet directory (default: current directory)
         #[arg(short, long)]
         path: Option<PathBuf>,
+    },
+    /// Run a deployed fleet interactively
+    Run {
+        /// Fleet name
+        name: String,
     },
     /// Create a new fleet from a template
     New {
@@ -25,7 +30,8 @@ pub enum FleetCommand {
 
 pub fn execute(cmd: FleetCommand) {
     match cmd {
-        FleetCommand::Run { path } => run(path),
+        FleetCommand::Deploy { path } => deploy(path),
+        FleetCommand::Run { name } => run(&name),
         FleetCommand::New { name } => scaffold(&name),
     }
 }
@@ -74,10 +80,11 @@ fn scaffold(name: &str) {
     println!("  mkdir -p agents");
     println!("  vlinder agent new <language> agents/<agent-name>");
     println!("  # repeat for each agent, then update fleet.toml");
-    println!("  vlinder fleet run");
+    println!("  vlinder fleet deploy");
+    println!("  vlinder fleet run {}", name);
 }
 
-pub fn run(path: Option<PathBuf>) {
+pub fn deploy(path: Option<PathBuf>) {
     let config = CliConfig::load();
     let fleet_path = path.unwrap_or_else(|| {
         std::env::current_dir().expect("Failed to get current directory")
@@ -95,8 +102,6 @@ pub fn run(path: Option<PathBuf>) {
             std::process::exit(1);
         });
 
-    let entry_name = manifest.entry.clone();
-
     // Deploy all agents in the fleet via registry gRPC
     let registry = connect_registry(&config);
 
@@ -113,7 +118,7 @@ pub fn run(path: Option<PathBuf>) {
                 eprintln!("Failed to deploy fleet agent '{}': {}", name, e);
                 std::process::exit(1);
             });
-        tracing::debug!(agent = %name, id = %agent.id, "Fleet agent deployed");
+        println!("  Agent: {} ({})", name, agent.id);
     }
 
     // Build Fleet from manifest + registry, then register
@@ -123,11 +128,29 @@ pub fn run(path: Option<PathBuf>) {
             std::process::exit(1);
         });
 
-    registry.register_fleet(fleet.clone())
+    let fleet_name = fleet.name.clone();
+    let entry_id = fleet.entry.clone();
+
+    registry.register_fleet(fleet)
         .unwrap_or_else(|e| {
             eprintln!("Failed to register fleet: {}", e);
             std::process::exit(1);
         });
+
+    println!("Deployed fleet '{}' (entry: {})", fleet_name, entry_id);
+}
+
+pub fn run(name: &str) {
+    let config = CliConfig::load();
+    let registry = connect_registry(&config);
+
+    let fleet = match registry.get_fleet(name) {
+        Some(f) => f,
+        None => {
+            eprintln!("Fleet '{}' not found — deploy it first with: vlinder fleet deploy", name);
+            std::process::exit(1);
+        }
+    };
 
     let entry_agent_id = fleet.entry.clone();
     let entry_agent_name = agent_routing_key(&entry_agent_id);
@@ -139,12 +162,12 @@ pub fn run(path: Option<PathBuf>) {
     let mut harness = connect_harness(&config);
     harness.start_session(&entry_agent_name);
 
-    tracing::debug!(fleet = %fleet.name, "Fleet deployed to distributed daemon");
+    tracing::debug!(fleet = %fleet.name, "Fleet session started");
 
     // Read state from the state service (ADR 079)
     apply_latest_state(&config, &mut *harness, &entry_agent_name);
 
-    println!("Fleet '{}' ready. Entry agent: {}", fleet.name, entry_name);
+    println!("Fleet '{}' ready. Entry agent: {}", fleet.name, entry_agent_name);
 
     // Run REPL with synchronous run_agent (ADR 092)
     repl::run(|input| {

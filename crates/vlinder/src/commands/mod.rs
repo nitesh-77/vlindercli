@@ -172,27 +172,46 @@ mod tests {
     }
 
     #[test]
-    fn cli_fleet_run_default_path() {
-        let cli = Cli::try_parse_from(["vlinder", "fleet", "run"]).unwrap();
+    fn cli_fleet_deploy_default_path() {
+        let cli = Cli::try_parse_from(["vlinder", "fleet", "deploy"]).unwrap();
         assert_eq!(
             cli.command,
             Command::Fleet {
-                cmd: fleet::FleetCommand::Run { path: None }
+                cmd: fleet::FleetCommand::Deploy { path: None }
             }
         );
     }
 
     #[test]
-    fn cli_fleet_run_with_path() {
-        let cli = Cli::try_parse_from(["vlinder", "fleet", "run", "-p", "/tmp/fleet"]).unwrap();
+    fn cli_fleet_deploy_with_path() {
+        let cli = Cli::try_parse_from(["vlinder", "fleet", "deploy", "-p", "/tmp/fleet"]).unwrap();
         assert_eq!(
             cli.command,
             Command::Fleet {
-                cmd: fleet::FleetCommand::Run {
+                cmd: fleet::FleetCommand::Deploy {
                     path: Some(PathBuf::from("/tmp/fleet")),
                 }
             }
         );
+    }
+
+    #[test]
+    fn cli_fleet_run_requires_name() {
+        let cli = Cli::try_parse_from(["vlinder", "fleet", "run", "my-fleet"]).unwrap();
+        assert_eq!(
+            cli.command,
+            Command::Fleet {
+                cmd: fleet::FleetCommand::Run {
+                    name: "my-fleet".to_string(),
+                }
+            }
+        );
+    }
+
+    #[test]
+    fn cli_fleet_run_without_name_fails() {
+        let result = Cli::try_parse_from(["vlinder", "fleet", "run"]);
+        assert!(result.is_err());
     }
 
     #[test]

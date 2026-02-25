@@ -31,7 +31,8 @@ pub fn execute() {
         std::process::exit(1);
     }
 
-    fleet::run(Some(fleet_path));
+    fleet::deploy(Some(fleet_path));
+    fleet::run("vlinder-support");
 }
 
 fn bundled_fleet_path() -> PathBuf {
