@@ -12,23 +12,30 @@ build-sidecar:
 
 # Build echo-container agent (OCI image via Podman)
 build-echo-container:
-    podman build -t localhost/echo-container:latest agents/echo-container/
+    podman build -t localhost/echo-container:latest fleets/todoapp/agents/echo-container/
 
 # Build openrouter-test agent (OCI image via Podman, exercises openrouter.vlinder.local)
 build-openrouter-test:
-    podman build -t localhost/openrouter-test:latest agents/openrouter-test/
+    podman build -t localhost/openrouter-test:latest fleets/todoapp/agents/openrouter-test/
 
 # Build sqlite-kv-test agent (OCI image via Podman, exercises sqlite-kv.vlinder.local)
 build-sqlite-kv-test:
-    podman build -t localhost/sqlite-kv-test:latest agents/sqlite-kv-test/
+    podman build -t localhost/sqlite-kv-test:latest fleets/todoapp/agents/sqlite-kv-test/
 
 # Build sqlite-vec-test agent (OCI image via Podman, exercises sqlite-vec.vlinder.local)
 build-sqlite-vec-test:
-    podman build -t localhost/sqlite-vec-test:latest agents/sqlite-vec-test/
+    podman build -t localhost/sqlite-vec-test:latest fleets/todoapp/agents/sqlite-vec-test/
 
 # Build ollama-test agent (OCI image via Podman, exercises all four ollama.vlinder.local endpoints)
 build-ollama-test:
-    podman build -t localhost/ollama-test:latest agents/ollama-test/
+    podman build -t localhost/ollama-test:latest fleets/todoapp/agents/ollama-test/
+
+# Build todoapp-orchestrator agent (OCI image via Podman, delegation smoke test)
+build-todoapp-orchestrator:
+    podman build -t localhost/todoapp-orchestrator:latest fleets/todoapp/agents/todoapp-orchestrator/
+
+# Build all todoapp fleet container images
+build-todoapp-fleet: build-todoapp-orchestrator build-echo-container build-sqlite-kv-test build-sqlite-vec-test build-ollama-test build-openrouter-test
 
 # Build todoapp agent (OCI image via Podman, OpenRouter integration test)
 build-todoapp:
@@ -40,13 +47,13 @@ build-pensieve-container:
 
 # Build support fleet agents (OCI images via Podman)
 build-support-agent:
-    podman build -t localhost/vlinder-support:latest agents/support-agent/
+    podman build -t localhost/vlinder-support:latest fleets/support/agents/support-agent/
 
 build-log-analyst:
-    podman build -t localhost/vlinder-log-analyst:latest agents/log-analyst/
+    podman build -t localhost/vlinder-log-analyst:latest fleets/support/agents/log-analyst/
 
 build-code-analyst:
-    podman build -t localhost/vlinder-code-analyst:latest agents/code-analyst/
+    podman build -t localhost/vlinder-code-analyst:latest fleets/support/agents/code-analyst/
 
 # Build all support fleet container images
 build-support-fleet: build-support-agent build-log-analyst build-code-analyst
@@ -56,7 +63,7 @@ build-support-fleet: build-support-agent build-log-analyst build-code-analyst
 # =============================================================================
 
 # Build everything needed to run agents: CLI + sidecar + agent container images
-build-everything: build build-sidecar build-todoapp build-echo-container build-openrouter-test build-ollama-test build-sqlite-vec-test build-sqlite-kv-test
+build-everything: build build-sidecar build-todoapp build-todoapp-fleet
 
 # Run a specific agent (usage: just run pensieve-container)
 # Uses ~/.vlinder by default (no VLINDER_DIR override needed)
@@ -107,9 +114,9 @@ clean-data:
     rm -f ~/.vlinder/*.db ~/.vlinder/*.db-shm ~/.vlinder/*.db-wal
     rm -rf ~/.vlinder/conversations
     rm -rf ~/.vlinder/state
-    find agents -name "*.db" -path "*/data/*" -delete
-    find agents -name "*.db-shm" -path "*/data/*" -delete
-    find agents -name "*.db-wal" -path "*/data/*" -delete
+    find agents fleets -name "*.db" -path "*/data/*" -delete
+    find agents fleets -name "*.db-shm" -path "*/data/*" -delete
+    find agents fleets -name "*.db-wal" -path "*/data/*" -delete
 
 # Full reset: clean slate for testing. Preserves ~/.vlinder/config.toml only.
 reset:
@@ -159,13 +166,13 @@ reset:
 
     # 5. Agent-local data directories
     echo "  Cleaning agent data..."
-    find agents -name "data" -type d -exec rm -rf {} + 2>/dev/null || true
+    find agents fleets -name "data" -type d -exec rm -rf {} + 2>/dev/null || true
     echo "  ✓ Agent data clean"
 
     # 6. Rust build artifacts
     echo "  Cleaning build artifacts..."
     cargo clean 2>/dev/null || true
-    rm -rf agents/*/target
+    rm -rf agents/*/target fleets/*/agents/*/target
     echo "  ✓ Build artifacts clean"
 
     echo ""

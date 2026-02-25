@@ -1,0 +1,20 @@
+name = "todoapp-fleet"
+entry = "todoapp-orchestrator"
+
+[agents.todoapp-orchestrator]
+path = "agents/todoapp-orchestrator"
+
+[agents.echo-container]
+path = "agents/echo-container"
+
+[agents.sqlite-kv-test]
+path = "agents/sqlite-kv-test"
+
+[agents.sqlite-vec-test]
+path = "agents/sqlite-vec-test"
+
+[agents.ollama-test]
+path = "agents/ollama-test"
+
+[agents.openrouter-test]
+path = "agents/openrouter-test"

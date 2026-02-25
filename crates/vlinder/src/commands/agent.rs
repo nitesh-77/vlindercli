@@ -4,7 +4,7 @@ use std::sync::Arc;
 use clap::{Subcommand, ValueEnum};
 
 use crate::config::CliConfig;
-use vlinder_core::domain::{AgentManifest, Harness, Registry};
+use vlinder_core::domain::{Agent, AgentManifest, Harness, Registry};
 
 use super::connect::{connect_harness, connect_registry, open_dag_store, read_latest_state};
 use super::repl;
@@ -88,9 +88,16 @@ fn deploy(path: Option<PathBuf>) {
         .expect("Failed to resolve agent path");
 
     let registry = connect_registry(&config);
+    let agent = deploy_agent_from_path(&absolute_path, &*registry);
 
-    // Load manifest from disk (CLI concern) and register via registry (ADR 103)
-    let manifest_path = absolute_path.join("agent.toml");
+    println!("Deployed: {} ({})", agent.name, agent.id);
+}
+
+/// Load an agent manifest from a directory, auto-deploy its models, and register it.
+///
+/// Shared by `agent deploy` and `fleet deploy`.
+pub(super) fn deploy_agent_from_path(agent_dir: &Path, registry: &dyn Registry) -> Agent {
+    let manifest_path = agent_dir.join("agent.toml");
     let manifest = AgentManifest::load(&manifest_path)
         .unwrap_or_else(|e| {
             eprintln!("Failed to load agent manifest: {:?}", e);
@@ -98,7 +105,7 @@ fn deploy(path: Option<PathBuf>) {
         });
 
     // Auto-deploy models from <agent_dir>/models/<name>.toml
-    match auto_deploy_models(&absolute_path, &manifest, &*registry) {
+    match auto_deploy_models(agent_dir, &manifest, registry) {
         Ok(deployed) => {
             for name in &deployed {
                 println!("  Model: {} (auto-deployed)", name);
@@ -110,13 +117,11 @@ fn deploy(path: Option<PathBuf>) {
         }
     }
 
-    let agent = registry.register_manifest(manifest)
+    registry.register_manifest(manifest)
         .unwrap_or_else(|e| {
             eprintln!("Failed to deploy agent: {}", e);
             std::process::exit(1);
-        });
-
-    println!("Deployed: {} ({})", agent.name, agent.id);
+        })
 }
 
 fn run(name: &str) {
@@ -334,7 +339,7 @@ fn patch_file(path: &PathBuf, from: &str, to: &str) {
 /// Models without a `.toml` file are skipped (they must already be registered).
 ///
 /// Returns the names of models that were auto-deployed.
-fn auto_deploy_models(
+pub(super) fn auto_deploy_models(
     agent_dir: &Path,
     manifest: &AgentManifest,
     registry: &dyn Registry,

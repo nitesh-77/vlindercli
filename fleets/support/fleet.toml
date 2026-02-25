@@ -2,10 +2,10 @@ name = "vlinder-support"
 entry = "support"
 
 [agents.support]
-path = "../../agents/support-agent"
+path = "agents/support-agent"
 
 [agents.log-analyst]
-path = "../../agents/log-analyst"
+path = "agents/log-analyst"
 
 [agents.code-analyst]
-path = "../../agents/code-analyst"
+path = "agents/code-analyst"

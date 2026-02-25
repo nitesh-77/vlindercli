@@ -34,6 +34,16 @@ pub enum ParseError {
     Validation(String),
 }
 
+impl std::fmt::Display for ParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ParseError::Io(e) => write!(f, "{}", e),
+            ParseError::Toml(e) => write!(f, "{}", e),
+            ParseError::Validation(e) => write!(f, "{}", e),
+        }
+    }
+}
+
 impl From<std::io::Error> for ParseError {
     fn from(e: std::io::Error) -> Self {
         ParseError::Io(e)
