@@ -7,6 +7,17 @@ use vlinder_proto::catalog_service::{GrpcCatalogClient, ping_catalog_service};
 use crate::config::CliConfig;
 use vlinder_core::domain::{Model, ModelCatalog, Registry};
 
+/// Load a model from a TOML manifest and register it with the registry.
+/// Used by `model add <path.toml>` and by `agent deploy` auto-discovery.
+pub fn load_and_register_model(path: &Path, registry: &dyn Registry) -> Result<Model, String> {
+    let model = Model::load(path)
+        .map_err(|e| format!("Failed to load model manifest '{}': {}", path.display(), e))?;
+    registry
+        .register_model(model.clone())
+        .map_err(|e| format!("Failed to register model: {}", e))?;
+    Ok(model)
+}
+
 #[derive(Subcommand, Debug, PartialEq)]
 pub enum ModelCommand {
     /// Add a model from a catalog
@@ -52,16 +63,25 @@ pub fn execute(cmd: ModelCommand) {
 
     match cmd {
         ModelCommand::Add { name, catalog, endpoint: _ } => {
-            let model = resolve_model(&name, &catalog, &config);
-            let Some(model) = model else { return };
-
             let registry = open_registry(&config);
             let Some(registry) = registry else { return };
 
-            if let Err(e) = registry.register_model(model.clone()) {
-                eprintln!("Failed to register model: {}", e);
-                return;
-            }
+            let model = if Path::new(&name).extension().is_some_and(|ext| ext == "toml") {
+                match load_and_register_model(Path::new(&name), &*registry) {
+                    Ok(m) => m,
+                    Err(e) => {
+                        eprintln!("{}", e);
+                        return;
+                    }
+                }
+            } else {
+                let Some(model) = resolve_from_catalog(&name, &catalog, &config) else { return };
+                if let Err(e) = registry.register_model(model.clone()) {
+                    eprintln!("Failed to register model: {}", e);
+                    return;
+                }
+                model
+            };
 
             println!("Added model '{}':", model.name);
             println!("  Type:   {:?}", model.model_type);
@@ -130,25 +150,15 @@ fn open_catalog(catalog_name: &str, config: &CliConfig) -> Option<Box<dyn ModelC
     }
 }
 
-/// Resolve a model from name — either a TOML manifest path or a catalog lookup.
-fn resolve_model(name: &str, catalog: &str, config: &CliConfig) -> Option<Model> {
-    if Path::new(name).extension().is_some_and(|ext| ext == "toml") {
-        match Model::load(Path::new(name)) {
-            Ok(m) => Some(m),
-            Err(e) => {
-                eprintln!("Failed to load model manifest '{}': {}", name, e);
-                None
-            }
-        }
-    } else {
-        let catalog = open_catalog(catalog, config)?;
+/// Resolve a model by name from a catalog backend (Ollama, OpenRouter).
+fn resolve_from_catalog(name: &str, catalog: &str, config: &CliConfig) -> Option<Model> {
+    let catalog = open_catalog(catalog, config)?;
 
-        match catalog.resolve(name) {
-            Ok(m) => Some(m),
-            Err(e) => {
-                eprintln!("Failed to resolve model '{}': {}", name, e);
-                None
-            }
+    match catalog.resolve(name) {
+        Ok(m) => Some(m),
+        Err(e) => {
+            eprintln!("Failed to resolve model '{}': {}", name, e);
+            None
         }
     }
 }
@@ -209,6 +219,89 @@ fn list_available(catalog_name: &str, filter: Option<&str>, config: &CliConfig) 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
+    use vlinder_core::domain::{InMemoryRegistry, InMemorySecretStore, Provider};
+
+    fn test_registry() -> Arc<InMemoryRegistry> {
+        let store = Arc::new(InMemorySecretStore::new());
+        Arc::new(InMemoryRegistry::new(store))
+    }
+
+    /// Write a model TOML that uses a URI model_path (no local file needed).
+    fn write_model_toml(dir: &Path, filename: &str, name: &str, provider: &str, model_path: &str) {
+        let models_dir = dir.join("models");
+        std::fs::create_dir_all(&models_dir).unwrap();
+        let content = format!(
+            "name = \"{name}\"\ntype = \"inference\"\nprovider = \"{provider}\"\nmodel_path = \"{model_path}\"\n"
+        );
+        std::fs::write(models_dir.join(filename), content).unwrap();
+    }
+
+    // ========================================================================
+    // load_and_register_model
+    // ========================================================================
+
+    #[test]
+    fn load_and_register_model_registers_from_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        write_model_toml(dir.path(), "claude-sonnet.toml", "claude-sonnet", "openrouter", "openrouter://anthropic/claude-sonnet-4");
+
+        let registry = test_registry();
+        registry.register_inference_engine(Provider::OpenRouter);
+
+        let model = load_and_register_model(
+            &dir.path().join("models/claude-sonnet.toml"),
+            &*registry,
+        ).unwrap();
+
+        assert_eq!(model.name, "claude-sonnet");
+        // Verify it's actually in the registry
+        assert!(registry.get_model("claude-sonnet").is_some());
+    }
+
+    #[test]
+    fn load_and_register_model_fails_on_missing_file() {
+        let registry = test_registry();
+        let result = load_and_register_model(Path::new("/nonexistent/model.toml"), &*registry);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn load_and_register_model_fails_when_engine_unavailable() {
+        let dir = tempfile::tempdir().unwrap();
+        write_model_toml(dir.path(), "claude-sonnet.toml", "claude-sonnet", "openrouter", "openrouter://anthropic/claude-sonnet-4");
+
+        let registry = test_registry();
+        // Don't register OpenRouter engine — should fail at register_model
+
+        let result = load_and_register_model(
+            &dir.path().join("models/claude-sonnet.toml"),
+            &*registry,
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Failed to register model"));
+    }
+
+    #[test]
+    fn load_and_register_model_is_idempotent() {
+        let dir = tempfile::tempdir().unwrap();
+        write_model_toml(dir.path(), "claude-sonnet.toml", "claude-sonnet", "openrouter", "openrouter://anthropic/claude-sonnet-4");
+
+        let registry = test_registry();
+        registry.register_inference_engine(Provider::OpenRouter);
+
+        let path = dir.path().join("models/claude-sonnet.toml");
+        let model1 = load_and_register_model(&path, &*registry).unwrap();
+        let model2 = load_and_register_model(&path, &*registry).unwrap();
+
+        assert_eq!(model1.name, model2.name);
+        // Still only one model in registry
+        assert_eq!(registry.get_models().len(), 1);
+    }
+
+    // ========================================================================
+    // CLI parsing
+    // ========================================================================
 
     #[test]
     fn parses_add_command() {

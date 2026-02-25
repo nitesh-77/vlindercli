@@ -79,7 +79,7 @@ pub use dag::{DagWorker, DagStore, DagNode, MessageType, Timeline, hash_dag_node
 // ============================================================================
 
 pub use path::{AbsolutePath, AbsoluteUri};
-pub use agent_manifest::{AgentManifest, ServiceConfig, Protocol};
+pub use agent_manifest::{AgentManifest, RequirementsConfig, ServiceConfig, Protocol};
 pub use provider::{Provider, HttpMethod, PayloadError, TypeValidator, ProviderRoute, ProviderHost};
 pub use fleet::{Fleet, LoadError as FleetLoadError};
 pub use fleet_manifest::{FleetManifest, ParseError as FleetManifestParseError};

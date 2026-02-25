@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use clap::{Subcommand, ValueEnum};
@@ -96,6 +96,19 @@ fn deploy(path: Option<PathBuf>) {
             eprintln!("Failed to load agent manifest: {:?}", e);
             std::process::exit(1);
         });
+
+    // Auto-deploy models from <agent_dir>/models/<name>.toml
+    match auto_deploy_models(&absolute_path, &manifest, &*registry) {
+        Ok(deployed) => {
+            for name in &deployed {
+                println!("  Model: {} (auto-deployed)", name);
+            }
+        }
+        Err(e) => {
+            eprintln!("{}", e);
+            std::process::exit(1);
+        }
+    }
 
     let agent = registry.register_manifest(manifest)
         .unwrap_or_else(|e| {
@@ -311,5 +324,178 @@ fn patch_file(path: &PathBuf, from: &str, to: &str) {
     if let Ok(content) = std::fs::read_to_string(path) {
         let patched = content.replace(from, to);
         let _ = std::fs::write(path, patched);
+    }
+}
+
+/// Auto-deploy models found in `<agent_dir>/models/` for each model in the manifest.
+///
+/// For each unique model name in `manifest.requirements.models`, checks if a
+/// corresponding `<agent_dir>/models/<name>.toml` exists. If so, loads and registers it.
+/// Models without a `.toml` file are skipped (they must already be registered).
+///
+/// Returns the names of models that were auto-deployed.
+fn auto_deploy_models(
+    agent_dir: &Path,
+    manifest: &AgentManifest,
+    registry: &dyn Registry,
+) -> Result<Vec<String>, String> {
+    let models_dir = agent_dir.join("models");
+    let model_names: std::collections::HashSet<&str> = manifest
+        .requirements
+        .models
+        .values()
+        .map(|s| s.as_str())
+        .collect();
+
+    let mut deployed = Vec::new();
+    for model_name in &model_names {
+        let model_toml = models_dir.join(format!("{}.toml", model_name));
+        if model_toml.exists() {
+            let model = super::model::load_and_register_model(&model_toml, registry)?;
+            deployed.push(model.name);
+        }
+    }
+    Ok(deployed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use vlinder_core::domain::{InMemoryRegistry, InMemorySecretStore, Provider};
+    use vlinder_core::domain::RequirementsConfig;
+
+    fn test_registry() -> Arc<InMemoryRegistry> {
+        let store = Arc::new(InMemorySecretStore::new());
+        Arc::new(InMemoryRegistry::new(store))
+    }
+
+    fn write_model_toml(dir: &Path, name: &str, provider: &str, model_path: &str) {
+        let models_dir = dir.join("models");
+        std::fs::create_dir_all(&models_dir).unwrap();
+        let content = format!(
+            "name = \"{name}\"\ntype = \"inference\"\nprovider = \"{provider}\"\nmodel_path = \"{model_path}\"\n"
+        );
+        std::fs::write(models_dir.join(format!("{}.toml", name)), content).unwrap();
+    }
+
+    fn manifest_with_models(models: Vec<(&str, &str)>) -> AgentManifest {
+        let mut model_map = std::collections::HashMap::new();
+        for (alias, name) in models {
+            model_map.insert(alias.to_string(), name.to_string());
+        }
+        AgentManifest {
+            name: "test-agent".to_string(),
+            description: "test".to_string(),
+            source: None,
+            runtime: "container".to_string(),
+            executable: "localhost/test:latest".to_string(),
+            requirements: RequirementsConfig {
+                models: model_map,
+                services: std::collections::HashMap::new(),
+            },
+            prompts: None,
+            object_storage: None,
+            vector_storage: None,
+        }
+    }
+
+    #[test]
+    fn auto_deploy_registers_discovered_models() {
+        let dir = tempfile::tempdir().unwrap();
+        write_model_toml(dir.path(), "claude-sonnet", "openrouter", "openrouter://anthropic/claude-sonnet-4");
+
+        let registry = test_registry();
+        registry.register_inference_engine(Provider::OpenRouter);
+
+        let manifest = manifest_with_models(vec![("inference_model", "claude-sonnet")]);
+        let deployed = auto_deploy_models(dir.path(), &manifest, &*registry).unwrap();
+
+        assert_eq!(deployed, vec!["claude-sonnet"]);
+        assert!(registry.get_model("claude-sonnet").is_some());
+    }
+
+    #[test]
+    fn auto_deploy_skips_models_without_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        // No models/ directory at all
+
+        let registry = test_registry();
+        let manifest = manifest_with_models(vec![("inference_model", "already-registered")]);
+        let deployed = auto_deploy_models(dir.path(), &manifest, &*registry).unwrap();
+
+        assert!(deployed.is_empty());
+    }
+
+    #[test]
+    fn auto_deploy_deduplicates_model_names() {
+        let dir = tempfile::tempdir().unwrap();
+        write_model_toml(dir.path(), "claude-sonnet", "openrouter", "openrouter://anthropic/claude-sonnet-4");
+
+        let registry = test_registry();
+        registry.register_inference_engine(Provider::OpenRouter);
+
+        // Two aliases pointing to the same model
+        let manifest = manifest_with_models(vec![
+            ("inference_model", "claude-sonnet"),
+            ("summary_model", "claude-sonnet"),
+        ]);
+        let deployed = auto_deploy_models(dir.path(), &manifest, &*registry).unwrap();
+
+        // Registered only once
+        assert_eq!(deployed.len(), 1);
+        assert_eq!(registry.get_models().len(), 1);
+    }
+
+    #[test]
+    fn auto_deploy_handles_multiple_models() {
+        let dir = tempfile::tempdir().unwrap();
+        write_model_toml(dir.path(), "claude-sonnet", "openrouter", "openrouter://anthropic/claude-sonnet-4");
+
+        // Write an embedding model TOML
+        let models_dir = dir.path().join("models");
+        std::fs::write(
+            models_dir.join("nomic-embed.toml"),
+            "name = \"nomic-embed\"\ntype = \"embedding\"\nprovider = \"ollama\"\nmodel_path = \"ollama://localhost:11434/nomic-embed-text:latest\"\n",
+        ).unwrap();
+
+        let registry = test_registry();
+        registry.register_inference_engine(Provider::OpenRouter);
+        registry.register_embedding_engine(Provider::Ollama);
+
+        let manifest = manifest_with_models(vec![
+            ("inference_model", "claude-sonnet"),
+            ("embedding_model", "nomic-embed"),
+        ]);
+        let mut deployed = auto_deploy_models(dir.path(), &manifest, &*registry).unwrap();
+        deployed.sort();
+
+        assert_eq!(deployed, vec!["claude-sonnet", "nomic-embed"]);
+        assert_eq!(registry.get_models().len(), 2);
+    }
+
+    #[test]
+    fn auto_deploy_with_no_required_models() {
+        let dir = tempfile::tempdir().unwrap();
+        let registry = test_registry();
+
+        let manifest = manifest_with_models(vec![]);
+        let deployed = auto_deploy_models(dir.path(), &manifest, &*registry).unwrap();
+
+        assert!(deployed.is_empty());
+    }
+
+    #[test]
+    fn auto_deploy_propagates_registration_error() {
+        let dir = tempfile::tempdir().unwrap();
+        write_model_toml(dir.path(), "claude-sonnet", "openrouter", "openrouter://anthropic/claude-sonnet-4");
+
+        let registry = test_registry();
+        // Don't register OpenRouter engine — registration should fail
+
+        let manifest = manifest_with_models(vec![("inference_model", "claude-sonnet")]);
+        let result = auto_deploy_models(dir.path(), &manifest, &*registry);
+
+        assert!(result.is_err());
     }
 }
