@@ -12,10 +12,9 @@ use vlinder_core::domain::{
     AgentId, CompleteMessage, ContainerDiagnostics, ContainerId, ContainerRuntimeInfo,
     ExpectsReply, HarnessType, ImageDigest, ImageRef, InvokeDiagnostics,
     InvokeMessage, MessageQueue, RoutingKey,
-    RuntimeType, SequenceCounter,
+    RuntimeType,
 };
 
-use crate::queue_bridge::QueueBridge;
 use crate::provider_server::ProviderServer;
 use crate::config::SidecarConfig;
 use crate::factory;
@@ -23,7 +22,6 @@ use crate::factory;
 /// The sidecar process — mediates between the platform queue and the agent container.
 pub struct Sidecar {
     queue: Arc<dyn MessageQueue + Send + Sync>,
-    bridge: Arc<QueueBridge>,
     /// Agent container port (localhost inside the pod).
     container_port: u16,
     /// Agent name (queue subscription key).
@@ -55,30 +53,8 @@ impl Sidecar {
             .map(|id| ContainerId::new(id))
             .unwrap_or_else(ContainerId::unknown);
 
-        // A placeholder invoke message. This will be updated per-invocation.
-        let placeholder_invoke = InvokeMessage::new(
-            vlinder_core::domain::TimelineId::main(),
-            vlinder_core::domain::SubmissionId::new(),
-            vlinder_core::domain::SessionId::new(),
-            HarnessType::Cli,
-            RuntimeType::Container,
-            AgentId::new("placeholder"),
-            Vec::new(),
-            None,
-            InvokeDiagnostics { harness_version: "".to_string(), history_turns: 0 },
-        );
-
-        let bridge = Arc::new(QueueBridge {
-            queue: Arc::clone(&queue),
-            registry: Arc::clone(&registry),
-            invoke: std::sync::RwLock::new(placeholder_invoke),
-            sequence: SequenceCounter::new(),
-            pending_replies: std::sync::RwLock::new(std::collections::HashMap::new()),
-        });
-
         Ok(Self {
             queue,
-            bridge,
             container_port: config.container_port,
             agent_name: config.agent.clone(),
             image_ref,
@@ -86,11 +62,6 @@ impl Sidecar {
             container_id,
             http_client: ureq::Agent::new(),
         })
-    }
-
-    /// Set the current invocation context for the QueueBridge.
-    fn set_context(&self, invoke: &InvokeMessage) {
-        self.bridge.update_invoke(invoke.clone());
     }
 
     /// Route a CompleteMessage to the correct destination.
@@ -109,7 +80,6 @@ impl Sidecar {
         reply_key: &Option<RoutingKey>,
     ) -> Result<(), String> {
         let started_at = Instant::now();
-        self.set_context(invoke);
 
         // Spawn provider server for this invoke — drops when this method returns.
         let provider_server = ProviderServer::start(invoke);

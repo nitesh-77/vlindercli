@@ -1,6 +1,6 @@
 # ADR 056: Fleet Execution and Agent-to-Agent Invocation
 
-**Status:** Draft
+**Status:** Accepted
 
 ## Context
 

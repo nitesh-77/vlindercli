@@ -1,6 +1,6 @@
 # ADR 074: Typed Agent Bridge Trait
 
-## Status: Draft
+## Status: Accepted (Superseded by provider server — ADR 090, 105)
 
 ## Context
 

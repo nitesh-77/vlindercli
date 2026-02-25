@@ -96,7 +96,7 @@ pub trait MessageQueue {
 
     /// Send a service request and block until the response arrives.
     ///
-    /// Used by agents (via sidecar/QueueBridge) for service calls.
+    /// Used by agents (via sidecar provider server) for service calls.
     fn call_service(&self, msg: RequestMessage) -> Result<ResponseMessage, QueueError> {
         let msg_for_recv = msg.clone();
         send_and_wait(

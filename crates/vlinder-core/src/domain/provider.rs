@@ -2,7 +2,7 @@
 //!
 //! Determines queue routing for inference and embedding requests.
 //! Used by Model (who serves it), ServiceConfig (what the agent declares),
-//! and QueueBridge (where to route requests).
+//! and the provider server (where to route requests).
 
 use serde::{Deserialize, Serialize};
 
