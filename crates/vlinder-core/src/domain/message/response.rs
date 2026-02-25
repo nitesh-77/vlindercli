@@ -12,7 +12,7 @@ use super::super::diagnostics::ServiceDiagnostics;
 /// Response message: Service → Runtime
 ///
 /// Service responds to a request, echoing all dimensions for traceability.
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct ResponseMessage {
     pub id: MessageId,
     pub protocol_version: String,

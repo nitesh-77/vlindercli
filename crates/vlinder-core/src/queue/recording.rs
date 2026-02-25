@@ -87,13 +87,8 @@ impl MessageQueue for RecordingQueue {
     }
 
     fn send_response(&self, msg: ResponseMessage) -> Result<(), QueueError> {
-        let observable = ObservableMessage::Response(msg);
-        self.record(&observable);
-        if let ObservableMessage::Response(msg) = observable {
-            self.inner.send_response(msg)
-        } else {
-            unreachable!()
-        }
+        self.record(&msg.clone().into());
+        self.inner.send_response(msg)
     }
 
     fn send_complete(&self, msg: CompleteMessage) -> Result<(), QueueError> {
