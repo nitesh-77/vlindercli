@@ -1,6 +1,6 @@
 # ADR 053: Configurable Service Call Timeouts
 
-**Status:** Proposed
+**Status:** Draft
 
 ## Context
 
