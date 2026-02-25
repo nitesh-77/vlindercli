@@ -217,7 +217,11 @@ fn row_to_timeline(row: &rusqlite::Row) -> Result<Timeline, rusqlite::Error> {
 fn row_to_dag_node(row: &rusqlite::Row) -> Result<DagNode, rusqlite::Error> {
     let mt_str: String = row.get(2)?;
     let message_type = MessageType::from_str(&mt_str)
-        .unwrap_or(MessageType::Invoke);
+        .ok_or_else(|| rusqlite::Error::FromSqlConversionFailure(
+            2,
+            rusqlite::types::Type::Text,
+            format!("unknown message type: {}", mt_str).into(),
+        ))?;
     let created_at_str: String = row.get(10)?;
     let created_at = DateTime::parse_from_rfc3339(&created_at_str)
         .map(|dt| dt.with_timezone(&Utc))
@@ -899,5 +903,22 @@ mod tests {
         let store = test_store();
         // Non-existent timeline → not sealed (no row → broken_at is None)
         assert!(!store.is_timeline_sealed(999).unwrap());
+    }
+
+    #[test]
+    fn unknown_message_type_returns_error() {
+        let store = test_store();
+        let conn = store.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO dag_nodes (hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state, protocol_version)
+             VALUES ('h1', '', 'bogus', 'cli', 'agent-a', 'sess-1', 'sub-1', x'', x'', x'', '2025-01-01T00:00:00Z', NULL, '')",
+            [],
+        ).unwrap();
+        drop(conn);
+
+        let result = store.get_node("h1");
+        assert!(result.is_err(), "unknown message type should error, not silently default");
+        let err = result.unwrap_err();
+        assert!(err.contains("unknown message type: bogus"), "error should name the bad value, got: {}", err);
     }
 }
