@@ -1,0 +1,13 @@
+name = "sales-advisor"
+description = "Go-to-market strategist advising on positioning, developer adoption, and messaging for vlindercli."
+runtime = "container"
+executable = "localhost/council-sales-advisor:latest"
+
+[requirements]
+
+[requirements.models]
+default = "gemini-flash"
+
+[requirements.services.infer]
+provider = "openrouter"
+protocol = "openai"

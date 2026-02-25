@@ -16,26 +16,26 @@ build-echo-container:
 
 # Build openrouter-test agent (OCI image via Podman, exercises openrouter.vlinder.local)
 build-openrouter-test:
-    podman build -t localhost/openrouter-test:latest fleets/todoapp/agents/openrouter-test/
+    podman build -t localhost/openrouter-test:latest agents/openrouter-test/
 
 # Build sqlite-kv-test agent (OCI image via Podman, exercises sqlite-kv.vlinder.local)
 build-sqlite-kv-test:
-    podman build -t localhost/sqlite-kv-test:latest fleets/todoapp/agents/sqlite-kv-test/
+    podman build -t localhost/sqlite-kv-test:latest agents/sqlite-kv-test/
 
 # Build sqlite-vec-test agent (OCI image via Podman, exercises sqlite-vec.vlinder.local)
 build-sqlite-vec-test:
-    podman build -t localhost/sqlite-vec-test:latest fleets/todoapp/agents/sqlite-vec-test/
+    podman build -t localhost/sqlite-vec-test:latest agents/sqlite-vec-test/
 
 # Build ollama-test agent (OCI image via Podman, exercises all four ollama.vlinder.local endpoints)
 build-ollama-test:
-    podman build -t localhost/ollama-test:latest fleets/todoapp/agents/ollama-test/
+    podman build -t localhost/ollama-test:latest agents/ollama-test/
 
 # Build todoapp-orchestrator agent (OCI image via Podman, delegation smoke test)
 build-todoapp-orchestrator:
     podman build -t localhost/todoapp-orchestrator:latest fleets/todoapp/agents/todoapp-orchestrator/
 
 # Build all todoapp fleet container images
-build-todoapp-fleet: build-todoapp-orchestrator build-echo-container build-sqlite-kv-test build-sqlite-vec-test build-ollama-test build-openrouter-test
+build-todoapp-fleet: build-todoapp-orchestrator build-echo-container
 
 # Build todoapp agent (OCI image via Podman, OpenRouter integration test)
 build-todoapp:
@@ -58,12 +58,28 @@ build-code-analyst:
 # Build all support fleet container images
 build-support-fleet: build-support-agent build-log-analyst build-code-analyst
 
+# Build council fleet agents (OCI images via Podman)
+build-council-orchestrator:
+    podman build -t localhost/council-orchestrator:latest fleets/council/agents/council-orchestrator/
+
+build-sales-advisor:
+    podman build -t localhost/council-sales-advisor:latest fleets/council/agents/sales-advisor/
+
+build-product-advisor:
+    podman build -t localhost/council-product-advisor:latest fleets/council/agents/product-advisor/
+
+build-architect-advisor:
+    podman build -t localhost/council-architect-advisor:latest fleets/council/agents/architect-advisor/
+
+# Build all council fleet container images
+build-council-fleet: build-council-orchestrator build-sales-advisor build-product-advisor build-architect-advisor
+
 # =============================================================================
 # Main Commands
 # =============================================================================
 
 # Build everything needed to run agents: CLI + sidecar + agent container images
-build-everything: build build-sidecar build-todoapp build-todoapp-fleet
+build-everything: build build-sidecar build-todoapp build-todoapp-fleet build-council-fleet
 
 # Run a specific agent (usage: just run pensieve-container)
 # Uses ~/.vlinder by default (no VLINDER_DIR override needed)

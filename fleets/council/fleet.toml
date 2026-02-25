@@ -1,0 +1,14 @@
+name = "council-fleet"
+entry = "council-orchestrator"
+
+[agents.council-orchestrator]
+path = "agents/council-orchestrator"
+
+[agents.sales-advisor]
+path = "agents/sales-advisor"
+
+[agents.product-advisor]
+path = "agents/product-advisor"
+
+[agents.architect-advisor]
+path = "agents/architect-advisor"

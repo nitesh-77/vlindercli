@@ -154,8 +154,44 @@ impl ContainerRuntime {
         let pod_id = self.podman.pod_create(&pod_name, &host_aliases)
             .map_err(|e| e.to_string())?;
 
+        // From here on, if anything fails we must remove the orphaned pod.
+        // Otherwise the next tick will try pod_create again and get "already exists".
+        if let Err(e) = self.start_in_pod(name, &pod_id, run_target, &image_ref) {
+            tracing::warn!(
+                event = "pod.cleanup",
+                agent = %name,
+                pod = %pod_id,
+                "Removing orphaned pod after start failure"
+            );
+            self.podman.pod_stop_and_remove(&pod_id, 0);
+            return Err(e);
+        }
+
+        tracing::info!(
+            event = "pod.started",
+            agent = %name,
+            pod = %pod_id,
+            image_ref = %image_ref,
+            "Pod started (agent + sidecar)"
+        );
+
+        self.pods.insert(name.to_string(), Pod { pod_id });
+        Ok(())
+    }
+
+    /// Populate and start a pod that has already been created.
+    ///
+    /// Adds the agent container, the sidecar container, and starts the pod.
+    /// Called by `start()` — if this fails, `start()` cleans up the orphaned pod.
+    fn start_in_pod(
+        &self,
+        name: &str,
+        pod_id: &PodId,
+        run_target: RunTarget<'_>,
+        image_ref: &ImageRef,
+    ) -> Result<(), String> {
         // 2. Add agent container (no env vars, no port mapping — shared network in pod)
-        self.podman.container_in_pod(run_target, &pod_id, &[])
+        self.podman.container_in_pod(run_target, pod_id, &[])
             .map_err(|e| e.to_string())?;
 
         // 3. Build sidecar env vars
@@ -176,7 +212,7 @@ impl ContainerRuntime {
             extract_port(&self.config.distributed.state_addr, 9092)
         );
 
-        let image_digest_str = self.podman.image_digest(&image_ref)
+        let image_digest_str = self.podman.image_digest(image_ref)
             .map(|d| String::from(d))
             .unwrap_or_default();
 
@@ -194,22 +230,13 @@ impl ContainerRuntime {
             .collect();
 
         // 4. Add sidecar container
-        self.podman.container_in_pod(sidecar_target, &pod_id, &env_refs)
+        self.podman.container_in_pod(sidecar_target, pod_id, &env_refs)
             .map_err(|e| e.to_string())?;
 
         // 5. Start the pod (all containers start together)
-        self.podman.pod_start(&pod_id)
+        self.podman.pod_start(pod_id)
             .map_err(|e| e.to_string())?;
 
-        tracing::info!(
-            event = "pod.started",
-            agent = %name,
-            pod = %pod_id,
-            image_ref = %image_ref,
-            "Pod started (agent + sidecar)"
-        );
-
-        self.pods.insert(name.to_string(), Pod { pod_id });
         Ok(())
     }
 
