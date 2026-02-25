@@ -1,11 +1,10 @@
-use std::path::{Path, PathBuf};
-use vlinderd::domain::{Fleet, FleetManifest};
+use std::collections::HashMap;
+use std::sync::Arc;
 
-const FLEET_FIXTURES: &str = "tests/fixtures/fleets";
-
-fn fleet_fixture(name: &str) -> PathBuf {
-    Path::new(FLEET_FIXTURES).join(name)
-}
+use vlinderd::domain::{
+    Fleet, FleetManifest, InMemoryRegistry, Registry,
+    RuntimeType, InMemorySecretStore, SecretStore,
+};
 
 // ============================================================================
 // FleetManifest Tests (inline TOML - no fixtures needed)
@@ -66,73 +65,415 @@ fn manifest_fails_for_missing_required_field() {
 }
 
 // ============================================================================
-// Fleet Tests (need fixtures for directory structure validation)
+// Fleet Tests (from_manifest + registry)
 // ============================================================================
 
+fn test_secret_store() -> Arc<dyn SecretStore> {
+    Arc::new(InMemorySecretStore::new())
+}
+
+fn test_registry_with_agents(agent_names: &[&str]) -> Arc<InMemoryRegistry> {
+    let registry = Arc::new(InMemoryRegistry::new(test_secret_store()));
+    registry.register_runtime(RuntimeType::Container);
+
+    for name in agent_names {
+        let agent = minimal_agent(name);
+        registry.restore_agent(agent).unwrap();
+    }
+    registry
+}
+
+fn minimal_agent(name: &str) -> vlinderd::domain::Agent {
+    use vlinderd::domain::Requirements;
+
+    vlinderd::domain::Agent {
+        id: vlinderd::domain::Agent::placeholder_id(name),
+        name: name.to_string(),
+        description: format!("{} agent", name),
+        source: None,
+        runtime: RuntimeType::Container,
+        executable: format!("localhost/{}:latest", name),
+        image_digest: None,
+        public_key: None,
+        object_storage: None,
+        vector_storage: None,
+        requirements: Requirements {
+            models: HashMap::new(),
+            services: HashMap::new(),
+        },
+        prompts: None,
+    }
+}
+
+fn test_manifest() -> FleetManifest {
+    parse_fleet_manifest(r#"
+        name = "test-fleet"
+        entry = "echo"
+
+        [agents.echo]
+        path = "agents/echo"
+
+        [agents.upper]
+        path = "agents/upper"
+    "#).unwrap()
+}
+
 #[test]
-fn fleet_load_parses_manifest() {
-    let fleet = Fleet::load(&fleet_fixture("test-fleet")).unwrap();
+fn fleet_from_manifest_resolves_agent_ids() {
+    let registry = test_registry_with_agents(&["echo", "upper"]);
+    let manifest = test_manifest();
+
+    let fleet = Fleet::from_manifest(manifest, &*registry).unwrap();
+
     assert_eq!(fleet.name, "test-fleet");
-    assert_eq!(fleet.entry, "echo");
+    assert_eq!(fleet.agents.len(), 2);
+    // Entry should be echo's registry ID
+    assert!(fleet.entry.as_str().contains("echo"));
 }
 
 #[test]
-fn fleet_load_fails_for_missing_manifest() {
-    let result = Fleet::load(Path::new("nonexistent-fleet"));
+fn fleet_from_manifest_fails_when_agent_not_registered() {
+    let registry = test_registry_with_agents(&["echo"]); // "upper" missing
+    let manifest = test_manifest();
+
+    let result = Fleet::from_manifest(manifest, &*registry);
     assert!(result.is_err());
+    let err = format!("{}", result.unwrap_err());
+    assert!(err.contains("upper"), "error should mention missing agent: {}", err);
 }
 
 #[test]
-fn fleet_load_fails_when_entry_not_in_agents() {
-    let result = Fleet::load(&fleet_fixture("invalid-entry-fleet"));
+fn fleet_from_manifest_fails_when_entry_not_registered() {
+    let registry = test_registry_with_agents(&["upper"]); // "echo" (entry) missing
+    let manifest = test_manifest();
+
+    let result = Fleet::from_manifest(manifest, &*registry);
     assert!(result.is_err());
-}
-
-#[test]
-fn fleet_load_fails_when_agent_path_missing() {
-    let result = Fleet::load(&fleet_fixture("missing-agent-fleet"));
-    assert!(result.is_err());
-}
-
-#[test]
-fn fleet_project_dir_set_from_load_path() {
-    let fleet = Fleet::load(&fleet_fixture("test-fleet")).unwrap();
-    assert!(fleet.project_dir.ends_with("test-fleet"));
+    let err = format!("{}", result.unwrap_err());
+    assert!(err.contains("echo"), "error should mention missing entry agent: {}", err);
 }
 
 #[test]
 fn fleet_has_agent() {
-    let fleet = Fleet::load(&fleet_fixture("test-fleet")).unwrap();
-    assert!(fleet.has_agent("echo"));
-    assert!(fleet.has_agent("upper"));
-    assert!(!fleet.has_agent("nonexistent"));
+    let registry = test_registry_with_agents(&["echo", "upper"]);
+    let manifest = test_manifest();
+    let fleet = Fleet::from_manifest(manifest, &*registry).unwrap();
+
+    // Fleet stores ResourceIds, has_agent checks by ResourceId string content
+    let echo_id = registry.agent_id("echo").unwrap();
+    let upper_id = registry.agent_id("upper").unwrap();
+    assert!(fleet.agents.contains(&echo_id));
+    assert!(fleet.agents.contains(&upper_id));
 }
 
 #[test]
-fn fleet_agent_path() {
-    let fleet = Fleet::load(&fleet_fixture("test-fleet")).unwrap();
-    let path = fleet.agent_path("echo").unwrap();
-    assert!(path.ends_with("agents/echo-agent"));
+fn fleet_has_placeholder_id_before_registration() {
+    let registry = test_registry_with_agents(&["echo", "upper"]);
+    let manifest = test_manifest();
+    let fleet = Fleet::from_manifest(manifest, &*registry).unwrap();
+
+    assert!(fleet.id.as_str().contains("pending-registration://fleets/test-fleet"));
+}
+
+// ============================================================================
+// Fleet Registration Tests
+// ============================================================================
+
+#[test]
+fn register_fleet_assigns_registry_id() {
+    let registry = test_registry_with_agents(&["echo", "upper"]);
+    let manifest = test_manifest();
+    let fleet = Fleet::from_manifest(manifest, &*registry).unwrap();
+
+    registry.register_fleet(fleet).unwrap();
+
+    let stored = registry.get_fleet("test-fleet").unwrap();
+    assert!(stored.id.as_str().contains("/fleets/test-fleet"));
+    assert!(!stored.id.as_str().contains("pending-registration"));
 }
 
 #[test]
-fn fleet_build_context_lists_non_entry_agents() {
-    let fleet = Fleet::load(&fleet_fixture("test-fleet")).unwrap();
-    let context = fleet.build_context().unwrap();
+fn register_fleet_idempotent() {
+    let registry = test_registry_with_agents(&["echo", "upper"]);
 
-    // Context should mention the fleet name
-    assert!(context.contains("test-fleet"), "context: {}", context);
+    let fleet1 = Fleet::from_manifest(test_manifest(), &*registry).unwrap();
+    let fleet2 = Fleet::from_manifest(test_manifest(), &*registry).unwrap();
 
-    // Context should list "upper" (non-entry agent) but not "echo" (entry agent)
-    assert!(context.contains("upper"), "context should list non-entry agent: {}", context);
-    assert!(context.contains("uppercases"), "context should include agent description: {}", context);
-    assert!(!context.contains("- echo:"), "context should NOT list entry agent: {}", context);
+    registry.register_fleet(fleet1).unwrap();
+    // Second registration of same fleet should succeed
+    registry.register_fleet(fleet2).unwrap();
 }
 
 #[test]
-fn fleet_agents_iterator() {
-    let fleet = Fleet::load(&fleet_fixture("test-fleet")).unwrap();
-    let agent_names: Vec<&str> = fleet.agents().map(|(name, _)| name).collect();
-    assert!(agent_names.contains(&"echo"));
-    assert!(agent_names.contains(&"upper"));
+fn get_fleets_returns_all() {
+    let registry = test_registry_with_agents(&["echo", "upper"]);
+    let fleet = Fleet::from_manifest(test_manifest(), &*registry).unwrap();
+    registry.register_fleet(fleet).unwrap();
+
+    let fleets = registry.get_fleets();
+    assert_eq!(fleets.len(), 1);
+    assert_eq!(fleets[0].name, "test-fleet");
+}
+
+#[test]
+fn get_fleet_returns_none_for_missing() {
+    let registry = test_registry_with_agents(&["echo"]);
+    assert!(registry.get_fleet("nonexistent").is_none());
+}
+
+// ============================================================================
+// Fleet from_manifest — Edge Cases
+// ============================================================================
+
+#[test]
+fn fleet_from_manifest_entry_is_in_agents_set() {
+    let registry = test_registry_with_agents(&["echo", "upper"]);
+    let manifest = test_manifest();
+    let fleet = Fleet::from_manifest(manifest, &*registry).unwrap();
+
+    // The entry agent's ResourceId must be present in the agents set
+    assert!(fleet.agents.contains(&fleet.entry));
+}
+
+#[test]
+fn fleet_from_manifest_single_agent_fleet() {
+    let registry = test_registry_with_agents(&["solo"]);
+    let manifest: FleetManifest = parse_fleet_manifest(r#"
+        name = "solo-fleet"
+        entry = "solo"
+
+        [agents.solo]
+        path = "agents/solo"
+    "#).unwrap();
+
+    let fleet = Fleet::from_manifest(manifest, &*registry).unwrap();
+    assert_eq!(fleet.agents.len(), 1);
+    assert_eq!(fleet.entry, registry.agent_id("solo").unwrap());
+}
+
+#[test]
+fn fleet_from_manifest_many_agents() {
+    let names = &["coordinator", "researcher", "writer", "reviewer", "publisher"];
+    let registry = test_registry_with_agents(names);
+    let manifest: FleetManifest = parse_fleet_manifest(r#"
+        name = "big-fleet"
+        entry = "coordinator"
+
+        [agents.coordinator]
+        path = "agents/coordinator"
+
+        [agents.researcher]
+        path = "agents/researcher"
+
+        [agents.writer]
+        path = "agents/writer"
+
+        [agents.reviewer]
+        path = "agents/reviewer"
+
+        [agents.publisher]
+        path = "agents/publisher"
+    "#).unwrap();
+
+    let fleet = Fleet::from_manifest(manifest, &*registry).unwrap();
+    assert_eq!(fleet.agents.len(), 5);
+    for name in names {
+        let id = registry.agent_id(name).unwrap();
+        assert!(fleet.agents.contains(&id), "fleet should contain agent '{}'", name);
+    }
+}
+
+#[test]
+fn fleet_from_manifest_all_agents_missing() {
+    // Registry has no agents at all
+    let registry = test_registry_with_agents(&[]);
+    let manifest: FleetManifest = parse_fleet_manifest(r#"
+        name = "ghost-fleet"
+        entry = "missing"
+
+        [agents.missing]
+        path = "agents/missing"
+    "#).unwrap();
+
+    let result = Fleet::from_manifest(manifest, &*registry);
+    assert!(result.is_err());
+    let err = format!("{}", result.unwrap_err());
+    assert!(err.contains("missing"), "error should mention missing agent: {}", err);
+}
+
+#[test]
+fn fleet_agents_count_matches_manifest() {
+    let registry = test_registry_with_agents(&["a", "b", "c"]);
+    let manifest: FleetManifest = parse_fleet_manifest(r#"
+        name = "counted"
+        entry = "a"
+
+        [agents.a]
+        path = "agents/a"
+
+        [agents.b]
+        path = "agents/b"
+
+        [agents.c]
+        path = "agents/c"
+    "#).unwrap();
+
+    let expected_count = manifest.agents.len();
+    let fleet = Fleet::from_manifest(manifest, &*registry).unwrap();
+    assert_eq!(fleet.agents.len(), expected_count);
+}
+
+// ============================================================================
+// Fleet Registration — Edge Cases
+// ============================================================================
+
+#[test]
+fn register_fleet_rejects_config_mismatch_different_entry() {
+    let registry = test_registry_with_agents(&["echo", "upper"]);
+
+    let fleet1 = Fleet::from_manifest(test_manifest(), &*registry).unwrap();
+    registry.register_fleet(fleet1).unwrap();
+
+    // Build a fleet with same agents but different entry
+    let manifest2: FleetManifest = parse_fleet_manifest(r#"
+        name = "test-fleet"
+        entry = "upper"
+
+        [agents.echo]
+        path = "agents/echo"
+
+        [agents.upper]
+        path = "agents/upper"
+    "#).unwrap();
+    let fleet2 = Fleet::from_manifest(manifest2, &*registry).unwrap();
+
+    let result = registry.register_fleet(fleet2);
+    assert!(result.is_err());
+    match result.unwrap_err() {
+        vlinderd::domain::RegistrationError::FleetConfigMismatch(name) => {
+            assert_eq!(name, "test-fleet");
+        }
+        other => panic!("expected FleetConfigMismatch, got: {}", other),
+    }
+}
+
+#[test]
+fn register_fleet_rejects_config_mismatch_different_agents() {
+    let registry = test_registry_with_agents(&["echo", "upper", "third"]);
+
+    let fleet1 = Fleet::from_manifest(test_manifest(), &*registry).unwrap();
+    registry.register_fleet(fleet1).unwrap();
+
+    // Build a fleet with same name and entry, but a different agent set
+    let manifest2: FleetManifest = parse_fleet_manifest(r#"
+        name = "test-fleet"
+        entry = "echo"
+
+        [agents.echo]
+        path = "agents/echo"
+
+        [agents.third]
+        path = "agents/third"
+    "#).unwrap();
+    let fleet2 = Fleet::from_manifest(manifest2, &*registry).unwrap();
+
+    let result = registry.register_fleet(fleet2);
+    assert!(result.is_err());
+    match result.unwrap_err() {
+        vlinderd::domain::RegistrationError::FleetConfigMismatch(name) => {
+            assert_eq!(name, "test-fleet");
+        }
+        other => panic!("expected FleetConfigMismatch, got: {}", other),
+    }
+}
+
+#[test]
+fn fleet_name_preserved_through_registration() {
+    let registry = test_registry_with_agents(&["echo", "upper"]);
+    let fleet = Fleet::from_manifest(test_manifest(), &*registry).unwrap();
+
+    assert_eq!(fleet.name, "test-fleet");
+    registry.register_fleet(fleet).unwrap();
+
+    let stored = registry.get_fleet("test-fleet").unwrap();
+    assert_eq!(stored.name, "test-fleet");
+}
+
+#[test]
+fn multiple_fleets_can_share_agents() {
+    let registry = test_registry_with_agents(&["shared", "only-a", "only-b"]);
+
+    let manifest_a: FleetManifest = parse_fleet_manifest(r#"
+        name = "fleet-a"
+        entry = "shared"
+
+        [agents.shared]
+        path = "agents/shared"
+
+        [agents.only-a]
+        path = "agents/only-a"
+    "#).unwrap();
+
+    let manifest_b: FleetManifest = parse_fleet_manifest(r#"
+        name = "fleet-b"
+        entry = "shared"
+
+        [agents.shared]
+        path = "agents/shared"
+
+        [agents.only-b]
+        path = "agents/only-b"
+    "#).unwrap();
+
+    let fleet_a = Fleet::from_manifest(manifest_a, &*registry).unwrap();
+    let fleet_b = Fleet::from_manifest(manifest_b, &*registry).unwrap();
+
+    registry.register_fleet(fleet_a).unwrap();
+    registry.register_fleet(fleet_b).unwrap();
+
+    assert_eq!(registry.get_fleets().len(), 2);
+
+    // Both fleets contain the shared agent
+    let shared_id = registry.agent_id("shared").unwrap();
+    assert!(registry.get_fleet("fleet-a").unwrap().agents.contains(&shared_id));
+    assert!(registry.get_fleet("fleet-b").unwrap().agents.contains(&shared_id));
+}
+
+// ============================================================================
+// Fleet::placeholder_id format
+// ============================================================================
+
+#[test]
+fn placeholder_id_has_expected_format() {
+    let id = Fleet::placeholder_id("my-fleet");
+    assert_eq!(id.as_str(), "pending-registration://fleets/my-fleet");
+}
+
+// ============================================================================
+// LoadError Display
+// ============================================================================
+
+#[test]
+fn load_error_display_io() {
+    let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
+    let err = vlinderd::domain::FleetLoadError::Io(io_err);
+    let msg = format!("{}", err);
+    assert!(msg.contains("IO error"));
+    assert!(msg.contains("file not found"));
+}
+
+#[test]
+fn load_error_display_parse() {
+    let err = vlinderd::domain::FleetLoadError::Parse("bad toml".to_string());
+    let msg = format!("{}", err);
+    assert!(msg.contains("parse error"));
+    assert!(msg.contains("bad toml"));
+}
+
+#[test]
+fn load_error_display_validation() {
+    let err = vlinderd::domain::FleetLoadError::Validation("entry not found".to_string());
+    let msg = format!("{}", err);
+    assert!(msg.contains("validation error"));
+    assert!(msg.contains("entry not found"));
 }

@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
 
 use super::{
-    Agent, AgentManifest, Job, JobId, JobStatus, Model, ModelType,
+    Agent, AgentManifest, Fleet, Job, JobId, JobStatus, Model, ModelType,
     ObjectStorageType, Provider, RegistrationError, Registry, ResourceId, RuntimeType,
     SecretStore, ServiceType, SubmissionId, VectorStorageType,
     ensure_agent_identity,
@@ -19,6 +19,7 @@ struct RegistryState {
     /// Stored manifests keyed by agent name (ADR 102).
     manifests: HashMap<String, AgentManifest>,
     models: HashMap<ResourceId, Model>,
+    fleets: HashMap<String, Fleet>,
     available_runtimes: HashSet<RuntimeType>,
     available_object_storage: HashSet<ObjectStorageType>,
     available_vector_storage: HashSet<VectorStorageType>,
@@ -44,6 +45,7 @@ impl InMemoryRegistry {
                 agents: HashMap::new(),
                 manifests: HashMap::new(),
                 models: HashMap::new(),
+                fleets: HashMap::new(),
                 available_runtimes: HashSet::new(),
                 available_object_storage: HashSet::new(),
                 available_vector_storage: HashSet::new(),
@@ -286,7 +288,13 @@ impl Registry for InMemoryRegistry {
     }
 
     fn agent_id(&self, name: &str) -> Option<ResourceId> {
-        Some(self.agent_id_internal(name))
+        let id = self.agent_id_internal(name);
+        let state = self.state.read().unwrap();
+        if state.agents.contains_key(&id) {
+            Some(id)
+        } else {
+            None
+        }
     }
 
     fn model_id(&self, name: &str) -> ResourceId {
@@ -312,6 +320,53 @@ impl Registry for InMemoryRegistry {
 
         state.models.remove(&model_id);
         Ok(true)
+    }
+
+    // --- Fleet operations ---
+
+    fn register_fleet(&self, mut fleet: Fleet) -> Result<(), RegistrationError> {
+        let mut state = self.state.write().unwrap();
+
+        // Idempotency: same fleet → Ok, different fleet same name → error
+        if let Some(existing) = state.fleets.get(&fleet.name) {
+            if existing.agents == fleet.agents && existing.entry == fleet.entry {
+                return Ok(());
+            }
+            return Err(RegistrationError::FleetConfigMismatch(fleet.name.clone()));
+        }
+
+        // Validate all referenced agents are registered
+        for agent_id in &fleet.agents {
+            if !state.agents.contains_key(agent_id) {
+                return Err(RegistrationError::FleetAgentNotRegistered(
+                    fleet.name.clone(),
+                    agent_id.as_str().to_string(),
+                ));
+            }
+        }
+
+        // Validate entry agent is in the agents set
+        if !fleet.agents.contains(&fleet.entry) {
+            return Err(RegistrationError::FleetAgentNotRegistered(
+                fleet.name.clone(),
+                fleet.entry.as_str().to_string(),
+            ));
+        }
+
+        // Assign registry identity
+        fleet.id = ResourceId::new(format!("{}/fleets/{}", self.registry_id.as_str(), fleet.name));
+        state.fleets.insert(fleet.name.clone(), fleet);
+        Ok(())
+    }
+
+    fn get_fleet(&self, name: &str) -> Option<Fleet> {
+        let state = self.state.read().unwrap();
+        state.fleets.get(name).cloned()
+    }
+
+    fn get_fleets(&self) -> Vec<Fleet> {
+        let state = self.state.read().unwrap();
+        state.fleets.values().cloned().collect()
     }
 
     // --- Job operations ---
@@ -681,5 +736,204 @@ mod tests {
 
         let result = registry.register_manifest(manifest2);
         assert!(matches!(result, Err(RegistrationError::ConfigMismatch(_))));
+    }
+
+    // --- Fleet registration tests ---
+
+    fn make_fleet(registry: &InMemoryRegistry, name: &str, entry: &str, agent_names: &[&str]) -> Fleet {
+        let entry_id = registry.agent_id(entry).unwrap();
+        let agents: HashSet<ResourceId> = agent_names.iter()
+            .map(|n| registry.agent_id(n).unwrap())
+            .collect();
+        Fleet {
+            id: Fleet::placeholder_id(name),
+            name: name.to_string(),
+            entry: entry_id,
+            agents,
+        }
+    }
+
+    #[test]
+    fn get_fleets_empty_initially() {
+        let registry = InMemoryRegistry::new(test_secret_store());
+        assert!(registry.get_fleets().is_empty());
+    }
+
+    #[test]
+    fn get_fleet_returns_none_for_unknown() {
+        let registry = InMemoryRegistry::new(test_secret_store());
+        assert!(registry.get_fleet("nonexistent").is_none());
+    }
+
+    #[test]
+    fn register_fleet_with_valid_agents() {
+        let registry = InMemoryRegistry::new(test_secret_store());
+        registry.restore_agent(minimal_agent("alpha")).unwrap();
+        registry.restore_agent(minimal_agent("beta")).unwrap();
+
+        let fleet = make_fleet(&registry, "my-fleet", "alpha", &["alpha", "beta"]);
+        registry.register_fleet(fleet).unwrap();
+
+        let stored = registry.get_fleet("my-fleet").unwrap();
+        assert_eq!(stored.name, "my-fleet");
+        assert_eq!(stored.agents.len(), 2);
+    }
+
+    #[test]
+    fn register_fleet_assigns_registry_id() {
+        let registry = InMemoryRegistry::new(test_secret_store());
+        registry.restore_agent(minimal_agent("solo")).unwrap();
+
+        let fleet = make_fleet(&registry, "test", "solo", &["solo"]);
+        assert!(fleet.id.as_str().contains("pending-registration"));
+
+        registry.register_fleet(fleet).unwrap();
+
+        let stored = registry.get_fleet("test").unwrap();
+        assert!(stored.id.as_str().contains("/fleets/test"));
+        assert!(!stored.id.as_str().contains("pending-registration"));
+    }
+
+    #[test]
+    fn register_fleet_validates_agents_exist() {
+        let registry = InMemoryRegistry::new(test_secret_store());
+        registry.restore_agent(minimal_agent("real")).unwrap();
+
+        // Build a fleet referencing both a real and a fake agent
+        let real_id = registry.agent_id("real").unwrap();
+        let fake_id = ResourceId::new("http://127.0.0.1:9000/agents/fake");
+        let fleet = Fleet {
+            id: Fleet::placeholder_id("bad-fleet"),
+            name: "bad-fleet".to_string(),
+            entry: real_id.clone(),
+            agents: HashSet::from([real_id, fake_id]),
+        };
+
+        let result = registry.register_fleet(fleet);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            RegistrationError::FleetAgentNotRegistered(fleet_name, agent_ref) => {
+                assert_eq!(fleet_name, "bad-fleet");
+                assert!(agent_ref.contains("fake"));
+            }
+            other => panic!("expected FleetAgentNotRegistered, got: {}", other),
+        }
+    }
+
+    #[test]
+    fn register_fleet_validates_entry_in_agents() {
+        let registry = InMemoryRegistry::new(test_secret_store());
+        registry.restore_agent(minimal_agent("worker")).unwrap();
+        registry.restore_agent(minimal_agent("entry-only")).unwrap();
+
+        // Fleet has "worker" in agents but "entry-only" as entry — entry not in agents set
+        let entry_id = registry.agent_id("entry-only").unwrap();
+        let worker_id = registry.agent_id("worker").unwrap();
+        let fleet = Fleet {
+            id: Fleet::placeholder_id("bad-entry"),
+            name: "bad-entry".to_string(),
+            entry: entry_id,
+            agents: HashSet::from([worker_id]),
+        };
+
+        let result = registry.register_fleet(fleet);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            RegistrationError::FleetAgentNotRegistered(fleet_name, agent_ref) => {
+                assert_eq!(fleet_name, "bad-entry");
+                assert!(agent_ref.contains("entry-only"));
+            }
+            other => panic!("expected FleetAgentNotRegistered, got: {}", other),
+        }
+    }
+
+    #[test]
+    fn register_fleet_idempotent_same_config() {
+        let registry = InMemoryRegistry::new(test_secret_store());
+        registry.restore_agent(minimal_agent("a")).unwrap();
+
+        let fleet1 = make_fleet(&registry, "idempotent", "a", &["a"]);
+        let fleet2 = make_fleet(&registry, "idempotent", "a", &["a"]);
+
+        registry.register_fleet(fleet1).unwrap();
+        registry.register_fleet(fleet2).unwrap(); // should succeed
+    }
+
+    #[test]
+    fn register_fleet_rejects_config_mismatch_different_entry() {
+        let registry = InMemoryRegistry::new(test_secret_store());
+        registry.restore_agent(minimal_agent("a")).unwrap();
+        registry.restore_agent(minimal_agent("b")).unwrap();
+
+        let fleet1 = make_fleet(&registry, "mismatch", "a", &["a", "b"]);
+        registry.register_fleet(fleet1).unwrap();
+
+        // Same name and agents, different entry
+        let fleet2 = make_fleet(&registry, "mismatch", "b", &["a", "b"]);
+        let result = registry.register_fleet(fleet2);
+        assert!(matches!(result, Err(RegistrationError::FleetConfigMismatch(_))));
+    }
+
+    #[test]
+    fn register_fleet_rejects_config_mismatch_different_agents() {
+        let registry = InMemoryRegistry::new(test_secret_store());
+        registry.restore_agent(minimal_agent("a")).unwrap();
+        registry.restore_agent(minimal_agent("b")).unwrap();
+        registry.restore_agent(minimal_agent("c")).unwrap();
+
+        let fleet1 = make_fleet(&registry, "mismatch", "a", &["a", "b"]);
+        registry.register_fleet(fleet1).unwrap();
+
+        // Same name and entry, different agent set
+        let fleet2 = make_fleet(&registry, "mismatch", "a", &["a", "c"]);
+        let result = registry.register_fleet(fleet2);
+        assert!(matches!(result, Err(RegistrationError::FleetConfigMismatch(_))));
+    }
+
+    #[test]
+    fn register_fleet_single_agent() {
+        let registry = InMemoryRegistry::new(test_secret_store());
+        registry.restore_agent(minimal_agent("solo")).unwrap();
+
+        let fleet = make_fleet(&registry, "solo-fleet", "solo", &["solo"]);
+        registry.register_fleet(fleet).unwrap();
+
+        let stored = registry.get_fleet("solo-fleet").unwrap();
+        assert_eq!(stored.agents.len(), 1);
+        assert_eq!(stored.entry, registry.agent_id("solo").unwrap());
+    }
+
+    #[test]
+    fn register_fleet_multiple_fleets() {
+        let registry = InMemoryRegistry::new(test_secret_store());
+        registry.restore_agent(minimal_agent("a")).unwrap();
+        registry.restore_agent(minimal_agent("b")).unwrap();
+        registry.restore_agent(minimal_agent("c")).unwrap();
+
+        let fleet1 = make_fleet(&registry, "fleet-1", "a", &["a", "b"]);
+        let fleet2 = make_fleet(&registry, "fleet-2", "b", &["b", "c"]);
+
+        registry.register_fleet(fleet1).unwrap();
+        registry.register_fleet(fleet2).unwrap();
+
+        assert_eq!(registry.get_fleets().len(), 2);
+        assert!(registry.get_fleet("fleet-1").is_some());
+        assert!(registry.get_fleet("fleet-2").is_some());
+    }
+
+    #[test]
+    fn get_fleet_returns_correct_data() {
+        let registry = InMemoryRegistry::new(test_secret_store());
+        registry.restore_agent(minimal_agent("x")).unwrap();
+        registry.restore_agent(minimal_agent("y")).unwrap();
+
+        let fleet = make_fleet(&registry, "lookup-test", "x", &["x", "y"]);
+        registry.register_fleet(fleet).unwrap();
+
+        let stored = registry.get_fleet("lookup-test").unwrap();
+        assert_eq!(stored.name, "lookup-test");
+        assert_eq!(stored.entry, registry.agent_id("x").unwrap());
+        assert!(stored.agents.contains(&registry.agent_id("x").unwrap()));
+        assert!(stored.agents.contains(&registry.agent_id("y").unwrap()));
     }
 }

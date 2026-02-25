@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::domain::{Agent, AgentLoadError, Fleet, FleetLoadError, Model, ModelLoadError};
+use crate::domain::{Agent, AgentLoadError, FleetManifest, FleetManifestParseError, Model, ModelLoadError};
 
 // ============================================================================
 // Public API (free functions that dispatch by URI scheme)
@@ -13,9 +13,9 @@ pub fn load_agent(uri: &str) -> Result<Agent, LoadError> {
     }
 }
 
-pub fn load_fleet(uri: &str) -> Result<Fleet, LoadError> {
+pub fn load_fleet_manifest(uri: &str) -> Result<FleetManifest, LoadError> {
     match parse_scheme(uri) {
-        "file" => FileLoader.load_fleet(uri),
+        "file" => FileLoader.load_fleet_manifest(uri),
         scheme => Err(LoadError::NotFound(format!("unknown scheme: {}", scheme))),
     }
 }
@@ -35,10 +35,10 @@ fn parse_scheme(uri: &str) -> &str {
 // Trait and Implementations
 // ============================================================================
 
-/// Loads agents, fleets, and models from URIs.
+/// Loads agents, fleet manifests, and models from URIs.
 pub trait Loader {
     fn load_agent(&self, uri: &str) -> Result<Agent, LoadError>;
-    fn load_fleet(&self, uri: &str) -> Result<Fleet, LoadError>;
+    fn load_fleet_manifest(&self, uri: &str) -> Result<FleetManifest, LoadError>;
     fn load_model(&self, uri: &str) -> Result<Model, LoadError>;
 }
 
@@ -57,9 +57,10 @@ impl Loader for FileLoader {
         Agent::load(path).map_err(LoadError::from)
     }
 
-    fn load_fleet(&self, uri: &str) -> Result<Fleet, LoadError> {
+    fn load_fleet_manifest(&self, uri: &str) -> Result<FleetManifest, LoadError> {
         let path = Path::new(Self::uri_to_path(uri));
-        Fleet::load(path).map_err(LoadError::from)
+        let manifest_path = path.join("fleet.toml");
+        FleetManifest::load(&manifest_path).map_err(LoadError::from)
     }
 
     fn load_model(&self, uri: &str) -> Result<Model, LoadError> {
@@ -101,13 +102,12 @@ impl From<AgentLoadError> for LoadError {
 }
 
 
-impl From<FleetLoadError> for LoadError {
-    fn from(e: FleetLoadError) -> Self {
+impl From<FleetManifestParseError> for LoadError {
+    fn from(e: FleetManifestParseError) -> Self {
         match e {
-            FleetLoadError::Io(e) => LoadError::Io(e),
-            FleetLoadError::Parse(s) => LoadError::Parse(s),
-            FleetLoadError::Validation(s) => LoadError::Validation(s),
-            FleetLoadError::PathNotFound(s) => LoadError::NotFound(s),
+            FleetManifestParseError::Io(e) => LoadError::Io(e),
+            FleetManifestParseError::Toml(s) => LoadError::Parse(s),
+            FleetManifestParseError::Validation(s) => LoadError::Validation(s),
         }
     }
 }
@@ -152,8 +152,8 @@ mod tests {
     }
 
     #[test]
-    fn load_fleet_fails_for_missing_uri() {
-        let result = load_fleet("file:///nonexistent/path");
+    fn load_fleet_manifest_fails_for_missing_uri() {
+        let result = load_fleet_manifest("file:///nonexistent/path");
         assert!(result.is_err());
     }
 

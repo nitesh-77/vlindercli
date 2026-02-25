@@ -12,7 +12,7 @@
 //! - `PersistentRegistry` — `crate::registry`
 //! - `GrpcRegistryClient` — `crate::registry_service`
 
-use crate::domain::{Agent, AgentManifest, Model, ObjectStorageType, Provider, ResourceId, RuntimeType, VectorStorageType};
+use crate::domain::{Agent, AgentManifest, Fleet, Model, ObjectStorageType, Provider, ResourceId, RuntimeType, VectorStorageType};
 
 /// Unique identifier for a submitted job.
 ///
@@ -94,6 +94,12 @@ pub enum RegistrationError {
     IdentityFailed(String),
     /// Persistence operation failed (disk I/O, database error, etc.).
     Persistence(String),
+    /// Fleet with this name is already registered.
+    FleetDuplicateName(String),
+    /// Fleet with this name exists but the definition differs.
+    FleetConfigMismatch(String),
+    /// Fleet references an agent that is not registered.
+    FleetAgentNotRegistered(String, String),
     /// Error forwarded from a remote registry (gRPC).
     /// Contains the server's error message as-is — already user-friendly.
     Remote(String),
@@ -135,6 +141,11 @@ impl std::fmt::Display for RegistrationError {
             RegistrationError::ModelInUse(name, agents) => write!(f, "model '{}' is in use by agents: {}", name, agents.join(", ")),
             RegistrationError::IdentityFailed(msg) => write!(f, "identity provisioning failed: {}", msg),
             RegistrationError::Persistence(msg) => write!(f, "persistence error: {}", msg),
+            RegistrationError::FleetDuplicateName(name) => write!(f, "fleet already registered: {}", name),
+            RegistrationError::FleetConfigMismatch(name) => write!(f, "fleet '{}' already registered with different configuration", name),
+            RegistrationError::FleetAgentNotRegistered(fleet, agent) => {
+                write!(f, "fleet '{}' references agent '{}' which is not registered\n\nDeploy the agent first: vlinder agent deploy", fleet, agent)
+            }
             RegistrationError::Remote(msg) => write!(f, "{}", msg),
         }
     }
@@ -260,6 +271,17 @@ pub trait Registry: Send + Sync {
     /// Get all pending jobs.
     fn pending_jobs(&self) -> Vec<Job>;
 
+    // --- Fleet operations ---
+
+    /// Register a fleet after validating all agents are registered.
+    fn register_fleet(&self, fleet: Fleet) -> Result<(), RegistrationError>;
+
+    /// Get a fleet by name.
+    fn get_fleet(&self, name: &str) -> Option<Fleet>;
+
+    /// Get all registered fleets.
+    fn get_fleets(&self) -> Vec<Fleet>;
+
     // --- Capability registration ---
 
     fn register_runtime(&self, runtime_type: RuntimeType);
@@ -360,5 +382,37 @@ mod tests {
     fn display_remote_passes_through() {
         let err = RegistrationError::Remote("server said no".into());
         assert_eq!(format!("{}", err), "server said no");
+    }
+
+    // ========================================================================
+    // RegistrationError Display — Fleet variants
+    // ========================================================================
+
+    #[test]
+    fn display_fleet_duplicate_name() {
+        let err = RegistrationError::FleetDuplicateName("my-fleet".into());
+        let msg = format!("{}", err);
+        assert!(msg.contains("my-fleet"));
+        assert!(msg.contains("already registered"));
+    }
+
+    #[test]
+    fn display_fleet_config_mismatch() {
+        let err = RegistrationError::FleetConfigMismatch("my-fleet".into());
+        let msg = format!("{}", err);
+        assert!(msg.contains("my-fleet"));
+        assert!(msg.contains("different configuration"));
+    }
+
+    #[test]
+    fn display_fleet_agent_not_registered() {
+        let err = RegistrationError::FleetAgentNotRegistered(
+            "my-fleet".into(),
+            "http://127.0.0.1:9000/agents/missing".into(),
+        );
+        let msg = format!("{}", err);
+        assert!(msg.contains("my-fleet"));
+        assert!(msg.contains("missing"));
+        assert!(msg.contains("not registered"));
     }
 }

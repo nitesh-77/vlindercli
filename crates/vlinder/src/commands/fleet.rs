@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use clap::Subcommand;
 
 use crate::config::CliConfig;
-use vlinder_core::domain::{AgentManifest, Fleet, Harness, agent_routing_key};
+use vlinder_core::domain::{AgentManifest, Fleet, FleetManifest, Harness, agent_routing_key};
 
 use super::connect::{connect_harness, connect_registry, open_dag_store, read_latest_state};
 use super::repl;
@@ -87,58 +87,64 @@ pub fn run(path: Option<PathBuf>) {
         .canonicalize()
         .expect("Failed to resolve fleet path");
 
-    // Load fleet definition
-    let fleet = Fleet::load(&absolute_path)
+    // Load fleet manifest from disk
+    let manifest_path = absolute_path.join("fleet.toml");
+    let manifest = FleetManifest::load(&manifest_path)
         .unwrap_or_else(|e| {
-            eprintln!("Failed to load fleet: {}", e);
+            eprintln!("Failed to load fleet manifest: {:?}", e);
             std::process::exit(1);
         });
 
-    // Build fleet context for the entry agent
-    let fleet_context = fleet.build_context()
-        .unwrap_or_else(|e| {
-            eprintln!("Failed to build fleet context: {}", e);
-            std::process::exit(1);
-        });
+    let entry_name = manifest.entry.clone();
 
-    // Deploy ALL agents in the fleet via registry gRPC (ADR 103)
+    // Deploy all agents in the fleet via registry gRPC
     let registry = connect_registry(&config);
-    let mut entry_agent_id = None;
 
-    for (name, agent_path) in fleet.agents() {
-        let manifest_path = agent_path.join("agent.toml");
-        let manifest = AgentManifest::load(&manifest_path)
+    for (name, agent_entry) in &manifest.agents {
+        let agent_path = absolute_path.join(&agent_entry.path);
+        let agent_manifest_path = agent_path.join("agent.toml");
+        let agent_manifest = AgentManifest::load(&agent_manifest_path)
             .unwrap_or_else(|e| {
                 eprintln!("Failed to load manifest for '{}': {:?}", name, e);
                 std::process::exit(1);
             });
-        let agent = registry.register_manifest(manifest)
+        let agent = registry.register_manifest(agent_manifest)
             .unwrap_or_else(|e| {
                 eprintln!("Failed to deploy fleet agent '{}': {}", name, e);
                 std::process::exit(1);
             });
         tracing::debug!(agent = %name, id = %agent.id, "Fleet agent deployed");
-        if name == fleet.entry {
-            entry_agent_id = Some(agent.id.clone());
-        }
     }
 
-    let entry_agent_id = entry_agent_id.unwrap_or_else(|| {
-        eprintln!("Entry agent '{}' not found in fleet agents", fleet.entry);
-        std::process::exit(1);
-    });
+    // Build Fleet from manifest + registry, then register
+    let fleet = Fleet::from_manifest(manifest, &*registry)
+        .unwrap_or_else(|e| {
+            eprintln!("Failed to build fleet: {}", e);
+            std::process::exit(1);
+        });
+
+    registry.register_fleet(fleet.clone())
+        .unwrap_or_else(|e| {
+            eprintln!("Failed to register fleet: {}", e);
+            std::process::exit(1);
+        });
+
+    let entry_agent_id = fleet.entry.clone();
     let entry_agent_name = agent_routing_key(&entry_agent_id);
+
+    // Build fleet context for the entry agent
+    let fleet_context = build_fleet_context(&*registry, &fleet);
 
     // Connect harness via gRPC — the daemon owns queue and registry
     let mut harness = connect_harness(&config);
     harness.start_session(&entry_agent_name);
 
-    tracing::debug!(fleet = %fleet.name, entry = %fleet.entry, "Fleet deployed to distributed daemon");
+    tracing::debug!(fleet = %fleet.name, "Fleet deployed to distributed daemon");
 
     // Read state from the state service (ADR 079)
     apply_latest_state(&config, &mut *harness, &entry_agent_name);
 
-    println!("Fleet '{}' ready. Entry agent: {}", fleet.name, fleet.entry);
+    println!("Fleet '{}' ready. Entry agent: {}", fleet.name, entry_name);
 
     // Run REPL with synchronous run_agent (ADR 092)
     repl::run(|input| {
@@ -148,6 +154,28 @@ pub fn run(path: Option<PathBuf>) {
             Err(e) => format!("[error] {}", e),
         }
     });
+}
+
+/// Build a fleet context string from registered agents.
+///
+/// Lists all non-entry agents with their descriptions so the entry agent
+/// knows what it can delegate to.
+fn build_fleet_context(registry: &dyn vlinder_core::domain::Registry, fleet: &Fleet) -> String {
+    let mut lines = vec![
+        format!("Fleet: {}", fleet.name),
+        "Available agents for delegation (use /delegate endpoint):".to_string(),
+    ];
+
+    for agent_id in &fleet.agents {
+        if *agent_id == fleet.entry {
+            continue;
+        }
+        if let Some(agent) = registry.get_agent(agent_id) {
+            lines.push(format!("- {}: {}", agent.name, agent.description));
+        }
+    }
+
+    lines.join("\n")
 }
 
 /// Read the latest state for an agent from the DAG store (ADR 079).

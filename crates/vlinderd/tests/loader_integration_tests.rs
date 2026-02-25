@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use vlinderd::loader::{load_agent, load_fleet};
+use vlinderd::loader::{load_agent, load_fleet_manifest};
 
 fn fixture_uri(name: &str) -> String {
     let path = PathBuf::from("tests/fixtures/agents")
@@ -29,7 +29,7 @@ fn load_agent_with_file_uri() {
 
 #[test]
 #[ignore] // Run via: just run-integration-tests
-fn load_fleet_with_file_uri() {
-    let fleet = load_fleet(&fleet_fixture_uri("test-fleet")).unwrap();
-    assert_eq!(fleet.name, "test-fleet");
+fn load_fleet_manifest_with_file_uri() {
+    let manifest = load_fleet_manifest(&fleet_fixture_uri("test-fleet")).unwrap();
+    assert_eq!(manifest.name, "test-fleet");
 }

@@ -4,7 +4,7 @@ use std::sync::Mutex;
 use tonic::transport::Channel;
 
 use vlinder_core::domain::{
-    Agent, Job, JobId, JobStatus, Model, ObjectStorageType,
+    Agent, Fleet, Job, JobId, JobStatus, Model, ObjectStorageType,
     Provider, RegistrationError, Registry, ResourceId, RuntimeType, SubmissionId, VectorStorageType,
 };
 use super::proto::{self, registry_client::RegistryClient};
@@ -321,6 +321,20 @@ impl Registry for GrpcRegistryClient {
                 .collect(),
             Err(_) => vec![],
         }
+    }
+
+    // --- Fleet operations (stub — gRPC not yet wired) ---
+
+    fn register_fleet(&self, _fleet: Fleet) -> Result<(), RegistrationError> {
+        Err(RegistrationError::Remote("fleet registration not yet supported over gRPC".to_string()))
+    }
+
+    fn get_fleet(&self, _name: &str) -> Option<Fleet> {
+        None
+    }
+
+    fn get_fleets(&self) -> Vec<Fleet> {
+        vec![]
     }
 
     // --- Capability registration (no-op for client, server manages these) ---

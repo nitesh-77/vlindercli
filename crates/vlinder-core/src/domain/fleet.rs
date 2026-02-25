@@ -1,96 +1,57 @@
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::collections::HashSet;
 
-use super::agent::Agent;
 use super::fleet_manifest::{FleetManifest, ParseError};
+use super::registry::Registry;
+use super::resource_id::ResourceId;
 
 /// A fleet is a composition boundary for agents.
 ///
+/// Stored in the registry after deployment. References agents by their
+/// registry-issued ResourceIds — names are resolved via the registry
+/// during construction.
+///
 /// See ADR 022 for the manifest format.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Fleet {
+    pub id: ResourceId,
     pub name: String,
-    pub entry: String,
-    pub project_dir: PathBuf,
-    agents: HashMap<String, PathBuf>,
+    pub entry: ResourceId,
+    pub agents: HashSet<ResourceId>,
 }
 
 impl Fleet {
-    pub fn from_manifest(manifest: FleetManifest, project_dir: &Path) -> Result<Fleet, LoadError> {
-        let project_dir = project_dir.to_path_buf();
-        let mut agents = HashMap::new();
+    /// Build a Fleet from a manifest, resolving agent names via the registry.
+    ///
+    /// All agents referenced in the manifest must already be registered.
+    pub fn from_manifest(
+        manifest: FleetManifest,
+        registry: &dyn Registry,
+    ) -> Result<Fleet, LoadError> {
+        let entry_id = registry.agent_id(&manifest.entry)
+            .ok_or_else(|| LoadError::Validation(format!(
+                "entry agent '{}' is not registered", manifest.entry
+            )))?;
 
-        for (name, entry) in manifest.agents {
-            let full_path = project_dir.join(&entry.path);
-            if !full_path.exists() {
-                return Err(LoadError::PathNotFound(format!(
-                    "agent '{}' path does not exist: {}",
-                    name,
-                    full_path.display()
-                )));
-            }
-            agents.insert(name, full_path);
+        let mut agents = HashSet::with_capacity(manifest.agents.len());
+        for name in manifest.agents.keys() {
+            let id = registry.agent_id(name)
+                .ok_or_else(|| LoadError::Validation(format!(
+                    "agent '{}' is not registered", name
+                )))?;
+            agents.insert(id);
         }
 
         Ok(Fleet {
+            id: Self::placeholder_id(&manifest.name),
             name: manifest.name,
-            entry: manifest.entry,
+            entry: entry_id,
             agents,
-            project_dir,
         })
     }
 
-    /// Convenience: load fleet from project directory
-    pub fn load(project_dir: &Path) -> Result<Fleet, LoadError> {
-        let manifest_path = project_dir.join("fleet.toml");
-        let manifest = FleetManifest::load(&manifest_path)?;
-        Self::from_manifest(manifest, project_dir)
-    }
-
-    pub fn has_agent(&self, name: &str) -> bool {
-        self.agents.contains_key(name)
-    }
-
-    pub fn agent_path(&self, name: &str) -> Option<&Path> {
-        self.agents.get(name).map(|p| p.as_path())
-    }
-
-    /// Iterate over all (name, path) pairs.
-    pub fn agents(&self) -> impl Iterator<Item = (&str, &Path)> {
-        self.agents.iter().map(|(name, path)| (name.as_str(), path.as_path()))
-    }
-
-    /// Build a context string describing the fleet for the entry agent.
-    ///
-    /// Lists all non-entry agents with their descriptions and model info.
-    /// The entry agent uses this to know what it can delegate to.
-    pub fn build_context(&self) -> Result<String, LoadError> {
-        let mut lines = vec![
-            format!("Fleet: {}", self.name),
-            "Available agents for delegation (use /delegate endpoint):".to_string(),
-        ];
-
-        for (name, path) in &self.agents {
-            if *name == self.entry {
-                continue; // skip entry agent — it's the one reading this context
-            }
-            match Agent::load(path) {
-                Ok(agent) => {
-                    let models: Vec<String> = agent.requirements.models.keys().cloned().collect();
-                    let model_info = if models.is_empty() {
-                        String::new()
-                    } else {
-                        format!(" Models: {}.", models.join(", "))
-                    };
-                    lines.push(format!("- {}: {}.{}", name, agent.description, model_info));
-                }
-                Err(_) => {
-                    lines.push(format!("- {}: (could not load agent description)", name));
-                }
-            }
-        }
-
-        Ok(lines.join("\n"))
+    /// Placeholder ID before registry assigns a real one.
+    pub fn placeholder_id(name: &str) -> ResourceId {
+        ResourceId::new(format!("pending-registration://fleets/{}", name))
     }
 }
 
@@ -99,7 +60,6 @@ pub enum LoadError {
     Io(std::io::Error),
     Parse(String),
     Validation(String),
-    PathNotFound(String),
 }
 
 impl std::fmt::Display for LoadError {
@@ -108,7 +68,6 @@ impl std::fmt::Display for LoadError {
             LoadError::Io(e) => write!(f, "IO error: {}", e),
             LoadError::Parse(s) => write!(f, "parse error: {}", s),
             LoadError::Validation(s) => write!(f, "validation error: {}", s),
-            LoadError::PathNotFound(s) => write!(f, "path not found: {}", s),
         }
     }
 }

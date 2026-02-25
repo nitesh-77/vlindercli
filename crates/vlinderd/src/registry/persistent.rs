@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use crate::config::Config;
 use crate::domain::{
-    Agent, Job, JobId, JobStatus, Model, ObjectStorageType, Provider, RegistrationError,
+    Agent, Fleet, Job, JobId, JobStatus, Model, ObjectStorageType, Provider, RegistrationError,
     Registry, RegistryRepository, ResourceId, RuntimeType, SecretStore, SubmissionId, VectorStorageType,
 };
 use crate::storage::SqliteRegistryRepository;
@@ -168,6 +168,20 @@ impl Registry for PersistentRegistry {
         }
 
         Ok(deleted)
+    }
+
+    // --- Fleet operations (delegate to in-memory, persistence deferred) ---
+
+    fn register_fleet(&self, fleet: Fleet) -> Result<(), RegistrationError> {
+        self.inner.register_fleet(fleet)
+    }
+
+    fn get_fleet(&self, name: &str) -> Option<Fleet> {
+        self.inner.get_fleet(name)
+    }
+
+    fn get_fleets(&self) -> Vec<Fleet> {
+        self.inner.get_fleets()
     }
 
     // --- Job operations (delegate directly) ---

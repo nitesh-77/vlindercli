@@ -31,14 +31,15 @@ fn agent_registration() {
     registry.register_runtime(RuntimeType::Container);
 
     // Agent not found initially
-    let agent_id = registry.agent_id("echo-agent").unwrap();
-    assert!(registry.get_agent(&agent_id).is_none());
+    assert!(registry.agent_id("echo-agent").is_none());
+    assert!(registry.get_agent_by_name("echo-agent").is_none());
 
     // Register agent — registry assigns identity
     let agent = load_agent("echo-agent");
     registry.register_agent(agent).unwrap();
 
-    // Now found by registry-assigned id
+    // Now found by name and registry-assigned id
+    let agent_id = registry.agent_id("echo-agent").unwrap();
     let agent = registry.get_agent(&agent_id).unwrap();
     assert_eq!(agent.name, "echo-agent");
 
