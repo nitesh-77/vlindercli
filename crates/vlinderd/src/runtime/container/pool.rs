@@ -131,10 +131,10 @@ impl ContainerRuntime {
         // 1. Create pod (with host aliases for provider hostnames)
         let mut host_aliases = Vec::new();
         if agent.requirements.services.values().any(|svc| svc.provider == Provider::OpenRouter) {
-            host_aliases.push("openrouter.vlinder.local:127.0.0.1".to_string());
+            host_aliases.push(format!("{}:127.0.0.1", vlinder_infer_openrouter::HOSTNAME));
         }
         if agent.requirements.services.values().any(|svc| svc.provider == Provider::Ollama) {
-            host_aliases.push("ollama.vlinder.local:127.0.0.1".to_string());
+            host_aliases.push(format!("{}:127.0.0.1", vlinder_ollama::HOSTNAME));
         }
         let needs_sqlite_vec = agent.vector_storage.as_ref()
             .and_then(|uri| VectorStorageType::from_scheme(uri.scheme()))
