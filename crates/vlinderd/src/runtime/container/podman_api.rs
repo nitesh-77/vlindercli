@@ -87,15 +87,27 @@ impl Podman for PodmanApiClient {
         image: RunTarget<'_>,
         pod_id: &PodId,
         env_vars: &[(&str, &str)],
+        volumes: &[(&str, &str)],
     ) -> Result<ContainerId, PodmanError> {
         let env: HashMap<String, String> = env_vars.iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+
+        let mounts: Vec<MountSpec> = volumes.iter()
+            .map(|(vol_name, container_path)| MountSpec {
+                name: vol_name.to_string(),
+                mount_type: "volume".to_string(),
+                source: vol_name.to_string(),
+                destination: container_path.to_string(),
+                options: vec!["ro".to_string()],
+            })
             .collect();
 
         let spec = PodContainerCreateSpec {
             image: image.as_str().to_string(),
             pod: pod_id.as_str().to_string(),
             env: if env.is_empty() { None } else { Some(env) },
+            mounts: if mounts.is_empty() { None } else { Some(mounts) },
         };
 
         let url = format!("{}/containers/create", API_BASE);
@@ -114,6 +126,41 @@ impl Podman for PodmanApiClient {
             .map_err(|e| PodmanError::Run(format!("failed to parse container create response: {}", e)))?;
 
         Ok(ContainerId::new(created.id))
+    }
+
+    fn volume_create(
+        &self,
+        name: &str,
+        driver: &str,
+        options: &[(&str, &str)],
+    ) -> Result<(), PodmanError> {
+        let driver_opts: HashMap<String, String> = options.iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+
+        let spec = VolumeCreateSpec {
+            name: name.to_string(),
+            driver: driver.to_string(),
+            options: if driver_opts.is_empty() { None } else { Some(driver_opts) },
+        };
+
+        let url = format!("{}/volumes/create", API_BASE);
+        let mut resp = self.agent.post(&url)
+            .send_json(&spec)
+            .map_err(|e| PodmanError::Run(format!("volume create failed: {}", e)))?;
+
+        let status = resp.status().as_u16();
+        if status != 201 {
+            let body = resp.body_mut().read_to_string().unwrap_or_default();
+            return Err(PodmanError::Run(format!("volume create HTTP {}: {}", status, body)));
+        }
+
+        Ok(())
+    }
+
+    fn volume_rm(&self, name: &str) {
+        let url = format!("{}/volumes/{}?force=true", API_BASE, name);
+        let _ = self.agent.delete(&url).call();
     }
 
     fn pod_start(&self, pod_id: &PodId) -> Result<(), PodmanError> {
@@ -183,6 +230,34 @@ struct PodContainerCreateSpec {
     pod: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     env: Option<HashMap<String, String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mounts: Option<Vec<MountSpec>>,
+}
+
+/// OCI mount spec for attaching volumes to containers (ADR 107).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+struct MountSpec {
+    #[serde(rename = "Name")]
+    name: String,
+    #[serde(rename = "Type")]
+    mount_type: String,
+    #[serde(rename = "Source")]
+    source: String,
+    #[serde(rename = "Destination")]
+    destination: String,
+    #[serde(rename = "Options")]
+    options: Vec<String>,
+}
+
+/// Volume creation spec for the Podman REST API (ADR 107).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+struct VolumeCreateSpec {
+    #[serde(rename = "Name")]
+    name: String,
+    #[serde(rename = "Driver")]
+    driver: String,
+    #[serde(rename = "Options", skip_serializing_if = "Option::is_none")]
+    options: Option<HashMap<String, String>>,
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -275,6 +350,7 @@ mod tests {
             image: "localhost/echo:latest".to_string(),
             pod: "pod123".to_string(),
             env: Some(env),
+            mounts: None,
         };
         let json = serde_json::to_string(&spec).unwrap();
         assert!(json.contains("KEY"));
@@ -288,8 +364,90 @@ mod tests {
             image: "localhost/echo:latest".to_string(),
             pod: "pod123".to_string(),
             env: None,
+            mounts: None,
         };
         let json = serde_json::to_string(&spec).unwrap();
         assert!(!json.contains("env"));
+        assert!(!json.contains("mounts"));
+    }
+
+    // ── Volume / mount serde types (ADR 107) ──
+
+    #[test]
+    fn mount_spec_serialization() {
+        let spec = MountSpec {
+            name: "vlinder-mount-support-knowledge".to_string(),
+            mount_type: "volume".to_string(),
+            source: "vlinder-mount-support-knowledge".to_string(),
+            destination: "/knowledge".to_string(),
+            options: vec!["ro".to_string()],
+        };
+        let json = serde_json::to_string(&spec).unwrap();
+        assert!(json.contains(r#""Type":"volume"#));
+        assert!(json.contains(r#""Destination":"/knowledge"#));
+        assert!(json.contains(r#""Options":["ro"]"#));
+    }
+
+    #[test]
+    fn mount_spec_round_trip() {
+        let spec = MountSpec {
+            name: "vol".to_string(),
+            mount_type: "volume".to_string(),
+            source: "vol".to_string(),
+            destination: "/data".to_string(),
+            options: vec!["ro".to_string()],
+        };
+        let json = serde_json::to_string(&spec).unwrap();
+        let parsed: MountSpec = serde_json::from_str(&json).unwrap();
+        assert_eq!(spec, parsed);
+    }
+
+    #[test]
+    fn volume_create_spec_serialization() {
+        let mut opts = HashMap::new();
+        opts.insert("type".to_string(), "fuse.s3fs".to_string());
+        opts.insert("device".to_string(), "vlinder-support:/v0.1.0/".to_string());
+        opts.insert("o".to_string(), "ro,url=http://localhost:4566".to_string());
+
+        let spec = VolumeCreateSpec {
+            name: "vlinder-mount-support-knowledge".to_string(),
+            driver: "local".to_string(),
+            options: Some(opts),
+        };
+        let json = serde_json::to_string(&spec).unwrap();
+        assert!(json.contains(r#""Name":"vlinder-mount-support-knowledge"#));
+        assert!(json.contains(r#""Driver":"local"#));
+        assert!(json.contains("fuse.s3fs"));
+    }
+
+    #[test]
+    fn volume_create_spec_round_trip() {
+        let spec = VolumeCreateSpec {
+            name: "test-vol".to_string(),
+            driver: "local".to_string(),
+            options: None,
+        };
+        let json = serde_json::to_string(&spec).unwrap();
+        let parsed: VolumeCreateSpec = serde_json::from_str(&json).unwrap();
+        assert_eq!(spec, parsed);
+    }
+
+    #[test]
+    fn pod_container_create_spec_with_mounts() {
+        let spec = PodContainerCreateSpec {
+            image: "localhost/support:latest".to_string(),
+            pod: "pod456".to_string(),
+            env: None,
+            mounts: Some(vec![MountSpec {
+                name: "vlinder-mount-support-knowledge".to_string(),
+                mount_type: "volume".to_string(),
+                source: "vlinder-mount-support-knowledge".to_string(),
+                destination: "/knowledge".to_string(),
+                options: vec!["ro".to_string()],
+            }]),
+        };
+        let json = serde_json::to_string(&spec).unwrap();
+        assert!(json.contains("mounts"));
+        assert!(json.contains("/knowledge"));
     }
 }

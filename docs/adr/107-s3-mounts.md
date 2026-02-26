@@ -1,6 +1,6 @@
 # ADR 107: Read-Only S3-Compatible Mounts
 
-**Status:** Draft
+**Status:** Accepted
 
 ## Context
 
@@ -16,15 +16,15 @@ shared knowledge bases. The common need is: mount a bucket of files
 into the container, read-only, at startup.
 
 S3 is the universal object storage API. Every cloud provider implements
-it (AWS, Cloudflare R2, MinIO, Garage, etc.). AWS's
-`mountpoint-for-amazon-s3` (Apache 2.0) exposes an S3 bucket as a
-POSIX filesystem — agents see files, not API calls.
+it (AWS, Cloudflare R2, MinIO, Garage, etc.). Podman natively supports
+FUSE-based volumes — `podman volume create` with `type=fuse.s3fs`
+mounts an S3 bucket as a filesystem. No custom tooling needed.
 
 ## Decision
 
-Agents declare S3 mounts in their manifest. The sidecar provisions
-them at container startup using `mountpoint-for-amazon-s3`. The agent
-sees a read-only directory of files.
+Agents declare S3 mounts in their manifest. The platform creates
+Podman volumes backed by `s3fs-fuse` and attaches them to the agent
+container. The agent sees a read-only directory of files.
 
 ```toml
 [requirements.mounts]
@@ -58,22 +58,24 @@ Fields:
 Plain files. Standard `open()`, `read()`, `readdir()`. No SDK, no
 client library, no API calls. Any language, any framework.
 
-### What the sidecar manages
+### What the platform manages
 
-For each declared mount:
+For each declared mount, the pool (in `vlinderd`) issues Podman
+commands before starting the pod:
 
-1. Resolve credentials (if `secret` is specified)
-2. Start `mount-s3` with the bucket, prefix, and mount point
-3. Bind-mount the FUSE mount into the container via Podman volume
-4. Unmount on container stop
+1. `podman volume create` with `type=fuse.s3fs`,
+   `device=bucket:/prefix`, and mount options (`ro`, `url=endpoint`)
+2. Attach the volume to the agent container (`-v volume:/path:ro`)
+3. Volume is removed when the pod is torn down
 
-The mount lifecycle follows the container lifecycle.
+Podman owns the FUSE mount lifecycle. The platform declares intent;
+Podman handles provisioning and cleanup.
 
 ### Read-only boundary
 
-Mounts are read-only. `mountpoint-for-amazon-s3` supports read-only
-mode natively — no write semantics to worry about, no conflict
-resolution, no sync protocol. This is a deliberate product boundary.
+Mounts are read-only. `s3fs-fuse` supports read-only mode natively —
+no write semantics to worry about, no conflict resolution, no sync
+protocol. This is a deliberate product boundary.
 
 Writable mounts, git-backed FUSE, bidirectional sync — all deferred to
 future ADRs if and when a concrete use case demands them.
@@ -94,10 +96,9 @@ No vendor lock-in at the manifest level.
 ## Consequences
 
 - `agent.toml` gains `[requirements.mounts]` — new manifest schema
-- Sidecar gains mount provisioning — new dependency on
-  `mountpoint-for-amazon-s3` binary
-- Host must support FUSE (standard on Linux, macFUSE on macOS)
-- Podman volume support required for bind-mounting into containers
+- Host requires `s3fs-fuse` installed (same category as NATS, Podman)
+- Pool gains volume creation — extends `Podman` trait with volume
+  support
 - Agents get bulk file access without HTTP streaming or custom clients
 - Unblocks ADR 108: support fleet knowledge delivery via S3
 - Read-only boundary keeps the implementation simple and auditable

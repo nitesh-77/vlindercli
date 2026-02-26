@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use vlinder_core::domain::{
-    Agent, Fleet, Job, JobId, JobStatus, Model, ModelType,
+    Agent, Fleet, Job, JobId, JobStatus, Model, ModelType, MountConfig,
     Protocol, Provider, Requirements, ResourceId, RuntimeType, ServiceConfig, ServiceType,
     SubmissionId,
 };
@@ -108,6 +108,15 @@ impl From<Agent> for proto::Agent {
                     uri: name,
                 })
                 .collect(),
+            mounts: agent.requirements.mounts.into_iter()
+                .map(|(name, cfg)| proto::MountEntry {
+                    name,
+                    s3: cfg.s3,
+                    path: cfg.path,
+                    endpoint: cfg.endpoint,
+                    secret: cfg.secret,
+                })
+                .collect(),
         }
     }
 }
@@ -144,6 +153,14 @@ impl TryFrom<proto::Agent> for Agent {
                     .map(|m| (m.alias, m.uri))
                     .collect(),
                 services,
+                mounts: agent.mounts.into_iter()
+                    .map(|m| (m.name, MountConfig {
+                        s3: m.s3,
+                        path: m.path,
+                        endpoint: m.endpoint,
+                        secret: m.secret,
+                    }))
+                    .collect(),
             },
             object_storage: agent.object_storage
                 .and_then(|cfg| cfg.resource_id)

@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use super::{Agent, ImageDigest, Model, ModelType, Prompts, Provider, Requirements, ResourceId, ServiceConfig, ServiceType};
+use super::{Agent, ImageDigest, Model, ModelType, MountConfig, Prompts, Provider, Requirements, ResourceId, ServiceConfig, ServiceType};
 use super::runtime::RuntimeType;
 
 /// Repository for persisting Registry state.
@@ -112,6 +112,7 @@ impl StoredAgent {
         let requirements = RequirementsJson {
             models: agent.requirements.models.clone(),
             services: agent.requirements.services.clone(),
+            mounts: agent.requirements.mounts.clone(),
         };
 
         let prompts = agent.prompts.as_ref().map(|p| PromptsJson {
@@ -183,7 +184,7 @@ impl StoredAgent {
             public_key,
             object_storage: self.object_storage.as_ref().map(ResourceId::new),
             vector_storage: self.vector_storage.as_ref().map(ResourceId::new),
-            requirements: Requirements { models, services: requirements.services },
+            requirements: Requirements { models, services: requirements.services, mounts: requirements.mounts },
             prompts: prompts.map(|p| Prompts {
                 intent_recognition: p.intent_recognition,
                 query_expansion: p.query_expansion,
@@ -201,6 +202,8 @@ impl StoredAgent {
 struct RequirementsJson {
     models: HashMap<String, String>,
     services: HashMap<ServiceType, ServiceConfig>,
+    #[serde(default)]
+    mounts: HashMap<String, MountConfig>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -233,6 +236,7 @@ mod tests {
             requirements: Requirements {
                 models: HashMap::new(),
                 services: HashMap::new(),
+                mounts: HashMap::new(),
             },
             prompts: None,
         }
@@ -264,6 +268,7 @@ mod tests {
             requirements: Requirements {
                 models,
                 services,
+                mounts: HashMap::new(),
             },
             prompts: Some(Prompts {
                 intent_recognition: Some("Classify intent".to_string()),

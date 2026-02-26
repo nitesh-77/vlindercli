@@ -1,0 +1,18 @@
+name = "s3-mount-test"
+description = "Test agent that reads files from an S3-backed mount"
+runtime = "container"
+executable = "localhost/s3-mount-test:latest"
+
+# S3 mount (ADR 107).
+# The agent sees files from s3://vlinder-support/v0.1.0/ at /knowledge/.
+#
+# endpoint: uses host.containers.internal because that's how containers
+#   normally reach host services. pool.rs rewrites this to localhost for
+#   the VM-level s3fs process (see comment in provision_mount_volumes).
+# secret: names a credential to resolve. Currently hardcoded to test:test
+#   in pool.rs; will read from SecretStore (ADR 083) when wired.
+[requirements.mounts.knowledge]
+s3 = "vlinder-support/v0.1.0/"
+path = "/knowledge"
+endpoint = "http://host.containers.internal:4566"
+secret = "localstack-dev"

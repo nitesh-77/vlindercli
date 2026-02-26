@@ -26,6 +26,10 @@ build-sqlite-kv-test:
 build-sqlite-vec-test:
     podman build -t localhost/sqlite-vec-test:latest agents/sqlite-vec-test/
 
+# Build s3-mount-test agent (OCI image via Podman, exercises S3-backed FUSE mounts)
+build-s3-mount-test:
+    podman build -t localhost/s3-mount-test:latest agents/s3-mount-test/
+
 # Build ollama-test agent (OCI image via Podman, exercises all four ollama.vlinder.local endpoints)
 build-ollama-test:
     podman build -t localhost/ollama-test:latest agents/ollama-test/
@@ -79,7 +83,7 @@ build-council-fleet: build-council-orchestrator build-sales-advisor build-produc
 # =============================================================================
 
 # Build everything needed to run agents: CLI + sidecar + agent container images
-build-everything: build build-sidecar build-todoapp build-todoapp-fleet build-council-fleet
+build-everything: build build-sidecar build-todoapp build-todoapp-fleet build-council-fleet build-s3-mount-test s3-start s3-seed
 
 # Run a specific agent (usage: just run pensieve-container)
 # Uses ~/.vlinder by default (no VLINDER_DIR override needed)
@@ -203,6 +207,120 @@ reset:
 # Check license compliance (fails on GPL/copyleft)
 license-check:
     cargo deny check licenses
+
+# =============================================================================
+# Local S3 (LocalStack + s3fs-fuse)
+#
+# S3 mounts (ADR 107) use s3fs-fuse to present S3 bucket prefixes as
+# read-only FUSE filesystems inside agent containers. On macOS this
+# requires setup inside the Podman Machine VM (CoreOS on Apple HV):
+#
+# Chain: s3-install → s3-setup → s3-start → s3-seed
+#
+# s3-install:  rpm-ostree install s3fs-fuse into the CoreOS VM.
+#              CoreOS is immutable — rpm-ostree layers packages on top
+#              and requires a reboot (machine stop/start) to apply.
+#              The COPR repo for podman-release can cause GPG key 404s;
+#              if that happens: podman machine ssh "sudo mv
+#              /etc/yum.repos.d/podman-release-copr.repo /tmp/"
+#
+# s3-setup:   Symlink mount.fuse.s3fs → s3fs in /usr/sbin.
+#              The `mount` command searches /sbin and /usr/sbin for
+#              helpers named mount.<type>. CoreOS /usr/sbin is normally
+#              read-only, but `sudo ln -sf` works through the composefs
+#              overlay. /usr/local/sbin does NOT work (not in mount's
+#              search path).
+#
+# s3-start:   Run LocalStack in a Podman container. Idempotent: skips
+#              if already running, removes stale stopped container first.
+#              IMPORTANT: LocalStack stops when the Podman machine
+#              restarts (stop/start or reset). If s3fs mounts hang after
+#              a machine restart, check `podman ps -a` — LocalStack is
+#              probably "Exited". Run `just s3-start` to bring it back.
+#
+# s3-seed:    Populate the test bucket with sample data. Creates a
+#              zero-byte directory marker at each prefix path — s3fs 1.97
+#              crashes without this (see note in s3-seed below).
+# =============================================================================
+
+# Install s3fs-fuse in the Podman VM (requires machine restart)
+# CoreOS uses rpm-ostree which layers packages immutably; reboot needed to apply.
+s3-install:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if podman machine ssh "command -v s3fs" >/dev/null 2>&1; then
+        echo "  ✓ s3fs-fuse already installed"
+    else
+        echo "  Installing s3fs-fuse (rpm-ostree)..."
+        podman machine ssh "sudo rpm-ostree install s3fs-fuse"
+        echo "  Restarting Podman machine (CoreOS needs reboot for rpm-ostree)..."
+        podman machine stop
+        podman machine start
+        echo "  ✓ s3fs-fuse installed"
+    fi
+
+# Symlink the s3fs mount helper so `mount -t fuse.s3fs` finds it.
+# The mount command looks for /usr/sbin/mount.<type> — on CoreOS the
+# s3fs binary lands in /usr/bin but mount won't find it there.
+# `sudo ln -sf` works through CoreOS's composefs overlay even though
+# /usr/sbin appears read-only (cp fails, but symlink works).
+s3-setup: s3-install
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if podman machine ssh "test -f /usr/sbin/mount.fuse.s3fs" 2>/dev/null; then
+        echo "  ✓ mount.fuse.s3fs already installed"
+    else
+        podman machine ssh "sudo ln -sf /usr/bin/s3fs /usr/sbin/mount.fuse.s3fs"
+        echo "  ✓ mount.fuse.s3fs symlinked in /usr/sbin"
+    fi
+
+# Start LocalStack for local S3 development (idempotent).
+# Handles three states: running (skip), stopped/stale (rm + create), absent (create).
+# Uses --filter + --quiet instead of --format '{{ "{{" }}.Names{{ "}}" }}'
+# because {{ is justfile interpolation syntax.
+s3-start: s3-setup
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if podman ps --filter name=^localstack$ --quiet 2>/dev/null | grep -q .; then
+        echo "  ✓ LocalStack already running"
+    else
+        podman rm -f localstack 2>/dev/null || true
+        podman run -d --name localstack -p 4566:4566 localstack/localstack:latest
+        echo "  LocalStack S3 running at http://localhost:4566"
+    fi
+
+# Stop and remove LocalStack
+s3-stop:
+    podman rm -f localstack 2>/dev/null || true
+
+# Create a test bucket and upload sample data.
+#
+# IMPORTANT: creates a zero-byte directory marker at the prefix path.
+# s3fs 1.97 has a bug in remote_mountpath_exists: when mounting a sub-path
+# (e.g., bucket:/v0.1.0/), it does HEAD on the prefix key. If that returns
+# 404 (no directory marker), s3fs crashes with:
+#   basic_string::back() Assertion '!empty()' failed
+# This kills the FUSE daemon, leaving a stale mount point that reports
+# "Transport endpoint is not connected" for all access attempts.
+# AWS S3 Console creates these markers when you "create a folder" —
+# LocalStack and other S3-compatible stores do not create them automatically.
+#
+# The `|| true` on `s3 ls` prevents broken pipe (SIGPIPE/exit 120) when
+# `head` closes the pipe before `aws s3 ls` finishes writing.
+s3-seed:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export AWS_ACCESS_KEY_ID=test
+    export AWS_SECRET_ACCESS_KEY=test
+    export AWS_DEFAULT_REGION=us-east-1
+    aws --endpoint-url http://localhost:4566 s3 mb s3://vlinder-support 2>/dev/null || true
+    # Directory marker — without this, s3fs 1.97 crashes on sub-path mounts
+    aws --endpoint-url http://localhost:4566 s3api put-object --bucket vlinder-support --key "v0.1.0/" --content-length 0 >/dev/null
+    echo "The mount works." | aws --endpoint-url http://localhost:4566 s3 cp - s3://vlinder-support/v0.1.0/probe.txt
+    aws --endpoint-url http://localhost:4566 s3 sync docs/ s3://vlinder-support/v0.1.0/docs/
+    aws --endpoint-url http://localhost:4566 s3 sync crates/vlinder-core/src/ s3://vlinder-support/v0.1.0/src/
+    echo "Seeded s3://vlinder-support/v0.1.0/"
+    aws --endpoint-url http://localhost:4566 s3 ls s3://vlinder-support/v0.1.0/ --recursive | head -20 || true
 
 # =============================================================================
 # Integration Tests (ADR 082)

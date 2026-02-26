@@ -65,6 +65,7 @@ impl Podman for PodmanCliClient {
         image: RunTarget<'_>,
         pod_id: &PodId,
         env_vars: &[(&str, &str)],
+        volumes: &[(&str, &str)],
     ) -> Result<ContainerId, PodmanError> {
         let mut args = vec![
             "create".to_string(),
@@ -75,6 +76,11 @@ impl Podman for PodmanCliClient {
         for (k, v) in env_vars {
             args.push("--env".to_string());
             args.push(format!("{}={}", k, v));
+        }
+
+        for (vol_name, container_path) in volumes {
+            args.push("--volume".to_string());
+            args.push(format!("{}:{}:ro", vol_name, container_path));
         }
 
         args.push(image.as_str().to_string());
@@ -91,6 +97,45 @@ impl Podman for PodmanCliClient {
 
         let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
         Ok(ContainerId::new(raw))
+    }
+
+    fn volume_create(
+        &self,
+        name: &str,
+        driver: &str,
+        options: &[(&str, &str)],
+    ) -> Result<(), PodmanError> {
+        let mut args = vec![
+            "volume".to_string(),
+            "create".to_string(),
+            "--driver".to_string(),
+            driver.to_string(),
+        ];
+
+        for (k, v) in options {
+            args.push("-o".to_string());
+            args.push(format!("{}={}", k, v));
+        }
+
+        args.push(name.to_string());
+
+        let output = Command::new("podman")
+            .args(&args)
+            .output()
+            .map_err(|e| PodmanError::Run(format!("failed to spawn podman: {}", e)))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(PodmanError::Run(format!("podman volume create failed: {}", stderr)));
+        }
+
+        Ok(())
+    }
+
+    fn volume_rm(&self, name: &str) {
+        let _ = Command::new("podman")
+            .args(["volume", "rm", "-f", name])
+            .output();
     }
 
     fn pod_start(&self, pod_id: &PodId) -> Result<(), PodmanError> {

@@ -70,18 +70,118 @@ pub(crate) trait Podman: Send {
 
     /// Create a container inside a pod. No port mapping — containers in
     /// a pod share a network namespace (like k8s).
+    ///
+    /// `volumes` are `(volume_name, container_path)` pairs for read-only
+    /// volume mounts (ADR 107).
     fn container_in_pod(
         &self,
         image: RunTarget<'_>,
         pod_id: &PodId,
         env_vars: &[(&str, &str)],
+        volumes: &[(&str, &str)],
     ) -> Result<ContainerId, PodmanError>;
+
+    /// Create a named Podman volume with the given driver and options.
+    ///
+    /// Used for S3-backed FUSE mounts (ADR 107). Options are key-value
+    /// pairs passed to the volume driver (e.g., `type=fuse.s3fs`).
+    fn volume_create(
+        &self,
+        name: &str,
+        driver: &str,
+        options: &[(&str, &str)],
+    ) -> Result<(), PodmanError>;
+
+    /// Remove a named volume (fire-and-forget, like pod cleanup).
+    fn volume_rm(&self, name: &str);
 
     /// Start all containers in a pod.
     fn pod_start(&self, pod_id: &PodId) -> Result<(), PodmanError>;
 
     /// Stop and remove a pod (all containers within it).
     fn pod_stop_and_remove(&self, pod_id: &PodId, timeout_secs: u32);
+}
+
+// ── S3 credential helpers (ADR 107) ─────────────────────────────────
+//
+// s3fs reads credentials from a "passwd" file containing `ACCESS_KEY:SECRET_KEY`.
+// The file must exist where s3fs runs — which is NOT the Mac host, but the
+// Podman Machine VM (CoreOS on Apple HV). On Linux without a VM, the file
+// lives on the host filesystem.
+//
+// The credential pipeline has three parts:
+// 1. Secret resolution: pool.rs resolves the secret name to credentials
+//    (currently hardcoded "test:test", will use SecretStore per ADR 083)
+// 2. Credential delivery: these helpers write the passwd file to the right
+//    place (VM via `podman machine ssh`, or local filesystem on Linux)
+// 3. Mount option: pool.rs passes `passwd_file=<path>` to s3fs
+//
+// Each agent mount gets its own passwd file (keyed by volume name) so
+// multiple agents with different S3 credentials don't collide.
+// Files are cleaned up when the agent's pod is torn down.
+
+/// Write an s3fs credentials file to the Podman execution environment.
+///
+/// On macOS: writes via `podman machine ssh` into the CoreOS VM's `/tmp`.
+/// On Linux: writes directly to the host's `/tmp`.
+///
+/// Returns the path where the file was written (in the execution
+/// environment, not the Mac host). The caller passes this as
+/// `passwd_file=<path>` in the s3fs mount options.
+///
+/// The file is chmod 600 — s3fs refuses to read passwd files with
+/// group/other permissions.
+pub(crate) fn write_s3_credentials(name: &str, credentials: &str) -> Result<String, String> {
+    let path = format!("/tmp/vlinder-s3-{}.passwd", name);
+
+    // Try podman machine ssh (macOS with Podman Machine VM)
+    let write_cmd = format!("cat > {} && chmod 600 {}", path, path);
+    let result = std::process::Command::new("podman")
+        .args(["machine", "ssh", "--", "sh", "-c", &write_cmd])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .and_then(|mut child| {
+            if let Some(ref mut stdin) = child.stdin {
+                use std::io::Write;
+                stdin.write_all(credentials.as_bytes())?;
+            }
+            child.wait()
+        });
+
+    match result {
+        Ok(status) if status.success() => {
+            tracing::debug!(path = %path, "Wrote s3fs credentials via podman machine ssh");
+            return Ok(path);
+        }
+        _ => {}
+    }
+
+    // Fallback: direct write (Linux, no VM)
+    std::fs::write(&path, credentials)
+        .map_err(|e| format!("failed to write s3 credentials to {}: {}", path, e))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|e| format!("failed to chmod {}: {}", path, e))?;
+    }
+    tracing::debug!(path = %path, "Wrote s3fs credentials to local filesystem");
+    Ok(path)
+}
+
+/// Remove an s3fs credentials file (fire-and-forget).
+pub(crate) fn remove_s3_credentials(name: &str) {
+    let path = format!("/tmp/vlinder-s3-{}.passwd", name);
+
+    // Try podman machine ssh (macOS)
+    let _ = std::process::Command::new("podman")
+        .args(["machine", "ssh", "--", "rm", "-f", &path])
+        .output();
+
+    // Also try local (Linux) — no-op if file doesn't exist
+    let _ = std::fs::remove_file(&path);
 }
 
 // ── Shared utilities ────────────────────────────────────────────────

@@ -14,7 +14,7 @@ use std::sync::Arc;
 use crate::config::Config;
 use crate::domain::{Agent, ImageRef, ObjectStorageType, PodId, Provider, Registry, ResourceId, Runtime, RuntimeType, VectorStorageType};
 
-use super::podman::{Podman, RunTarget, resolve_socket};
+use super::podman::{Podman, RunTarget, resolve_socket, write_s3_credentials, remove_s3_credentials};
 use super::podman_api::PodmanApiClient;
 use super::podman_cli::PodmanCliClient;
 
@@ -41,6 +41,8 @@ impl ImagePolicy {
 /// A running pod: agent + sidecar containers sharing a network namespace.
 struct Pod {
     pod_id: PodId,
+    /// Volume names created for S3 mounts (ADR 107). Cleaned up on shutdown.
+    mount_volumes: Vec<String>,
 }
 
 /// Orchestrates Podman pods for container agents.
@@ -108,10 +110,11 @@ impl ContainerRuntime {
 
     /// Start a pod with agent + sidecar containers.
     ///
-    /// 1. Create a Podman pod named `vlinder-{name}`
-    /// 2. Add the agent container (user image, no env vars)
-    /// 3. Add the sidecar container (vlinder-sidecar image, env vars for config)
-    /// 4. Start the pod (all containers start together)
+    /// 1. Provision S3 mount volumes (ADR 107)
+    /// 2. Create a Podman pod named `vlinder-{name}`
+    /// 3. Add the agent container (user image, with mount volumes)
+    /// 4. Add the sidecar container (vlinder-sidecar image, env vars for config)
+    /// 5. Start the pod (all containers start together)
     fn start(&mut self, name: &str, agent: &Agent) -> Result<(), String> {
         if self.pods.contains_key(name) {
             return Ok(());
@@ -128,7 +131,14 @@ impl ContainerRuntime {
                 .unwrap_or(RunTarget::Ref(&image_ref)),
         };
 
-        // 1. Create pod (with host aliases for provider hostnames)
+        // 1. Provision S3 mount volumes (ADR 107)
+        let mount_volumes = self.provision_mount_volumes(name, agent)?;
+        let volume_pairs: Vec<(String, String)> = mount_volumes.iter()
+            .zip(agent.requirements.mounts.values())
+            .map(|(vol_name, mount)| (vol_name.clone(), mount.path.clone()))
+            .collect();
+
+        // 2. Create pod (with host aliases for provider hostnames)
         let mut host_aliases = vec!["runtime.vlinder.local:127.0.0.1".to_string()];
         if agent.requirements.services.values().any(|svc| svc.provider == Provider::OpenRouter) {
             host_aliases.push(format!("{}:127.0.0.1", vlinder_infer_openrouter::HOSTNAME));
@@ -154,9 +164,10 @@ impl ContainerRuntime {
         let pod_id = self.podman.pod_create(&pod_name, &host_aliases)
             .map_err(|e| e.to_string())?;
 
-        // From here on, if anything fails we must remove the orphaned pod.
+        // From here on, if anything fails we must remove the orphaned pod
+        // and clean up any volumes we created.
         // Otherwise the next tick will try pod_create again and get "already exists".
-        if let Err(e) = self.start_in_pod(name, &pod_id, run_target, &image_ref) {
+        if let Err(e) = self.start_in_pod(name, &pod_id, run_target, &image_ref, &volume_pairs) {
             tracing::warn!(
                 event = "pod.cleanup",
                 agent = %name,
@@ -164,6 +175,7 @@ impl ContainerRuntime {
                 "Removing orphaned pod after start failure"
             );
             self.podman.pod_stop_and_remove(&pod_id, 0);
+            self.cleanup_mount_volumes(&mount_volumes);
             return Err(e);
         }
 
@@ -175,13 +187,14 @@ impl ContainerRuntime {
             "Pod started (agent + sidecar)"
         );
 
-        self.pods.insert(name.to_string(), Pod { pod_id });
+        self.pods.insert(name.to_string(), Pod { pod_id, mount_volumes });
         Ok(())
     }
 
     /// Populate and start a pod that has already been created.
     ///
-    /// Adds the agent container, the sidecar container, and starts the pod.
+    /// Adds the agent container (with mount volumes), the sidecar container,
+    /// and starts the pod.
     /// Called by `start()` — if this fails, `start()` cleans up the orphaned pod.
     fn start_in_pod(
         &self,
@@ -189,12 +202,18 @@ impl ContainerRuntime {
         pod_id: &PodId,
         run_target: RunTarget<'_>,
         image_ref: &ImageRef,
+        volumes: &[(String, String)],
     ) -> Result<(), String> {
-        // 2. Add agent container (no env vars, no port mapping — shared network in pod)
-        self.podman.container_in_pod(run_target, pod_id, &[])
+        // Build volume refs for the agent container
+        let volume_refs: Vec<(&str, &str)> = volumes.iter()
+            .map(|(vol, path)| (vol.as_str(), path.as_str()))
+            .collect();
+
+        // 3. Add agent container (with mount volumes, no env vars)
+        self.podman.container_in_pod(run_target, pod_id, &[], &volume_refs)
             .map_err(|e| e.to_string())?;
 
-        // 3. Build sidecar env vars
+        // 4. Build sidecar env vars
         let sidecar_image_ref = ImageRef::parse(&self.config.runtime.sidecar_image)
             .unwrap_or_else(|_| ImageRef::parse("localhost/vlinder-sidecar:latest").unwrap());
         let sidecar_target = RunTarget::Ref(&sidecar_image_ref);
@@ -229,15 +248,167 @@ impl ContainerRuntime {
             .map(|(k, v)| (*k, v.as_str()))
             .collect();
 
-        // 4. Add sidecar container
-        self.podman.container_in_pod(sidecar_target, pod_id, &env_refs)
+        // 5. Add sidecar container (no volumes — sidecar doesn't need file mounts)
+        self.podman.container_in_pod(sidecar_target, pod_id, &env_refs, &[])
             .map_err(|e| e.to_string())?;
 
-        // 5. Start the pod (all containers start together)
+        // 6. Start the pod (all containers start together)
         self.podman.pod_start(pod_id)
             .map_err(|e| e.to_string())?;
 
         Ok(())
+    }
+
+    /// Provision S3-backed Podman volumes for an agent's declared mounts (ADR 107).
+    ///
+    /// Creates one Podman volume per mount using s3fs-fuse as the FUSE driver.
+    /// Returns the list of volume names so the caller can attach them to the
+    /// agent container and track them for cleanup.
+    ///
+    /// # How it works
+    ///
+    /// Podman volumes with `type=fuse.s3fs` are lazily mounted: `volume create`
+    /// only stores metadata; the actual s3fs FUSE mount happens when a container
+    /// starts and references the volume. At that point Podman invokes the
+    /// `mount.fuse.s3fs` helper (a symlink to `/usr/bin/s3fs` installed by
+    /// `just s3-setup`), which launches the s3fs daemon. The daemon connects
+    /// to the S3 endpoint, registers a FUSE mount point, and daemonizes.
+    /// Podman then bind-mounts that FUSE mount into the container.
+    ///
+    /// # Architecture (macOS with Podman Machine)
+    ///
+    /// Three network contexts matter:
+    ///
+    /// 1. **Mac host**: where the daemon (vlinderd) and `podman` CLI run.
+    ///    LocalStack binds to `localhost:4566` here.
+    /// 2. **Podman VM** (CoreOS on Apple HV): where s3fs and the container
+    ///    engine actually run. `localhost:4566` reaches LocalStack via
+    ///    Podman's port forwarding. `host.containers.internal` resolves to
+    ///    `192.168.127.254` but port forwarding only binds to the Mac side,
+    ///    so `host.containers.internal:4566` does NOT work from the VM.
+    /// 3. **Container namespace**: shares the pod's network namespace.
+    ///    The agent process runs here, but s3fs does NOT — it runs at the
+    ///    VM level as a mount helper.
+    ///
+    /// Because s3fs runs at the VM level, we rewrite `host.containers.internal`
+    /// to `localhost` in the endpoint URL.
+    ///
+    /// # s3fs mount options (hard-won lessons)
+    ///
+    /// Each option exists because of a specific failure mode we hit:
+    ///
+    /// - `ro`: read-only mount (agents should not write to S3 mounts)
+    /// - `connect_timeout=10`: **prevents Podman deadlock**. Without this,
+    ///   if the S3 endpoint is unreachable (e.g. LocalStack not running),
+    ///   s3fs blocks the mount() syscall indefinitely. Since Podman holds
+    ///   internal locks during container start, this deadlocks the entire
+    ///   Podman daemon — `podman ps`, `podman machine ssh`, everything hangs.
+    ///   The only recovery is `podman machine stop` (which also often hangs,
+    ///   requiring force-killing `vfkit`/`gvproxy` processes).
+    /// - `compat_dir`: **required for sub-path mounts**. S3 has no real
+    ///   directories — only key prefixes. When mounting `bucket:/v0.1.0/`,
+    ///   s3fs's CheckBucket does a HEAD on the prefix path. Without
+    ///   `compat_dir`, CheckBucket enters an infinite retry loop on 404,
+    ///   consuming CPU and blocking all FUSE requests (same deadlock as above).
+    ///   With `compat_dir`, it uses LIST instead of HEAD to verify the path.
+    ///   NOTE: even with `compat_dir`, a zero-byte directory marker object
+    ///   must exist at the prefix key (e.g. `v0.1.0/`) or s3fs 1.97 crashes
+    ///   with `basic_string::back() Assertion '!empty()' failed` in
+    ///   `remote_mountpath_exists`. See `just s3-seed` for marker creation.
+    /// - `allow_other`: lets non-root processes read the FUSE mount. Without
+    ///   this, only the user who ran s3fs can access the files. Podman's
+    ///   volume driver runs as root in the VM, so the mount is owned by root;
+    ///   `allow_other` lets the container's processes read it.
+    /// - `use_path_request_style`: required for non-AWS S3 backends
+    ///   (LocalStack, MinIO). AWS uses virtual-hosted-style URLs
+    ///   (`bucket.s3.amazonaws.com`), but local backends need path-style
+    ///   (`localhost:4566/bucket`).
+    /// - `passwd_file`: s3fs reads credentials from a colon-separated file
+    ///   (`ACCESS_KEY:SECRET_KEY`). The file must exist in the Podman VM
+    ///   filesystem (not the Mac), so we write it via `podman machine ssh`.
+    ///   See `write_s3_credentials` in `podman.rs`.
+    fn provision_mount_volumes(&self, agent_name: &str, agent: &Agent) -> Result<Vec<String>, String> {
+        let mut volume_names = Vec::new();
+
+        for (mount_name, mount) in &agent.requirements.mounts {
+            let vol_name = format!("vlinder-mount-{}-{}", agent_name, mount_name);
+
+            // Parse "bucket/prefix" → ("bucket", "/prefix")
+            // s3fs device format: `bucket:/path` mounts only objects under that prefix.
+            let (bucket, prefix) = match mount.s3.split_once('/') {
+                Some((b, p)) => (b, format!("/{}", p)),
+                None => (mount.s3.as_str(), "/".to_string()),
+            };
+
+            let device = format!("{}:{}", bucket, prefix);
+            let raw_endpoint = mount.endpoint.as_deref().unwrap_or("https://s3.amazonaws.com");
+
+            // Rewrite host.containers.internal → localhost for the VM context.
+            // See architecture comment above for why this is necessary.
+            let endpoint = raw_endpoint.replace("host.containers.internal", "localhost");
+
+            // See doc comment above for why each option is here.
+            let mut mount_flags = vec![format!(
+                "ro,url={},connect_timeout=10,compat_dir,allow_other",
+                endpoint
+            )];
+
+            if mount.endpoint.is_some() {
+                mount_flags.push("use_path_request_style".to_string());
+            }
+
+            // Three independent concerns for credential handling:
+            // 1. Secret resolution: currently hardcoded, will read from SecretStore (ADR 083)
+            // 2. Credential delivery: write passwd file to the VM filesystem
+            // 3. Mount option: tell s3fs where to find the passwd file
+            if mount.secret.is_some() {
+                // TODO: resolve from SecretStore (ADR 083) — this is the only
+                // line that needs to change. The delivery pipeline (write to VM,
+                // pass as mount option, clean up on teardown) is fully wired.
+                let credentials = "test:test";
+                let passwd_path = write_s3_credentials(&vol_name, credentials)?;
+                mount_flags.push(format!("passwd_file={}", passwd_path));
+            }
+
+            let mount_opts = mount_flags.join(",");
+
+            let options: Vec<(&str, &str)> = vec![
+                ("type", "fuse.s3fs"),
+                ("device", &device),
+                ("o", &mount_opts),
+            ];
+
+            self.podman.volume_create(&vol_name, "local", &options)
+                .map_err(|e| format!("failed to create volume {}: {}", vol_name, e))?;
+
+            tracing::info!(
+                event = "volume.created",
+                agent = %agent_name,
+                mount = %mount_name,
+                volume = %vol_name,
+                s3 = %mount.s3,
+                path = %mount.path,
+                "S3 mount volume created"
+            );
+
+            volume_names.push(vol_name);
+        }
+
+        Ok(volume_names)
+    }
+
+    /// Remove mount volumes and their credential files (fire-and-forget).
+    ///
+    /// Must clean up both the Podman volume (which unmounts s3fs) and the
+    /// passwd file written to the VM. If volume removal hangs (stale FUSE
+    /// mount), Podman will force-remove it — the `connect_timeout` on the
+    /// mount options prevents indefinite hangs.
+    fn cleanup_mount_volumes(&self, volumes: &[String]) {
+        for vol_name in volumes {
+            tracing::info!(event = "volume.removed", volume = %vol_name, "Removing mount volume");
+            self.podman.volume_rm(vol_name);
+            remove_s3_credentials(vol_name);
+        }
     }
 
     /// Start pods for agents that don't have one yet.
@@ -284,6 +455,11 @@ impl Runtime for ContainerRuntime {
         for (name, pod) in self.pods.drain() {
             tracing::info!(event = "pod.stopped", agent = %name, pod = %pod.pod_id, "Stopping pod");
             self.podman.pod_stop_and_remove(&pod.pod_id, 5);
+            for vol_name in &pod.mount_volumes {
+                tracing::info!(event = "volume.removed", volume = %vol_name, "Removing mount volume");
+                self.podman.volume_rm(vol_name);
+                remove_s3_credentials(vol_name);
+            }
         }
     }
 }
@@ -358,5 +534,29 @@ mod tests {
         let mut runtime = ContainerRuntime::new(&Config::for_test()).unwrap();
 
         assert!(!runtime.tick());
+    }
+
+    // ── S3 mount volume naming (ADR 107) ──
+
+    #[test]
+    fn parse_s3_with_prefix() {
+        let s3 = "vlinder-support/v0.1.0/";
+        let (bucket, prefix) = s3.split_once('/').unwrap();
+        assert_eq!(bucket, "vlinder-support");
+        assert_eq!(format!("/{}", prefix), "/v0.1.0/");
+    }
+
+    #[test]
+    fn parse_s3_bucket_only() {
+        let s3 = "my-bucket";
+        let result = s3.split_once('/');
+        assert!(result.is_none());
+        // Falls back to bucket = "my-bucket", prefix = "/"
+    }
+
+    #[test]
+    fn mount_volume_name_format() {
+        let name = format!("vlinder-mount-{}-{}", "support", "knowledge");
+        assert_eq!(name, "vlinder-mount-support-knowledge");
     }
 }

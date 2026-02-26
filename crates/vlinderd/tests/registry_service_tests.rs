@@ -19,6 +19,7 @@ fn empty_requirements() -> Requirements {
     Requirements {
         models: HashMap::new(),
         services: HashMap::new(),
+        mounts: HashMap::new(),
     }
 }
 

@@ -1,4 +1,4 @@
-# ADR 107: Agent Scaffolding and Development MCP Server
+# ADR 108: Agent Scaffolding and Development MCP Server
 
 **Status:** Draft
 
@@ -80,13 +80,15 @@ provider services.
 
 The MCP server is backed by a **support agent fleet** — the platform's
 developer tooling runs on the platform itself. MCP requests route to
-specialist agents that reason over four knowledge sources:
+specialist agents that reason over three knowledge sources:
 
-**1. Platform source (vlindercli).** Tree-sitter parses and indexes the
-vlindercli Rust source. This index is embedded at build time — same
-version, same commit as the binary. The platform's own code is the source
-of truth for the container contract, provider hostnames, message types, and
-delegation protocol. No documentation to drift.
+**1. Platform source + docs (S3 mount).** The support fleet mounts a
+versioned S3 bucket (`s3://vlinder-support/v{version}/`) containing
+platform source and documentation — ADRs, README, code. CI/CD uploads
+per release, so the fleet always reads the version that matches the
+running binary. Per-version documentation means no drift. The fleet
+knows both *what the code does* and *why it was designed that way*. See
+ADR 107 for the mount mechanism.
 
 **2. Runtime state (~/.vlinder/).** The support fleet reads the `.vlinder/`
 directory: conversation payloads, logs, agent state. Today, debugging a
@@ -95,41 +97,35 @@ and `~/.vlinder/logs/`. The fleet makes this queryable — any coding tool
 can ask "what happened?" instead of the developer spelunking through files.
 The platform dogfoods its own observability surface.
 
-**3. Agent code.** The developer's agent code, parsed live from disk with
-tree-sitter. Grammars ship for the languages agents are written in
-(Python, TypeScript, Go, etc.) plus TOML for manifests. This gives
-cross-referencing ability: the fleet knows what the platform offers (from
-source #1) and what the developer's agent uses (from their code + TOML),
-and can bridge the two — flagging mismatches, suggesting wiring, answering
-structural questions.
+**3. Agent code.** The developer's agent code, read live from disk. The
+fleet knows what the platform offers (from source #1) and what the
+developer's agent uses (from their code + TOML), and can bridge the
+two — flagging mismatches, suggesting wiring, answering structural
+questions.
 
-**4. Platform docs.** ADRs, README, and project documentation — embedded
-alongside the source. The fleet knows not just *what the code does* but
-*why it was designed that way*. A coding tool can ask "how does delegation
-work?" and get both the implementation and the rationale.
-
-### Fallback: CLAUDE.md + SQLite RAG
+### Fallback: CLAUDE.md + direct S3 queries
 
 The support fleet requires a running daemon and healthy agents. When
 either is unavailable, the fallback path provides the same knowledge
-through static artifacts:
+through simpler access:
 
 - **CLAUDE.md** — the platform contract, checked into every scaffolded
   project. Any coding tool can read it directly, no daemon needed.
-- **SQLite RAG** — embedded vectors over platform source, docs, and
-  runtime state. The same data the fleet agents query, pre-indexed into
-  the existing SQLite store. Direct access, no agent orchestration.
+- **Direct S3 queries** — the same bucket the fleet mounts is queryable
+  directly. The daemon reads files from the mount without agent
+  orchestration.
 
 Three tiers of availability:
 
 1. **Fleet running** — full reasoning, delegation, observable agent
    conversations
-2. **Daemon running, fleet down** — MCP falls back to SQLite RAG queries
+2. **Daemon running, fleet down** — MCP falls back to direct reads from
+   the S3 mount
 3. **Nothing running** — CLAUDE.md in the repo
 
-The fleet doesn't add new data. It adds reasoning over data that's already
-queryable through SQLite. The fallback degrades gracefully from
-intelligence to retrieval to static docs.
+The fleet doesn't add new data. It adds reasoning over data that's
+already accessible through the mount. The fallback degrades gracefully
+from intelligence to retrieval to static docs.
 
 **Tool-agnostic.** MCP is an open protocol. Any tool that speaks MCP gets
 full platform awareness: Claude Code, Gemini, Codex, Cursor, Lovable,
@@ -185,16 +181,18 @@ with access.
 
 - Every scaffolded agent project ships with `.mcp.json` — MCP becomes the
   default integration path, not a bolt-on
-- `vlinderd` gains an MCP endpoint, adding tree-sitter as a build
+- `vlinderd` gains an MCP endpoint
+- Platform source and docs are delivered via S3 mount (ADR 107), not
+  embedded in the binary — no binary size increase, no tree-sitter
   dependency
-- Platform source and docs are embedded in the binary, increasing binary
-  size
+- CI/CD gains an upload step: publish source + docs to
+  `s3://vlinder-support/v{version}/` per release
 - The `.vlinder/` directory becomes a first-class API surface, not just
   files on disk
 - The support fleet is the platform's first dogfood consumer of fleets and
   delegation — bugs in the fleet primitives surface here first
-- Graceful degradation: fleet → SQLite RAG → CLAUDE.md. No single point of
-  failure locks the developer out of platform knowledge
+- Graceful degradation: fleet → direct S3 reads → CLAUDE.md. No single
+  point of failure locks the developer out of platform knowledge
 - The support fleet's own conversations are observable in `~/.vlinder/`,
   making it possible to debug the debugger
 - Every deployed agent/fleet becomes an MCP tool — Vlinder is not just an

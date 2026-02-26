@@ -326,6 +326,7 @@ mod tests {
             requirements: Requirements {
                 models: HashMap::new(),
                 services: HashMap::new(),
+                mounts: HashMap::new(),
             },
             prompts: None,
         }
@@ -357,6 +358,7 @@ mod tests {
             requirements: Requirements {
                 models,
                 services,
+                mounts: HashMap::new(),
             },
             prompts: Some(Prompts {
                 intent_recognition: Some("Classify".to_string()),

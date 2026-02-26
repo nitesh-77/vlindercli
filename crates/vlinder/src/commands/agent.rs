@@ -398,6 +398,7 @@ mod tests {
             requirements: RequirementsConfig {
                 models: model_map,
                 services: std::collections::HashMap::new(),
+                mounts: std::collections::HashMap::new(),
             },
             prompts: None,
             object_storage: None,

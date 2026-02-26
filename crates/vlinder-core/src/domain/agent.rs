@@ -3,7 +3,7 @@ use std::path::Path;
 
 use serde::Serialize;
 
-use super::agent_manifest::{AgentManifest, ParseError, PromptsConfig, RequirementsConfig, ServiceConfig};
+use super::agent_manifest::{AgentManifest, MountConfig, ParseError, PromptsConfig, RequirementsConfig, ServiceConfig};
 use super::service_type::ServiceType;
 use super::image_digest::ImageDigest;
 use super::resource_id::ResourceId;
@@ -177,6 +177,8 @@ pub struct Requirements {
     /// e.g., "inference_model" → "claude-sonnet"
     pub models: HashMap<String, String>,
     pub services: HashMap<ServiceType, ServiceConfig>,
+    /// S3 mount declarations (ADR 107).
+    pub mounts: HashMap<String, MountConfig>,
 }
 
 impl Requirements {
@@ -185,6 +187,7 @@ impl Requirements {
         Requirements {
             models: config.models,
             services: config.services,
+            mounts: config.mounts,
         }
     }
 }
@@ -389,6 +392,68 @@ mod tests {
             runtime = "container"
             executable = "localhost/echo:v2"
             [requirements]
+        "#).unwrap();
+
+        assert_ne!(a.config(), b.config());
+    }
+
+    // ========================================================================
+    // Mount support (ADR 107)
+    // ========================================================================
+
+    #[test]
+    fn from_toml_with_mounts() {
+        let agent = make_agent(r#"
+            name = "support"
+            description = "Support agent"
+            runtime = "container"
+            executable = "localhost/support:latest"
+
+            [requirements.mounts.knowledge]
+            s3 = "vlinder-support/v0.1.0/"
+            path = "/knowledge"
+            endpoint = "http://host.containers.internal:4566"
+        "#).unwrap();
+
+        assert_eq!(agent.requirements.mounts.len(), 1);
+        let mount = &agent.requirements.mounts["knowledge"];
+        assert_eq!(mount.s3, "vlinder-support/v0.1.0/");
+        assert_eq!(mount.path, "/knowledge");
+        assert_eq!(mount.endpoint.as_deref(), Some("http://host.containers.internal:4566"));
+    }
+
+    #[test]
+    fn from_toml_without_mounts_has_empty_map() {
+        let agent = make_agent(r#"
+            name = "echo"
+            description = "Echoes"
+            runtime = "container"
+            executable = "localhost/echo:latest"
+
+            [requirements]
+        "#).unwrap();
+
+        assert!(agent.requirements.mounts.is_empty());
+    }
+
+    #[test]
+    fn config_differs_on_mounts() {
+        let a = make_agent(r#"
+            name = "echo"
+            description = "Echoes"
+            runtime = "container"
+            executable = "localhost/echo:latest"
+            [requirements]
+        "#).unwrap();
+
+        let b = make_agent(r#"
+            name = "echo"
+            description = "Echoes"
+            runtime = "container"
+            executable = "localhost/echo:latest"
+            [requirements.mounts.knowledge]
+            s3 = "vlinder-support/v0.1.0/"
+            path = "/knowledge"
         "#).unwrap();
 
         assert_ne!(a.config(), b.config());

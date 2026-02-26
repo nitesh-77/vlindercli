@@ -644,6 +644,7 @@ mod tests {
             requirements: Requirements {
                 models: HashMap::new(),
                 services: HashMap::new(),
+                mounts: HashMap::new(),
             },
             prompts: None,
         }
@@ -693,6 +694,7 @@ mod tests {
             requirements: RequirementsConfig {
                 models: HashMap::new(),
                 services: HashMap::new(),
+                mounts: HashMap::new(),
             },
             prompts: None,
             object_storage: None,

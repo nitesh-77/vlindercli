@@ -78,6 +78,7 @@ fn agent_domain_to_proto_preserves_fields() {
                 ("phi3".to_string(), "phi3".to_string()),
             ]),
             services,
+            mounts: HashMap::new(),
         },
         prompts: None,
 
@@ -114,6 +115,7 @@ fn agent_proto_to_domain_round_trip() {
         }],
 
         models: vec![],
+        mounts: vec![],
         object_storage: None,
         vector_storage: None,
     };
@@ -151,6 +153,7 @@ fn agent_models_survive_proto_round_trip() {
                 ("embedding_model".to_string(), "nomic-embed".to_string()),
             ]),
             services,
+            mounts: HashMap::new(),
         },
         prompts: None,
 
@@ -183,6 +186,7 @@ fn agent_proto_missing_id_fails() {
         services: vec![],
 
         models: vec![],
+        mounts: vec![],
         object_storage: None,
         vector_storage: None,
     };

@@ -100,6 +100,7 @@ fn minimal_agent(name: &str) -> vlinderd::domain::Agent {
         requirements: Requirements {
             models: HashMap::new(),
             services: HashMap::new(),
+            mounts: HashMap::new(),
         },
         prompts: None,
     }
