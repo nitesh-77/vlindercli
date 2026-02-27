@@ -282,6 +282,18 @@ impl HarnessType {
             HarnessType::Grpc => "grpc",
         }
     }
+
+    /// Parse from string representation.
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "cli" => Some(HarnessType::Cli),
+            "web" => Some(HarnessType::Web),
+            "api" => Some(HarnessType::Api),
+            "whatsapp" => Some(HarnessType::Whatsapp),
+            "grpc" => Some(HarnessType::Grpc),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for HarnessType {
@@ -496,6 +508,23 @@ mod tests {
         assert_eq!(HarnessType::Api.as_str(), "api");
         assert_eq!(HarnessType::Whatsapp.as_str(), "whatsapp");
         assert_eq!(HarnessType::Grpc.as_str(), "grpc");
+    }
+
+    #[test]
+    fn harness_type_from_str_round_trips() {
+        let types = [
+            HarnessType::Cli, HarnessType::Web, HarnessType::Api,
+            HarnessType::Whatsapp, HarnessType::Grpc,
+        ];
+        for ht in types {
+            assert_eq!(HarnessType::from_str(ht.as_str()), Some(ht));
+        }
+    }
+
+    #[test]
+    fn harness_type_from_str_unknown_returns_none() {
+        assert_eq!(HarnessType::from_str("unknown"), None);
+        assert_eq!(HarnessType::from_str(""), None);
     }
 
     #[test]
