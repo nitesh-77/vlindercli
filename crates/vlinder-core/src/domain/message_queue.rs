@@ -9,7 +9,7 @@
 //! Each receive method returns a tuple of (TypedMessage, AckFn) where
 //! AckFn acknowledges successful processing.
 
-use super::{CompleteMessage, DelegateMessage, InvokeMessage, Operation, RequestMessage, ResponseMessage, ResourceId, RoutingKey, ServiceType, SubmissionId};
+use super::{AgentId, CompleteMessage, DelegateMessage, HarnessType, InvokeMessage, Operation, RequestMessage, ResponseMessage, ResourceId, RoutingKey, ServiceBackend, SubmissionId};
 use std::fmt;
 
 /// One-shot closure that acknowledges a received message was processed.
@@ -47,16 +47,16 @@ pub trait MessageQueue {
     // Typed receive methods (ADR 044)
     // -------------------------------------------------------------------------
 
-    /// Receive an InvokeMessage from a subject pattern.
+    /// Receive an InvokeMessage for a specific agent.
     ///
     /// Returns the typed message with all dimensions intact.
-    fn receive_invoke(&self, subject_pattern: &str) -> Result<(InvokeMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError>;
+    fn receive_invoke(&self, agent: &AgentId) -> Result<(InvokeMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError>;
 
-    /// Receive a RequestMessage for a service/backend/operation pattern.
+    /// Receive a RequestMessage for a service-backend/operation pair.
     ///
     /// Used by workers to receive typed service requests.
     /// Returns the typed message with all dimensions intact.
-    fn receive_request(&self, service: ServiceType, backend: &str, operation: Operation) -> Result<(RequestMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError>;
+    fn receive_request(&self, service: ServiceBackend, operation: Operation) -> Result<(RequestMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError>;
 
     /// Receive a ResponseMessage for the given request.
     ///
@@ -67,7 +67,7 @@ pub trait MessageQueue {
     /// Receive a CompleteMessage for a specific submission.
     ///
     /// Each invocation polls its own submission-scoped consumer (ADR 052).
-    fn receive_complete(&self, submission: &SubmissionId, harness: &str) -> Result<(CompleteMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError>;
+    fn receive_complete(&self, submission: &SubmissionId, harness: HarnessType) -> Result<(CompleteMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError>;
 
     // -------------------------------------------------------------------------
     // Delegation methods (ADR 056, ADR 096 §7)
@@ -77,7 +77,7 @@ pub trait MessageQueue {
     fn send_delegate(&self, msg: DelegateMessage) -> Result<(), QueueError>;
 
     /// Receive a DelegateMessage for a target agent.
-    fn receive_delegate(&self, target_agent: &str) -> Result<(DelegateMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError>;
+    fn receive_delegate(&self, target: &AgentId) -> Result<(DelegateMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError>;
 
     /// Send a CompleteMessage as a delegation reply (ADR 096 §7).
     ///
@@ -110,10 +110,10 @@ pub trait MessageQueue {
     /// Used by the harness to run an agent to completion.
     fn run_agent(&self, msg: InvokeMessage) -> Result<CompleteMessage, QueueError> {
         let submission = msg.submission.clone();
-        let harness = msg.harness.as_str().to_string();
+        let harness = msg.harness;
         send_and_wait(
             || self.send_invoke(msg),
-            || self.receive_complete(&submission, &harness),
+            || self.receive_complete(&submission, harness),
         )
     }
 }
@@ -172,13 +172,13 @@ impl std::error::Error for QueueError {}
 ///
 /// Registry IDs have the format `<registry>/agents/<name>`.
 /// The last path component is the agent name, used as the NATS subject token.
-pub fn agent_routing_key(agent_id: &ResourceId) -> String {
-    if let Some(path) = agent_id.path() {
-        if let Some(name) = path.rsplit('/').next() {
-            if !name.is_empty() {
-                return name.to_string();
-            }
-        }
-    }
-    agent_id.as_str().to_string()
+pub fn agent_routing_key(agent_id: &ResourceId) -> AgentId {
+    let name = if let Some(path) = agent_id.path() {
+        path.rsplit('/').next()
+            .filter(|n| !n.is_empty())
+            .unwrap_or(agent_id.as_str())
+    } else {
+        agent_id.as_str()
+    };
+    AgentId::new(name)
 }

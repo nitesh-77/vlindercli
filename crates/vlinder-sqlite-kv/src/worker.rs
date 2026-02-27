@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use vlinder_core::domain::Registry;
-use vlinder_core::domain::{MessageQueue, Operation, RequestMessage, ResponseMessage, ServiceDiagnostics, ServiceType};
+use vlinder_core::domain::{MessageQueue, Operation, RequestMessage, ResponseMessage, ServiceBackend, ServiceDiagnostics};
 
 use crate::storage::SqliteObjectStorage;
 use crate::state_store::{SqliteStateStore, hash_value, hash_snapshot, hash_state_commit};
@@ -29,21 +29,21 @@ pub struct KvWorker {
     registry: Arc<dyn Registry>,
     stores: RwLock<HashMap<String, Arc<SqliteObjectStorage>>>,
     state_stores: RwLock<HashMap<String, Arc<SqliteStateStore>>>,
-    backend: String,
+    service: ServiceBackend,
 }
 
 impl KvWorker {
     pub fn new(
         queue: Arc<dyn MessageQueue + Send + Sync>,
         registry: Arc<dyn Registry>,
-        backend: &str,
+        service: ServiceBackend,
     ) -> Self {
         Self {
             queue,
             registry,
             stores: RwLock::new(HashMap::new()),
             state_stores: RwLock::new(HashMap::new()),
-            backend: backend.to_string(),
+            service,
         }
     }
 
@@ -110,13 +110,13 @@ impl KvWorker {
     }
 
     fn try_get(&self) -> bool {
-        match self.queue.receive_request(ServiceType::Kv, &self.backend, Operation::Get) {
+        match self.queue.receive_request(self.service, Operation::Get) {
             Ok((request, ack)) => {
                 let start = std::time::Instant::now();
                 let response_payload = self.handle_get(&request);
                 let duration_ms = start.elapsed().as_millis() as u64;
                 let diag = ServiceDiagnostics::storage(
-                    ServiceType::Kv, &self.backend, Operation::Get, response_payload.len() as u64, duration_ms,
+                    self.service.service_type(), self.service.backend_str(), Operation::Get, response_payload.len() as u64, duration_ms,
                 );
                 let mut response = ResponseMessage::from_request_with_diagnostics(
                     &request, response_payload, diag,
@@ -131,13 +131,13 @@ impl KvWorker {
     }
 
     fn try_put(&self) -> bool {
-        match self.queue.receive_request(ServiceType::Kv, &self.backend, Operation::Put) {
+        match self.queue.receive_request(self.service, Operation::Put) {
             Ok((request, ack)) => {
                 let start = std::time::Instant::now();
                 let (response_payload, new_state) = self.handle_put(&request);
                 let duration_ms = start.elapsed().as_millis() as u64;
                 let diag = ServiceDiagnostics::storage(
-                    ServiceType::Kv, &self.backend, Operation::Put, response_payload.len() as u64, duration_ms,
+                    self.service.service_type(), self.service.backend_str(), Operation::Put, response_payload.len() as u64, duration_ms,
                 );
                 let mut response = ResponseMessage::from_request_with_diagnostics(
                     &request, response_payload, diag,
@@ -153,13 +153,13 @@ impl KvWorker {
     }
 
     fn try_list(&self) -> bool {
-        match self.queue.receive_request(ServiceType::Kv, &self.backend, Operation::List) {
+        match self.queue.receive_request(self.service, Operation::List) {
             Ok((request, ack)) => {
                 let start = std::time::Instant::now();
                 let response_payload = self.handle_list(&request);
                 let duration_ms = start.elapsed().as_millis() as u64;
                 let diag = ServiceDiagnostics::storage(
-                    ServiceType::Kv, &self.backend, Operation::List, response_payload.len() as u64, duration_ms,
+                    self.service.service_type(), self.service.backend_str(), Operation::List, response_payload.len() as u64, duration_ms,
                 );
                 let mut response = ResponseMessage::from_request_with_diagnostics(
                     &request, response_payload, diag,
@@ -174,13 +174,13 @@ impl KvWorker {
     }
 
     fn try_delete(&self) -> bool {
-        match self.queue.receive_request(ServiceType::Kv, &self.backend, Operation::Delete) {
+        match self.queue.receive_request(self.service, Operation::Delete) {
             Ok((request, ack)) => {
                 let start = std::time::Instant::now();
                 let response_payload = self.handle_delete(&request);
                 let duration_ms = start.elapsed().as_millis() as u64;
                 let diag = ServiceDiagnostics::storage(
-                    ServiceType::Kv, &self.backend, Operation::Delete, response_payload.len() as u64, duration_ms,
+                    self.service.service_type(), self.service.backend_str(), Operation::Delete, response_payload.len() as u64, duration_ms,
                 );
                 let mut response = ResponseMessage::from_request_with_diagnostics(
                     &request, response_payload, diag,
@@ -460,7 +460,7 @@ mod tests {
         let agent = test_agent_with_object_storage(&db_path);
         registry.register_agent(agent).unwrap();
         let registry: Arc<dyn Registry> = Arc::new(registry);
-        let handler = KvWorker::new(Arc::clone(&queue), Arc::clone(&registry), "sqlite");
+        let handler = KvWorker::new(Arc::clone(&queue), Arc::clone(&registry), ServiceBackend::Kv(ObjectStorageType::Sqlite));
 
         // Put request — no base64, plain string
         let put_payload = serde_json::json!({
@@ -512,7 +512,7 @@ mod tests {
         let agent = test_agent_with_object_storage(&db_path);
         registry.register_agent(agent).unwrap();
         let registry: Arc<dyn Registry> = Arc::new(registry);
-        let handler = KvWorker::new(Arc::clone(&queue), Arc::clone(&registry), "sqlite");
+        let handler = KvWorker::new(Arc::clone(&queue), Arc::clone(&registry), ServiceBackend::Kv(ObjectStorageType::Sqlite));
 
         let put_payload = serde_json::json!({
             "path": "/todos.json",
@@ -555,7 +555,7 @@ mod tests {
         let agent = test_agent_with_object_storage(&db_path);
         registry.register_agent(agent).unwrap();
         let registry: Arc<dyn Registry> = Arc::new(registry);
-        let handler = KvWorker::new(Arc::clone(&queue), Arc::clone(&registry), "sqlite");
+        let handler = KvWorker::new(Arc::clone(&queue), Arc::clone(&registry), ServiceBackend::Kv(ObjectStorageType::Sqlite));
 
         // First put
         let put1 = serde_json::json!({"path": "/a.txt", "content": "aaa"});
@@ -623,7 +623,7 @@ mod tests {
         let agent = test_agent_with_object_storage(&db_path);
         registry.register_agent(agent).unwrap();
         let registry: Arc<dyn Registry> = Arc::new(registry);
-        let handler = KvWorker::new(Arc::clone(&queue), Arc::clone(&registry), "sqlite");
+        let handler = KvWorker::new(Arc::clone(&queue), Arc::clone(&registry), ServiceBackend::Kv(ObjectStorageType::Sqlite));
         let session = SessionId::new();
 
         // Put /a.txt → state1
@@ -703,7 +703,7 @@ mod tests {
         let agent = test_agent_with_object_storage(&db_path);
         registry.register_agent(agent).unwrap();
         let registry: Arc<dyn Registry> = Arc::new(registry);
-        let handler = KvWorker::new(Arc::clone(&queue), Arc::clone(&registry), "sqlite");
+        let handler = KvWorker::new(Arc::clone(&queue), Arc::clone(&registry), ServiceBackend::Kv(ObjectStorageType::Sqlite));
 
         // Put a file first (unversioned)
         let put_payload = serde_json::json!({"path": "/hello.txt", "content": "hello"});

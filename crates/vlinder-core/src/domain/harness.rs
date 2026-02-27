@@ -10,7 +10,7 @@
 use std::sync::Arc;
 
 use crate::domain::{
-    AgentId, HarnessType, InvokeDiagnostics, InvokeMessage,
+    HarnessType, InvokeDiagnostics, InvokeMessage,
     JobId, JobStatus, MessageQueue, Registry, ResourceId,
     SessionId, SubmissionId, TimelineId,
 };
@@ -161,7 +161,7 @@ impl CoreHarness {
             session_id,
             self.harness_type(),
             runtime,
-            AgentId::new(crate::domain::agent_routing_key(agent_id)),
+            crate::domain::agent_routing_key(agent_id),
             payload.as_bytes().to_vec(),
             self.last_state.clone(),
             invoke_diag,

@@ -193,12 +193,12 @@ pub fn run(name: &str) {
 
     // Connect harness via gRPC — the daemon owns queue and registry
     let mut harness = connect_harness(&config);
-    harness.start_session(&entry_agent_name);
+    harness.start_session(entry_agent_name.as_str());
 
     tracing::debug!(fleet = %fleet.name, "Fleet session started");
 
     // Read state from the state service (ADR 079)
-    apply_latest_state(&config, &mut *harness, &entry_agent_name);
+    apply_latest_state(&config, &mut *harness, entry_agent_name.as_str());
 
     println!("Fleet '{}' ready. Entry agent: {}", fleet.name, entry_agent_name);
 

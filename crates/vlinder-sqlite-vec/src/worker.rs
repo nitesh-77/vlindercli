@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use vlinder_core::domain::Registry;
-use vlinder_core::domain::{MessageQueue, Operation, RequestMessage, ResponseMessage, ServiceDiagnostics, ServiceType};
+use vlinder_core::domain::{MessageQueue, Operation, RequestMessage, ResponseMessage, ServiceBackend, ServiceDiagnostics};
 
 use crate::storage::SqliteVectorStorage;
 use crate::types::{SqliteVecStoreRequest, SqliteVecSearchRequest, SqliteVecDeleteRequest};
@@ -21,20 +21,20 @@ pub struct SqliteVecWorker {
     queue: Arc<dyn MessageQueue + Send + Sync>,
     registry: Arc<dyn Registry>,
     stores: RwLock<HashMap<String, Arc<SqliteVectorStorage>>>,
-    backend: String,
+    service: ServiceBackend,
 }
 
 impl SqliteVecWorker {
     pub fn new(
         queue: Arc<dyn MessageQueue + Send + Sync>,
         registry: Arc<dyn Registry>,
-        backend: &str,
+        service: ServiceBackend,
     ) -> Self {
         Self {
             queue,
             registry,
             stores: RwLock::new(HashMap::new()),
-            backend: backend.to_string(),
+            service,
         }
     }
 
@@ -65,13 +65,13 @@ impl SqliteVecWorker {
     }
 
     fn try_store(&self) -> bool {
-        match self.queue.receive_request(ServiceType::Vec, &self.backend, Operation::Store) {
+        match self.queue.receive_request(self.service, Operation::Store) {
             Ok((request, ack)) => {
                 let start = std::time::Instant::now();
                 let response_payload = self.handle_store(&request);
                 let duration_ms = start.elapsed().as_millis() as u64;
                 let diag = ServiceDiagnostics::storage(
-                    ServiceType::Vec, &self.backend, Operation::Store, response_payload.len() as u64, duration_ms,
+                    self.service.service_type(), self.service.backend_str(), Operation::Store, response_payload.len() as u64, duration_ms,
                 );
                 let mut response = ResponseMessage::from_request_with_diagnostics(
                     &request, response_payload, diag,
@@ -86,13 +86,13 @@ impl SqliteVecWorker {
     }
 
     fn try_search(&self) -> bool {
-        match self.queue.receive_request(ServiceType::Vec, &self.backend, Operation::Search) {
+        match self.queue.receive_request(self.service, Operation::Search) {
             Ok((request, ack)) => {
                 let start = std::time::Instant::now();
                 let response_payload = self.handle_search(&request);
                 let duration_ms = start.elapsed().as_millis() as u64;
                 let diag = ServiceDiagnostics::storage(
-                    ServiceType::Vec, &self.backend, Operation::Search, response_payload.len() as u64, duration_ms,
+                    self.service.service_type(), self.service.backend_str(), Operation::Search, response_payload.len() as u64, duration_ms,
                 );
                 let mut response = ResponseMessage::from_request_with_diagnostics(
                     &request, response_payload, diag,
@@ -107,13 +107,13 @@ impl SqliteVecWorker {
     }
 
     fn try_delete(&self) -> bool {
-        match self.queue.receive_request(ServiceType::Vec, &self.backend, Operation::Delete) {
+        match self.queue.receive_request(self.service, Operation::Delete) {
             Ok((request, ack)) => {
                 let start = std::time::Instant::now();
                 let response_payload = self.handle_delete(&request);
                 let duration_ms = start.elapsed().as_millis() as u64;
                 let diag = ServiceDiagnostics::storage(
-                    ServiceType::Vec, &self.backend, Operation::Delete, response_payload.len() as u64, duration_ms,
+                    self.service.service_type(), self.service.backend_str(), Operation::Delete, response_payload.len() as u64, duration_ms,
                 );
                 let mut response = ResponseMessage::from_request_with_diagnostics(
                     &request, response_payload, diag,
@@ -247,7 +247,7 @@ mod tests {
         let agent = test_agent_with_vector_storage(&db_path);
         registry.register_agent(agent).unwrap();
         let registry: Arc<dyn Registry> = Arc::new(registry);
-        let handler = SqliteVecWorker::new(Arc::clone(&queue), Arc::clone(&registry), "sqlite-vec");
+        let handler = SqliteVecWorker::new(Arc::clone(&queue), Arc::clone(&registry), ServiceBackend::Vec(VectorStorageType::SqliteVec));
 
         let embedding: Vec<f32> = (0..768).map(|i| i as f32 * 0.001).collect();
         let store_payload = serde_json::json!({
@@ -300,7 +300,7 @@ mod tests {
         let agent = test_agent_with_vector_storage(&db_path);
         registry.register_agent(agent).unwrap();
         let registry: Arc<dyn Registry> = Arc::new(registry);
-        let handler = SqliteVecWorker::new(Arc::clone(&queue), Arc::clone(&registry), "sqlite-vec");
+        let handler = SqliteVecWorker::new(Arc::clone(&queue), Arc::clone(&registry), ServiceBackend::Vec(VectorStorageType::SqliteVec));
 
         let embedding: Vec<f32> = (0..768).map(|i| i as f32 * 0.001).collect();
         let store_payload = serde_json::json!({

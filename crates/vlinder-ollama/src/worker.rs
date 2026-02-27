@@ -7,8 +7,8 @@ use std::time::Instant;
 
 use async_openai::types::chat::{CreateChatCompletionRequest, CreateChatCompletionResponse};
 use vlinder_core::domain::{
-    MessageQueue, Operation, RequestMessage, ResponseMessage, ServiceDiagnostics, ServiceMetrics,
-    ServiceType,
+    EmbeddingBackendType, InferenceBackendType, MessageQueue, Operation, RequestMessage,
+    ResponseMessage, ServiceBackend, ServiceDiagnostics, ServiceMetrics, ServiceType,
 };
 
 use crate::types::{
@@ -34,7 +34,7 @@ impl OllamaWorker {
     pub fn tick(&self) -> bool {
         // Try each inference operation in turn.
         for op in [Operation::Run, Operation::Chat, Operation::Generate] {
-            match self.queue.receive_request(ServiceType::Infer, "ollama", op) {
+            match self.queue.receive_request(ServiceBackend::Infer(InferenceBackendType::Ollama), op) {
                 Ok((request, ack)) => {
                     self.process(request, ack, op);
                     return true;
@@ -44,7 +44,7 @@ impl OllamaWorker {
         }
 
         // Poll for embed requests.
-        match self.queue.receive_request(ServiceType::Embed, "ollama", Operation::Run) {
+        match self.queue.receive_request(ServiceBackend::Embed(EmbeddingBackendType::Ollama), Operation::Run) {
             Ok((request, ack)) => {
                 self.process_embed(request, ack);
                 return true;

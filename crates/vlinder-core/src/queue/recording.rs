@@ -110,19 +110,19 @@ impl MessageQueue for RecordingQueue {
     // Receive methods — delegate straight through
     // -------------------------------------------------------------------------
 
-    fn receive_invoke(&self, subject_pattern: &str) -> Result<(InvokeMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
-        self.inner.receive_invoke(subject_pattern)
+    fn receive_invoke(&self, agent: &crate::domain::AgentId) -> Result<(InvokeMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+        self.inner.receive_invoke(agent)
     }
 
-    fn receive_request(&self, service: crate::domain::ServiceType, backend: &str, operation: crate::domain::Operation) -> Result<(RequestMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
-        self.inner.receive_request(service, backend, operation)
+    fn receive_request(&self, service: crate::domain::ServiceBackend, operation: crate::domain::Operation) -> Result<(RequestMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+        self.inner.receive_request(service, operation)
     }
 
     fn receive_response(&self, request: &RequestMessage) -> Result<(ResponseMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
         self.inner.receive_response(request)
     }
 
-    fn receive_complete(&self, submission: &SubmissionId, harness: &str) -> Result<(CompleteMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+    fn receive_complete(&self, submission: &SubmissionId, harness: crate::domain::HarnessType) -> Result<(CompleteMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
         self.inner.receive_complete(submission, harness)
     }
 
@@ -130,8 +130,8 @@ impl MessageQueue for RecordingQueue {
     // Delegation methods — delegate straight through
     // -------------------------------------------------------------------------
 
-    fn receive_delegate(&self, target_agent: &str) -> Result<(DelegateMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
-        self.inner.receive_delegate(target_agent)
+    fn receive_delegate(&self, target: &crate::domain::AgentId) -> Result<(DelegateMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+        self.inner.receive_delegate(target)
     }
 
     fn receive_delegate_reply(&self, reply_key: &crate::domain::RoutingKey) -> Result<(CompleteMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
@@ -383,7 +383,7 @@ mod tests {
         inner.send_invoke(msg).unwrap();
 
         // Receive through the recording queue — should delegate to inner
-        let result = queue.receive_invoke("echo");
+        let result = queue.receive_invoke(&test_agent_id());
         assert!(result.is_ok());
     }
 

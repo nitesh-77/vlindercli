@@ -352,7 +352,7 @@ fn repair(dir: &Path, path: Option<PathBuf>) {
         harness.set_timeline(TimelineId::from(id), false);
     }
 
-    harness.start_session(&agent_name);
+    harness.start_session(agent_name.as_str());
 
     // Restore state from trailer
     if let Some(state) = state_trailer {

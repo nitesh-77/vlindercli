@@ -295,7 +295,8 @@ fn run_storage_object_sqlite_worker(config: &Config, shutdown: &AtomicBool) {
             .expect("Failed to connect to registry")
     );
 
-    let worker = KvWorker::new(queue, registry, "sqlite");
+    use vlinder_core::domain::{ObjectStorageType, ServiceBackend};
+    let worker = KvWorker::new(queue, registry, ServiceBackend::Kv(ObjectStorageType::Sqlite));
 
     tracing::info!(registry = %registry_addr, "SQLite object storage worker ready");
 
@@ -318,7 +319,8 @@ fn run_storage_object_memory_worker(config: &Config, shutdown: &AtomicBool) {
             .expect("Failed to connect to registry")
     );
 
-    let worker = KvWorker::new(queue, registry, "memory");
+    use vlinder_core::domain::{ObjectStorageType, ServiceBackend};
+    let worker = KvWorker::new(queue, registry, ServiceBackend::Kv(ObjectStorageType::InMemory));
 
     tracing::info!(registry = %registry_addr, "In-memory object storage worker ready");
 
@@ -341,7 +343,8 @@ fn run_storage_vector_sqlite_worker(config: &Config, shutdown: &AtomicBool) {
             .expect("Failed to connect to registry")
     );
 
-    let worker = SqliteVecWorker::new(queue, registry, "sqlite-vec");
+    use vlinder_core::domain::{ServiceBackend, VectorStorageType};
+    let worker = SqliteVecWorker::new(queue, registry, ServiceBackend::Vec(VectorStorageType::SqliteVec));
 
     tracing::info!(registry = %registry_addr, "SQLite-vec vector storage worker ready");
 
@@ -364,7 +367,8 @@ fn run_storage_vector_memory_worker(config: &Config, shutdown: &AtomicBool) {
             .expect("Failed to connect to registry")
     );
 
-    let worker = SqliteVecWorker::new(queue, registry, "memory");
+    use vlinder_core::domain::{ServiceBackend, VectorStorageType};
+    let worker = SqliteVecWorker::new(queue, registry, ServiceBackend::Vec(VectorStorageType::InMemory));
 
     tracing::info!(registry = %registry_addr, "In-memory vector storage worker ready");
 

@@ -71,7 +71,7 @@ fn container_runtime_executes_echo_agent() {
             panic!("container did not complete within 60 seconds");
         }
         // Check for completion
-        if let Ok((complete, ack)) = queue.receive_complete(&submission, "cli") {
+        if let Ok((complete, ack)) = queue.receive_complete(&submission, HarnessType::Cli) {
             assert_eq!(
                 String::from_utf8(complete.payload).unwrap(),
                 "hello from container"

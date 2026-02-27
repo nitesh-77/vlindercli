@@ -6,7 +6,8 @@ use std::time::Instant;
 
 use async_openai::types::chat::{CreateChatCompletionRequest, CreateChatCompletionResponse};
 use vlinder_core::domain::{
-    MessageQueue, Operation, ResponseMessage, ServiceDiagnostics, ServiceMetrics, ServiceType,
+    InferenceBackendType, MessageQueue, Operation, ResponseMessage, ServiceBackend,
+    ServiceDiagnostics, ServiceMetrics, ServiceType,
 };
 
 pub struct OpenRouterWorker {
@@ -32,7 +33,7 @@ impl OpenRouterWorker {
     pub fn tick(&self) -> bool {
         match self
             .queue
-            .receive_request(ServiceType::Infer, "openrouter", Operation::Run)
+            .receive_request(ServiceBackend::Infer(InferenceBackendType::OpenRouter), Operation::Run)
         {
             Ok((request, ack)) => {
                 let start = Instant::now();

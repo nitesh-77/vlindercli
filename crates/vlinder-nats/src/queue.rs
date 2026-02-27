@@ -339,9 +339,9 @@ impl MessageQueue for NatsQueue {
         })
     }
 
-    fn receive_invoke(&self, subject_pattern: &str) -> Result<(InvokeMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+    fn receive_invoke(&self, agent: &AgentId) -> Result<(InvokeMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
         // Build filter: vlinder.{timeline}.{submission}.invoke.{harness}.{runtime}.{agent}
-        let filter = format!("vlinder.*.*.invoke.*.*.{}", subject_pattern);
+        let filter = format!("vlinder.*.*.invoke.*.*.{}", agent.as_str());
 
         self.inner.runtime.block_on(async {
             let (js_msg, ack_fn) = self.fetch_one(&filter).await?;
@@ -372,9 +372,9 @@ impl MessageQueue for NatsQueue {
         })
     }
 
-    fn receive_request(&self, service: ServiceType, backend: &str, operation: Operation) -> Result<(RequestMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+    fn receive_request(&self, service: ServiceBackend, operation: Operation) -> Result<(RequestMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
         // Build filter: vlinder.{timeline}.{submission}.req.{agent}.{service}.{backend}.{op}.{seq}
-        let filter = format!("vlinder.*.*.req.*.{}.{}.{}.*", service, backend, operation);
+        let filter = format!("vlinder.*.*.req.*.{}.{}.{}.*", service.service_type(), service.backend_str(), operation);
 
         self.inner.runtime.block_on(async {
             let (js_msg, ack_fn) = self.fetch_one(&filter).await?;
@@ -451,9 +451,9 @@ impl MessageQueue for NatsQueue {
         })
     }
 
-    fn receive_complete(&self, submission: &SubmissionId, harness: &str) -> Result<(CompleteMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+    fn receive_complete(&self, submission: &SubmissionId, harness: HarnessType) -> Result<(CompleteMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
         // Build filter: submission-scoped consumer (ADR 052) with timeline wildcard
-        let filter = format!("vlinder.*.{}.complete.*.{}", submission, harness);
+        let filter = format!("vlinder.*.{}.complete.*.{}", submission, harness.as_str());
 
         self.inner.runtime.block_on(async {
             let (js_msg, ack_fn) = self.fetch_one(&filter).await?;
@@ -514,8 +514,8 @@ impl MessageQueue for NatsQueue {
         })
     }
 
-    fn receive_delegate(&self, target_agent: &str) -> Result<(DelegateMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
-        let filter = format!("vlinder.*.*.delegate.*.{}", target_agent);
+    fn receive_delegate(&self, target: &AgentId) -> Result<(DelegateMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+        let filter = format!("vlinder.*.*.delegate.*.{}", target.as_str());
 
         self.inner.runtime.block_on(async {
             let (js_msg, ack_fn) = self.fetch_one(&filter).await?;

@@ -179,7 +179,8 @@ impl Sidecar {
         tracing::info!(event = "sidecar.started", agent = %self.agent_name, "Sidecar loop started");
 
         loop {
-            if let Ok((invoke, ack)) = self.queue.receive_invoke(&self.agent_name) {
+            let agent_id = AgentId::new(&self.agent_name);
+            if let Ok((invoke, ack)) = self.queue.receive_invoke(&agent_id) {
                 let _ = ack();
                 tracing::info!(
                     event = "dispatch.started",
@@ -191,7 +192,7 @@ impl Sidecar {
                 if self.handle_invoke(&invoke, &None).is_err() {
                     break;
                 }
-            } else if let Ok((delegate, ack)) = self.queue.receive_delegate(&self.agent_name) {
+            } else if let Ok((delegate, ack)) = self.queue.receive_delegate(&agent_id) {
                 let _ = ack();
                 tracing::info!(
                     event = "delegation.received",

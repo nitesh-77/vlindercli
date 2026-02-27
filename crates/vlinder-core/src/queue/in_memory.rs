@@ -1,13 +1,13 @@
 //! In-memory queue implementation.
 
 use crate::domain::{
-    CompleteMessage, DelegateMessage, InvokeMessage, MessageQueue,
+    AgentId, CompleteMessage, DelegateMessage, HarnessType, InvokeMessage, MessageQueue,
     ObservableMessage, Operation, QueueError, RequestMessage, ResponseMessage,
-    RoutingKey, ServiceType, SubmissionId,
+    RoutingKey, ServiceBackend, SubmissionId,
 };
 #[cfg(test)]
 use crate::domain::{
-    AgentId, ContainerDiagnostics, DelegateDiagnostics, InvokeDiagnostics, RequestDiagnostics,
+    ContainerDiagnostics, DelegateDiagnostics, InvokeDiagnostics, RequestDiagnostics,
 };
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
@@ -67,14 +67,12 @@ impl MessageQueue for InMemoryQueue {
         Ok(())
     }
 
-    fn receive_invoke(&self, subject_pattern: &str) -> Result<(InvokeMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+    fn receive_invoke(&self, agent: &AgentId) -> Result<(InvokeMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
         let mut typed = self.typed_queues.lock().unwrap();
 
         for (key, queue) in typed.iter_mut() {
             let matches = match key {
-                RoutingKey::Invoke { agent, .. } => {
-                    subject_pattern.contains('*') || agent.as_str() == subject_pattern
-                }
+                RoutingKey::Invoke { agent: a, .. } => a == agent,
                 _ => false,
             };
             if matches {
@@ -89,13 +87,13 @@ impl MessageQueue for InMemoryQueue {
         Err(QueueError::Timeout)
     }
 
-    fn receive_request(&self, service: ServiceType, backend: &str, operation: Operation) -> Result<(RequestMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+    fn receive_request(&self, service: ServiceBackend, operation: Operation) -> Result<(RequestMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
         let mut typed = self.typed_queues.lock().unwrap();
 
         for (key, queue) in typed.iter_mut() {
             let matches = match key {
                 RoutingKey::Request { service: svc, operation: op, .. } => {
-                    svc.service_type() == service && svc.backend_str() == backend && *op == operation
+                    *svc == service && *op == operation
                 }
                 _ => false,
             };
@@ -127,13 +125,13 @@ impl MessageQueue for InMemoryQueue {
         Err(QueueError::Timeout)
     }
 
-    fn receive_complete(&self, submission: &SubmissionId, harness: &str) -> Result<(CompleteMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+    fn receive_complete(&self, submission: &SubmissionId, harness: HarnessType) -> Result<(CompleteMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
         let mut typed = self.typed_queues.lock().unwrap();
 
         for (key, queue) in typed.iter_mut() {
             let matches = match key {
                 RoutingKey::Complete { submission: sub, harness: h, .. } => {
-                    sub == submission && h.as_str() == harness
+                    sub == submission && *h == harness
                 }
                 _ => false,
             };
@@ -156,12 +154,12 @@ impl MessageQueue for InMemoryQueue {
         Ok(())
     }
 
-    fn receive_delegate(&self, target_agent: &str) -> Result<(DelegateMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+    fn receive_delegate(&self, target: &AgentId) -> Result<(DelegateMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
         let mut typed = self.typed_queues.lock().unwrap();
 
         for (key, queue) in typed.iter_mut() {
             let matches = match key {
-                RoutingKey::Delegate { target, .. } => target.as_str() == target_agent,
+                RoutingKey::Delegate { target: t, .. } => t == target,
                 _ => false,
             };
             if matches {
@@ -204,8 +202,8 @@ impl MessageQueue for InMemoryQueue {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{InferenceBackendType, Nonce, ObjectStorageType, Operation, RuntimeType, ServiceBackend, VectorStorageType};
-    use crate::domain::{HarnessType, Sequence, SessionId, SubmissionId, TimelineId};
+    use crate::domain::{InferenceBackendType, Nonce, ObjectStorageType, Operation, RuntimeType, VectorStorageType};
+    use crate::domain::{Sequence, SessionId, SubmissionId, TimelineId};
 
     fn test_agent_id() -> AgentId {
         AgentId::new("echo-agent")
@@ -239,7 +237,7 @@ mod tests {
         queue.send_invoke(invoke).unwrap();
 
         // Receive typed message
-        let (received, ack) = queue.receive_invoke("echo-agent").unwrap();
+        let (received, ack) = queue.receive_invoke(&test_agent_id()).unwrap();
 
         assert_eq!(received.id, original_id);
         assert_eq!(received.harness, HarnessType::Cli);
@@ -270,7 +268,7 @@ mod tests {
 
         queue.send_invoke(invoke).unwrap();
 
-        let (received, _) = queue.receive_invoke("echo-agent").unwrap();
+        let (received, _) = queue.receive_invoke(&test_agent_id()).unwrap();
 
         // All dimensions preserved for reply construction
         assert_eq!(received.submission, submission);
@@ -299,7 +297,7 @@ mod tests {
         queue.send_request(request).unwrap();
 
         // Receive by service/backend/operation
-        let (received, ack) = queue.receive_request(ServiceType::Kv, "sqlite", Operation::Get).unwrap();
+        let (received, ack) = queue.receive_request(ServiceBackend::Kv(ObjectStorageType::Sqlite), Operation::Get).unwrap();
 
         assert_eq!(received.id, original_id);
         assert_eq!(received.service, ServiceBackend::Kv(ObjectStorageType::Sqlite));
@@ -331,7 +329,7 @@ mod tests {
 
         queue.send_request(request).unwrap();
 
-        let (received, _) = queue.receive_request(ServiceType::Vec, "sqlite-vec", Operation::Search).unwrap();
+        let (received, _) = queue.receive_request(ServiceBackend::Vec(VectorStorageType::SqliteVec), Operation::Search).unwrap();
 
         // All dimensions preserved for reply construction
         assert_eq!(received.submission, submission);
@@ -358,7 +356,7 @@ mod tests {
 
         queue.send_request(request).unwrap();
 
-        let (received, _) = queue.receive_request(ServiceType::Infer, "ollama", Operation::Run).unwrap();
+        let (received, _) = queue.receive_request(ServiceBackend::Infer(InferenceBackendType::Ollama), Operation::Run).unwrap();
 
         assert_eq!(received.service, ServiceBackend::Infer(InferenceBackendType::Ollama));
         assert_eq!(received.operation, Operation::Run);
@@ -388,7 +386,7 @@ mod tests {
 
         queue.send_delegate(delegate).unwrap();
 
-        let (received, ack) = queue.receive_delegate("summarizer").unwrap();
+        let (received, ack) = queue.receive_delegate(&AgentId::new("summarizer")).unwrap();
 
         assert_eq!(received.id, original_id);
         assert_eq!(received.caller, AgentId::new("coordinator"));
@@ -417,7 +415,7 @@ mod tests {
 
         queue.send_delegate(delegate).unwrap();
 
-        let result = queue.receive_delegate("fact-checker");
+        let result = queue.receive_delegate(&AgentId::new("fact-checker"));
         assert!(matches!(result, Err(QueueError::Timeout)));
     }
 
