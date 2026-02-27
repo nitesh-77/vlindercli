@@ -23,6 +23,7 @@ COPY crates/vlinder-sqlite-kv/Cargo.toml crates/vlinder-sqlite-kv/
 COPY crates/vlinder-nats/Cargo.toml crates/vlinder-nats/
 COPY crates/vlinder-sidecar/Cargo.toml crates/vlinder-sidecar/
 COPY crates/vlinder-podman-runtime/Cargo.toml crates/vlinder-podman-runtime/
+COPY crates/vlinder-sql-state/Cargo.toml crates/vlinder-sql-state/
 COPY crates/vlinderd/Cargo.toml crates/vlinderd/
 COPY crates/vlinder/Cargo.toml crates/vlinder/
 
@@ -35,6 +36,7 @@ RUN mkdir -p crates/vlinder-core/src && echo "" > crates/vlinder-core/src/lib.rs
     mkdir -p crates/vlinder-proto/src && echo "" > crates/vlinder-proto/src/lib.rs && \
     mkdir -p crates/vlinder-nats/src && echo "" > crates/vlinder-nats/src/lib.rs && \
     mkdir -p crates/vlinder-podman-runtime/src && echo "" > crates/vlinder-podman-runtime/src/lib.rs && \
+    mkdir -p crates/vlinder-sql-state/src && echo "" > crates/vlinder-sql-state/src/lib.rs && \
     mkdir -p crates/vlinder-sidecar/src && echo "fn main() {}" > crates/vlinder-sidecar/src/main.rs && \
     mkdir -p crates/vlinderd/src && echo "fn main() {}" > crates/vlinderd/src/main.rs && \
     mkdir -p crates/vlinder/src && echo "fn main() {}" > crates/vlinder/src/main.rs

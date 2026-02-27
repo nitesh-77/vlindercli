@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
-use crate::domain::{HistoryEntry, Session};
+use vlinder_core::domain::{HistoryEntry, Session};
 
 /// A running session viewer server.
 ///
@@ -320,7 +320,7 @@ fn html_response(status: u16, body: &str) -> tiny_http::Response<std::io::Cursor
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{SessionId, SubmissionId};
+    use vlinder_core::domain::{SessionId, SubmissionId};
 
     fn test_session() -> Session {
         let mut session = Session::new(

@@ -41,6 +41,8 @@ pub enum WorkerRole {
     Catalog,
     /// DAG git worker — writes messages as git commits for time-travel
     DagGit,
+    /// Session viewer HTTP server — read-only conversation browser
+    SessionViewer,
 }
 
 impl WorkerRole {
@@ -69,6 +71,7 @@ impl WorkerRole {
             WorkerRole::State => "state",
             WorkerRole::Catalog => "catalog",
             WorkerRole::DagGit => "dag-git",
+            WorkerRole::SessionViewer => "session-viewer",
         }
     }
 
@@ -88,6 +91,7 @@ impl WorkerRole {
             WorkerRole::State => "State service",
             WorkerRole::Catalog => "Catalog service",
             WorkerRole::DagGit => "DAG git worker",
+            WorkerRole::SessionViewer => "Session viewer HTTP server",
         }
     }
 }
@@ -116,6 +120,7 @@ impl FromStr for WorkerRole {
             "state" => Ok(WorkerRole::State),
             "catalog" => Ok(WorkerRole::Catalog),
             "dag-git" => Ok(WorkerRole::DagGit),
+            "session-viewer" => Ok(WorkerRole::SessionViewer),
             _ => Err(ParseWorkerRoleError(s.to_string())),
         }
     }
@@ -148,6 +153,7 @@ mod tests {
         assert_eq!("state".parse::<WorkerRole>().unwrap(), WorkerRole::State);
         assert_eq!("catalog".parse::<WorkerRole>().unwrap(), WorkerRole::Catalog);
         assert_eq!("dag-git".parse::<WorkerRole>().unwrap(), WorkerRole::DagGit);
+        assert_eq!("session-viewer".parse::<WorkerRole>().unwrap(), WorkerRole::SessionViewer);
     }
 
     #[test]
@@ -173,6 +179,7 @@ mod tests {
             WorkerRole::State,
             WorkerRole::Catalog,
             WorkerRole::DagGit,
+            WorkerRole::SessionViewer,
         ] {
             let env_val = role.as_env_value();
             let parsed: WorkerRole = env_val.parse().unwrap();

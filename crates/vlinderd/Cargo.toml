@@ -21,6 +21,7 @@ vlinder-sqlite-vec = { path = "../vlinder-sqlite-vec" }
 vlinder-sqlite-kv = { path = "../vlinder-sqlite-kv" }
 vlinder-podman-runtime = { path = "../vlinder-podman-runtime" }
 vlinder-proto = { path = "../vlinder-proto" }
+vlinder-sql-state = { path = "../vlinder-sql-state" }
 clap = { version = "4", features = ["derive"] }
 dirs = "6"
 indicatif = "0.17"
@@ -54,9 +55,6 @@ futures = "0.3"
 
 # gRPC for registry service
 tonic = "0.12"
-
-# Lightweight HTTP server for session viewer
-tiny_http = "0.12"
 
 # Signal handling for graceful shutdown
 ctrlc = "3.4"

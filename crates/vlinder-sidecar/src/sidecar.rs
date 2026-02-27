@@ -43,8 +43,6 @@ impl Sidecar {
     /// then fetches the Agent from the registry to determine storage backends.
     pub fn new(config: &SidecarConfig) -> Result<Self, Box<dyn std::error::Error>> {
         let queue = factory::connect_queue(&config.nats_url, &config.state_url)?;
-        let registry = factory::connect_registry(&config.registry_url)?;
-
         let image_ref = config.image_ref.as_ref()
             .and_then(|r| ImageRef::parse(r).ok());
         let image_digest = config.image_digest.as_ref()

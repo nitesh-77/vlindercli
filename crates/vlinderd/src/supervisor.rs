@@ -283,6 +283,12 @@ impl Supervisor {
             workers.push(child);
         }
 
+        // Session viewer — local HTTP server for browsing conversation sessions.
+        // No health check needed: local-only, no other services depend on it.
+        if let Some(child) = spawn_worker(WorkerRole::SessionViewer) {
+            workers.push(child);
+        }
+
         tracing::info!(
             worker_count = workers.len(),
             "Supervisor started in distributed mode"

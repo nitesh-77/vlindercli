@@ -7,8 +7,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use vlinderd::config::{conversations_dir, Config};
-use vlinderd::session_server::SessionServer;
+use vlinderd::config::Config;
 use vlinderd::supervisor::Supervisor;
 use vlinderd::worker::run_worker_loop;
 use vlinderd::worker_role::WorkerRole;
@@ -42,22 +41,6 @@ fn run_as_supervisor(config: &Config) {
     tracing::info!("Starting vlinder supervisor (distributed mode)");
 
     let mut supervisor = Supervisor::new(config);
-
-    // Start session viewer
-    let port = std::env::var("VLINDER_SESSION_PORT")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(7777u16);
-    let _server = match SessionServer::start(conversations_dir(), port) {
-        Ok(server) => {
-            tracing::info!(port = server.port(), "Session viewer started: http://127.0.0.1:{}", server.port());
-            Some(server)
-        }
-        Err(e) => {
-            tracing::warn!(error = %e, "Session viewer failed to start");
-            None
-        }
-    };
 
     let shutdown = Arc::new(AtomicBool::new(false));
     let shutdown_clone = Arc::clone(&shutdown);

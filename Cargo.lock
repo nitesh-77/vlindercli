@@ -3330,6 +3330,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "vlinder-sql-state"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "tempfile",
+ "tiny_http",
+ "tracing",
+ "ureq 3.2.0",
+ "vlinder-core",
+]
+
+[[package]]
 name = "vlinder-sqlite-kv"
 version = "0.1.0"
 dependencies = [
@@ -3378,7 +3390,6 @@ dependencies = [
  "sqlite-vec",
  "tempfile",
  "termimad",
- "tiny_http",
  "tokio",
  "tokio-stream",
  "toml",
@@ -3394,6 +3405,7 @@ dependencies = [
  "vlinder-ollama",
  "vlinder-podman-runtime",
  "vlinder-proto",
+ "vlinder-sql-state",
  "vlinder-sqlite-kv",
  "vlinder-sqlite-vec",
  "zerocopy 0.7.35",
