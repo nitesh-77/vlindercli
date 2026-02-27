@@ -39,7 +39,7 @@ pub fn recording_from_config(config: &Config) -> Result<Arc<dyn MessageQueue + S
 
     let store: Arc<dyn DagStore> = match config.state.backend {
         StateBackend::Grpc => {
-            use crate::state_service::GrpcStateClient;
+            use vlinder_sql_state::state_service::GrpcStateClient;
 
             let state_addr = if config.distributed.state_addr.starts_with("http://")
                 || config.distributed.state_addr.starts_with("https://") {

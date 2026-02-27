@@ -73,7 +73,7 @@ fn run_registry_worker(config: &Config, shutdown: &AtomicBool) {
     use crate::domain::{RuntimeType, ObjectStorageType, VectorStorageType};
     use crate::registry::PersistentRegistry;
     use crate::registry_service::RegistryServiceServer;
-    use crate::secret_service::GrpcSecretClient;
+    use vlinder_proto::secret_service::GrpcSecretClient;
 
     let secret_addr = if config.distributed.secret_addr.starts_with("http://") {
         config.distributed.secret_addr.clone()
@@ -128,7 +128,7 @@ fn run_registry_worker(config: &Config, shutdown: &AtomicBool) {
 
 fn run_secret_worker(config: &Config, shutdown: &AtomicBool) {
     use tonic::transport::Server;
-    use crate::secret_service::SecretServiceServer;
+    use vlinder_proto::secret_service::SecretServiceServer;
 
     let secret_store = crate::secret_store_factory::from_config(config)
         .unwrap_or_else(|e| panic!("Failed to open secret store: {}", e));
@@ -164,7 +164,7 @@ fn run_harness_worker(config: &Config, shutdown: &AtomicBool) {
     use tonic::transport::Server;
     use crate::domain::HarnessType;
     use crate::harness::CoreHarness;
-    use crate::harness_service::HarnessServiceServer;
+    use vlinder_proto::harness_service::HarnessServiceServer;
     use crate::registry_service::GrpcRegistryClient;
 
     let queue = crate::queue_factory::recording_from_config(config).expect("Failed to create queue");
@@ -364,7 +364,7 @@ fn run_state_worker(config: &Config, shutdown: &AtomicBool) {
     use crate::config::dag_db_path;
     use crate::domain::DagStore;
     use vlinder_sql_state::SqliteDagStore;
-    use crate::state_service::StateServiceServer;
+    use vlinder_sql_state::state_service::StateServiceServer;
 
     let db_path = dag_db_path();
     let store = SqliteDagStore::open(&db_path)
@@ -403,7 +403,7 @@ fn run_catalog_worker(config: &Config, shutdown: &AtomicBool) {
     use tonic::transport::Server;
     use vlinder_ollama::OllamaCatalog;
     use vlinder_infer_openrouter::OpenRouterCatalog;
-    use crate::catalog_service::CatalogServiceServer;
+    use vlinder_catalog::catalog_service::CatalogServiceServer;
     use crate::domain::{CatalogService, CompositeCatalog};
 
     let mut composite = CompositeCatalog::new();
