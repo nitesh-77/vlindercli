@@ -725,6 +725,25 @@ fn subject_to_routing_key(subject: &str) -> Option<RoutingKey> {
     }
 }
 
+/// Serialize an `InvokeMessage` into NATS headers (sans payload).
+///
+/// Inverse of `from_nats_headers` for the Invoke variant.
+/// This is the single source of truth for which fields go into NATS headers;
+/// `send_invoke` delegates here.
+pub fn invoke_to_nats_headers(msg: &InvokeMessage) -> HashMap<String, String> {
+    let mut h = HashMap::new();
+    h.insert("msg-id".to_string(), msg.id.as_str().to_string());
+    h.insert("protocol-version".to_string(), msg.protocol_version.clone());
+    h.insert("session-id".to_string(), msg.session.as_str().to_string());
+    if let Some(ref state) = msg.state {
+        h.insert("state".to_string(), state.clone());
+    }
+    if let Ok(diag_json) = serde_json::to_string(&msg.diagnostics) {
+        h.insert("diagnostics".to_string(), diag_json);
+    }
+    h
+}
+
 /// Reconstruct typed message headers from a `RoutingKey` and NATS header map.
 ///
 /// The `RoutingKey` provides the message type discriminant and routing fields
@@ -1149,81 +1168,72 @@ mod tests {
     // from_nats_headers: RoutingKey + headers → ObservableMessageHeaders
     // ========================================================================
 
-    /// Build the header map that send_invoke would produce for an InvokeMessage.
-    fn invoke_nats_headers() -> HashMap<String, String> {
-        let mut h = HashMap::new();
-        h.insert("msg-id".to_string(), "msg-001".to_string());
-        h.insert("protocol-version".to_string(), "0.1.0".to_string());
-        h.insert("session-id".to_string(), "ses-test".to_string());
-        h.insert("state".to_string(), "state-abc".to_string());
-        h
+    /// Build a test InvokeMessage for header round-trip tests.
+    fn test_invoke_message(state: Option<String>) -> InvokeMessage {
+        InvokeMessage::new(
+            timeline(), submission(), SessionId::from("ses-test".to_string()),
+            HarnessType::Cli, RuntimeType::Container, agent(),
+            b"hello-payload".to_vec(), state,
+            InvokeDiagnostics { harness_version: "0.1.0".to_string(), history_turns: 0 },
+        )
     }
 
     #[test]
-    fn from_nats_headers_invoke_assembles_correctly() {
+    fn invoke_headers_round_trip() {
         use vlinder_core::domain::ObservableMessage;
 
-        let key = RoutingKey::Invoke {
-            timeline: timeline(), submission: submission(),
-            harness: HarnessType::Cli, runtime: RuntimeType::Container,
-            agent: agent(),
-        };
-        let headers = invoke_nats_headers();
+        let original = test_invoke_message(Some("state-abc".to_string()));
+        let key = original.routing_key();
+        let headers = invoke_to_nats_headers(&original);
 
-        let msg_headers = from_nats_headers(&key, &headers)
-            .expect("should produce Invoke headers");
-        let msg = msg_headers.assemble(b"hello-payload".to_vec());
+        let recovered = from_nats_headers(&key, &headers)
+            .expect("should produce Invoke headers")
+            .assemble(original.payload.clone());
 
-        if let ObservableMessage::Invoke(m) = &msg {
-            assert_eq!(m.id, MessageId::from("msg-001".to_string()));
-            assert_eq!(m.protocol_version, "0.1.0");
-            assert_eq!(m.timeline, timeline());
-            assert_eq!(m.submission, submission());
-            assert_eq!(m.session, SessionId::from("ses-test".to_string()));
-            assert_eq!(m.harness, HarnessType::Cli);
-            assert_eq!(m.runtime, RuntimeType::Container);
-            assert_eq!(m.agent_id, agent());
-            assert_eq!(m.payload, b"hello-payload");
-            assert_eq!(m.state, Some("state-abc".to_string()));
+        if let ObservableMessage::Invoke(m) = &recovered {
+            assert_eq!(m.id, original.id);
+            assert_eq!(m.protocol_version, original.protocol_version);
+            assert_eq!(m.timeline, original.timeline);
+            assert_eq!(m.submission, original.submission);
+            assert_eq!(m.session, original.session);
+            assert_eq!(m.harness, original.harness);
+            assert_eq!(m.runtime, original.runtime);
+            assert_eq!(m.agent_id, original.agent_id);
+            assert_eq!(m.payload, original.payload);
+            assert_eq!(m.state, original.state);
         } else {
-            panic!("expected Invoke, got {:?}", msg);
+            panic!("expected Invoke, got {:?}", recovered);
+        }
+    }
+
+    #[test]
+    fn invoke_headers_round_trip_without_state() {
+        use vlinder_core::domain::ObservableMessage;
+
+        let original = test_invoke_message(None);
+        let key = original.routing_key();
+        let headers = invoke_to_nats_headers(&original);
+
+        let recovered = from_nats_headers(&key, &headers)
+            .unwrap()
+            .assemble(original.payload.clone());
+
+        if let ObservableMessage::Invoke(m) = &recovered {
+            assert_eq!(m.state, None);
+            assert_eq!(m.id, original.id);
+        } else {
+            panic!("expected Invoke");
         }
     }
 
     #[test]
     fn from_nats_headers_invoke_missing_session_returns_none() {
-        let key = RoutingKey::Invoke {
-            timeline: timeline(), submission: submission(),
-            harness: HarnessType::Cli, runtime: RuntimeType::Container,
-            agent: agent(),
-        };
-        let mut headers = invoke_nats_headers();
+        let original = test_invoke_message(None);
+        let key = original.routing_key();
+        let mut headers = invoke_to_nats_headers(&original);
         headers.remove("session-id");
 
         assert!(from_nats_headers(&key, &headers).is_none());
-    }
-
-    #[test]
-    fn from_nats_headers_invoke_without_state() {
-        use vlinder_core::domain::ObservableMessage;
-
-        let key = RoutingKey::Invoke {
-            timeline: timeline(), submission: submission(),
-            harness: HarnessType::Cli, runtime: RuntimeType::Container,
-            agent: agent(),
-        };
-        let mut headers = invoke_nats_headers();
-        headers.remove("state");
-
-        let msg = from_nats_headers(&key, &headers)
-            .unwrap()
-            .assemble(b"payload".to_vec());
-
-        if let ObservableMessage::Invoke(m) = &msg {
-            assert_eq!(m.state, None);
-        } else {
-            panic!("expected Invoke");
-        }
     }
 
     #[test]
@@ -1232,7 +1242,7 @@ mod tests {
             timeline: timeline(), submission: submission(),
             agent: agent(), harness: HarnessType::Cli,
         };
-        assert!(from_nats_headers(&key, &invoke_nats_headers()).is_none());
+        assert!(from_nats_headers(&key, &HashMap::new()).is_none());
     }
 }
 
