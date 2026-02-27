@@ -725,6 +725,46 @@ fn subject_to_routing_key(subject: &str) -> Option<RoutingKey> {
     }
 }
 
+/// Reconstruct typed message headers from a `RoutingKey` and NATS header map.
+///
+/// The `RoutingKey` provides the message type discriminant and routing fields
+/// (agent, harness, service, etc.) — already parsed by `subject_to_routing_key`.
+/// The header map provides session-scoped fields (msg-id, session-id, state,
+/// diagnostics) that aren't part of routing.
+///
+/// Only Invoke is implemented so far — other variants return None.
+pub fn from_nats_headers(
+    key: &RoutingKey,
+    headers: &HashMap<String, String>,
+) -> Option<vlinder_core::domain::ObservableMessageHeaders> {
+    use vlinder_core::domain::ObservableMessageHeaders;
+
+    match key {
+        RoutingKey::Invoke { timeline, submission, harness, runtime, agent } => {
+            let diagnostics = headers.get("diagnostics")
+                .and_then(|s| serde_json::from_str(s).ok())
+                .unwrap_or_else(|| InvokeDiagnostics {
+                    harness_version: String::new(),
+                    history_turns: 0,
+                });
+
+            Some(ObservableMessageHeaders::Invoke {
+                id: MessageId::from(headers.get("msg-id")?.clone()),
+                protocol_version: headers.get("protocol-version").cloned().unwrap_or_default(),
+                timeline: timeline.clone(),
+                submission: submission.clone(),
+                session: SessionId::from(headers.get("session-id")?.clone()),
+                harness: *harness,
+                runtime: *runtime,
+                agent_id: agent.clone(),
+                state: headers.get("state").cloned(),
+                diagnostics,
+            })
+        }
+        _ => None, // Other variants to follow
+    }
+}
+
 /// Derive a stable consumer name from a filter pattern.
 ///
 /// NATS consumer names must be alphanumeric + dash/underscore.
@@ -1103,6 +1143,96 @@ mod tests {
     #[test]
     fn subject_to_routing_key_rejects_too_few_segments() {
         assert!(subject_to_routing_key("vlinder.1.sub").is_none());
+    }
+
+    // ========================================================================
+    // from_nats_headers: RoutingKey + headers → ObservableMessageHeaders
+    // ========================================================================
+
+    /// Build the header map that send_invoke would produce for an InvokeMessage.
+    fn invoke_nats_headers() -> HashMap<String, String> {
+        let mut h = HashMap::new();
+        h.insert("msg-id".to_string(), "msg-001".to_string());
+        h.insert("protocol-version".to_string(), "0.1.0".to_string());
+        h.insert("session-id".to_string(), "ses-test".to_string());
+        h.insert("state".to_string(), "state-abc".to_string());
+        h
+    }
+
+    #[test]
+    fn from_nats_headers_invoke_assembles_correctly() {
+        use vlinder_core::domain::ObservableMessage;
+
+        let key = RoutingKey::Invoke {
+            timeline: timeline(), submission: submission(),
+            harness: HarnessType::Cli, runtime: RuntimeType::Container,
+            agent: agent(),
+        };
+        let headers = invoke_nats_headers();
+
+        let msg_headers = from_nats_headers(&key, &headers)
+            .expect("should produce Invoke headers");
+        let msg = msg_headers.assemble(b"hello-payload".to_vec());
+
+        if let ObservableMessage::Invoke(m) = &msg {
+            assert_eq!(m.id, MessageId::from("msg-001".to_string()));
+            assert_eq!(m.protocol_version, "0.1.0");
+            assert_eq!(m.timeline, timeline());
+            assert_eq!(m.submission, submission());
+            assert_eq!(m.session, SessionId::from("ses-test".to_string()));
+            assert_eq!(m.harness, HarnessType::Cli);
+            assert_eq!(m.runtime, RuntimeType::Container);
+            assert_eq!(m.agent_id, agent());
+            assert_eq!(m.payload, b"hello-payload");
+            assert_eq!(m.state, Some("state-abc".to_string()));
+        } else {
+            panic!("expected Invoke, got {:?}", msg);
+        }
+    }
+
+    #[test]
+    fn from_nats_headers_invoke_missing_session_returns_none() {
+        let key = RoutingKey::Invoke {
+            timeline: timeline(), submission: submission(),
+            harness: HarnessType::Cli, runtime: RuntimeType::Container,
+            agent: agent(),
+        };
+        let mut headers = invoke_nats_headers();
+        headers.remove("session-id");
+
+        assert!(from_nats_headers(&key, &headers).is_none());
+    }
+
+    #[test]
+    fn from_nats_headers_invoke_without_state() {
+        use vlinder_core::domain::ObservableMessage;
+
+        let key = RoutingKey::Invoke {
+            timeline: timeline(), submission: submission(),
+            harness: HarnessType::Cli, runtime: RuntimeType::Container,
+            agent: agent(),
+        };
+        let mut headers = invoke_nats_headers();
+        headers.remove("state");
+
+        let msg = from_nats_headers(&key, &headers)
+            .unwrap()
+            .assemble(b"payload".to_vec());
+
+        if let ObservableMessage::Invoke(m) = &msg {
+            assert_eq!(m.state, None);
+        } else {
+            panic!("expected Invoke");
+        }
+    }
+
+    #[test]
+    fn from_nats_headers_non_invoke_returns_none() {
+        let key = RoutingKey::Complete {
+            timeline: timeline(), submission: submission(),
+            agent: agent(), harness: HarnessType::Cli,
+        };
+        assert!(from_nats_headers(&key, &invoke_nats_headers()).is_none());
     }
 }
 
