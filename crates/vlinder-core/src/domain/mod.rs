@@ -107,7 +107,7 @@ pub use model_manifest::{ModelManifest, ModelTypeConfig};
 // Model Catalog (trait)
 // ============================================================================
 
-pub use catalog::{ModelCatalog, ModelInfo, CatalogError};
+pub use catalog::{ModelCatalog, ModelInfo, CatalogError, CatalogService, CompositeCatalog};
 
 // ============================================================================
 // Runtime (trait)
