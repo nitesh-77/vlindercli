@@ -2,8 +2,7 @@
 
 use serde::Deserialize;
 
-use crate::config::Config;
-use crate::domain::{
+use vlinder_core::domain::{
     CatalogError, Provider, Model, ModelCatalog, ModelInfo, ModelType, ResourceId,
 };
 
@@ -20,11 +19,6 @@ impl OllamaCatalog {
         Self {
             endpoint: endpoint.into(),
         }
-    }
-
-    /// Create catalog using endpoint from config.
-    pub fn from_config() -> Self {
-        Self::new(Config::load().ollama.endpoint)
     }
 }
 

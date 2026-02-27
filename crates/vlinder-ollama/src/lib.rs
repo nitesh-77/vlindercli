@@ -12,8 +12,11 @@
 //! Embedding:
 //! - `/api/embed` — Ollama native embed (Operation::Run)
 
+mod catalog;
 mod types;
 mod worker;
+
+pub use catalog::OllamaCatalog;
 
 pub use types::{
     OllamaChatRequest, OllamaChatResponse,

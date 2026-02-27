@@ -401,7 +401,8 @@ fn run_state_worker(config: &Config, shutdown: &AtomicBool) {
 fn run_catalog_worker(config: &Config, shutdown: &AtomicBool) {
     use std::collections::HashMap;
     use tonic::transport::Server;
-    use crate::catalog::{OllamaCatalog, OpenRouterCatalog};
+    use vlinder_ollama::OllamaCatalog;
+    use vlinder_infer_openrouter::OpenRouterCatalog;
     use crate::catalog_service::CatalogServiceServer;
     use crate::domain::ModelCatalog;
 

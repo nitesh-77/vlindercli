@@ -2,8 +2,8 @@
 //!
 //! These tests skip gracefully if VLINDER_OPENROUTER_API_KEY is not set.
 
-use vlinderd::catalog::OpenRouterCatalog;
-use vlinderd::domain::{Provider, ModelCatalog};
+use vlinder_infer_openrouter::OpenRouterCatalog;
+use vlinder_core::domain::{Provider, ModelCatalog};
 
 /// Return the API key if set, or print a skip message and return None.
 fn openrouter_key_or_skip() -> Option<String> {
@@ -19,10 +19,11 @@ fn openrouter_key_or_skip() -> Option<String> {
 #[test]
 #[ignore] // Run via: just run-integration-tests
 fn lists_models_from_openrouter() {
-    if openrouter_key_or_skip().is_none() {
-        return;
-    }
-    let catalog = OpenRouterCatalog::from_config();
+    let key = match openrouter_key_or_skip() {
+        Some(k) => k,
+        None => return,
+    };
+    let catalog = OpenRouterCatalog::new("https://openrouter.ai/api/v1", &key);
     let models = catalog.list();
     assert!(models.is_ok());
     assert!(!models.unwrap().is_empty());
@@ -31,10 +32,11 @@ fn lists_models_from_openrouter() {
 #[test]
 #[ignore] // Run via: just run-integration-tests
 fn resolves_model_from_openrouter() {
-    if openrouter_key_or_skip().is_none() {
-        return;
-    }
-    let catalog = OpenRouterCatalog::from_config();
+    let key = match openrouter_key_or_skip() {
+        Some(k) => k,
+        None => return,
+    };
+    let catalog = OpenRouterCatalog::new("https://openrouter.ai/api/v1", &key);
     let model = catalog.resolve("anthropic/claude-sonnet-4");
     assert!(model.is_ok());
     let model = model.unwrap();

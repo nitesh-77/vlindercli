@@ -3251,6 +3251,7 @@ name = "vlinder-infer-openrouter"
 version = "0.1.0"
 dependencies = [
  "async-openai",
+ "serde",
  "serde_json",
  "tracing",
  "ureq 3.2.0",

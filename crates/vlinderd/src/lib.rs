@@ -1,7 +1,6 @@
 pub use vlinder_core::domain;
 pub use vlinder_core::queue;
 
-pub mod catalog;
 pub mod config;
 pub mod git_dag;
 pub mod harness;

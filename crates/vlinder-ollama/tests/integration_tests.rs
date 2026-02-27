@@ -1,12 +1,12 @@
 //! Integration tests that require a running Ollama server.
 
-use vlinderd::catalog::OllamaCatalog;
-use vlinderd::domain::{Provider, ModelCatalog};
+use vlinder_ollama::OllamaCatalog;
+use vlinder_core::domain::{Provider, ModelCatalog};
 
 #[test]
 #[ignore] // Run via: just run-integration-tests
 fn lists_models_from_ollama() {
-    let catalog = OllamaCatalog::from_config();
+    let catalog = OllamaCatalog::new("http://localhost:11434");
     let models = catalog.list();
     assert!(models.is_ok());
 }
@@ -14,7 +14,7 @@ fn lists_models_from_ollama() {
 #[test]
 #[ignore] // Run via: just run-integration-tests
 fn resolves_model_from_ollama() {
-    let catalog = OllamaCatalog::from_config();
+    let catalog = OllamaCatalog::new("http://localhost:11434");
     let model = catalog.resolve("phi3");
     assert!(model.is_ok());
     let model = model.unwrap();

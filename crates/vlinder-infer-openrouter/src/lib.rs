@@ -2,7 +2,10 @@
 //! for the OpenRouter inference backend, and the worker that
 //! processes inference requests.
 
+mod catalog;
 mod worker;
+
+pub use catalog::OpenRouterCatalog;
 pub use worker::OpenRouterWorker;
 
 use async_openai::types::chat::{CreateChatCompletionRequest, CreateChatCompletionResponse};

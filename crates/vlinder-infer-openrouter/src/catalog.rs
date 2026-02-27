@@ -2,8 +2,7 @@
 
 use serde::Deserialize;
 
-use crate::config::Config;
-use crate::domain::{
+use vlinder_core::domain::{
     CatalogError, Provider, Model, ModelCatalog, ModelInfo, ModelType, ResourceId,
 };
 
@@ -23,12 +22,6 @@ impl OpenRouterCatalog {
             endpoint: endpoint.into(),
             api_key: api_key.into(),
         }
-    }
-
-    /// Create catalog using config values.
-    pub fn from_config() -> Self {
-        let config = Config::load();
-        Self::new(&config.openrouter.endpoint, &config.openrouter.api_key)
     }
 }
 
