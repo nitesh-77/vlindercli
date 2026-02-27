@@ -9,6 +9,14 @@ vlinder-core = { path = "../vlinder-core" }
 tiny_http = "0.12"
 serde_json = "1"
 tracing = "0.1"
+rusqlite = { version = "0.32", features = ["bundled"] }
+chrono = { version = "0.4", features = ["serde"] }
+tonic = "0.12"
+prost = "0.13"
+tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
+
+[build-dependencies]
+tonic-build = "0.12"
 
 [dev-dependencies]
 tempfile = "3"

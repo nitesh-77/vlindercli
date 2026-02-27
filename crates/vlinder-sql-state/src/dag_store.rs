@@ -1,7 +1,7 @@
 //! SqliteDagStore — SQLite-backed persistence for the Merkle DAG (ADR 067).
 //!
 //! Domain types (`DagNode`, `DagStore`, `MessageType`, `hash_dag_node`) live
-//! in `crate::domain`. This module provides the SQLite implementation.
+//! in `vlinder_core::domain`. This module provides the SQLite implementation.
 
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use chrono::{DateTime, Utc};
 use rusqlite::Connection;
 
-use crate::domain::{DagNode, DagStore, MessageType, Timeline};
+use vlinder_core::domain::{DagNode, DagStore, MessageType, Timeline};
 
 /// SQLite-backed DagStore.
 pub struct SqliteDagStore {
@@ -504,7 +504,7 @@ impl<T> OptionalExt<T> for Result<T, rusqlite::Error> {
 mod tests {
     use super::*;
     use chrono::TimeZone;
-    use crate::domain::hash_dag_node;
+    use vlinder_core::domain::hash_dag_node;
 
     fn test_store() -> SqliteDagStore {
         let tmp = tempfile::NamedTempFile::new().unwrap();

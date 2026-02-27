@@ -9,7 +9,7 @@ use crate::config::CliConfig;
 use vlinder_core::domain::{DagStore, Harness, Registry};
 use vlinder_proto::harness_service::{GrpcHarnessClient, ping_harness};
 use vlinder_proto::registry_service::{GrpcRegistryClient, ping_registry};
-use vlinder_proto::state_service::GrpcStateClient;
+use vlinder_sql_state::state_service::GrpcStateClient;
 
 /// Connect to the registry via gRPC, exiting on failure.
 pub fn connect_registry(config: &CliConfig) -> Arc<dyn Registry> {

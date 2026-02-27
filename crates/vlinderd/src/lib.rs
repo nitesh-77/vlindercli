@@ -13,7 +13,7 @@ pub use vlinder_proto::catalog_service;
 pub use vlinder_proto::harness_service;
 pub use vlinder_proto::registry_service;
 pub use vlinder_proto::secret_service;
-pub use vlinder_proto::state_service;
+pub use vlinder_sql_state::state_service;
 pub mod storage;
 pub mod supervisor;
 pub mod tracing_setup;

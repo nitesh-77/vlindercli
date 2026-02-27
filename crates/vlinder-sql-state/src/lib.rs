@@ -1,11 +1,11 @@
-//! SessionServer — read-only HTTP server for browsing conversation sessions.
+//! vlinder-sql-state — SQLite-backed state vertical.
 //!
-//! Serves `~/.vlinder/conversations/` as a chat-style HTML viewer:
-//!   GET /                     -> index page listing all sessions
-//!   GET /session/{file}.json  -> rendered conversation view
-//!
-//! Starts by default alongside `vlinder agent run`. Binds to 127.0.0.1
-//! (localhost only).
+//! Contains the SqliteDagStore (Merkle DAG persistence) and the
+//! SessionServer (read-only HTTP viewer for conversation sessions).
+
+pub mod dag_store;
+pub mod state_service;
+pub use dag_store::SqliteDagStore;
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};

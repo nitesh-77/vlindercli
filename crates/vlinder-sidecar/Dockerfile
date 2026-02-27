@@ -41,9 +41,11 @@ RUN mkdir -p crates/vlinder-core/src && echo "" > crates/vlinder-core/src/lib.rs
     mkdir -p crates/vlinderd/src && echo "fn main() {}" > crates/vlinderd/src/main.rs && \
     mkdir -p crates/vlinder/src && echo "fn main() {}" > crates/vlinder/src/main.rs
 
-# Proto build dependencies (proto files needed for vlinder-proto build.rs)
+# Proto build dependencies (proto files needed for build.rs)
 COPY crates/vlinder-proto/build.rs crates/vlinder-proto/
 COPY crates/vlinder-proto/proto crates/vlinder-proto/proto
+COPY crates/vlinder-sql-state/build.rs crates/vlinder-sql-state/
+COPY crates/vlinder-sql-state/proto crates/vlinder-sql-state/proto
 
 # Pre-build dependencies (this layer is cached unless Cargo.toml changes)
 RUN cargo build --release -p vlinder-sidecar 2>/dev/null || true
@@ -57,6 +59,7 @@ COPY crates/vlinder-sqlite-kv/src crates/vlinder-sqlite-kv/src
 COPY crates/vlinder-proto/src crates/vlinder-proto/src
 COPY crates/vlinder-nats/src crates/vlinder-nats/src
 COPY crates/vlinder-podman-runtime/src crates/vlinder-podman-runtime/src
+COPY crates/vlinder-sql-state/src crates/vlinder-sql-state/src
 COPY crates/vlinder-sidecar/src crates/vlinder-sidecar/src
 
 # Touch source files to invalidate the cache for actual compilation
@@ -68,6 +71,7 @@ RUN touch crates/vlinder-core/src/lib.rs \
           crates/vlinder-nats/src/lib.rs \
           crates/vlinder-podman-runtime/src/lib.rs \
           crates/vlinder-proto/src/lib.rs \
+          crates/vlinder-sql-state/src/lib.rs \
           crates/vlinder-sidecar/src/main.rs
 
 # Build the sidecar binary

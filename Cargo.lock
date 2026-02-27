@@ -3223,6 +3223,7 @@ dependencies = [
  "ureq 3.2.0",
  "vlinder-core",
  "vlinder-proto",
+ "vlinder-sql-state",
 ]
 
 [[package]]
@@ -3325,6 +3326,7 @@ dependencies = [
  "vlinder-nats",
  "vlinder-ollama",
  "vlinder-proto",
+ "vlinder-sql-state",
  "vlinder-sqlite-kv",
  "vlinder-sqlite-vec",
 ]
@@ -3333,9 +3335,15 @@ dependencies = [
 name = "vlinder-sql-state"
 version = "0.1.0"
 dependencies = [
+ "chrono",
+ "prost",
+ "rusqlite",
  "serde_json",
  "tempfile",
  "tiny_http",
+ "tokio",
+ "tonic",
+ "tonic-build",
  "tracing",
  "ureq 3.2.0",
  "vlinder-core",

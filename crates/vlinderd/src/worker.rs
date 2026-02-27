@@ -363,7 +363,7 @@ fn run_state_worker(config: &Config, shutdown: &AtomicBool) {
     use tonic::transport::Server;
     use crate::config::dag_db_path;
     use crate::domain::DagStore;
-    use crate::storage::dag_store::SqliteDagStore;
+    use vlinder_sql_state::SqliteDagStore;
     use crate::state_service::StateServiceServer;
 
     let db_path = dag_db_path();
