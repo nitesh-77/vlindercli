@@ -137,9 +137,3 @@ pub use registry::{Job, JobId, JobStatus, RegistrationError, Registry};
 pub use registry_repository::{RegistryRepository, RepositoryError, StoredAgent, StoredModel};
 pub use registry_memory::InMemoryRegistry;
 
-// ============================================================================
-// Loader
-// ============================================================================
-
-mod loader;
-pub use loader::{Loader, LoadError};

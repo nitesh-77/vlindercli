@@ -1,5 +1,4 @@
 pub mod config;
-pub mod loader;
 pub mod queue_factory;
 pub mod registry_factory;
 pub mod secret_store_factory;
