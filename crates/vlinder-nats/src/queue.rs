@@ -657,7 +657,7 @@ fn routing_key_to_subject(key: &RoutingKey) -> String {
 ///
 /// Inverse of `routing_key_to_subject`. Returns `None` for subjects
 /// that don't match the `vlinder.<timeline>.<submission>.<type>...` format.
-fn subject_to_routing_key(subject: &str) -> Option<RoutingKey> {
+pub fn subject_to_routing_key(subject: &str) -> Option<RoutingKey> {
     let s: Vec<&str> = subject.split('.').collect();
     if s.len() < 4 || s[0] != "vlinder" {
         return None;

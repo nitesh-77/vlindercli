@@ -473,7 +473,7 @@ fn run_dag_git_worker(_config: &Config, shutdown: &AtomicBool) {
     use vlinder_core::domain::workers::dag::reconstruct_observable_message;
     use vlinder_git_dag::GitDagWorker;
     use vlinder_core::domain::DagWorker;
-    use vlinder_nats::NatsQueue;
+    use vlinder_nats::{NatsQueue, subject_to_routing_key, from_nats_headers};
 
     let nats = NatsQueue::localhost()
         .expect("Failed to connect to NATS");
@@ -543,7 +543,14 @@ fn run_dag_git_worker(_config: &Config, shutdown: &AtomicBool) {
                     "DAG git received NATS message",
                 );
 
-                if let Some(observable) = reconstruct_observable_message(&subject, &headers, &payload) {
+                // New pipeline: subject → RoutingKey → typed headers → assemble.
+                // Currently handles Invoke; other types fall back to old reconstruction.
+                let observable = subject_to_routing_key(&subject)
+                    .and_then(|key| from_nats_headers(&key, &headers))
+                    .map(|hdrs| hdrs.assemble(payload.clone()))
+                    .or_else(|| reconstruct_observable_message(&subject, &headers, &payload));
+
+                if let Some(observable) = observable {
                     let created_at = chrono::Utc::now();
                     git_worker.on_observable_message(&observable, created_at);
                 } else {
