@@ -1,4 +1,4 @@
 [workspace]
 resolver = "2"
-members = ["crates/vlinderd", "crates/vlinder-core", "crates/vlinder-proto", "crates/vlinder", "crates/vlinder-sidecar", "crates/vlinder-infer-openrouter", "crates/vlinder-ollama", "crates/vlinder-sqlite-vec", "crates/vlinder-sqlite-kv", "crates/vlinder-podman-runtime"]
+members = ["crates/vlinderd", "crates/vlinder-core", "crates/vlinder-proto", "crates/vlinder", "crates/vlinder-sidecar", "crates/vlinder-infer-openrouter", "crates/vlinder-ollama", "crates/vlinder-sqlite-vec", "crates/vlinder-sqlite-kv", "crates/vlinder-podman-runtime", "crates/vlinder-nats"]
 default-members = ["crates/vlinderd", "crates/vlinder"]

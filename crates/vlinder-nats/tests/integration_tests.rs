@@ -1,6 +1,6 @@
 //! Integration tests that require a running NATS server.
 
-use vlinderd::queue::NatsQueue;
+use vlinder_nats::NatsQueue;
 
 #[test]
 #[ignore] // Run via: just run-integration-tests

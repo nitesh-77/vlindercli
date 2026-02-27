@@ -7,7 +7,8 @@ use std::sync::Arc;
 
 use crate::config::{Config, QueueBackend, StateBackend};
 use crate::domain::{DagStore, MessageQueue, QueueError};
-use crate::queue::{NatsQueue, RecordingQueue};
+use vlinder_nats::NatsQueue;
+use crate::queue::RecordingQueue;
 
 /// Create a queue from configuration.
 ///

@@ -14,6 +14,7 @@ test-support = []
 
 [dependencies]
 vlinder-core = { path = "../vlinder-core" }
+vlinder-nats = { path = "../vlinder-nats" }
 vlinder-ollama = { path = "../vlinder-ollama" }
 vlinder-infer-openrouter = { path = "../vlinder-infer-openrouter" }
 vlinder-sqlite-vec = { path = "../vlinder-sqlite-vec" }

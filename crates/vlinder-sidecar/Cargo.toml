@@ -10,6 +10,7 @@ path = "src/main.rs"
 
 [dependencies]
 vlinder-core = { path = "../vlinder-core" }
+vlinder-nats = { path = "../vlinder-nats" }
 vlinder-proto = { path = "../vlinder-proto" }
 vlinder-ollama = { path = "../vlinder-ollama" }
 vlinder-infer-openrouter = { path = "../vlinder-infer-openrouter" }

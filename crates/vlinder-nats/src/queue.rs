@@ -15,7 +15,7 @@ use async_nats::jetstream::message::Message as JetStreamMessage;
 use futures::StreamExt;
 use tokio::runtime::Runtime;
 
-use crate::domain::{
+use vlinder_core::domain::{
     AgentId, CompleteMessage, ContainerDiagnostics, DelegateMessage, DelegateDiagnostics,
     HarnessType, InvokeDiagnostics, InvokeMessage, MessageId, MessageQueue, Nonce,
     Operation, QueueError, RequestDiagnostics, RequestMessage,
@@ -711,7 +711,7 @@ fn parse_operation(s: &str) -> Result<Operation, QueueError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{
+    use vlinder_core::domain::{
         InferenceBackendType, ObjectStorageType, VectorStorageType,
     };
 

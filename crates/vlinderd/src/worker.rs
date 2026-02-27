@@ -453,7 +453,7 @@ fn run_dag_git_worker(_config: &Config, shutdown: &AtomicBool) {
     use crate::domain::workers::dag::reconstruct_observable_message;
     use crate::git_dag::GitDagWorker;
     use crate::domain::DagWorker;
-    use crate::queue::NatsQueue;
+    use vlinder_nats::NatsQueue;
 
     let nats = NatsQueue::localhost()
         .expect("Failed to connect to NATS");

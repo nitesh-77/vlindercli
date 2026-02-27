@@ -8,7 +8,7 @@ use std::sync::Arc;
 use async_nats::jetstream::{self, kv};
 use tokio::runtime::Runtime;
 
-use crate::domain::{SecretStore, SecretStoreError};
+use vlinder_core::domain::{SecretStore, SecretStoreError};
 
 /// NATS KV secret store.
 ///

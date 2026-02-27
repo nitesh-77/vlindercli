@@ -3229,18 +3229,15 @@ dependencies = [
 name = "vlinder-core"
 version = "0.1.0"
 dependencies = [
- "async-nats",
  "async-openai",
  "base64",
  "chrono",
  "ed25519-dalek",
- "futures",
  "rand",
  "semver",
  "serde",
  "serde_json",
  "sha2",
- "tokio",
  "toml",
  "tracing",
  "uuid",
@@ -3255,6 +3252,18 @@ dependencies = [
  "serde_json",
  "tracing",
  "ureq 3.2.0",
+ "vlinder-core",
+]
+
+[[package]]
+name = "vlinder-nats"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "futures",
+ "serde_json",
+ "tokio",
+ "tracing",
  "vlinder-core",
 ]
 
@@ -3313,6 +3322,7 @@ dependencies = [
  "ureq 2.12.1",
  "vlinder-core",
  "vlinder-infer-openrouter",
+ "vlinder-nats",
  "vlinder-ollama",
  "vlinder-proto",
  "vlinder-sqlite-kv",
@@ -3380,6 +3390,7 @@ dependencies = [
  "uuid",
  "vlinder-core",
  "vlinder-infer-openrouter",
+ "vlinder-nats",
  "vlinder-ollama",
  "vlinder-podman-runtime",
  "vlinder-proto",
