@@ -1,6 +1,6 @@
-//! Podman abstraction — trait + shared utilities.
+//! Podman client abstraction — trait + shared utilities.
 //!
-//! The `Podman` trait is the contract for all container engine interactions.
+//! The `PodmanClient` trait is the contract for all Podman interactions.
 //! Two implementations exist:
 //! - `PodmanApiClient` (primary) — REST API over Unix socket
 //! - `PodmanCliClient` (fallback) — shells out to the `podman` binary
@@ -51,11 +51,11 @@ impl RunTarget<'_> {
 
 // ── Trait ────────────────────────────────────────────────────────────
 
-/// Abstraction over the Podman container engine.
+/// Client abstraction over the Podman container engine.
 ///
 /// Pod-oriented: create pods, add containers to them, start/stop pods.
-/// The trait is object-safe so `ContainerRuntime` can hold a `Box<dyn Podman>`.
-pub(crate) trait Podman: Send {
+/// The trait is object-safe so `ContainerRuntime` can hold a `Box<dyn PodmanClient>`.
+pub(crate) trait PodmanClient: Send {
     /// Engine version (e.g. 4.9.3).  None if Podman is unavailable.
     fn engine_version(&self) -> Option<semver::Version>;
 

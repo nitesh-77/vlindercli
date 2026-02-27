@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use vlinder_core::domain::{ContainerId, ImageDigest, ImageRef, PodId};
 
-use crate::podman::{Podman, PodmanError, RunTarget};
+use crate::podman_client::{PodmanClient, PodmanError, RunTarget};
 use crate::unix_transport::unix_agent;
 
 const API_BASE: &str = "http://localhost/v5.0.0/libpod";
@@ -33,7 +33,7 @@ impl PodmanApiClient {
 
 // ── Podman trait implementation ──────────────────────────────────────
 
-impl Podman for PodmanApiClient {
+impl PodmanClient for PodmanApiClient {
     fn engine_version(&self) -> Option<semver::Version> {
         let url = "http://localhost/version";
         let mut resp = self.agent.get(url).call().ok()?;

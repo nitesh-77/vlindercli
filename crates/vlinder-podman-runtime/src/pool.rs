@@ -14,7 +14,7 @@ use std::sync::Arc;
 use vlinder_core::domain::{Agent, ImageRef, ObjectStorageType, PodId, Provider, Registry, ResourceId, Runtime, RuntimeType, VectorStorageType};
 
 use crate::config::PodmanRuntimeConfig;
-use crate::podman::{Podman, RunTarget, resolve_socket, write_s3_credentials, remove_s3_credentials};
+use crate::podman_client::{PodmanClient, RunTarget, resolve_socket, write_s3_credentials, remove_s3_credentials};
 use crate::podman_api::PodmanApiClient;
 use crate::podman_cli::PodmanCliClient;
 
@@ -56,7 +56,7 @@ pub struct ContainerRuntime {
     pods: HashMap<String, Pod>,
     config: PodmanRuntimeConfig,
     image_policy: ImagePolicy,
-    podman: Box<dyn Podman>,
+    podman: Box<dyn PodmanClient>,
 }
 
 impl ContainerRuntime {
@@ -76,7 +76,7 @@ impl ContainerRuntime {
         ));
 
         let image_policy = ImagePolicy::from_config(&config.image_policy);
-        let podman: Box<dyn Podman> = match resolve_socket(&config.podman_socket) {
+        let podman: Box<dyn PodmanClient> = match resolve_socket(&config.podman_socket) {
             Some(path) => {
                 tracing::info!(event = "podman.socket", path = %path.display(), "Using Podman socket API");
                 Box::new(PodmanApiClient::new(&path))

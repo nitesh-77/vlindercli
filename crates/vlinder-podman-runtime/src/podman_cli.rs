@@ -7,12 +7,12 @@ use std::process::Command;
 
 use vlinder_core::domain::{ContainerId, ImageDigest, ImageRef, PodId};
 
-use crate::podman::{Podman, PodmanError, RunTarget};
+use crate::podman_client::{PodmanClient, PodmanError, RunTarget};
 
 /// Fallback implementation that shells out to the `podman` CLI.
 pub(crate) struct PodmanCliClient;
 
-impl Podman for PodmanCliClient {
+impl PodmanClient for PodmanCliClient {
     fn engine_version(&self) -> Option<semver::Version> {
         Command::new("podman")
             .args(["version", "--format", "{{.Client.Version}}"])
