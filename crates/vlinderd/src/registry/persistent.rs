@@ -10,7 +10,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::config::Config;
-use crate::domain::{
+use vlinder_core::domain::{
     Agent, Fleet, Job, JobId, JobStatus, Model, ObjectStorageType, Provider, RegistrationError,
     Registry, RegistryRepository, ResourceId, RuntimeType, SecretStore, SubmissionId, VectorStorageType,
 };
@@ -247,8 +247,8 @@ impl Registry for PersistentRegistry {
 mod tests {
     use super::*;
     use std::collections::HashMap;
-    use crate::domain::{ModelType, Requirements, RuntimeType};
-    use crate::domain::InMemorySecretStore;
+    use vlinder_core::domain::{ModelType, Requirements, RuntimeType};
+    use vlinder_core::domain::InMemorySecretStore;
 
     fn test_secret_store() -> Arc<dyn SecretStore> {
         Arc::new(InMemorySecretStore::new())

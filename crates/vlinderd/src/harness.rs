@@ -1,18 +1,18 @@
 //! CoreHarness — CLI-specific implementation of the Harness trait (ADR 076).
 //!
-//! Domain types (Harness trait) live in `crate::domain`.
+//! Domain types (Harness trait) live in `vlinder_core::domain`.
 //! This module contains the CLI implementation with session management
 //! and local filesystem support.
 
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::domain::{
+use vlinder_core::domain::{
     AgentId, AgentManifest, Harness, HarnessType, InvokeDiagnostics, InvokeMessage,
     JobId, JobStatus, MessageQueue, Registry, ResourceId,
     SessionId, SubmissionId, TimelineId,
 };
-use crate::domain::Session;
+use vlinder_core::domain::Session;
 
 /// CLI harness implementation.
 ///
@@ -137,7 +137,7 @@ impl CoreHarness {
             session_id,
             self.harness_type(),
             runtime,
-            AgentId::new(crate::domain::agent_routing_key(agent_id)),
+            AgentId::new(vlinder_core::domain::agent_routing_key(agent_id)),
             payload.as_bytes().to_vec(),
             self.last_state.clone(),
             invoke_diag,
@@ -190,8 +190,8 @@ mod tests {
     use super::*;
     use crate::registry::InMemoryRegistry;
     use vlinder_core::queue::InMemoryQueue;
-    use crate::domain::InMemorySecretStore;
-    use crate::domain::{RuntimeType, SecretStore};
+    use vlinder_core::domain::InMemorySecretStore;
+    use vlinder_core::domain::{RuntimeType, SecretStore};
     use std::path::PathBuf;
 
     fn fixture_path(name: &str) -> PathBuf {

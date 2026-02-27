@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::domain::{Agent, FleetManifest, LoadError, Loader, Model};
+use vlinder_core::domain::{Agent, FleetManifest, LoadError, Loader, Model};
 
 // ============================================================================
 // Public API (free functions that dispatch by URI scheme)

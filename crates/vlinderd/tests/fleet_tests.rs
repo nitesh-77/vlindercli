@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use vlinderd::domain::{
+use vlinder_core::domain::{
     Fleet, FleetManifest, InMemoryRegistry, Registry,
     RuntimeType, InMemorySecretStore, SecretStore,
 };
@@ -83,11 +83,11 @@ fn test_registry_with_agents(agent_names: &[&str]) -> Arc<InMemoryRegistry> {
     registry
 }
 
-fn minimal_agent(name: &str) -> vlinderd::domain::Agent {
-    use vlinderd::domain::Requirements;
+fn minimal_agent(name: &str) -> vlinder_core::domain::Agent {
+    use vlinder_core::domain::Requirements;
 
-    vlinderd::domain::Agent {
-        id: vlinderd::domain::Agent::placeholder_id(name),
+    vlinder_core::domain::Agent {
+        id: vlinder_core::domain::Agent::placeholder_id(name),
         name: name.to_string(),
         description: format!("{} agent", name),
         source: None,
@@ -351,7 +351,7 @@ fn register_fleet_rejects_config_mismatch_different_entry() {
     let result = registry.register_fleet(fleet2);
     assert!(result.is_err());
     match result.unwrap_err() {
-        vlinderd::domain::RegistrationError::FleetConfigMismatch(name) => {
+        vlinder_core::domain::RegistrationError::FleetConfigMismatch(name) => {
             assert_eq!(name, "test-fleet");
         }
         other => panic!("expected FleetConfigMismatch, got: {}", other),
@@ -381,7 +381,7 @@ fn register_fleet_rejects_config_mismatch_different_agents() {
     let result = registry.register_fleet(fleet2);
     assert!(result.is_err());
     match result.unwrap_err() {
-        vlinderd::domain::RegistrationError::FleetConfigMismatch(name) => {
+        vlinder_core::domain::RegistrationError::FleetConfigMismatch(name) => {
             assert_eq!(name, "test-fleet");
         }
         other => panic!("expected FleetConfigMismatch, got: {}", other),
@@ -457,7 +457,7 @@ fn placeholder_id_has_expected_format() {
 #[test]
 fn load_error_display_io() {
     let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
-    let err = vlinderd::domain::FleetLoadError::Io(io_err);
+    let err = vlinder_core::domain::FleetLoadError::Io(io_err);
     let msg = format!("{}", err);
     assert!(msg.contains("IO error"));
     assert!(msg.contains("file not found"));
@@ -465,7 +465,7 @@ fn load_error_display_io() {
 
 #[test]
 fn load_error_display_parse() {
-    let err = vlinderd::domain::FleetLoadError::Parse("bad toml".to_string());
+    let err = vlinder_core::domain::FleetLoadError::Parse("bad toml".to_string());
     let msg = format!("{}", err);
     assert!(msg.contains("parse error"));
     assert!(msg.contains("bad toml"));
@@ -473,7 +473,7 @@ fn load_error_display_parse() {
 
 #[test]
 fn load_error_display_validation() {
-    let err = vlinderd::domain::FleetLoadError::Validation("entry not found".to_string());
+    let err = vlinder_core::domain::FleetLoadError::Validation("entry not found".to_string());
     let msg = format!("{}", err);
     assert!(msg.contains("validation error"));
     assert!(msg.contains("entry not found"));

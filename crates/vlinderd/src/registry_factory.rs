@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use crate::config::{Config, RegistryBackend};
-use crate::domain::Registry;
+use vlinder_core::domain::Registry;
 
 /// Create a registry client from configuration.
 ///
@@ -27,7 +27,7 @@ pub fn from_config(config: &Config) -> Result<Arc<dyn Registry>, Box<dyn std::er
         }
         #[cfg(any(test, feature = "test-support"))]
         RegistryBackend::Memory => {
-            use crate::domain::InMemorySecretStore;
+            use vlinder_core::domain::InMemorySecretStore;
             use crate::registry::InMemoryRegistry;
 
             let secret_store = Arc::new(InMemorySecretStore::new());

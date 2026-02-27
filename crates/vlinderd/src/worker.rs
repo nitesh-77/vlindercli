@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use crate::config::Config;
-use crate::domain::Registry;
+use vlinder_core::domain::Registry;
 use crate::worker_role::WorkerRole;
 
 /// Helper to get gRPC registry address with http:// prefix.
@@ -70,7 +70,7 @@ pub fn run_worker_loop(role: WorkerRole, shutdown: Arc<AtomicBool>) {
 fn run_registry_worker(config: &Config, shutdown: &AtomicBool) {
     use tonic::transport::Server;
     use crate::config::registry_db_path;
-    use crate::domain::{RuntimeType, ObjectStorageType, VectorStorageType};
+    use vlinder_core::domain::{RuntimeType, ObjectStorageType, VectorStorageType};
     use crate::registry::PersistentRegistry;
     use vlinder_proto::registry_service::RegistryServiceServer;
     use vlinder_proto::secret_service::GrpcSecretClient;
@@ -80,7 +80,7 @@ fn run_registry_worker(config: &Config, shutdown: &AtomicBool) {
     } else {
         format!("http://{}", config.distributed.secret_addr)
     };
-    let secret_store: Arc<dyn crate::domain::SecretStore> = Arc::new(
+    let secret_store: Arc<dyn vlinder_core::domain::SecretStore> = Arc::new(
         GrpcSecretClient::connect(&secret_addr)
             .unwrap_or_else(|e| panic!("Failed to connect to secret service: {}", e))
     );
@@ -162,7 +162,7 @@ fn run_secret_worker(config: &Config, shutdown: &AtomicBool) {
 
 fn run_harness_worker(config: &Config, shutdown: &AtomicBool) {
     use tonic::transport::Server;
-    use crate::domain::HarnessType;
+    use vlinder_core::domain::HarnessType;
     use crate::harness::CoreHarness;
     use vlinder_proto::harness_service::HarnessServiceServer;
     use vlinder_proto::registry_service::GrpcRegistryClient;
@@ -206,7 +206,7 @@ fn run_harness_worker(config: &Config, shutdown: &AtomicBool) {
 
 fn run_agent_container_worker(config: &Config, shutdown: &AtomicBool) {
     use vlinder_podman_runtime::{ContainerRuntime, PodmanRuntimeConfig};
-    use crate::domain::Runtime;
+    use vlinder_core::domain::Runtime;
 
     let registry = crate::registry_factory::from_config(config)
         .expect("Failed to connect to registry");
@@ -362,7 +362,7 @@ fn run_storage_vector_memory_worker(config: &Config, shutdown: &AtomicBool) {
 fn run_state_worker(config: &Config, shutdown: &AtomicBool) {
     use tonic::transport::Server;
     use crate::config::dag_db_path;
-    use crate::domain::DagStore;
+    use vlinder_core::domain::DagStore;
     use vlinder_sql_state::SqliteDagStore;
     use vlinder_sql_state::state_service::StateServiceServer;
 
@@ -404,7 +404,7 @@ fn run_catalog_worker(config: &Config, shutdown: &AtomicBool) {
     use vlinder_ollama::OllamaCatalog;
     use vlinder_infer_openrouter::OpenRouterCatalog;
     use vlinder_catalog::catalog_service::CatalogServiceServer;
-    use crate::domain::{CatalogService, CompositeCatalog};
+    use vlinder_core::domain::{CatalogService, CompositeCatalog};
 
     let mut composite = CompositeCatalog::new();
     composite.add(
@@ -451,9 +451,9 @@ fn run_catalog_worker(config: &Config, shutdown: &AtomicBool) {
 fn run_dag_git_worker(_config: &Config, shutdown: &AtomicBool) {
     use std::collections::HashMap;
     use crate::config::conversations_dir;
-    use crate::domain::workers::dag::reconstruct_observable_message;
+    use vlinder_core::domain::workers::dag::reconstruct_observable_message;
     use vlinder_git_dag::GitDagWorker;
-    use crate::domain::DagWorker;
+    use vlinder_core::domain::DagWorker;
     use vlinder_nats::NatsQueue;
 
     let nats = NatsQueue::localhost()

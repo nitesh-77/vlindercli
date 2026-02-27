@@ -9,7 +9,7 @@
 #![cfg(feature = "test-support")]
 
 use vlinderd::config::Config;
-use vlinderd::domain::{
+use vlinder_core::domain::{
     Agent, AgentId, Runtime, RuntimeType,
     InvokeDiagnostics, InvokeMessage, HarnessType, SessionId, SubmissionId, TimelineId,
 };

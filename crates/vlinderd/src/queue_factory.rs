@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use crate::config::{Config, QueueBackend, StateBackend};
-use crate::domain::{DagStore, MessageQueue, QueueError};
+use vlinder_core::domain::{DagStore, MessageQueue, QueueError};
 use vlinder_nats::NatsQueue;
 use vlinder_core::queue::RecordingQueue;
 
@@ -57,7 +57,7 @@ pub fn recording_from_config(config: &Config) -> Result<Arc<dyn MessageQueue + S
         }
         #[cfg(any(test, feature = "test-support"))]
         StateBackend::Memory => {
-            use crate::domain::InMemoryDagStore;
+            use vlinder_core::domain::InMemoryDagStore;
             Arc::new(InMemoryDagStore::new())
         }
     };

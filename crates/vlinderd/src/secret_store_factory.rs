@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 use crate::config::{Config, QueueBackend};
-use crate::domain::{SecretStore, SecretStoreError};
+use vlinder_core::domain::{SecretStore, SecretStoreError};
 use vlinder_nats::NatsSecretStore;
 
 /// Create a secret store from configuration.
@@ -21,7 +21,7 @@ pub fn from_config(config: &Config) -> Result<Arc<dyn SecretStore>, SecretStoreE
         }
         #[cfg(any(test, feature = "test-support"))]
         QueueBackend::Memory => {
-            use crate::domain::InMemorySecretStore;
+            use vlinder_core::domain::InMemorySecretStore;
             Ok(Arc::new(InMemorySecretStore::new()))
         }
     }

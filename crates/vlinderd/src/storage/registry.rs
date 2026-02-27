@@ -5,7 +5,7 @@ use std::sync::Mutex;
 
 use rusqlite::Connection;
 
-use crate::domain::{Agent, Model, ModelType, Provider, RegistryRepository, RepositoryError, StoredAgent, StoredModel};
+use vlinder_core::domain::{Agent, Model, ModelType, Provider, RegistryRepository, RepositoryError, StoredAgent, StoredModel};
 
 /// SQLite-backed registry repository.
 pub struct SqliteRegistryRepository {
@@ -241,7 +241,7 @@ impl RegistryRepository for SqliteRegistryRepository {
 mod tests {
     use super::*;
     use std::collections::HashMap;
-    use crate::domain::{
+    use vlinder_core::domain::{
         Agent, ImageDigest, ModelType, Prompts, Provider,
         Requirements, ResourceId, RuntimeType,
     };
@@ -333,7 +333,7 @@ mod tests {
     }
 
     fn full_test_agent() -> Agent {
-        use crate::domain::{Provider, Protocol, ServiceConfig, ServiceType};
+        use vlinder_core::domain::{Provider, Protocol, ServiceConfig, ServiceType};
         let mut models = HashMap::new();
         models.insert("phi3".to_string(), "phi3:latest".to_string());
 
@@ -439,9 +439,9 @@ mod tests {
         assert_eq!(restored.vector_storage.as_ref().map(|r| r.as_str()), Some("sqlite:///data/vectors.db"));
         assert_eq!(restored.requirements.models.get("phi3").map(|s| s.as_str()), Some("phi3:latest"));
         assert_eq!(restored.requirements.services.len(), 1);
-        let infer = &restored.requirements.services[&crate::domain::ServiceType::Infer];
-        assert_eq!(infer.provider, crate::domain::Provider::Ollama);
-        assert_eq!(infer.protocol, crate::domain::Protocol::OpenAi);
+        let infer = &restored.requirements.services[&vlinder_core::domain::ServiceType::Infer];
+        assert_eq!(infer.provider, vlinder_core::domain::Provider::Ollama);
+        assert_eq!(infer.protocol, vlinder_core::domain::Protocol::OpenAi);
         assert_eq!(infer.models, vec!["phi3:latest"]);
         assert!(restored.prompts.as_ref().unwrap().intent_recognition.is_some());
     }

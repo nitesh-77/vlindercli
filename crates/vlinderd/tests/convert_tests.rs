@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use vlinderd::domain::{
+use vlinder_core::domain::{
     Agent, Job, JobId, JobStatus, Model, ModelType, Protocol, Provider,
     Requirements, ResourceId, RuntimeType, ServiceConfig, ServiceType, SubmissionId,
 };

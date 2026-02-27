@@ -1,7 +1,7 @@
 //! Agent and AgentManifest tests.
 
 use std::path::{Path, PathBuf};
-use vlinderd::domain::{Agent, AgentManifest};
+use vlinder_core::domain::{Agent, AgentManifest};
 
 const AGENT_FIXTURES: &str = "tests/fixtures/agents";
 
@@ -53,7 +53,7 @@ fn manifest_parses_optional_source() {
 
 #[test]
 fn manifest_parses_requirements() {
-    use vlinderd::domain::{ServiceType, Provider, Protocol};
+    use vlinder_core::domain::{ServiceType, Provider, Protocol};
 
     let manifest: AgentManifest = parse_manifest(r#"
         name = "test-agent"
@@ -206,7 +206,7 @@ fn agent_with_empty_models_list() {
 
 #[test]
 fn agent_services_from_fixture() {
-    use vlinderd::domain::{ServiceType, Provider, Protocol};
+    use vlinder_core::domain::{ServiceType, Provider, Protocol};
 
     let agent = Agent::load(&agent_fixture("pensieve")).unwrap();
 

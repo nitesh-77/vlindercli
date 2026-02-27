@@ -1,5 +1,3 @@
-pub use vlinder_core::domain;
-
 pub mod config;
 pub mod harness;
 pub mod loader;
