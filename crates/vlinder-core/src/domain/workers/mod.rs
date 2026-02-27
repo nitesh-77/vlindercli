@@ -5,4 +5,4 @@
 
 pub mod dag;
 
-pub use dag::{reconstruct_observable_message, build_dag_node};
+pub use dag::build_dag_node;
