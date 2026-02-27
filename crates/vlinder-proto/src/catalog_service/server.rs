@@ -1,46 +1,39 @@
-//! gRPC server wrapping ModelCatalog implementations.
+//! gRPC server wrapping a CatalogService implementation.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
 
-use vlinder_core::domain::ModelCatalog;
+use vlinder_core::domain::CatalogService;
 use super::proto::{
-    catalog_service_server::CatalogService,
+    catalog_service_server::CatalogService as GrpcCatalogService,
     PingRequest, SemVer,
+    ListCatalogsRequest, ListCatalogsResponse,
     ResolveRequest, ResolveResponse,
     ListRequest, ListResponse,
     AvailableRequest, AvailableResponse,
 };
 
-/// gRPC server that dispatches catalog requests to the appropriate backend.
+/// gRPC server that delegates catalog requests to a `CatalogService`.
 ///
-/// Holds a map of catalog name → implementation. The request's `catalog` field
-/// selects which backend handles the call.
+/// The `CatalogService` trait handles dispatch to the right backend
+/// by catalog name — this server is just a gRPC adapter.
 pub struct CatalogServiceServer {
-    catalogs: HashMap<String, Arc<dyn ModelCatalog>>,
+    service: Arc<dyn CatalogService>,
 }
 
 impl CatalogServiceServer {
-    pub fn new(catalogs: HashMap<String, Arc<dyn ModelCatalog>>) -> Self {
-        Self { catalogs }
+    pub fn new(service: Arc<dyn CatalogService>) -> Self {
+        Self { service }
     }
 
     /// Create a tonic service from this server.
     pub fn into_service(self) -> super::proto::catalog_service_server::CatalogServiceServer<Self> {
         super::proto::catalog_service_server::CatalogServiceServer::new(self)
     }
-
-    fn get_catalog(&self, name: &str) -> Result<Arc<dyn ModelCatalog>, Status> {
-        self.catalogs
-            .get(name)
-            .cloned()
-            .ok_or_else(|| Status::not_found(format!("unknown catalog: {}", name)))
-    }
 }
 
 #[tonic::async_trait]
-impl CatalogService for CatalogServiceServer {
+impl GrpcCatalogService for CatalogServiceServer {
     async fn ping(
         &self,
         _request: Request<PingRequest>,
@@ -52,16 +45,25 @@ impl CatalogService for CatalogServiceServer {
         }))
     }
 
+    async fn list_catalogs(
+        &self,
+        _request: Request<ListCatalogsRequest>,
+    ) -> Result<Response<ListCatalogsResponse>, Status> {
+        let names = self.service.catalogs();
+        Ok(Response::new(ListCatalogsResponse { catalogs: names }))
+    }
+
     async fn resolve(
         &self,
         request: Request<ResolveRequest>,
     ) -> Result<Response<ResolveResponse>, Status> {
         let req = request.into_inner();
-        let catalog = self.get_catalog(&req.catalog)?;
+        let service = self.service.clone();
+        let catalog = req.catalog;
         let name = req.name;
 
         let result = tokio::task::spawn_blocking(move || {
-            catalog.resolve(&name)
+            service.resolve(&catalog, &name)
         }).await.map_err(|e| Status::internal(e.to_string()))?;
 
         match result {
@@ -81,10 +83,11 @@ impl CatalogService for CatalogServiceServer {
         request: Request<ListRequest>,
     ) -> Result<Response<ListResponse>, Status> {
         let req = request.into_inner();
-        let catalog = self.get_catalog(&req.catalog)?;
+        let service = self.service.clone();
+        let catalog = req.catalog;
 
         let result = tokio::task::spawn_blocking(move || {
-            catalog.list()
+            service.list(&catalog)
         }).await.map_err(|e| Status::internal(e.to_string()))?;
 
         match result {
@@ -104,11 +107,12 @@ impl CatalogService for CatalogServiceServer {
         request: Request<AvailableRequest>,
     ) -> Result<Response<AvailableResponse>, Status> {
         let req = request.into_inner();
-        let catalog = self.get_catalog(&req.catalog)?;
+        let service = self.service.clone();
+        let catalog = req.catalog;
         let name = req.name;
 
         let result = tokio::task::spawn_blocking(move || {
-            catalog.available(&name)
+            service.available(&catalog, &name)
         }).await.map_err(|e| Status::internal(e.to_string()))?;
 
         Ok(Response::new(AvailableResponse {

@@ -1,25 +1,23 @@
-//! gRPC client implementing the ModelCatalog trait.
+//! gRPC client implementing the CatalogService trait.
 
 use std::sync::Mutex;
 use tonic::transport::Channel;
 
-use vlinder_core::domain::{CatalogError, Model, ModelCatalog, ModelInfo};
+use vlinder_core::domain::{CatalogError, CatalogService, Model, ModelInfo};
 use super::proto::{self, catalog_service_client::CatalogServiceClient};
 
-/// ModelCatalog implementation that makes gRPC calls to a remote Catalog Service.
+/// CatalogService implementation that makes gRPC calls to a remote Catalog Service.
 ///
-/// Each client is bound to a specific catalog name (e.g., "ollama", "openrouter").
-/// The catalog name is sent in every request so the server can dispatch to the
-/// correct backend.
+/// A single client talks to the entire service — catalog names are passed
+/// per-call, not baked into the constructor.
 pub struct GrpcCatalogClient {
     client: Mutex<CatalogServiceClient<Channel>>,
     runtime: tokio::runtime::Runtime,
-    catalog: String,
 }
 
 impl GrpcCatalogClient {
-    /// Connect to a catalog service server for a specific catalog backend.
-    pub fn connect(addr: &str, catalog: &str) -> Result<Self, Box<dyn std::error::Error>> {
+    /// Connect to a catalog service server.
+    pub fn connect(addr: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let runtime = tokio::runtime::Runtime::new()?;
         let client = runtime.block_on(async {
             CatalogServiceClient::connect(addr.to_string()).await
@@ -28,7 +26,6 @@ impl GrpcCatalogClient {
         Ok(Self {
             client: Mutex::new(client),
             runtime,
-            catalog: catalog.to_string(),
         })
     }
 }
@@ -50,10 +47,23 @@ pub fn ping_catalog_service(addr: &str) -> Option<(u32, u32, u32)> {
     })
 }
 
-impl ModelCatalog for GrpcCatalogClient {
-    fn resolve(&self, name: &str) -> Result<Model, CatalogError> {
+impl CatalogService for GrpcCatalogClient {
+    fn catalogs(&self) -> Vec<String> {
+        let result = self.runtime.block_on(async {
+            self.client.lock().unwrap()
+                .list_catalogs(proto::ListCatalogsRequest {})
+                .await
+        });
+
+        match result {
+            Ok(resp) => resp.into_inner().catalogs,
+            Err(_) => Vec::new(),
+        }
+    }
+
+    fn resolve(&self, catalog: &str, name: &str) -> Result<Model, CatalogError> {
         let request = proto::ResolveRequest {
-            catalog: self.catalog.clone(),
+            catalog: catalog.to_string(),
             name: name.to_string(),
         };
 
@@ -73,9 +83,9 @@ impl ModelCatalog for GrpcCatalogClient {
         }
     }
 
-    fn list(&self) -> Result<Vec<ModelInfo>, CatalogError> {
+    fn list(&self, catalog: &str) -> Result<Vec<ModelInfo>, CatalogError> {
         let request = proto::ListRequest {
-            catalog: self.catalog.clone(),
+            catalog: catalog.to_string(),
         };
 
         let response = self.runtime.block_on(async {
@@ -91,9 +101,9 @@ impl ModelCatalog for GrpcCatalogClient {
         Ok(resp.models.into_iter().map(Into::into).collect())
     }
 
-    fn available(&self, name: &str) -> bool {
+    fn available(&self, catalog: &str, name: &str) -> bool {
         let request = proto::AvailableRequest {
-            catalog: self.catalog.clone(),
+            catalog: catalog.to_string(),
             name: name.to_string(),
         };
 

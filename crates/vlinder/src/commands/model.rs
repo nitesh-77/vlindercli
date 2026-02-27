@@ -5,7 +5,7 @@ use clap::Subcommand;
 
 use vlinder_proto::catalog_service::{GrpcCatalogClient, ping_catalog_service};
 use crate::config::CliConfig;
-use vlinder_core::domain::{Model, ModelCatalog, Registry};
+use vlinder_core::domain::{CatalogService, Model, Registry};
 
 /// Load a model from a TOML manifest and register it with the registry.
 /// Used by `model add <path.toml>` and by `agent deploy` auto-discovery.
@@ -122,13 +122,8 @@ fn open_registry(config: &CliConfig) -> Option<Arc<dyn Registry>> {
     super::connect::open_registry(config)
 }
 
-/// Connect to a catalog backend via the daemon's gRPC catalog service.
-fn open_catalog(catalog_name: &str, config: &CliConfig) -> Option<Box<dyn ModelCatalog>> {
-    if !CATALOGS.contains(&catalog_name) {
-        eprintln!("Unknown catalog: {}. Supported: ollama, openrouter", catalog_name);
-        return None;
-    }
-
+/// Connect to the daemon's gRPC catalog service.
+fn open_catalog_service(config: &CliConfig) -> Option<GrpcCatalogClient> {
     let catalog_addr = if config.daemon.catalog_addr.starts_with("http://")
         || config.daemon.catalog_addr.starts_with("https://") {
         config.daemon.catalog_addr.clone()
@@ -141,8 +136,8 @@ fn open_catalog(catalog_name: &str, config: &CliConfig) -> Option<Box<dyn ModelC
         return None;
     }
 
-    match GrpcCatalogClient::connect(&catalog_addr, catalog_name) {
-        Ok(client) => Some(Box::new(client)),
+    match GrpcCatalogClient::connect(&catalog_addr) {
+        Ok(client) => Some(client),
         Err(e) => {
             eprintln!("Failed to connect to catalog service: {}", e);
             None
@@ -152,9 +147,9 @@ fn open_catalog(catalog_name: &str, config: &CliConfig) -> Option<Box<dyn ModelC
 
 /// Resolve a model by name from a catalog backend (Ollama, OpenRouter).
 fn resolve_from_catalog(name: &str, catalog: &str, config: &CliConfig) -> Option<Model> {
-    let catalog = open_catalog(catalog, config)?;
+    let service = open_catalog_service(config)?;
 
-    match catalog.resolve(name) {
+    match service.resolve(catalog, name) {
         Ok(m) => Some(m),
         Err(e) => {
             eprintln!("Failed to resolve model '{}': {}", name, e);
@@ -163,16 +158,17 @@ fn resolve_from_catalog(name: &str, catalog: &str, config: &CliConfig) -> Option
     }
 }
 
-/// Known catalogs in display order.
-const CATALOGS: &[&str] = &["ollama", "openrouter"];
-
 fn list_available(catalog_name: &str, filter: Option<&str>, config: &CliConfig) {
+    let Some(service) = open_catalog_service(config) else { return };
+
+    let available_catalogs = service.catalogs();
     let catalogs: Vec<&str> = if catalog_name == "all" {
-        CATALOGS.to_vec()
-    } else if CATALOGS.contains(&catalog_name) {
+        available_catalogs.iter().map(|s| s.as_str()).collect()
+    } else if available_catalogs.iter().any(|c| c == catalog_name) {
         vec![catalog_name]
     } else {
-        eprintln!("Unknown catalog: {}. Supported: all, ollama, openrouter", catalog_name);
+        let names = available_catalogs.join(", ");
+        eprintln!("Unknown catalog: {}. Available: all, {}", catalog_name, names);
         return;
     };
 
@@ -180,11 +176,7 @@ fn list_available(catalog_name: &str, filter: Option<&str>, config: &CliConfig) 
     println!();
 
     for name in &catalogs {
-        let Some(catalog) = open_catalog(name, config) else {
-            continue;
-        };
-
-        match catalog.list() {
+        match service.list(name) {
             Ok(models) => {
                 let filtered: Vec<_> = if let Some(q) = filter {
                     let q = q.to_lowercase();

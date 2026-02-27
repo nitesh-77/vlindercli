@@ -400,20 +400,19 @@ fn run_state_worker(config: &Config, shutdown: &AtomicBool) {
 }
 
 fn run_catalog_worker(config: &Config, shutdown: &AtomicBool) {
-    use std::collections::HashMap;
     use tonic::transport::Server;
     use vlinder_ollama::OllamaCatalog;
     use vlinder_infer_openrouter::OpenRouterCatalog;
     use crate::catalog_service::CatalogServiceServer;
-    use crate::domain::ModelCatalog;
+    use crate::domain::{CatalogService, CompositeCatalog};
 
-    let mut catalogs: HashMap<String, Arc<dyn ModelCatalog>> = HashMap::new();
-    catalogs.insert(
+    let mut composite = CompositeCatalog::new();
+    composite.add(
         "ollama".to_string(),
         Arc::new(OllamaCatalog::new(&config.ollama.endpoint)),
     );
     if !config.openrouter.api_key.is_empty() {
-        catalogs.insert(
+        composite.add(
             "openrouter".to_string(),
             Arc::new(OpenRouterCatalog::new(
                 &config.openrouter.endpoint,
@@ -428,11 +427,12 @@ fn run_catalog_worker(config: &Config, shutdown: &AtomicBool) {
     let addr: std::net::SocketAddr = addr_str.parse()
         .expect("Invalid catalog service address");
 
-    tracing::info!(?addr, catalogs = ?catalogs.keys().collect::<Vec<_>>(), "Starting catalog gRPC server");
+    let catalog_names = composite.catalogs();
+    tracing::info!(?addr, catalogs = ?catalog_names, "Starting catalog gRPC server");
 
     let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
     rt.block_on(async {
-        let service = CatalogServiceServer::new(catalogs).into_service();
+        let service = CatalogServiceServer::new(Arc::new(composite)).into_service();
 
         let server = Server::builder()
             .add_service(service)

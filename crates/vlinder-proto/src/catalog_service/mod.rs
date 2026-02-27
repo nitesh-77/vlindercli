@@ -1,8 +1,8 @@
 //! gRPC Catalog Service.
 //!
-//! Exposes the ModelCatalog trait over gRPC for distributed mode.
-//! - `CatalogServiceServer`: Wraps catalog implementations, serves gRPC requests
-//! - `GrpcCatalogClient`: Implements ModelCatalog trait via gRPC calls
+//! Exposes the CatalogService trait over gRPC for distributed mode.
+//! - `CatalogServiceServer`: Wraps a CatalogService impl, serves gRPC requests
+//! - `GrpcCatalogClient`: Implements CatalogService trait via gRPC calls
 
 mod server;
 mod client;

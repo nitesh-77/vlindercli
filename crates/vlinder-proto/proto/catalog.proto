@@ -3,6 +3,7 @@ package vlinder.catalog;
 
 service CatalogService {
   rpc Ping(PingRequest) returns (SemVer);
+  rpc ListCatalogs(ListCatalogsRequest) returns (ListCatalogsResponse);
   rpc Resolve(ResolveRequest) returns (ResolveResponse);
   rpc List(ListRequest) returns (ListResponse);
   rpc Available(AvailableRequest) returns (AvailableResponse);
@@ -10,6 +11,9 @@ service CatalogService {
 
 message PingRequest {}
 message SemVer { uint32 major = 1; uint32 minor = 2; uint32 patch = 3; }
+
+message ListCatalogsRequest {}
+message ListCatalogsResponse { repeated string catalogs = 1; }
 
 enum ModelType {
   MODEL_TYPE_UNSPECIFIED = 0;
