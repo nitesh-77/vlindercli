@@ -5,8 +5,8 @@
 
 use std::sync::Arc;
 
-use crate::config::{Config, QueueBackend, StateBackend};
-use vlinder_core::domain::{DagStore, MessageQueue, QueueError};
+use crate::config::{Config, QueueBackend};
+use vlinder_core::domain::{MessageQueue, QueueError};
 use vlinder_nats::NatsQueue;
 use vlinder_core::queue::RecordingQueue;
 
@@ -37,30 +37,8 @@ pub fn from_config(config: &Config) -> Result<Arc<dyn MessageQueue + Send + Sync
 pub fn recording_from_config(config: &Config) -> Result<Arc<dyn MessageQueue + Send + Sync>, QueueError> {
     let inner = from_config(config)?;
 
-    let store: Arc<dyn DagStore> = match config.state.backend {
-        StateBackend::Grpc => {
-            use vlinder_sql_state::state_service::GrpcStateClient;
-
-            let state_addr = if config.distributed.state_addr.starts_with("http://")
-                || config.distributed.state_addr.starts_with("https://") {
-                config.distributed.state_addr.clone()
-            } else {
-                format!("http://{}", config.distributed.state_addr)
-            };
-
-            Arc::new(
-                GrpcStateClient::connect(&state_addr)
-                    .map_err(|e| QueueError::SendFailed(
-                        format!("state service at {} unreachable: {}", state_addr, e)
-                    ))?
-            )
-        }
-        #[cfg(any(test, feature = "test-support"))]
-        StateBackend::Memory => {
-            use vlinder_core::domain::InMemoryDagStore;
-            Arc::new(InMemoryDagStore::new())
-        }
-    };
+    let store = crate::state_factory::from_config(config)
+        .map_err(|e| QueueError::SendFailed(format!("state service unreachable: {}", e)))?;
 
     Ok(Arc::new(RecordingQueue::new(inner, store)))
 }
