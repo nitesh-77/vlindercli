@@ -188,10 +188,8 @@ impl Harness for CoreHarness {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::registry::InMemoryRegistry;
     use vlinder_core::queue::InMemoryQueue;
-    use vlinder_core::domain::InMemorySecretStore;
-    use vlinder_core::domain::{RuntimeType, SecretStore};
+    use vlinder_core::domain::{InMemoryRegistry, InMemorySecretStore, RuntimeType, SecretStore};
     use std::path::PathBuf;
 
     fn fixture_path(name: &str) -> PathBuf {

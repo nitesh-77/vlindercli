@@ -3,9 +3,10 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use vlinder_core::domain::{Agent, Provider, Model, ModelType, Registry, RegistrationError, ResourceId, RuntimeType, SecretStore};
-use vlinderd::registry::InMemoryRegistry;
-use vlinder_core::domain::InMemorySecretStore;
+use vlinder_core::domain::{
+    Agent, InMemoryRegistry, InMemorySecretStore, Model, ModelType, Provider, Registry,
+    RegistrationError, ResourceId, RuntimeType, SecretStore,
+};
 
 fn test_secret_store() -> Arc<dyn SecretStore> {
     Arc::new(InMemorySecretStore::new())

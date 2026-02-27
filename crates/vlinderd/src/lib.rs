@@ -2,7 +2,6 @@ pub mod config;
 pub mod harness;
 pub mod loader;
 pub mod queue_factory;
-pub mod registry;
 pub mod registry_factory;
 pub mod secret_store_factory;
 pub mod supervisor;
