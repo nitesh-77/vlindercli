@@ -1,6 +1,6 @@
 # Domain Model
 
-This document describes the core types and abstractions in VlinderCLI. It separates the **domain** (abstract protocol) from **implementations** (concrete infrastructure).
+Core types and abstractions in VlinderCLI. Separates the **domain** (abstract protocol in `vlinder-core`) from **implementations** (concrete infrastructure in leaf crates).
 
 For architectural decisions, see `docs/adr/`. For the vision, see `VISION.md`.
 
@@ -8,29 +8,49 @@ For architectural decisions, see `docs/adr/`. For the vision, see `VISION.md`.
 
 ## Architecture Overview
 
-VlinderCLI uses a **queue-based message-passing architecture** (ADR 018). Everything is a service that consumes messages and produces responses:
+Queue-based message-passing architecture (ADR 018). Everything is a service that consumes messages and produces responses:
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                     Message Queue (NATS)                    │
-│                                                             │
-│   ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌────────────┐        │
-│   │inference│ │embedding│ │ storage │ │  agents    │        │
-│   │ worker  │ │ worker  │ │ workers │ │(containers)│        │
-│   └─────────┘ └─────────┘ └─────────┘ └────────────┘        │
-│   ┌─────────┐ ┌─────────┐                                   │
-│   │  state  │ │   DAG   │                                   │
-│   │ worker  │ │ worker  │                                   │
-│   └─────────┘ └─────────┘                                   │
-│        ▲           ▲           ▲           ▲                │
-│        └───────────┴───────────┴───────────┘                │
-│                    all just workers                         │
-└─────────────────────────────────────────────────────────────┘
+                         Message Queue (NATS)
+
+   +-----------+ +-----------+ +-----------+ +------------+
+   | inference | | embedding | |  storage  | |   agents   |
+   |  workers  | |  workers  | |  workers  | |(containers)|
+   +-----------+ +-----------+ +-----------+ +------------+
+   +-----------+ +-----------+ +-----------+ +------------+
+   |   state   | |    DAG    | |  catalog  | |   secret   |
+   |  worker   | |  worker   | |  worker   | |   worker   |
+   +-----------+ +-----------+ +-----------+ +------------+
+        ^             ^             ^              ^
+        +-------------+-------------+--------------+
+                       all just workers
 ```
 
-**Architecture**: `vlinder daemon` runs a **Supervisor** that spawns worker processes. Workers connect to **NATS** for messaging and **gRPC** for registry/state. There is no in-process mode — all execution flows through the queue (ADR 062).
+`vlinder daemon` runs a **Supervisor** that spawns worker processes. Workers connect to **NATS** for messaging and **gRPC** for registry/state/secret/catalog. There is no in-process mode -- all execution flows through the queue (ADR 062).
 
-In-memory implementations (`InMemoryQueue`, `InMemoryRegistry`, etc.) exist only as **unit test doubles**.
+In-memory implementations (`InMemoryQueue`, `InMemoryRegistry`, etc.) exist only as unit test doubles.
+
+---
+
+## Crate Layout
+
+```
+vlinder-core           Domain types, traits, and protocol specification
+vlinder-nats           NATS MessageQueue implementation
+vlinder-sql-registry   PersistentRegistry + gRPC service + SQLite storage
+vlinder-sql-state      SqliteDagStore + gRPC state service
+vlinder-git-dag        Git-based DAG worker (conversation commits)
+vlinder-ollama         Ollama inference/embedding workers + catalog
+vlinder-infer-openrouter  OpenRouter inference worker + catalog
+vlinder-sqlite-kv      SQLite object storage worker
+vlinder-sqlite-vec     SQLite-vec vector storage worker
+vlinder-podman-runtime Container runtime (Podman)
+vlinder-catalog        Catalog gRPC service
+vlinder-proto          gRPC services (harness, secret, catalog protos)
+vlinder-sidecar        Agent sidecar container
+vlinder                CLI binary (vlinder)
+vlinderd               Daemon binary (vlinderd) + config + factories + supervisor
+```
 
 ---
 
@@ -38,29 +58,28 @@ In-memory implementations (`InMemoryQueue`, `InMemoryRegistry`, etc.) exist only
 
 The domain defines **what** the system does: types, traits, and contracts. Infrastructure-agnostic.
 
-Location: [`src/domain/`](../src/domain/mod.rs)
+Location: `crates/vlinder-core/src/domain/`
 
 ---
 
 ## Identity Types
 
-These types provide identity and ordering across the system.
-
 ### ResourceId
 
-URI-based resource identity. Key for looking up any resource in the registry: storage, models, runtimes, agents.
+URI-based resource identity. Key for looking up any resource in the registry.
 
-- **Type**: [`src/domain/resource_id.rs`](../src/domain/resource_id.rs)
 - Scheme indicates resource type: `sqlite://`, `ollama://`, `openrouter://`, `memory://`, `http://`
 - Supports parsing into `scheme()`, `authority()`, and `path()` components
+- Location: `domain/resource_id.rs`
 
-### MessageId, SubmissionId, SessionId
+### MessageId, SubmissionId, SessionId, TimelineId
 
-Tracking identifiers for message flow (ADR 044, 054):
+Tracking identifiers for message flow:
 
-- `MessageId` — unique per message (UUID)
-- `SubmissionId` — groups messages for one user request. Content-addressed SHA-256 hash of (payload, session_id, parent_submission) per ADR 081
-- `SessionId` — groups submissions into a conversation. Format: `ses-{uuid}`
+- `MessageId` -- unique per message (UUID)
+- `SubmissionId` -- groups messages for one user request. Content-addressed SHA-256 hash of (payload, session_id, parent_submission) per ADR 081
+- `SessionId` -- groups submissions into a conversation. Format: `ses-{uuid}`
+- `TimelineId` -- branch-scoped identity for time-travel (ADR 093)
 
 ### Sequence / SequenceCounter
 
@@ -70,304 +89,279 @@ Ordering for service requests within a submission. Starts at 1, increments per r
 
 OCI container identity types with parse-time validation:
 
-- `ImageRef` — validated OCI image reference (e.g., `localhost/echo-agent:latest`). Must contain `/`.
-- `ImageDigest` — validated content-addressed digest (e.g., `sha256:a80c4f17...`). Only `sha256:` supported.
+- `ImageRef` -- validated OCI image reference (e.g., `localhost/echo-agent:latest`)
+- `ImageDigest` -- validated content-addressed digest (e.g., `sha256:a80c4f17...`)
+- Location: `domain/image_ref.rs`, `domain/image_digest.rs`
 
-- **Types**: [`src/domain/image_ref.rs`](../src/domain/image_ref.rs), [`src/domain/image_digest.rs`](../src/domain/image_digest.rs)
+### ContainerId, PodId
+
+Podman runtime identity newtypes for container and pod IDs.
 
 ---
 
-## Configuration Types
-
-These types describe **what** to use.
+## Agent & Fleet Types
 
 ### Agent
 
-A unit of behavior with declared requirements: identity, executable (OCI image), models, services, mounts, prompts. Mounts are Podman volume mounts mapping host paths to guest paths.
+A unit of behavior with declared requirements: identity, executable (OCI image), models, services, mounts, prompts.
 
-- **Type**: [`src/domain/agent.rs`](../src/domain/agent.rs)
-- Key fields: `name`, `runtime: RuntimeType`, `executable: String` (OCI image ref), `image_digest: Option<ImageDigest>`, `requirements: Requirements`, `object_storage`, `vector_storage`
+- Location: `domain/agent.rs`
+- Key fields: `name`, `id: ResourceId`, `runtime: RuntimeType`, `executable: String`, `image_digest: Option<ImageDigest>`, `requirements: Requirements`, `object_storage`, `vector_storage`, `public_key`
 
-### Requirements
+### AgentManifest
 
-What an agent needs to run: models (name → ResourceId mapping) and services (by name).
+Raw manifest from `agent.toml`. Deserialized separately from the resolved `Agent` type.
 
-- **Type**: [`src/domain/agent.rs`](../src/domain/agent.rs) (defined alongside Agent)
+- Location: `domain/agent_manifest.rs`
+- Contains: `RequirementsConfig`, `ServiceConfig`, `Protocol`, `MountConfig`, `PromptsConfig`
 
-### Mount
+### Requirements / Prompts
 
-Podman volume mount: maps host path to guest path with read/write mode.
-
-- **Type**: [`src/domain/agent.rs`](../src/domain/agent.rs) (defined alongside Agent)
-
-### Prompts
-
-Optional LLM prompt overrides for agent behavior customization.
-
-- **Type**: [`src/domain/agent.rs`](../src/domain/agent.rs) (defined alongside Agent)
+What an agent needs to run (models, services, mounts) and optional prompt overrides.
 
 ### Model
 
-An inference or embedding capability: name, type, engine, model path (ResourceId), content digest.
+An inference or embedding capability: name, type, provider, model path, content digest.
 
-- **Type**: [`src/domain/model.rs`](../src/domain/model.rs)
-- `EngineType`: `Ollama` | `OpenRouter` | `InMemory` (test-only)
+- Location: `domain/model.rs`
 - `ModelType`: `Inference` | `Embedding`
+- `Provider`: `Ollama` | `OpenRouter`
 
-### Fleet
+### ModelManifest
 
-A composition boundary for agents: name, entry-point agent, project directory, agents map (name → path).
+Raw manifest from `<model>.toml`. Separate from resolved `Model` type.
 
-- **Type**: [`src/domain/fleet.rs`](../src/domain/fleet.rs)
+- Location: `domain/model_manifest.rs`
 
-### Storage
+### Fleet / FleetManifest
 
-Storage configuration types and traits for object (key-value) and vector (embedding) storage.
+A composition boundary for agents: name, entry-point agent, agents map.
 
-- **Type**: [`src/domain/storage.rs`](../src/domain/storage.rs)
+- Location: `domain/fleet.rs`, `domain/fleet_manifest.rs`
+
+### Storage Configuration
+
 - `ObjectStorageType`: `Sqlite` | `InMemory` (test-only)
 - `VectorStorageType`: `SqliteVec` | `InMemory` (test-only)
-- `ObjectStorage` trait: `put_file()`, `get_file()`, `delete_file()`, `list_files()`
-- `VectorStorage` trait: `store_embedding()`, `search_by_vector()`, `delete_embedding()`
+- Location: `domain/storage.rs`
 
 ---
 
 ## Protocol Types
 
-The five typed messages that flow through the queue (ADR 044). Every message carries `protocol_version`, `submission`, and `session` for traceability.
+Five typed messages flow through the queue (ADR 018, 044). Every message carries `protocol_version`, `submission`, and `session` for traceability.
 
 ### Message Flow
 
 ```
-Harness ──InvokeMessage──▶ Runtime ──RequestMessage──▶ Service
-                                   ◀──ResponseMessage──
-        ◀──CompleteMessage──
+Harness --InvokeMessage--> Runtime --RequestMessage--> Service
+                                   <--ResponseMessage--
+        <--CompleteMessage--
 
-Agent ──DelegateMessage──▶ Agent (via runtime)
+Agent --DelegateMessage--> Agent (via runtime)
 ```
 
 ### InvokeMessage
 
-Harness → Runtime. Starts a submission by invoking an agent. Carries `agent_id`, `harness: HarnessType`, `runtime: RuntimeType`, `state: Option<String>`, and `InvokeDiagnostics`.
+Harness -> Runtime. Starts a submission. Carries `agent_id`, `harness: HarnessType`, `runtime: RuntimeType`, `state: Option<String>`, `timeline: TimelineId`, and `InvokeDiagnostics`.
 
 ### RequestMessage
 
-Runtime → Service. Agent requests a service operation (kv, vec, infer, embed). Carries `service`, `backend`, `operation`, `sequence`, and `RequestDiagnostics`.
+Runtime -> Service. Agent requests a service operation (kv, vec, infer, embed). Carries `service`, `backend`, `operation`, `sequence`, and `RequestDiagnostics`.
 
 ### ResponseMessage
 
-Service → Runtime. Service replies with result. Echoes all request dimensions plus `correlation_id` for tracing. Carries `ServiceDiagnostics`.
+Service -> Runtime. Service replies with result. Echoes all request dimensions plus `correlation_id`. Carries `ServiceDiagnostics`.
 
 ### CompleteMessage
 
-Runtime → Harness. Submission finished. Carries final `state` hash and `ContainerDiagnostics`.
+Runtime -> Harness. Submission finished. Carries final `state` hash and `ContainerDiagnostics`.
 
 ### DelegateMessage
 
-Agent → Agent (via runtime). One agent invoking another. Carries `caller_agent`, `target_agent`, `reply_subject`, and `DelegateDiagnostics`.
+Agent -> Agent (via runtime). One agent invoking another. Carries `caller_agent`, `target_agent`, `reply_subject`, and `DelegateDiagnostics`.
 
-- **Types**: [`src/domain/message.rs`](../src/domain/message.rs)
+Location: `domain/message/` (one file per message type)
 
 ### ExpectsReply Trait
 
-Type-level enforcement of request-response pairing:
-- `InvokeMessage` expects `CompleteMessage`
-- `RequestMessage` expects `ResponseMessage`
-- Terminal messages (`CompleteMessage`, `ResponseMessage`) do NOT implement `ExpectsReply` — attempting to reply is a compile error.
+Type-level enforcement of request-response pairing. Terminal messages (`CompleteMessage`, `ResponseMessage`) do NOT implement it -- attempting to reply is a compile error.
 
 ### ObservableMessage
 
-Unified enum wrapping all five message types for polymorphic handling (e.g., receiving from a queue when the type isn't known at compile time).
+Unified enum wrapping all five message types for polymorphic handling (e.g., DAG recording).
 
 ### HarnessType
 
-Entry point variants: `Cli`, `Web`, `Api`, `Whatsapp`. Routes completion messages back to the correct harness. Only `Cli` is currently implemented; the other variants are reserved for future use.
+Entry point variants: `Cli`, `Web`, `Api`, `Whatsapp`. Routes completion messages back to the correct harness.
 
 ### MessageQueue Trait
 
 Typed send/receive methods for all five message types, plus routing helpers and delegation support.
 
-- **Trait**: [`src/domain/message_queue.rs`](../src/domain/message_queue.rs)
+- Location: `domain/message_queue.rs`
 
-### SdkContract Trait
+---
 
-The 11 operations agents can request (ADR 074, 075):
+## Routing
 
-| Category | Operations |
-|----------|------------|
-| Object storage | `kv_get`, `kv_put`, `kv_list`, `kv_delete` |
-| Vector storage | `vector_store`, `vector_search`, `vector_delete` |
-| Inference | `infer` |
-| Embedding | `embed` |
-| Delegation | `delegate`, `wait` |
+### RoutingKey
 
-- **Trait**: [`src/domain/sdk.rs`](../src/domain/sdk.rs)
+Determines NATS subject for message delivery. Variants for each message type (Invoke, Complete, Request, Response, Delegate, DelegateReply).
 
-### AgentAction / AgentEvent
+### AgentId, Nonce, ServiceBackend
 
-JSON wire format for state-machine agents (ADR 074):
-- `AgentAction` — agent → platform (POST /handle response body). Tagged with `"action"`.
-- `AgentEvent` — platform → agent (POST /handle request body). Tagged with `"type"`.
-- Each carries an opaque `state: Value` field that the platform round-trips without interpretation.
+Supporting types for routing: agent identity in routing context, one-shot uniqueness values, service-backend pairs.
 
-### QueueBridge
+### InferenceBackendType, EmbeddingBackendType
 
-Queue-backed implementation of `SdkContract`. Routes typed SDK calls through the `MessageQueue`. Manages state cursor for versioned KV operations (ADR 055).
+Backend selectors for routing inference/embedding requests to the right worker.
 
-- **Type**: [`src/domain/queue_bridge.rs`](../src/domain/queue_bridge.rs)
+- Location: `domain/routing_key.rs`
 
 ---
 
 ## Time Travel Types
 
-Content-addressed data structures for runtime tracing and state versioning.
-
 ### DagNode / DagStore Trait
 
-Merkle DAG for runtime tracing (ADR 067). One `DagNode` per NATS message — no pairing, each message is independently meaningful.
+Merkle DAG for runtime tracing (ADR 067). One `DagNode` per NATS message.
 
-- `hash`: `SHA-256(payload || parent_hash || message_type || diagnostics)` — Merkle chain
-- `parent_hash`: previous node in the session (empty for root)
+- `hash`: `SHA-256(payload || parent_hash || message_type || diagnostics)` -- Merkle chain
+- `parent_hash`: previous node in the session
 - `message_type`: `Invoke` | `Request` | `Response` | `Complete` | `Delegate`
-- `from` / `to`: sender and receiver
-- `session_id`, `submission_id`, `payload`, `diagnostics`, `stderr`, `state`, `protocol_version`
+- `from` / `to`, `session_id`, `submission_id`, `payload`, `diagnostics`, `stderr`, `state`
 
 `DagStore` trait: `insert_node()`, `get_node()`, `get_session_nodes()`, `get_children()`, `latest_state()`, `latest_node_hash()`.
 
-- **Types**: [`src/domain/dag.rs`](../src/domain/dag.rs)
+### DagWorker Trait
 
-### StateCommit / State Hashing
+Processes observable messages and persists them to the DAG.
 
-Content-addressed versioned state mirroring git's object model (ADR 055):
+### Timeline / SessionSummary
 
-| Concept | Git equivalent | Hash function |
-|---------|---------------|---------------|
-| Value | Blob | `SHA-256(content)` |
-| Snapshot | Tree | `SHA-256(sorted JSON of path→value_hash)` |
-| State commit | Commit | `SHA-256(snapshot_hash + ":" + parent_hash)` |
-
-Root state is empty string `""` — the parent of the first commit.
-
-- **Types**: [`src/domain/state.rs`](../src/domain/state.rs)
+Timeline represents a named branch. SessionSummary provides summary data for the session viewer.
 
 ### Session / HistoryEntry
 
-Conversation state for multi-turn interactions (ADR 054). `Session` groups multiple submissions, builds enriched payloads with conversation history, and tracks open questions.
+Conversation state for multi-turn interactions (ADR 054). Tracks conversation history, builds enriched payloads, manages submission chaining.
 
-- **Types**: [`src/domain/session.rs`](../src/domain/session.rs)
-
-### Route / Stop
-
-Protocol trace for a session. `Route` is the full chain of messages; each `Stop` is one message with hash, type, sender, receiver, payload, and timestamp. Built from `DagNode`s.
-
-- **Types**: [`src/domain/route.rs`](../src/domain/route.rs)
+- Location: `domain/session.rs`
 
 ---
 
 ## Diagnostics
 
-Each message type carries diagnostics specific to its emitter (ADR 071). The type system encodes what each platform component guarantees — no shared struct with optional fields.
+Each message type carries diagnostics specific to its emitter (ADR 071):
 
 | Message | Diagnostics type | Emitter |
 |---------|------------------|---------|
 | Invoke | `InvokeDiagnostics` | Harness |
-| Request | `RequestDiagnostics` | QueueBridge |
+| Request | `RequestDiagnostics` | Container runtime |
 | Response | `ServiceDiagnostics` + `ServiceMetrics` | Service workers |
 | Complete | `ContainerDiagnostics` + `ContainerRuntimeInfo` | Container runtime |
 | Delegate | `DelegateDiagnostics` | Container runtime |
 
 `ServiceMetrics` is a tagged enum: `Inference { tokens_input, tokens_output, model }`, `Embedding { dimensions, model }`, `Storage { operation, bytes_transferred }`.
 
-`ContainerRuntimeInfo` captures Podman metadata: engine version, image ref, image digest, container ID.
-
-- **Types**: [`src/domain/diagnostics.rs`](../src/domain/diagnostics.rs)
+- Location: `domain/diagnostics.rs`
 
 ---
 
-## Control Plane Types
-
-These types manage system state and coordinate execution.
+## Control Plane
 
 ### Registry Trait
 
-Source of truth for all system state. Stores agents, models, jobs, and tracks available capabilities (runtimes, storage types, engine types).
+Source of truth for all system state. Stores agents, models, jobs, and tracks capabilities.
 
-- **Trait**: [`src/domain/registry.rs`](../src/domain/registry.rs)
-- Agent operations: `register_agent()`, `get_agent()`, `get_agents()`, `select_runtime()`
+- Agent operations: `register_agent()`, `register_manifest()`, `get_agent()`, `get_agents()`, `select_runtime()`
 - Model operations: `register_model()`, `get_model()`, `delete_model()`
 - Job operations: `create_job()`, `get_job()`, `update_job_status()`, `pending_jobs()`
-- Capability registration/queries for runtimes, storage types, engine types
+- Capability registration for runtimes, storage types, inference/embedding engines
+- Location: `domain/registry.rs`
 
 ### RegistryRepository Trait
 
-Persistence layer for Registry state. Handles save/load of agents and models to durable storage (SQLite, etc).
+Persistence layer for Registry state (save/load agents and models to durable storage).
 
-- **Trait**: [`src/domain/registry_repository.rs`](../src/domain/registry_repository.rs)
+- Location: `domain/registry_repository.rs`
 
 ### Job / JobId / JobStatus
 
-A submitted job and its current state.
+Submitted job and current state.
 
 - `JobId`: format `<registry_id>/jobs/<uuid>`
-- `JobStatus`: `Pending` → `Running` → `Completed(String)` | `Failed(String)`
+- `JobStatus`: `Pending` -> `Running` -> `Completed(String)` | `Failed(String)`
 
-### Harness Trait
+### Harness Trait + CoreHarness
 
-API surface for agent deployment and job management. Currently only `CliHarness` implements this trait. `HarnessType` has additional variants (Web, API, WhatsApp) reserved for future use.
+API surface for agent interaction. `CoreHarness` is the canonical implementation:
 
-- `deploy()` — register agent from TOML manifest
-- `invoke()` — submit a job
-- `poll()` — check job status
+- Session management with conversation history
+- Content-addressed submission chaining (ADR 081)
+- State tracking with pending/committed promotion (ADR 055)
+- Timeline-scoped invocations with seal enforcement (ADR 093)
+- Job creation and status tracking via the registry
 
-- **Trait**: [`src/domain/harness.rs`](../src/domain/harness.rs)
+- Location: `domain/harness.rs`
 
 ### Runtime Trait / RuntimeType
 
-Agent execution protocol. The runtime discovers agents from Registry, polls their input queues, and executes agent code on message arrival.
+Agent execution protocol. The runtime polls input queues, executes agent code, and manages the request-response lifecycle.
 
 - `RuntimeType`: `Container` (OCI containers via Podman)
 - Methods: `id()`, `runtime_type()`, `tick()`, `shutdown()`
+- Location: `domain/runtime.rs`
 
-- **Trait**: [`src/domain/runtime.rs`](../src/domain/runtime.rs)
+### ModelCatalog / CatalogService Traits
 
-### ModelCatalog Trait
+Resolves model names to Model configurations. `CompositeCatalog` dispatches across multiple backends.
 
-Resolves model names to Model configurations from backend catalogs.
+- Location: `domain/catalog.rs`
 
-- Methods: `resolve()`, `list()`, `available()`
-- **Trait**: [`src/domain/catalog.rs`](../src/domain/catalog.rs)
+### SecretStore Trait
+
+Named secret storage (byte blobs). Used for agent identity keys (ADR 083).
+
+- Location: `domain/secret_store.rs`
+
+### AgentIdentity
+
+Ed25519 key pair for agent identity. Provisioned at registration time.
+
+- Location: `domain/identity.rs`
+
+### Provider
+
+Model provider enum: `Ollama` | `OpenRouter`. Includes HTTP routing information (`ProviderRoute`, `ProviderHost`).
+
+- Location: `domain/provider.rs`
+
+### Operation / ServiceType
+
+`Operation`: verb being performed (Get, Put, List, Delete, Store, Search, Run, Chat, Generate).
+`ServiceType`: platform service category (Kv, Vec, Infer, Embed).
 
 ---
 
-## Service Workers
+## Queue Implementations (vlinder-core)
 
-Service workers are **domain entities** that define protocol handlers (ADR 030). They subscribe to queue subjects, process typed requests, and send typed responses. Inference and embedding workers validate that agents declared the model before invoking.
+Test doubles and decorators that live alongside the domain:
 
-Location: [`src/domain/workers/`](../src/domain/workers/mod.rs)
+| Type | Description |
+|------|-------------|
+| `InMemoryQueue` | VecDeque per subject -- test double only |
+| `RecordingQueue` | Decorator -- records DAG nodes before forwarding |
 
-| Worker | Service Queues | Trait Used |
-|--------|---------------|------------|
-| `ObjectServiceWorker` | `kv` — get, put, list, delete | `ObjectStorage` |
-| `VectorServiceWorker` | `vec` — store, search, delete | `VectorStorage` |
-| `InferenceServiceWorker` | `infer` — run | `InferenceEngine` |
-| `EmbeddingServiceWorker` | `embed` — run | `EmbeddingEngine` |
-| `GitDagWorker` | DAG node utilities | `DagStore` |
+Location: `crates/vlinder-core/src/queue/`
 
 ---
 
-## Loader Trait
+## Workers (vlinder-core)
 
-Abstracts how configuration is loaded from URIs. Free functions dispatch by URI scheme.
+DAG message reconstruction utilities for building `DagNode`s from raw NATS messages.
 
-- **Trait**: [`src/loader.rs`](../src/loader.rs)
-
-```rust
-pub trait Loader {
-    fn load_agent(&self, uri: &str) -> Result<Agent, LoadError>;
-    fn load_fleet(&self, uri: &str) -> Result<Fleet, LoadError>;
-    fn load_model(&self, uri: &str) -> Result<Model, LoadError>;
-}
-```
+Location: `domain/workers/dag.rs`
 
 ---
 
@@ -375,7 +369,130 @@ pub trait Loader {
 
 Enforce absolute paths at compile time. Relative paths in manifests resolve against the manifest's directory at load time.
 
-- **Types**: [`src/domain/path.rs`](../src/domain/path.rs)
+- `AbsoluteUri` -- absolute `file://` URI
+- `AbsolutePath` -- absolute filesystem path
+- Location: `domain/path.rs`
+
+---
+
+# Part 2: Implementations (Concrete Infrastructure)
+
+Each leaf crate implements one or more domain traits.
+
+---
+
+## Registry (`vlinder-sql-registry`)
+
+| Type | Role | Description |
+|------|------|-------------|
+| `PersistentRegistry` | `Registry` impl | Write-through to SQLite via `SqliteRegistryRepository` |
+| `SqliteRegistryRepository` | `RegistryRepository` impl | SQLite persistence for agents and models |
+| `RegistryServiceServer` | gRPC server | Wraps a `Registry`, serves gRPC |
+| `GrpcRegistryClient` | gRPC client | Implements `Registry` trait via gRPC |
+| `RegistryConfig` | Config | Engine availability (inference/embedding providers) |
+
+## State (`vlinder-sql-state`)
+
+| Type | Role | Description |
+|------|------|-------------|
+| `SqliteDagStore` | `DagStore` impl | SQLite-backed Merkle DAG persistence |
+| `StateServiceServer` | gRPC server | Wraps a `DagStore`, serves gRPC |
+| `GrpcStateClient` | gRPC client | Implements `DagStore` trait via gRPC |
+| `SessionServer` | HTTP server | Session viewer for debugging |
+
+## DAG (`vlinder-git-dag`)
+
+| Type | Role | Description |
+|------|------|-------------|
+| `GitDagWorker` | `DagWorker` impl | Writes conversation commits to a git repo |
+
+## Queue (`vlinder-nats`)
+
+| Type | Role | Description |
+|------|------|-------------|
+| `NatsQueue` | `MessageQueue` impl | NATS JetStream with sync facade over async tokio |
+| `NatsSecretStore` | `SecretStore` impl | NATS KV-backed secret storage |
+
+## Container Runtime (`vlinder-podman-runtime`)
+
+| Type | Role | Description |
+|------|------|-------------|
+| `ContainerRuntime` | `Runtime` impl | Executes OCI agents via Podman pods |
+
+Tick-loop orchestrator: polls invoke/delegate queues, dispatches to containers via HTTP POST `/handle`, manages the request-response lifecycle.
+
+## Inference (`vlinder-ollama`, `vlinder-infer-openrouter`)
+
+| Type | Crate | Description |
+|------|-------|-------------|
+| `OllamaWorker` | `vlinder-ollama` | Inference + embedding via Ollama HTTP API |
+| `OllamaCatalog` | `vlinder-ollama` | Model resolution from local Ollama |
+| `OpenRouterWorker` | `vlinder-infer-openrouter` | Inference via OpenRouter cloud API |
+| `OpenRouterCatalog` | `vlinder-infer-openrouter` | Model resolution from OpenRouter |
+
+## Storage (`vlinder-sqlite-kv`, `vlinder-sqlite-vec`)
+
+| Type | Crate | Description |
+|------|-------|-------------|
+| `KvWorker` | `vlinder-sqlite-kv` | SQLite-backed object storage worker |
+| `SqliteVecWorker` | `vlinder-sqlite-vec` | sqlite-vec vector storage worker |
+
+## Catalog (`vlinder-catalog`)
+
+| Type | Role | Description |
+|------|------|-------------|
+| `CatalogServiceServer` | gRPC server | Wraps `CompositeCatalog`, serves gRPC |
+
+## Other gRPC Services (`vlinder-proto`)
+
+| Type | Role | Description |
+|------|------|-------------|
+| `HarnessServiceServer` | gRPC server | Wraps a `Harness`, serves gRPC |
+| `GrpcHarnessClient` | gRPC client | Implements `Harness` trait via gRPC |
+| `SecretServiceServer` | gRPC server | Wraps a `SecretStore`, serves gRPC |
+| `GrpcSecretClient` | gRPC client | Implements `SecretStore` trait via gRPC |
+
+---
+
+# Part 3: Daemon Wiring (`vlinderd`)
+
+The daemon is not domain -- it's the composition root that wires everything together.
+
+## Supervisor
+
+Process manager for `vlinder daemon`. Spawns worker processes per `Config`, waits for readiness (registry first, then state service), manages graceful shutdown.
+
+## Factories
+
+Config-to-implementation wiring. Each takes `&Config` and returns a trait object:
+
+| Factory | Returns | Production impl |
+|---------|---------|-----------------|
+| `queue_factory` | `Arc<dyn MessageQueue>` | `NatsQueue` / `RecordingQueue` |
+| `registry_factory` | `Arc<dyn Registry>` | `GrpcRegistryClient` |
+| `secret_store_factory` | `Arc<dyn SecretStore>` | `NatsSecretStore` |
+| `state_factory` | `Arc<dyn DagStore>` | `GrpcStateClient` |
+
+## Workers
+
+14 worker processes spawned by the supervisor:
+
+| Worker | Type | Service |
+|--------|------|---------|
+| Registry | gRPC server | `PersistentRegistry` |
+| State | gRPC server | `SqliteDagStore` |
+| Harness | gRPC server | `CoreHarness` |
+| Secret | gRPC server | `NatsSecretStore` |
+| Catalog | gRPC server | `CompositeCatalog` |
+| Agent Container | tick loop | `ContainerRuntime` |
+| Inference Ollama | tick loop | `OllamaWorker` |
+| Inference OpenRouter | tick loop | `OpenRouterWorker` |
+| Object Storage SQLite | tick loop | `KvWorker` |
+| Object Storage Memory | tick loop | `KvWorker` |
+| Vector Storage SQLite | tick loop | `SqliteVecWorker` |
+| Vector Storage Memory | tick loop | `SqliteVecWorker` |
+| DAG Git | NATS consumer | `GitDagWorker` |
+| Session Viewer | HTTP server | `SessionServer` |
 
 ---
 
@@ -383,323 +500,78 @@ Enforce absolute paths at compile time. Relative paths in manifests resolve agai
 
 | Trait | Purpose | Implementations |
 |-------|---------|-----------------|
-| `Registry` | System state, agent/job tracking | `PersistentRegistry`, `GrpcRegistryClient`, *`InMemoryRegistry`* (test) |
+| `Registry` | System state, agent/job tracking | `PersistentRegistry`, `GrpcRegistryClient`, *`InMemoryRegistry`* |
 | `RegistryRepository` | Registry persistence | `SqliteRegistryRepository` |
-| `MessageQueue` | Typed message passing | `NatsQueue`, `RecordingQueue`, *`InMemoryQueue`* (test) |
+| `MessageQueue` | Typed message passing | `NatsQueue`, `RecordingQueue`, *`InMemoryQueue`* |
 | `Runtime` | Agent execution | `ContainerRuntime` (Podman) |
-| `InferenceEngine` | Text generation | `OllamaInferenceEngine`, `OpenRouterInferenceEngine`, *`InMemoryInference`* (test) |
-| `EmbeddingEngine` | Vector embeddings | `OllamaEmbeddingEngine`, *`InMemoryEmbedding`* (test) |
-| `ObjectStorage` | Key-value file storage | `SqliteObjectStorage`, *`InMemoryObjectStorage`* (test) |
-| `VectorStorage` | Embedding search | `SqliteVectorStorage`, *`InMemoryVectorStorage`* (test) |
-| `DagStore` | Merkle DAG persistence | `SqliteDagStore`, `GrpcStateClient` |
-| `SdkContract` | Agent SDK operations | `QueueBridge` |
+| `DagStore` | Merkle DAG persistence | `SqliteDagStore`, `GrpcStateClient`, *`InMemoryDagStore`* |
+| `DagWorker` | DAG message processing | `GitDagWorker` |
+| `Harness` | Agent interaction API | `CoreHarness`, `GrpcHarnessClient` |
 | `ModelCatalog` | Model name resolution | `OllamaCatalog`, `OpenRouterCatalog` |
-| `Harness` | Agent interaction API | `CliHarness` |
-| `Loader` | Load configs from URIs | `FileLoader` |
+| `CatalogService` | Multi-backend catalog | `CompositeCatalog` |
+| `SecretStore` | Named secret storage | `NatsSecretStore`, `GrpcSecretClient`, *`InMemorySecretStore`* |
 
-**Design principle**: Every trait has one production implementation per backend and one in-memory test double. Production always flows through NATS + gRPC (ADR 062). Agent code interacts only with `SdkContract` and never sees infrastructure.
+*Italicized* = test double only.
+
+**Design principle**: Every trait has one production implementation per backend and one in-memory test double. Production always flows through NATS + gRPC (ADR 062).
 
 ---
 
 ## Relationships
 
-### Composition ("has a")
+### Composition
 
 ```
 Agent
- ├── id: ResourceId
- ├── runtime: RuntimeType
- ├── executable: String (OCI image ref)
- ├── image_digest: Option<ImageDigest>
- ├── Requirements
- │    ├── models: Map<String, ResourceId>
- │    └── services: Vec<String>
- ├── mounts: Vec<Mount>
- ├── prompts: Option<Prompts>
- ├── object_storage: Option<ResourceId>
- └── vector_storage: Option<ResourceId>
+ +-- id: ResourceId
+ +-- runtime: RuntimeType
+ +-- executable: String (OCI image ref)
+ +-- image_digest: Option<ImageDigest>
+ +-- public_key: Option<Vec<u8>>
+ +-- Requirements
+ |    +-- models: Map<String, ResourceId>
+ |    +-- services: Map<String, ServiceConfig>
+ |    +-- mounts: Map<String, MountConfig>
+ +-- prompts: Option<Prompts>
+ +-- object_storage: Option<ObjectStorageType>
+ +-- vector_storage: Option<VectorStorageType>
 
 Model
- ├── id: ResourceId
- ├── model_type: ModelType (Inference | Embedding)
- ├── engine: EngineType (Ollama | OpenRouter | InMemory)
- ├── model_path: ResourceId
- └── digest: String
-
-Fleet
- ├── name: String
- ├── entry: String
- ├── project_dir: PathBuf
- └── agents: Map<String, PathBuf>
+ +-- id: ResourceId
+ +-- model_type: ModelType (Inference | Embedding)
+ +-- provider: Provider (Ollama | OpenRouter)
+ +-- model_path: ResourceId
+ +-- digest: String
 
 DagNode
- ├── hash: String (SHA-256 Merkle chain)
- ├── parent_hash: String
- ├── message_type: MessageType
- ├── from / to: String
- ├── session_id / submission_id: String
- ├── payload: Vec<u8>
- ├── diagnostics: Vec<u8>
- ├── stderr: Vec<u8>
- ├── state: Option<String>
- └── protocol_version: String
+ +-- hash: String (SHA-256 Merkle chain)
+ +-- parent_hash: String
+ +-- message_type: MessageType
+ +-- from / to: String
+ +-- session_id / submission_id: String
+ +-- payload / diagnostics / stderr: Vec<u8>
+ +-- state: Option<String>
 ```
 
-### Implementation ("implements")
-
-Production implementations listed first; *italicized* = test-only double.
-
-```
-InferenceEngine              ObjectStorage              MessageQueue
- ├── OllamaInferenceEngine    ├── SqliteObjectStorage    ├── NatsQueue
- ├── OpenRouterInferenceEngine├── *InMemoryObjectStorage* ├── RecordingQueue
- └── *InMemoryInference*                                  └── *InMemoryQueue*
-
-EmbeddingEngine              VectorStorage              DagStore
- ├── OllamaEmbeddingEngine    ├── SqliteVectorStorage    ├── SqliteDagStore
- └── *InMemoryEmbedding*      └── *InMemoryVectorStorage* └── GrpcStateClient
-
-Registry                     Runtime                    SdkContract
- ├── PersistentRegistry        └── ContainerRuntime       └── QueueBridge
- ├── GrpcRegistryClient
- └── *InMemoryRegistry*
-
-ModelCatalog                 Loader                     Harness
- ├── OllamaCatalog            └── FileLoader             └── CliHarness
- └── OpenRouterCatalog
-```
-
-### Dependencies ("uses")
+### Dependencies
 
 ```
 vlinder daemon
- └── Supervisor (process manager)
-      ├── NatsQueue (shared message bus)
-      ├── Registry worker → PersistentRegistry → SqliteRegistryRepository
-      │    └── RegistryServiceServer (gRPC)
-      ├── State worker → SqliteDagStore
-      │    └── StateServiceServer (gRPC)
-      ├── Agent worker → ContainerRuntime (Podman)
-      │    └── QueueBridge → routes SDK calls through NatsQueue
-      ├── Inference worker → OllamaInferenceEngine / OpenRouterInferenceEngine
-      ├── Embedding worker → OllamaEmbeddingEngine
-      ├── Object storage worker → SqliteObjectStorage
-      ├── Vector storage worker → SqliteVectorStorage
-      └── DAG git worker → writes conversation commits
+ +-- Supervisor (process manager)
+      +-- NatsQueue (shared message bus)
+      +-- Registry worker -> PersistentRegistry -> SqliteRegistryRepository
+      |    +-- RegistryServiceServer (gRPC)
+      +-- State worker -> SqliteDagStore
+      |    +-- StateServiceServer (gRPC)
+      +-- Harness worker -> CoreHarness
+      |    +-- HarnessServiceServer (gRPC)
+      +-- Agent worker -> ContainerRuntime (Podman)
+      +-- Inference workers -> OllamaWorker / OpenRouterWorker
+      +-- Storage workers -> KvWorker / SqliteVecWorker
+      +-- DAG git worker -> GitDagWorker -> git repo
+      +-- Session viewer -> SessionServer (HTTP)
 
-vlinder agent run (CLI client)
- └── CliHarness
-      ├── GrpcRegistryClient → Registry worker (gRPC)
-      └── NatsQueue → submits InvokeMessage, polls for CompleteMessage
-```
-
-### Loading Flow
-
-```
-URI ("file://./agent.toml")
- └── Loader (dispatches by scheme)
-      └── FileLoader
-           └── AgentManifest (TOML deserialization)
-                └── Agent (resolved domain type)
-```
-
----
-
-# Part 2: Implementations (Concrete Infrastructure)
-
-These modules implement the domain concepts with actual infrastructure.
-
----
-
-## Inference Implementations
-
-Location: [`src/inference/`](../src/inference/mod.rs)
-
-| Implementation | Trait | Description |
-|----------------|-------|-------------|
-| `OllamaInferenceEngine` | `InferenceEngine` | HTTP client for Ollama's inference API |
-| `OpenRouterInferenceEngine` | `InferenceEngine` | OpenAI-compatible HTTP client for OpenRouter cloud LLMs |
-| *`InMemoryInference`* | `InferenceEngine` | Returns canned response — **test double only** |
-
-Factory: `open_inference_engine(model)` selects engine by `EngineType`.
-
----
-
-## Embedding Implementations
-
-Location: [`src/embedding/`](../src/embedding/mod.rs)
-
-| Implementation | Trait | Description |
-|----------------|-------|-------------|
-| `OllamaEmbeddingEngine` | `EmbeddingEngine` | HTTP client for Ollama's embedding API |
-| *`InMemoryEmbedding`* | `EmbeddingEngine` | Returns canned vector — **test double only** |
-
-Factory: `open_embedding_engine(model)` selects engine by `EngineType`.
-
----
-
-## Storage Implementations
-
-Location: [`src/storage/`](../src/storage/mod.rs)
-
-| Implementation | Trait | Description |
-|----------------|-------|-------------|
-| `SqliteObjectStorage` | `ObjectStorage` | SQLite-backed virtual filesystem |
-| *`InMemoryObjectStorage`* | `ObjectStorage` | HashMap-based — **test double only** |
-| `SqliteVectorStorage` | `VectorStorage` | sqlite-vec extension for similarity search |
-| *`InMemoryVectorStorage`* | `VectorStorage` | Brute-force euclidean distance — **test double only** |
-| `StateStore` | — | Content-addressed SQLite store for versioned state (ADR 055) |
-| `SqliteDagStore` | `DagStore` | SQLite-backed Merkle DAG persistence |
-| `SqliteRegistryRepository` | `RegistryRepository` | SQLite persistence for registry state |
-
----
-
-## Queue Implementations
-
-Location: [`src/queue/`](../src/queue/mod.rs)
-
-| Implementation | Trait | Description |
-|----------------|-------|-------------|
-| `NatsQueue` | `MessageQueue` | NATS JetStream with sync facade over async tokio |
-| `RecordingQueue` | `MessageQueue` | Decorator — records DAG nodes before forwarding |
-| *`InMemoryQueue`* | `MessageQueue` | VecDeque per subject — **test double only** |
-
-Factories: `from_config()` and `recording_from_config()`.
-
----
-
-## Runtime
-
-The `Runtime` trait defines agent execution protocol. Only container runtime exists.
-
-- **Trait**: [`src/domain/runtime.rs`](../src/domain/runtime.rs)
-
-### ContainerRuntime
-
-Executes OCI container agents via Podman. Tick-loop orchestrator: polls invoke/delegate queues, dispatches to containers via HTTP POST `/handle`, manages the `AgentAction`/`AgentEvent` state-machine loop, and uses `QueueBridge` for SDK calls.
-
-- **Implementation**: [`src/runtime/container/`](../src/runtime/container/mod.rs)
-- **Podman interface**: `Podman` trait with `PodmanCli` production implementation
-- **Container lifecycle**: `ContainerPool` manages start/stop/reuse
-
----
-
-## Registry Implementations
-
-Location: [`src/registry/`](../src/registry/mod.rs)
-
-| Implementation | Trait | Description |
-|----------------|-------|-------------|
-| `PersistentRegistry` | `Registry` | Write-through to SQLite via `SqliteRegistryRepository` |
-| *`InMemoryRegistry`* | `Registry` | RwLock-guarded in-memory state — **test double only** |
-
-### gRPC (distributed access)
-
-Location: [`src/registry_service/`](../src/registry_service/mod.rs)
-
-| Implementation | Role | Description |
-|----------------|------|-------------|
-| `GrpcRegistryClient` | Client | Implements `Registry` trait via gRPC calls |
-| `RegistryServiceServer` | Server | Wraps a `Registry` impl, serves gRPC requests |
-
----
-
-## State Service
-
-Location: [`src/state_service/`](../src/state_service/mod.rs)
-
-| Implementation | Role | Description |
-|----------------|------|-------------|
-| `GrpcStateClient` | Client | Implements `DagStore` trait via gRPC calls |
-| `StateServiceServer` | Server | Wraps a `DagStore` impl, serves gRPC requests |
-
----
-
-## Model Catalog Implementations
-
-Location: [`src/catalog/`](../src/catalog/)
-
-| Implementation | Trait | Description |
-|----------------|-------|-------------|
-| `OllamaCatalog` | `ModelCatalog` | Resolves models from local Ollama instance |
-| `OpenRouterCatalog` | `ModelCatalog` | Resolves models from OpenRouter API |
-
----
-
-## Loader Implementations
-
-Location: [`src/loader.rs`](../src/loader.rs)
-
-| Implementation | Trait | Description |
-|----------------|-------|-------------|
-| `FileLoader` | `Loader` | Loads from filesystem (`file://` scheme) |
-
-### TOML Manifests
-
-`FileLoader` uses these types to deserialize TOML files:
-
-| Type | File Format | Location |
-|------|-------------|----------|
-| `AgentManifest` | `agent.toml` | [`src/domain/agent_manifest.rs`](../src/domain/agent_manifest.rs) |
-| `ModelManifest` | `<model>.toml` | [`src/domain/model_manifest.rs`](../src/domain/model_manifest.rs) |
-| `FleetManifest` | `fleet.toml` | [`src/domain/fleet_manifest.rs`](../src/domain/fleet_manifest.rs) |
-
----
-
-## Supervisor
-
-Location: [`src/supervisor.rs`](../src/supervisor.rs)
-
-Process manager for `vlinder daemon`. Spawns worker processes, waits for readiness (registry first, then state service), and manages shutdown. This is the only deployment mode (ADR 062).
-
----
-
-# Summary
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                      DOMAIN (abstract)                      │
-│                                                             │
-│  Identity: ResourceId, MessageId, SubmissionId, SessionId,  │
-│            ImageRef, ImageDigest, Sequence                  │
-│  Config:   Agent, Model, Fleet, Storage                     │
-│  Protocol: InvokeMessage, RequestMessage, ResponseMessage,  │
-│            CompleteMessage, DelegateMessage                 │
-│  SDK:      SdkContract (11 ops), AgentAction, AgentEvent    │
-│  Time:     DagNode, DagStore, StateCommit, Session, Route   │
-│  Control:  Registry, Harness, Runtime, Job, ModelCatalog    │
-│  Workers:  Object, Vector, Inference, Embedding, GitDag     │
-│  Diag:     Invoke/Request/Service/Container/Delegate Diag   │
-└─────────────────────────────────────────────────────────────┘
-                            │
-                            │ implements
-                            ▼
-┌─────────────────────────────────────────────────────────────┐
-│                  IMPLEMENTATIONS (concrete)                 │
-│                                                             │
-│  Inference: OllamaInferenceEngine, OpenRouterInferenceEngine│
-│  Embedding: OllamaEmbeddingEngine                           │
-│  Storage:   SqliteObjectStorage, SqliteVectorStorage,       │
-│             StateStore, SqliteDagStore                      │
-│  Queue:     NatsQueue, RecordingQueue                       │
-│  Runtime:   ContainerRuntime (Podman)                       │
-│  Registry:  PersistentRegistry, GrpcRegistryClient          │
-│  State:     GrpcStateClient, StateServiceServer             │
-│  Catalog:   OllamaCatalog, OpenRouterCatalog                │
-│  Loader:    FileLoader                                      │
-│  (InMemory* impls exist as test doubles only)               │
-└─────────────────────────────────────────────────────────────┘
-
-Deployment (vlinder daemon → Supervisor):
-
-┌─────────────────────────────────────────────────────────────┐
-│  Supervisor spawns worker processes                         │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐     │
-│  │ Registry │  │  State   │  │  Agent   │  │ Service  │     │
-│  │  (gRPC)  │  │  (gRPC)  │  │ workers  │  │ workers  │     │
-│  └──────────┘  └──────────┘  └──────────┘  └──────────┘     │
-│        ▲              ▲            ▲              ▲         │
-│        └──────────────┴────────────┴──────────────┘         │
-│                         NATS                                │
-└─────────────────────────────────────────────────────────────┘
+vlinder (CLI client)
+ +-- GrpcHarnessClient -> Harness worker (gRPC)
+ +-- GrpcRegistryClient -> Registry worker (gRPC)
 ```
