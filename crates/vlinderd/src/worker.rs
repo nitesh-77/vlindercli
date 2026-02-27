@@ -204,7 +204,7 @@ fn run_harness_worker(config: &Config, shutdown: &AtomicBool) {
 }
 
 fn run_agent_container_worker(config: &Config, shutdown: &AtomicBool) {
-    use crate::runtime::{ContainerRuntime, PodmanRuntimeConfig};
+    use vlinder_podman_runtime::{ContainerRuntime, PodmanRuntimeConfig};
     use crate::domain::Runtime;
 
     let registry = crate::registry_factory::from_config(config)

@@ -13,7 +13,7 @@ use vlinderd::domain::{
     Agent, AgentId, Runtime, RuntimeType,
     InvokeDiagnostics, InvokeMessage, HarnessType, SessionId, SubmissionId, TimelineId,
 };
-use vlinderd::runtime::{ContainerRuntime, PodmanRuntimeConfig};
+use vlinder_podman_runtime::{ContainerRuntime, PodmanRuntimeConfig};
 
 #[test]
 #[ignore] // Run via: just run-integration-tests
