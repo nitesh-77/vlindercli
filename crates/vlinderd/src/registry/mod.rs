@@ -14,7 +14,7 @@ pub(crate) use persistent::PersistentRegistry;
 use std::sync::Arc;
 use crate::config::Config;
 use crate::domain::Registry;
-use crate::registry_service::{GrpcRegistryClient, ping_registry};
+use vlinder_proto::registry_service::{GrpcRegistryClient, ping_registry};
 
 /// Connect to the registry via gRPC.
 ///

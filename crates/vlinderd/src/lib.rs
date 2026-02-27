@@ -8,7 +8,6 @@ pub mod queue_factory;
 pub mod registry;
 pub mod registry_factory;
 pub mod secret_store_factory;
-pub use vlinder_proto::registry_service;
 pub mod storage;
 pub mod supervisor;
 pub mod tracing_setup;

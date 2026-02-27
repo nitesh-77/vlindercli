@@ -72,7 +72,7 @@ fn run_registry_worker(config: &Config, shutdown: &AtomicBool) {
     use crate::config::registry_db_path;
     use crate::domain::{RuntimeType, ObjectStorageType, VectorStorageType};
     use crate::registry::PersistentRegistry;
-    use crate::registry_service::RegistryServiceServer;
+    use vlinder_proto::registry_service::RegistryServiceServer;
     use vlinder_proto::secret_service::GrpcSecretClient;
 
     let secret_addr = if config.distributed.secret_addr.starts_with("http://") {
@@ -165,7 +165,7 @@ fn run_harness_worker(config: &Config, shutdown: &AtomicBool) {
     use crate::domain::HarnessType;
     use crate::harness::CoreHarness;
     use vlinder_proto::harness_service::HarnessServiceServer;
-    use crate::registry_service::GrpcRegistryClient;
+    use vlinder_proto::registry_service::GrpcRegistryClient;
 
     let queue = crate::queue_factory::recording_from_config(config).expect("Failed to create queue");
 
@@ -270,7 +270,7 @@ fn run_inference_openrouter_worker(config: &Config, shutdown: &AtomicBool) {
 fn run_storage_object_sqlite_worker(config: &Config, shutdown: &AtomicBool) {
     use vlinder_sqlite_kv::KvWorker;
 
-    use crate::registry_service::GrpcRegistryClient;
+    use vlinder_proto::registry_service::GrpcRegistryClient;
 
     let queue = crate::queue_factory::recording_from_config(config).expect("Failed to create queue");
 
@@ -293,7 +293,7 @@ fn run_storage_object_sqlite_worker(config: &Config, shutdown: &AtomicBool) {
 fn run_storage_object_memory_worker(config: &Config, shutdown: &AtomicBool) {
     use vlinder_sqlite_kv::KvWorker;
 
-    use crate::registry_service::GrpcRegistryClient;
+    use vlinder_proto::registry_service::GrpcRegistryClient;
 
     let queue = crate::queue_factory::recording_from_config(config).expect("Failed to create queue");
 
@@ -316,7 +316,7 @@ fn run_storage_object_memory_worker(config: &Config, shutdown: &AtomicBool) {
 fn run_storage_vector_sqlite_worker(config: &Config, shutdown: &AtomicBool) {
     use vlinder_sqlite_vec::SqliteVecWorker;
 
-    use crate::registry_service::GrpcRegistryClient;
+    use vlinder_proto::registry_service::GrpcRegistryClient;
 
     let queue = crate::queue_factory::recording_from_config(config).expect("Failed to create queue");
 
@@ -339,7 +339,7 @@ fn run_storage_vector_sqlite_worker(config: &Config, shutdown: &AtomicBool) {
 fn run_storage_vector_memory_worker(config: &Config, shutdown: &AtomicBool) {
     use vlinder_sqlite_vec::SqliteVecWorker;
 
-    use crate::registry_service::GrpcRegistryClient;
+    use vlinder_proto::registry_service::GrpcRegistryClient;
 
     let queue = crate::queue_factory::recording_from_config(config).expect("Failed to create queue");
 
