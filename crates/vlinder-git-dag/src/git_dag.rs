@@ -53,7 +53,7 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use git2::{Repository, Oid, Signature, TreeBuilder, FileMode};
 
-use crate::domain::{DagWorker, ObservableMessage, Registry};
+use vlinder_core::domain::{DagWorker, ObservableMessage, Registry};
 
 /// DAG worker that writes commits to a git repository.
 pub struct GitDagWorker {
@@ -464,7 +464,7 @@ fn message_state(msg: &ObservableMessage) -> Option<&str> {
 mod tests {
     use super::*;
     use std::process::Command;
-    use crate::domain::{
+    use vlinder_core::domain::{
         AgentId, InvokeMessage, RequestMessage, ResponseMessage, CompleteMessage, DelegateMessage,
         ObservableMessage, HarnessType, TimelineId, SubmissionId, SessionId, Sequence, Nonce,
         InvokeDiagnostics, RequestDiagnostics, ServiceDiagnostics, ServiceMetrics,

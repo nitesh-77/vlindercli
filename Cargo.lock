@@ -3257,6 +3257,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "vlinder-git-dag"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "git2",
+ "serde",
+ "tempfile",
+ "toml",
+ "tracing",
+ "vlinder-core",
+]
+
+[[package]]
 name = "vlinder-infer-openrouter"
 version = "0.1.0"
 dependencies = [
@@ -3420,6 +3433,7 @@ dependencies = [
  "uuid",
  "vlinder-catalog",
  "vlinder-core",
+ "vlinder-git-dag",
  "vlinder-infer-openrouter",
  "vlinder-nats",
  "vlinder-ollama",

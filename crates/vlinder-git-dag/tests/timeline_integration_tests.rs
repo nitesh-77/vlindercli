@@ -11,8 +11,8 @@ mod common;
 
 use common::*;
 
-use vlinderd::domain::DagWorker;
-use vlinderd::git_dag::GitDagWorker;
+use vlinder_core::domain::DagWorker;
+use vlinder_git_dag::GitDagWorker;
 
 // ============================================================================
 // Test: checkout shows trailers and state
