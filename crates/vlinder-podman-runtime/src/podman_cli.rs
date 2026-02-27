@@ -5,9 +5,9 @@
 
 use std::process::Command;
 
-use crate::domain::{ContainerId, ImageDigest, ImageRef, PodId};
+use vlinder_core::domain::{ContainerId, ImageDigest, ImageRef, PodId};
 
-use super::podman::{Podman, PodmanError, RunTarget};
+use crate::podman::{Podman, PodmanError, RunTarget};
 
 /// Fallback implementation that shells out to the `podman` CLI.
 pub(crate) struct PodmanCliClient;

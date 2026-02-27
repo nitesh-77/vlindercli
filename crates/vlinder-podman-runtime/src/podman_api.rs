@@ -8,10 +8,10 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::domain::{ContainerId, ImageDigest, ImageRef, PodId};
+use vlinder_core::domain::{ContainerId, ImageDigest, ImageRef, PodId};
 
-use super::podman::{Podman, PodmanError, RunTarget};
-use super::unix_transport::unix_agent;
+use crate::podman::{Podman, PodmanError, RunTarget};
+use crate::unix_transport::unix_agent;
 
 const API_BASE: &str = "http://localhost/v5.0.0/libpod";
 

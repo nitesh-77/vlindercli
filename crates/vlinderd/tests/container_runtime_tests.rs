@@ -13,18 +13,27 @@ use vlinderd::domain::{
     Agent, AgentId, Runtime, RuntimeType,
     InvokeDiagnostics, InvokeMessage, HarnessType, SessionId, SubmissionId, TimelineId,
 };
-use vlinderd::runtime::ContainerRuntime;
+use vlinderd::runtime::{ContainerRuntime, PodmanRuntimeConfig};
 
 #[test]
 #[ignore] // Run via: just run-integration-tests
 fn container_runtime_executes_echo_agent() {
     let config = Config::for_test();
-    let mut runtime = ContainerRuntime::new(&config).unwrap();
+    let registry = vlinderd::registry_factory::from_config(&config)
+        .expect("Failed to create registry");
+    let podman_config = PodmanRuntimeConfig {
+        image_policy: config.runtime.image_policy.clone(),
+        podman_socket: config.runtime.podman_socket.clone(),
+        sidecar_image: config.runtime.sidecar_image.clone(),
+        nats_url: config.queue.nats_url.clone(),
+        registry_addr: config.distributed.registry_addr.clone(),
+        state_addr: config.distributed.state_addr.clone(),
+    };
+    let mut runtime = ContainerRuntime::new(&podman_config, registry.clone()).unwrap();
 
-    // Use the runtime's registry and a queue from config for test setup.
+    // Use the injected registry and a queue from config for test setup.
     // The sidecar creates its own queue — requires shared infra (NATS) to work.
     let queue = vlinderd::queue_factory::recording_from_config(&config).unwrap();
-    let registry = runtime.registry().clone();
 
     registry.register_runtime(RuntimeType::Container);
 

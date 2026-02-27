@@ -1,8 +1,7 @@
 //! Agent runtime — orchestrates agent execution.
 //!
 //! Contains:
-//! - ContainerRuntime: queue-based OCI container agent execution
+//! - ContainerRuntime: queue-based OCI container agent execution (via vlinder-podman-runtime)
 
-mod container;
-
-pub use container::ContainerRuntime;
+pub use vlinder_podman_runtime::ContainerRuntime;
+pub use vlinder_podman_runtime::PodmanRuntimeConfig;

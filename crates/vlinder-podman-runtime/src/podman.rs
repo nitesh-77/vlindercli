@@ -7,7 +7,7 @@
 
 use std::fmt;
 
-use crate::domain::{ContainerId, ImageDigest, ImageRef, PodId};
+use vlinder_core::domain::{ContainerId, ImageDigest, ImageRef, PodId};
 
 // ── Error type ──────────────────────────────────────────────────────
 

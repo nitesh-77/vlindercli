@@ -21,6 +21,7 @@ COPY crates/vlinder-infer-openrouter/Cargo.toml crates/vlinder-infer-openrouter/
 COPY crates/vlinder-sqlite-vec/Cargo.toml crates/vlinder-sqlite-vec/
 COPY crates/vlinder-sqlite-kv/Cargo.toml crates/vlinder-sqlite-kv/
 COPY crates/vlinder-sidecar/Cargo.toml crates/vlinder-sidecar/
+COPY crates/vlinder-podman-runtime/Cargo.toml crates/vlinder-podman-runtime/
 COPY crates/vlinderd/Cargo.toml crates/vlinderd/
 COPY crates/vlinder/Cargo.toml crates/vlinder/
 
@@ -31,6 +32,7 @@ RUN mkdir -p crates/vlinder-core/src && echo "" > crates/vlinder-core/src/lib.rs
     mkdir -p crates/vlinder-sqlite-vec/src && echo "" > crates/vlinder-sqlite-vec/src/lib.rs && \
     mkdir -p crates/vlinder-sqlite-kv/src && echo "" > crates/vlinder-sqlite-kv/src/lib.rs && \
     mkdir -p crates/vlinder-proto/src && echo "" > crates/vlinder-proto/src/lib.rs && \
+    mkdir -p crates/vlinder-podman-runtime/src && echo "" > crates/vlinder-podman-runtime/src/lib.rs && \
     mkdir -p crates/vlinder-sidecar/src && echo "fn main() {}" > crates/vlinder-sidecar/src/main.rs && \
     mkdir -p crates/vlinderd/src && echo "fn main() {}" > crates/vlinderd/src/main.rs && \
     mkdir -p crates/vlinder/src && echo "fn main() {}" > crates/vlinder/src/main.rs
@@ -49,6 +51,7 @@ COPY crates/vlinder-infer-openrouter/src crates/vlinder-infer-openrouter/src
 COPY crates/vlinder-sqlite-vec/src crates/vlinder-sqlite-vec/src
 COPY crates/vlinder-sqlite-kv/src crates/vlinder-sqlite-kv/src
 COPY crates/vlinder-proto/src crates/vlinder-proto/src
+COPY crates/vlinder-podman-runtime/src crates/vlinder-podman-runtime/src
 COPY crates/vlinder-sidecar/src crates/vlinder-sidecar/src
 
 # Touch source files to invalidate the cache for actual compilation
@@ -57,6 +60,7 @@ RUN touch crates/vlinder-core/src/lib.rs \
           crates/vlinder-infer-openrouter/src/lib.rs \
           crates/vlinder-sqlite-vec/src/lib.rs \
           crates/vlinder-sqlite-kv/src/lib.rs \
+          crates/vlinder-podman-runtime/src/lib.rs \
           crates/vlinder-proto/src/lib.rs \
           crates/vlinder-sidecar/src/main.rs
 

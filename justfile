@@ -120,6 +120,10 @@ model-remove name:
 test:
     cargo test --workspace
 
+# Run only podman-runtime crate tests (fast, no daemon deps)
+test-podman-runtime:
+    cargo test -p vlinder-podman-runtime
+
 # Build CLI
 build:
     cargo build

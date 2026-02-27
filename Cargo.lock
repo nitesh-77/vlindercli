@@ -3270,6 +3270,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "vlinder-podman-runtime"
+version = "0.1.0"
+dependencies = [
+ "dirs",
+ "semver",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tracing",
+ "ureq 3.2.0",
+ "vlinder-core",
+ "vlinder-infer-openrouter",
+ "vlinder-ollama",
+ "vlinder-sqlite-kv",
+ "vlinder-sqlite-vec",
+]
+
+[[package]]
 name = "vlinder-proto"
 version = "0.1.0"
 dependencies = [
@@ -3343,7 +3361,6 @@ dependencies = [
  "rand",
  "reedline",
  "rusqlite",
- "semver",
  "serde",
  "serde_json",
  "sha2",
@@ -3363,6 +3380,7 @@ dependencies = [
  "vlinder-core",
  "vlinder-infer-openrouter",
  "vlinder-ollama",
+ "vlinder-podman-runtime",
  "vlinder-proto",
  "vlinder-sqlite-kv",
  "vlinder-sqlite-vec",

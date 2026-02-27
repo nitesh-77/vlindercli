@@ -11,12 +11,31 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::config::Config;
-use crate::domain::{Agent, ImageRef, ObjectStorageType, PodId, Provider, Registry, ResourceId, Runtime, RuntimeType, VectorStorageType};
+use vlinder_core::domain::{Agent, ImageRef, ObjectStorageType, PodId, Provider, Registry, ResourceId, Runtime, RuntimeType, VectorStorageType};
 
-use super::podman::{Podman, RunTarget, resolve_socket, write_s3_credentials, remove_s3_credentials};
-use super::podman_api::PodmanApiClient;
-use super::podman_cli::PodmanCliClient;
+use crate::podman::{Podman, RunTarget, resolve_socket, write_s3_credentials, remove_s3_credentials};
+use crate::podman_api::PodmanApiClient;
+use crate::podman_cli::PodmanCliClient;
+
+/// Configuration for the Podman container runtime.
+///
+/// Extracted from vlinderd's full Config to decouple the runtime
+/// crate from daemon configuration.
+#[derive(Clone, Debug)]
+pub struct PodmanRuntimeConfig {
+    /// "mutable" or "pinned" (ADR 073)
+    pub image_policy: String,
+    /// "auto", "disabled", or explicit socket path (ADR 077)
+    pub podman_socket: String,
+    /// OCI image ref for the sidecar container
+    pub sidecar_image: String,
+    /// NATS URL for sidecar env vars
+    pub nats_url: String,
+    /// Registry gRPC address for sidecar env vars
+    pub registry_addr: String,
+    /// State service gRPC address for sidecar env vars
+    pub state_addr: String,
+}
 
 /// Image resolution policy for container agents (ADR 073).
 ///
@@ -54,7 +73,7 @@ pub struct ContainerRuntime {
     id: ResourceId,
     registry: Arc<dyn Registry>,
     pods: HashMap<String, Pod>,
-    config: Config,
+    config: PodmanRuntimeConfig,
     image_policy: ImagePolicy,
     podman: Box<dyn Podman>,
 }
@@ -63,18 +82,20 @@ impl ContainerRuntime {
     /// Create a new runtime, connecting to the registry and detecting Podman.
     ///
     /// Selects socket API or CLI based on the `podman_socket` config value (ADR 077).
-    pub fn new(config: &Config) -> Result<Self, Box<dyn std::error::Error>> {
-        let registry = crate::registry_factory::from_config(config)?;
-
-        let registry_id = ResourceId::new(&config.distributed.registry_addr);
+    /// The registry is passed in — the caller is responsible for creating it.
+    pub fn new(
+        config: &PodmanRuntimeConfig,
+        registry: Arc<dyn Registry>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let registry_id = ResourceId::new(&config.registry_addr);
         let id = ResourceId::new(format!(
             "{}/runtimes/{}",
             registry_id.as_str(),
             RuntimeType::Container.as_str()
         ));
 
-        let image_policy = ImagePolicy::from_config(&config.runtime.image_policy);
-        let podman: Box<dyn Podman> = match resolve_socket(&config.runtime.podman_socket) {
+        let image_policy = ImagePolicy::from_config(&config.image_policy);
+        let podman: Box<dyn Podman> = match resolve_socket(&config.podman_socket) {
             Some(path) => {
                 tracing::info!(event = "podman.socket", path = %path.display(), "Using Podman socket API");
                 Box::new(PodmanApiClient::new(&path))
@@ -103,7 +124,7 @@ impl ContainerRuntime {
     }
 
     /// Access the registry (test-only, for integration test setup).
-    #[cfg(any(test, feature = "test-support"))]
+    #[cfg(test)]
     pub fn registry(&self) -> &Arc<dyn Registry> {
         &self.registry
     }
@@ -214,21 +235,21 @@ impl ContainerRuntime {
             .map_err(|e| e.to_string())?;
 
         // 4. Build sidecar env vars
-        let sidecar_image_ref = ImageRef::parse(&self.config.runtime.sidecar_image)
+        let sidecar_image_ref = ImageRef::parse(&self.config.sidecar_image)
             .unwrap_or_else(|_| ImageRef::parse("localhost/vlinder-sidecar:latest").unwrap());
         let sidecar_target = RunTarget::Ref(&sidecar_image_ref);
 
         let nats_url = format!(
             "nats://host.containers.internal:{}",
-            extract_port(&self.config.queue.nats_url, 4222)
+            extract_port(&self.config.nats_url, 4222)
         );
         let registry_url = format!(
             "http://host.containers.internal:{}",
-            extract_port(&self.config.distributed.registry_addr, 9090)
+            extract_port(&self.config.registry_addr, 9090)
         );
         let state_url = format!(
             "http://host.containers.internal:{}",
-            extract_port(&self.config.distributed.state_addr, 9092)
+            extract_port(&self.config.state_addr, 9092)
         );
 
         let image_digest_str = self.podman.image_digest(image_ref)
@@ -475,7 +496,25 @@ fn extract_port(url: &str, default: u16) -> u16 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::Config;
+
+    /// Build a PodmanRuntimeConfig for tests (matches vlinderd's Config::for_test defaults).
+    fn test_config() -> PodmanRuntimeConfig {
+        PodmanRuntimeConfig {
+            image_policy: "mutable".to_string(),
+            podman_socket: "disabled".to_string(),
+            sidecar_image: "localhost/vlinder-sidecar:latest".to_string(),
+            nats_url: "nats://localhost:4222".to_string(),
+            registry_addr: "http://127.0.0.1:9090".to_string(),
+            state_addr: "http://127.0.0.1:9092".to_string(),
+        }
+    }
+
+    /// Build an InMemoryRegistry for tests.
+    fn test_registry() -> Arc<dyn Registry> {
+        use vlinder_core::domain::{InMemoryRegistry, InMemorySecretStore};
+        let secret_store = Arc::new(InMemorySecretStore::new());
+        Arc::new(InMemoryRegistry::new(secret_store))
+    }
 
     #[test]
     fn image_policy_from_config_pinned() {
@@ -520,7 +559,9 @@ mod tests {
 
     #[test]
     fn runtime_id_format() {
-        let runtime = ContainerRuntime::new(&Config::for_test()).unwrap();
+        let config = test_config();
+        let registry = test_registry();
+        let runtime = ContainerRuntime::new(&config, registry).unwrap();
 
         assert_eq!(
             runtime.id().as_str(),
@@ -531,7 +572,9 @@ mod tests {
 
     #[test]
     fn tick_returns_false_when_no_agents() {
-        let mut runtime = ContainerRuntime::new(&Config::for_test()).unwrap();
+        let config = test_config();
+        let registry = test_registry();
+        let mut runtime = ContainerRuntime::new(&config, registry).unwrap();
 
         assert!(!runtime.tick());
     }

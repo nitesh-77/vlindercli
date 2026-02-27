@@ -204,10 +204,22 @@ fn run_harness_worker(config: &Config, shutdown: &AtomicBool) {
 }
 
 fn run_agent_container_worker(config: &Config, shutdown: &AtomicBool) {
-    use crate::runtime::ContainerRuntime;
+    use crate::runtime::{ContainerRuntime, PodmanRuntimeConfig};
     use crate::domain::Runtime;
 
-    let mut runtime = ContainerRuntime::new(config)
+    let registry = crate::registry_factory::from_config(config)
+        .expect("Failed to connect to registry");
+
+    let podman_config = PodmanRuntimeConfig {
+        image_policy: config.runtime.image_policy.clone(),
+        podman_socket: config.runtime.podman_socket.clone(),
+        sidecar_image: config.runtime.sidecar_image.clone(),
+        nats_url: config.queue.nats_url.clone(),
+        registry_addr: config.distributed.registry_addr.clone(),
+        state_addr: config.distributed.state_addr.clone(),
+    };
+
+    let mut runtime = ContainerRuntime::new(&podman_config, registry)
         .expect("Failed to create container runtime");
 
     tracing::info!("Container agent worker ready");
