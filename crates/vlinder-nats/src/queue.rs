@@ -744,19 +744,86 @@ pub fn invoke_to_nats_headers(msg: &InvokeMessage) -> HashMap<String, String> {
     h
 }
 
+/// Serialize a `RequestMessage` into NATS headers (sans payload).
+pub fn request_to_nats_headers(msg: &RequestMessage) -> HashMap<String, String> {
+    let mut h = HashMap::new();
+    h.insert("msg-id".to_string(), msg.id.as_str().to_string());
+    h.insert("protocol-version".to_string(), msg.protocol_version.clone());
+    h.insert("session-id".to_string(), msg.session.as_str().to_string());
+    if let Some(ref state) = msg.state {
+        h.insert("state".to_string(), state.clone());
+    }
+    if let Ok(diag_json) = serde_json::to_string(&msg.diagnostics) {
+        h.insert("diagnostics".to_string(), diag_json);
+    }
+    h
+}
+
+/// Serialize a `ResponseMessage` into NATS headers (sans payload).
+pub fn response_to_nats_headers(msg: &ResponseMessage) -> HashMap<String, String> {
+    let mut h = HashMap::new();
+    h.insert("msg-id".to_string(), msg.id.as_str().to_string());
+    h.insert("protocol-version".to_string(), msg.protocol_version.clone());
+    h.insert("session-id".to_string(), msg.session.as_str().to_string());
+    h.insert("correlation-id".to_string(), msg.correlation_id.as_str().to_string());
+    h.insert("status-code".to_string(), msg.status_code.to_string());
+    if let Some(ref state) = msg.state {
+        h.insert("state".to_string(), state.clone());
+    }
+    if let Ok(diag_json) = serde_json::to_string(&msg.diagnostics) {
+        h.insert("diagnostics".to_string(), diag_json);
+    }
+    h
+}
+
+/// Serialize a `CompleteMessage` into NATS headers (sans payload).
+pub fn complete_to_nats_headers(msg: &CompleteMessage) -> HashMap<String, String> {
+    let mut h = HashMap::new();
+    h.insert("msg-id".to_string(), msg.id.as_str().to_string());
+    h.insert("protocol-version".to_string(), msg.protocol_version.clone());
+    h.insert("session-id".to_string(), msg.session.as_str().to_string());
+    if let Some(ref state) = msg.state {
+        h.insert("state".to_string(), state.clone());
+    }
+    if let Ok(diag_json) = serde_json::to_string(&msg.diagnostics) {
+        h.insert("diagnostics".to_string(), diag_json);
+    }
+    h
+}
+
+/// Serialize a `DelegateMessage` into NATS headers (sans payload).
+pub fn delegate_to_nats_headers(msg: &DelegateMessage) -> HashMap<String, String> {
+    let mut h = HashMap::new();
+    h.insert("msg-id".to_string(), msg.id.as_str().to_string());
+    h.insert("protocol-version".to_string(), msg.protocol_version.clone());
+    h.insert("session-id".to_string(), msg.session.as_str().to_string());
+    h.insert("nonce".to_string(), msg.nonce.as_str().to_string());
+    if let Some(ref state) = msg.state {
+        h.insert("state".to_string(), state.clone());
+    }
+    if let Ok(diag_json) = serde_json::to_string(&msg.diagnostics) {
+        h.insert("diagnostics".to_string(), diag_json);
+    }
+    h
+}
+
 /// Reconstruct typed message headers from a `RoutingKey` and NATS header map.
 ///
 /// The `RoutingKey` provides the message type discriminant and routing fields
 /// (agent, harness, service, etc.) — already parsed by `subject_to_routing_key`.
 /// The header map provides session-scoped fields (msg-id, session-id, state,
 /// diagnostics) that aren't part of routing.
-///
-/// Only Invoke is implemented so far — other variants return None.
 pub fn from_nats_headers(
     key: &RoutingKey,
     headers: &HashMap<String, String>,
 ) -> Option<vlinder_core::domain::ObservableMessageHeaders> {
     use vlinder_core::domain::ObservableMessageHeaders;
+
+    // Common fields shared by all variants.
+    let id = MessageId::from(headers.get("msg-id")?.clone());
+    let protocol_version = headers.get("protocol-version").cloned().unwrap_or_default();
+    let session = SessionId::from(headers.get("session-id")?.clone());
+    let state = headers.get("state").cloned();
 
     match key {
         RoutingKey::Invoke { timeline, submission, harness, runtime, agent } => {
@@ -768,19 +835,72 @@ pub fn from_nats_headers(
                 });
 
             Some(ObservableMessageHeaders::Invoke {
-                id: MessageId::from(headers.get("msg-id")?.clone()),
-                protocol_version: headers.get("protocol-version").cloned().unwrap_or_default(),
-                timeline: timeline.clone(),
-                submission: submission.clone(),
-                session: SessionId::from(headers.get("session-id")?.clone()),
-                harness: *harness,
-                runtime: *runtime,
-                agent_id: agent.clone(),
-                state: headers.get("state").cloned(),
-                diagnostics,
+                id, protocol_version,
+                timeline: timeline.clone(), submission: submission.clone(), session,
+                harness: *harness, runtime: *runtime, agent_id: agent.clone(),
+                state, diagnostics,
             })
         }
-        _ => None, // Other variants to follow
+        RoutingKey::Request { timeline, submission, agent, service, operation, sequence } => {
+            let diagnostics = headers.get("diagnostics")
+                .and_then(|s| serde_json::from_str(s).ok())
+                .unwrap_or_else(|| RequestDiagnostics {
+                    sequence: 0, endpoint: String::new(), request_bytes: 0, received_at_ms: 0,
+                });
+
+            Some(ObservableMessageHeaders::Request {
+                id, protocol_version,
+                timeline: timeline.clone(), submission: submission.clone(), session,
+                agent_id: agent.clone(), service: *service, operation: *operation,
+                sequence: *sequence, state, diagnostics,
+            })
+        }
+        RoutingKey::Response { timeline, submission, service, agent, operation, sequence } => {
+            let diagnostics = headers.get("diagnostics")
+                .and_then(|s| serde_json::from_str(s).ok())
+                .unwrap_or_else(ServiceDiagnostics::placeholder);
+            let correlation_id = MessageId::from(headers.get("correlation-id")?.clone());
+            let status_code = headers.get("status-code")
+                .and_then(|s| s.parse::<u16>().ok())
+                .unwrap_or(200);
+
+            Some(ObservableMessageHeaders::Response {
+                id, protocol_version,
+                timeline: timeline.clone(), submission: submission.clone(), session,
+                agent_id: agent.clone(), service: *service, operation: *operation,
+                sequence: *sequence, correlation_id, state, diagnostics, status_code,
+            })
+        }
+        RoutingKey::Complete { timeline, submission, agent, harness } => {
+            let diagnostics = headers.get("diagnostics")
+                .and_then(|s| serde_json::from_str(s).ok())
+                .unwrap_or_else(|| ContainerDiagnostics::placeholder(0));
+
+            Some(ObservableMessageHeaders::Complete {
+                id, protocol_version,
+                timeline: timeline.clone(), submission: submission.clone(), session,
+                agent_id: agent.clone(), harness: *harness, state, diagnostics,
+            })
+        }
+        RoutingKey::Delegate { timeline, submission, caller, target } => {
+            let diagnostics = headers.get("diagnostics")
+                .and_then(|s| serde_json::from_str(s).ok())
+                .unwrap_or_else(|| DelegateDiagnostics {
+                    container: ContainerDiagnostics::placeholder(0),
+                });
+            let nonce = Nonce::new(headers.get("nonce")?.clone());
+
+            Some(ObservableMessageHeaders::Delegate {
+                id, protocol_version,
+                timeline: timeline.clone(), submission: submission.clone(), session,
+                caller: caller.clone(), target: target.clone(), nonce, state, diagnostics,
+            })
+        }
+        RoutingKey::DelegateReply { .. } => {
+            // DelegateReply carries a CompleteMessage — same as Complete.
+            // Handled via receive_delegate_reply which already parses directly.
+            None
+        }
     }
 }
 
@@ -1237,12 +1357,154 @@ mod tests {
     }
 
     #[test]
-    fn from_nats_headers_non_invoke_returns_none() {
-        let key = RoutingKey::Complete {
+    fn from_nats_headers_delegate_reply_returns_none() {
+        let key = RoutingKey::DelegateReply {
             timeline: timeline(), submission: submission(),
-            agent: agent(), harness: HarnessType::Cli,
+            caller: agent(), target: agent_alt(), nonce: Nonce::new("n"),
         };
         assert!(from_nats_headers(&key, &HashMap::new()).is_none());
+    }
+
+    // ========================================================================
+    // Request header round-trip
+    // ========================================================================
+
+    #[test]
+    fn request_headers_round_trip() {
+        use vlinder_core::domain::ObservableMessage;
+
+        let original = RequestMessage::new(
+            timeline(), submission(), SessionId::from("ses-test".to_string()), agent(),
+            ServiceBackend::Kv(ObjectStorageType::Sqlite), Operation::Get,
+            Sequence::first(), b"key-data".to_vec(), Some("state-x".to_string()),
+            RequestDiagnostics { sequence: 1, endpoint: "/test".to_string(), request_bytes: 8, received_at_ms: 0 },
+        );
+        let key = original.routing_key();
+        let headers = request_to_nats_headers(&original);
+
+        let recovered = from_nats_headers(&key, &headers)
+            .expect("should produce Request headers")
+            .assemble(original.payload.clone());
+
+        if let ObservableMessage::Request(m) = &recovered {
+            assert_eq!(m.id, original.id);
+            assert_eq!(m.submission, original.submission);
+            assert_eq!(m.session, original.session);
+            assert_eq!(m.agent_id, original.agent_id);
+            assert_eq!(m.service, original.service);
+            assert_eq!(m.operation, original.operation);
+            assert_eq!(m.sequence, original.sequence);
+            assert_eq!(m.payload, original.payload);
+            assert_eq!(m.state, original.state);
+        } else {
+            panic!("expected Request, got {:?}", recovered);
+        }
+    }
+
+    // ========================================================================
+    // Response header round-trip
+    // ========================================================================
+
+    #[test]
+    fn response_headers_round_trip() {
+        use vlinder_core::domain::ObservableMessage;
+
+        let request = RequestMessage::new(
+            timeline(), submission(), SessionId::from("ses-test".to_string()), agent(),
+            ServiceBackend::Infer(InferenceBackendType::Ollama), Operation::Run,
+            Sequence::from(3), b"prompt".to_vec(), None,
+            RequestDiagnostics { sequence: 3, endpoint: "/infer".to_string(), request_bytes: 6, received_at_ms: 0 },
+        );
+        let original = ResponseMessage::from_request(&request, b"reply-data".to_vec());
+        let key = original.routing_key();
+        let headers = response_to_nats_headers(&original);
+
+        let recovered = from_nats_headers(&key, &headers)
+            .expect("should produce Response headers")
+            .assemble(original.payload.clone());
+
+        if let ObservableMessage::Response(m) = &recovered {
+            assert_eq!(m.id, original.id);
+            assert_eq!(m.submission, original.submission);
+            assert_eq!(m.session, original.session);
+            assert_eq!(m.agent_id, original.agent_id);
+            assert_eq!(m.service, original.service);
+            assert_eq!(m.operation, original.operation);
+            assert_eq!(m.sequence, original.sequence);
+            assert_eq!(m.correlation_id, original.correlation_id);
+            assert_eq!(m.status_code, original.status_code);
+            assert_eq!(m.payload, original.payload);
+        } else {
+            panic!("expected Response, got {:?}", recovered);
+        }
+    }
+
+    // ========================================================================
+    // Complete header round-trip
+    // ========================================================================
+
+    #[test]
+    fn complete_headers_round_trip() {
+        use vlinder_core::domain::ObservableMessage;
+
+        let original = CompleteMessage::new(
+            timeline(), submission(), SessionId::from("ses-test".to_string()), agent(),
+            HarnessType::Grpc, b"done".to_vec(), Some("state-z".to_string()),
+            ContainerDiagnostics::placeholder(0),
+        );
+        let key = original.routing_key();
+        let headers = complete_to_nats_headers(&original);
+
+        let recovered = from_nats_headers(&key, &headers)
+            .expect("should produce Complete headers")
+            .assemble(original.payload.clone());
+
+        if let ObservableMessage::Complete(m) = &recovered {
+            assert_eq!(m.id, original.id);
+            assert_eq!(m.submission, original.submission);
+            assert_eq!(m.session, original.session);
+            assert_eq!(m.agent_id, original.agent_id);
+            assert_eq!(m.harness, original.harness);
+            assert_eq!(m.payload, original.payload);
+            assert_eq!(m.state, original.state);
+        } else {
+            panic!("expected Complete, got {:?}", recovered);
+        }
+    }
+
+    // ========================================================================
+    // Delegate header round-trip
+    // ========================================================================
+
+    #[test]
+    fn delegate_headers_round_trip() {
+        use vlinder_core::domain::ObservableMessage;
+
+        let original = DelegateMessage::new(
+            timeline(), submission(), SessionId::from("ses-test".to_string()),
+            agent(), agent_alt(), b"task-data".to_vec(), Nonce::new("nonce-42"),
+            None,
+            DelegateDiagnostics { container: ContainerDiagnostics::placeholder(0) },
+        );
+        let key = original.routing_key();
+        let headers = delegate_to_nats_headers(&original);
+
+        let recovered = from_nats_headers(&key, &headers)
+            .expect("should produce Delegate headers")
+            .assemble(original.payload.clone());
+
+        if let ObservableMessage::Delegate(m) = &recovered {
+            assert_eq!(m.id, original.id);
+            assert_eq!(m.submission, original.submission);
+            assert_eq!(m.session, original.session);
+            assert_eq!(m.caller, original.caller);
+            assert_eq!(m.target, original.target);
+            assert_eq!(m.nonce, original.nonce);
+            assert_eq!(m.payload, original.payload);
+            assert_eq!(m.state, original.state);
+        } else {
+            panic!("expected Delegate, got {:?}", recovered);
+        }
     }
 }
 

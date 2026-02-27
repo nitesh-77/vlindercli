@@ -470,7 +470,6 @@ fn run_catalog_worker(config: &Config, shutdown: &AtomicBool) {
 fn run_dag_git_worker(_config: &Config, shutdown: &AtomicBool) {
     use std::collections::HashMap;
     use crate::config::conversations_dir;
-    use vlinder_core::domain::workers::dag::reconstruct_observable_message;
     use vlinder_git_dag::GitDagWorker;
     use vlinder_core::domain::DagWorker;
     use vlinder_nats::{NatsQueue, subject_to_routing_key, from_nats_headers};
@@ -543,12 +542,10 @@ fn run_dag_git_worker(_config: &Config, shutdown: &AtomicBool) {
                     "DAG git received NATS message",
                 );
 
-                // New pipeline: subject → RoutingKey → typed headers → assemble.
-                // Currently handles Invoke; other types fall back to old reconstruction.
+                // Pipeline: subject → RoutingKey → typed headers → assemble.
                 let observable = subject_to_routing_key(&subject)
                     .and_then(|key| from_nats_headers(&key, &headers))
-                    .map(|hdrs| hdrs.assemble(payload.clone()))
-                    .or_else(|| reconstruct_observable_message(&subject, &headers, &payload));
+                    .map(|hdrs| hdrs.assemble(payload.clone()));
 
                 if let Some(observable) = observable {
                     let created_at = chrono::Utc::now();
