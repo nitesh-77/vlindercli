@@ -129,7 +129,7 @@ fn run_secret_worker(config: &Config, shutdown: &AtomicBool) {
     use tonic::transport::Server;
     use crate::secret_service::SecretServiceServer;
 
-    let secret_store = crate::secret_store::from_config(config)
+    let secret_store = crate::secret_store_factory::from_config(config)
         .unwrap_or_else(|e| panic!("Failed to open secret store: {}", e));
 
     // Parse address, stripping http:// prefix if present

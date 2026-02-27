@@ -9,7 +9,7 @@ use std::time::Duration;
 use vlinderd::domain::{Agent, Registry, Requirements, RuntimeType, SecretStore, SubmissionId};
 use vlinderd::registry::InMemoryRegistry;
 use vlinderd::registry_service::{GrpcRegistryClient, RegistryServiceServer};
-use vlinderd::secret_store::InMemorySecretStore;
+use vlinderd::domain::InMemorySecretStore;
 
 fn test_secret_store() -> Arc<dyn SecretStore> {
     Arc::new(InMemorySecretStore::new())

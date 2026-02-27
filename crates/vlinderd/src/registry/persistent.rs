@@ -248,7 +248,7 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
     use crate::domain::{ModelType, Requirements, RuntimeType};
-    use crate::secret_store::InMemorySecretStore;
+    use crate::domain::InMemorySecretStore;
 
     fn test_secret_store() -> Arc<dyn SecretStore> {
         Arc::new(InMemorySecretStore::new())

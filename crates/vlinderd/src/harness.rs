@@ -190,7 +190,7 @@ mod tests {
     use super::*;
     use crate::registry::InMemoryRegistry;
     use crate::queue::InMemoryQueue;
-    use crate::secret_store::InMemorySecretStore;
+    use crate::domain::InMemorySecretStore;
     use crate::domain::{RuntimeType, SecretStore};
     use std::path::PathBuf;
 
