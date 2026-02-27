@@ -23,6 +23,7 @@ COPY crates/vlinder-sqlite-kv/Cargo.toml crates/vlinder-sqlite-kv/
 COPY crates/vlinder-nats/Cargo.toml crates/vlinder-nats/
 COPY crates/vlinder-sidecar/Cargo.toml crates/vlinder-sidecar/
 COPY crates/vlinder-podman-runtime/Cargo.toml crates/vlinder-podman-runtime/
+COPY crates/vlinder-catalog/Cargo.toml crates/vlinder-catalog/
 COPY crates/vlinder-sql-state/Cargo.toml crates/vlinder-sql-state/
 COPY crates/vlinderd/Cargo.toml crates/vlinderd/
 COPY crates/vlinder/Cargo.toml crates/vlinder/
@@ -36,6 +37,7 @@ RUN mkdir -p crates/vlinder-core/src && echo "" > crates/vlinder-core/src/lib.rs
     mkdir -p crates/vlinder-proto/src && echo "" > crates/vlinder-proto/src/lib.rs && \
     mkdir -p crates/vlinder-nats/src && echo "" > crates/vlinder-nats/src/lib.rs && \
     mkdir -p crates/vlinder-podman-runtime/src && echo "" > crates/vlinder-podman-runtime/src/lib.rs && \
+    mkdir -p crates/vlinder-catalog/src && echo "" > crates/vlinder-catalog/src/lib.rs && \
     mkdir -p crates/vlinder-sql-state/src && echo "" > crates/vlinder-sql-state/src/lib.rs && \
     mkdir -p crates/vlinder-sidecar/src && echo "fn main() {}" > crates/vlinder-sidecar/src/main.rs && \
     mkdir -p crates/vlinderd/src && echo "fn main() {}" > crates/vlinderd/src/main.rs && \
@@ -44,6 +46,8 @@ RUN mkdir -p crates/vlinder-core/src && echo "" > crates/vlinder-core/src/lib.rs
 # Proto build dependencies (proto files needed for build.rs)
 COPY crates/vlinder-proto/build.rs crates/vlinder-proto/
 COPY crates/vlinder-proto/proto crates/vlinder-proto/proto
+COPY crates/vlinder-catalog/build.rs crates/vlinder-catalog/
+COPY crates/vlinder-catalog/proto crates/vlinder-catalog/proto
 COPY crates/vlinder-sql-state/build.rs crates/vlinder-sql-state/
 COPY crates/vlinder-sql-state/proto crates/vlinder-sql-state/proto
 
@@ -59,6 +63,7 @@ COPY crates/vlinder-sqlite-kv/src crates/vlinder-sqlite-kv/src
 COPY crates/vlinder-proto/src crates/vlinder-proto/src
 COPY crates/vlinder-nats/src crates/vlinder-nats/src
 COPY crates/vlinder-podman-runtime/src crates/vlinder-podman-runtime/src
+COPY crates/vlinder-catalog/src crates/vlinder-catalog/src
 COPY crates/vlinder-sql-state/src crates/vlinder-sql-state/src
 COPY crates/vlinder-sidecar/src crates/vlinder-sidecar/src
 
@@ -71,6 +76,7 @@ RUN touch crates/vlinder-core/src/lib.rs \
           crates/vlinder-nats/src/lib.rs \
           crates/vlinder-podman-runtime/src/lib.rs \
           crates/vlinder-proto/src/lib.rs \
+          crates/vlinder-catalog/src/lib.rs \
           crates/vlinder-sql-state/src/lib.rs \
           crates/vlinder-sidecar/src/main.rs
 

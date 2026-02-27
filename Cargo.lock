@@ -3221,9 +3221,21 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "ureq 3.2.0",
+ "vlinder-catalog",
  "vlinder-core",
  "vlinder-proto",
  "vlinder-sql-state",
+]
+
+[[package]]
+name = "vlinder-catalog"
+version = "0.1.0"
+dependencies = [
+ "prost",
+ "tokio",
+ "tonic",
+ "tonic-build",
+ "vlinder-core",
 ]
 
 [[package]]
@@ -3406,6 +3418,7 @@ dependencies = [
  "tracing-subscriber",
  "ureq 3.2.0",
  "uuid",
+ "vlinder-catalog",
  "vlinder-core",
  "vlinder-infer-openrouter",
  "vlinder-nats",

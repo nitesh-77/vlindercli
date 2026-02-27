@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use clap::Subcommand;
 
-use vlinder_proto::catalog_service::{GrpcCatalogClient, ping_catalog_service};
+use vlinder_catalog::catalog_service::{GrpcCatalogClient, ping_catalog_service};
 use crate::config::CliConfig;
 use vlinder_core::domain::{CatalogService, Model, Registry};
 

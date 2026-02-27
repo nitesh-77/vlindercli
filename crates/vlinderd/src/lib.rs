@@ -9,7 +9,7 @@ pub mod queue_factory;
 pub mod registry;
 pub mod registry_factory;
 pub mod secret_store_factory;
-pub use vlinder_proto::catalog_service;
+pub use vlinder_catalog::catalog_service;
 pub use vlinder_proto::harness_service;
 pub use vlinder_proto::registry_service;
 pub use vlinder_proto::secret_service;
