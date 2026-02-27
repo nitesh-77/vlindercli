@@ -59,7 +59,7 @@ pub use message::{
     PROTOCOL_VERSION,
     MessageId, SubmissionId, SessionId, TimelineId, Sequence, SequenceCounter, HarnessType,
     InvokeMessage, RequestMessage, ResponseMessage, CompleteMessage, DelegateMessage,
-    ExpectsReply, ObservableMessage,
+    ExpectsReply, ObservableMessage, ObservableMessageHeaders,
 };
 pub use message_queue::{Acknowledgement, MessageQueue, QueueError, agent_routing_key};
 pub use routing_key::{RoutingKey, AgentId, Nonce, ServiceBackend, InferenceBackendType, EmbeddingBackendType};

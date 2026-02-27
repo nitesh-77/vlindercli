@@ -25,7 +25,7 @@ pub use request::RequestMessage;
 pub use response::ResponseMessage;
 pub use complete::CompleteMessage;
 pub use delegate::DelegateMessage;
-pub use observable::ObservableMessage;
+pub use observable::{ObservableMessage, ObservableMessageHeaders};
 
 /// Protocol version stamped on every message at construction time.
 pub const PROTOCOL_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -400,5 +400,36 @@ mod tests {
 
         let reply_key = request.routing_key().reply_key(None).unwrap();
         assert_eq!(reply_key, response.routing_key());
+    }
+
+    // --- ObservableMessageHeaders assemble tests ---
+
+    #[test]
+    fn invoke_headers_assemble_produces_invoke_message() {
+        let headers = ObservableMessageHeaders::Invoke {
+            id: MessageId::from("msg-1".to_string()),
+            protocol_version: "0.1.0".to_string(),
+            timeline: TimelineId::main(),
+            submission: test_submission(),
+            session: SessionId::from("ses-1".to_string()),
+            harness: HarnessType::Cli,
+            runtime: RuntimeType::Container,
+            agent_id: test_agent_id(),
+            state: Some("state-abc".to_string()),
+            diagnostics: test_invoke_diag(),
+        };
+
+        let msg = headers.assemble(b"hello".to_vec());
+
+        assert!(matches!(&msg, ObservableMessage::Invoke(_)));
+        if let ObservableMessage::Invoke(m) = &msg {
+            assert_eq!(m.id, MessageId::from("msg-1".to_string()));
+            assert_eq!(m.harness, HarnessType::Cli);
+            assert_eq!(m.runtime, RuntimeType::Container);
+            assert_eq!(m.agent_id, test_agent_id());
+            assert_eq!(m.payload, b"hello");
+            assert_eq!(m.state, Some("state-abc".to_string()));
+            assert_eq!(m.submission, test_submission());
+        }
     }
 }
