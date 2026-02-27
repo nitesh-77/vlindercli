@@ -13,29 +13,10 @@ use std::sync::Arc;
 
 use vlinder_core::domain::{Agent, ImageRef, ObjectStorageType, PodId, Provider, Registry, ResourceId, Runtime, RuntimeType, VectorStorageType};
 
+use crate::config::PodmanRuntimeConfig;
 use crate::podman::{Podman, RunTarget, resolve_socket, write_s3_credentials, remove_s3_credentials};
 use crate::podman_api::PodmanApiClient;
 use crate::podman_cli::PodmanCliClient;
-
-/// Configuration for the Podman container runtime.
-///
-/// Extracted from vlinderd's full Config to decouple the runtime
-/// crate from daemon configuration.
-#[derive(Clone, Debug)]
-pub struct PodmanRuntimeConfig {
-    /// "mutable" or "pinned" (ADR 073)
-    pub image_policy: String,
-    /// "auto", "disabled", or explicit socket path (ADR 077)
-    pub podman_socket: String,
-    /// OCI image ref for the sidecar container
-    pub sidecar_image: String,
-    /// NATS URL for sidecar env vars
-    pub nats_url: String,
-    /// Registry gRPC address for sidecar env vars
-    pub registry_addr: String,
-    /// State service gRPC address for sidecar env vars
-    pub state_addr: String,
-}
 
 /// Image resolution policy for container agents (ADR 073).
 ///
