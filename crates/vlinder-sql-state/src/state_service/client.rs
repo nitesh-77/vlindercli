@@ -263,4 +263,8 @@ impl DagStore for GrpcStateClient {
         }).map_err(|e| e.to_string())?;
         Ok(response.into_inner().sealed)
     }
+
+    fn list_sessions(&self) -> Result<Vec<vlinder_core::domain::SessionSummary>, String> {
+        Err("list_sessions is not available over gRPC".to_string())
+    }
 }

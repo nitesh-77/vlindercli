@@ -72,7 +72,7 @@ pub use diagnostics::{
 // DAG (content-addressed Merkle DAG)
 // ============================================================================
 
-pub use dag::{DagWorker, DagStore, DagNode, MessageType, Timeline, hash_dag_node, InMemoryDagStore};
+pub use dag::{DagWorker, DagStore, DagNode, MessageType, Timeline, SessionSummary, hash_dag_node, InMemoryDagStore};
 
 // ============================================================================
 // Paths

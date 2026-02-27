@@ -7,12 +7,11 @@ pub mod dag_store;
 pub mod state_service;
 pub use dag_store::SqliteDagStore;
 
-use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
-use vlinder_core::domain::{HistoryEntry, Session};
+use vlinder_core::domain::{DagStore, MessageType};
 
 /// A running session viewer server.
 ///
@@ -28,7 +27,7 @@ impl SessionServer {
     /// Start the session viewer in a background thread.
     ///
     /// Binds to `127.0.0.1:{port}` (localhost only — this is a local dev tool).
-    pub fn start(conversations_dir: PathBuf, port: u16) -> std::io::Result<Self> {
+    pub fn start(store: Arc<dyn DagStore>, port: u16) -> std::io::Result<Self> {
         let server = tiny_http::Server::http(format!("127.0.0.1:{}", port))
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::AddrInUse, e.to_string()))?;
 
@@ -38,7 +37,7 @@ impl SessionServer {
         let stop = Arc::clone(&stop_flag);
 
         let handle = std::thread::spawn(move || {
-            run_server(server, conversations_dir, stop);
+            run_server(server, &*store, stop);
         });
 
         Ok(Self {
@@ -72,7 +71,7 @@ impl Drop for SessionServer {
 // Server loop
 // =============================================================================
 
-fn run_server(server: tiny_http::Server, dir: PathBuf, stop: Arc<AtomicBool>) {
+fn run_server(server: tiny_http::Server, store: &dyn DagStore, stop: Arc<AtomicBool>) {
     let timeout = std::time::Duration::from_millis(100);
     loop {
         if stop.load(Ordering::Relaxed) {
@@ -80,21 +79,21 @@ fn run_server(server: tiny_http::Server, dir: PathBuf, stop: Arc<AtomicBool>) {
         }
 
         match server.recv_timeout(timeout) {
-            Ok(Some(request)) => handle_request(request, &dir),
+            Ok(Some(request)) => handle_request(request, store),
             Ok(None) => continue,  // timeout — check stop flag
             Err(_) => break,
         }
     }
 }
 
-fn handle_request(request: tiny_http::Request, dir: &Path) {
+fn handle_request(request: tiny_http::Request, store: &dyn DagStore) {
     let url = request.url().to_string();
 
     if url == "/" {
-        let body = render_index(dir);
+        let body = render_index(store);
         let _ = request.respond(html_response(200, &body));
-    } else if let Some(filename) = url.strip_prefix("/session/") {
-        match render_session(dir, filename) {
+    } else if let Some(session_id) = url.strip_prefix("/session/") {
+        match render_session(store, session_id) {
             Ok(body) => {
                 let _ = request.respond(html_response(200, &body));
             }
@@ -113,55 +112,30 @@ fn handle_request(request: tiny_http::Request, dir: &Path) {
 // Rendering
 // =============================================================================
 
-fn render_index(dir: &Path) -> String {
-    let mut sessions: Vec<(String, Option<Session>)> = Vec::new();
-
-    if let Ok(entries) = std::fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let name = entry.file_name().to_string_lossy().to_string();
-            if !name.ends_with(".json") {
-                continue;
-            }
-            let session = std::fs::read_to_string(entry.path())
-                .ok()
-                .and_then(|json| serde_json::from_str::<Session>(&json).ok());
-            sessions.push((name, session));
-        }
-    }
-
-    // Sort newest first (filenames start with datetime)
-    sessions.sort_by(|a, b| b.0.cmp(&a.0));
+fn render_index(store: &dyn DagStore) -> String {
+    let sessions = match store.list_sessions() {
+        Ok(s) => s,
+        Err(_) => return html_page("Vlinder Sessions", "<h1>Sessions</h1><p>Error loading sessions.</p>"),
+    };
 
     if sessions.is_empty() {
         return html_page("Vlinder Sessions", "<h1>Sessions</h1><p>No conversations yet.</p>");
     }
 
     let mut items = String::new();
-    for (filename, session) in &sessions {
-        let (agent, turns, status) = match session {
-            Some(s) => {
-                let turns = s.history.len();
-                let status = if s.open.is_some() { "<span class=\"badge\">pending</span>" } else { "" };
-                (s.agent.as_str().to_string(), turns, status.to_string())
-            }
-            None => ("?".to_string(), 0, String::new()),
-        };
-
-        // Parse datetime from filename: 2026-02-08T14-30-05Z_agent_id.json
-        let datetime = filename.split('_').next().unwrap_or("")
-            .replace('T', " ")
-            .trim_end_matches('Z')
-            .to_string();
+    for s in &sessions {
+        let datetime = s.started_at.format("%Y-%m-%d %H:%M:%S").to_string();
+        let status = if s.is_open { "<span class=\"badge\">pending</span>" } else { "" };
 
         items.push_str(&format!(
-            "<li><a href=\"/session/{filename}\">\
+            "<li><a href=\"/session/{session_id}\">\
              <strong>{agent}</strong>\
              <span class=\"meta\">{datetime} &middot; {turns} messages {status}</span>\
              </a></li>\n",
-            filename = html_escape(filename),
-            agent = html_escape(&agent),
+            session_id = html_escape(&s.session_id),
+            agent = html_escape(&s.agent_name),
             datetime = html_escape(&datetime),
-            turns = turns,
+            turns = s.message_count,
             status = status,
         ));
     }
@@ -171,57 +145,72 @@ fn render_index(dir: &Path) -> String {
     ))
 }
 
-fn render_session(dir: &Path, filename: &str) -> Result<String, String> {
-    // Security: reject path traversal
-    if filename.contains("..") || filename.contains('/') || filename.contains('\\') {
-        return Err("invalid filename".to_string());
-    }
-    if !filename.ends_with(".json") {
-        return Err("invalid filename".to_string());
+fn render_session(store: &dyn DagStore, session_id: &str) -> Result<String, String> {
+    // Security: reject path traversal attempts
+    if session_id.contains("..") || session_id.contains('/') || session_id.contains('\\') {
+        return Err("invalid session id".to_string());
     }
 
-    let filepath = dir.join(filename);
-    let json = std::fs::read_to_string(&filepath)
-        .map_err(|_| "session not found".to_string())?;
-    let session: Session = serde_json::from_str(&json)
-        .map_err(|e| format!("invalid session: {}", e))?;
+    let nodes = store.get_session_nodes(session_id)?;
+    if nodes.is_empty() {
+        return Err("session not found".to_string());
+    }
+
+    let agent_name = nodes.iter()
+        .find(|n| n.message_type == MessageType::Invoke)
+        .map(|n| n.to.clone())
+        .unwrap_or_default();
+
+    let is_open = nodes.last()
+        .map(|n| n.message_type != MessageType::Complete)
+        .unwrap_or(false);
 
     let mut messages = String::new();
 
-    // Show pending indicator
-    if let Some(ref question) = session.open {
-        messages.push_str(&format!(
-            "<div class=\"open-indicator\">Pending: {}</div>\n",
-            html_escape(question)
-        ));
+    // Show pending indicator if the last message is not a Complete
+    if is_open {
+        // Show the last invoke payload as the pending question
+        if let Some(last_invoke) = nodes.iter().rev().find(|n| n.message_type == MessageType::Invoke) {
+            let payload = String::from_utf8_lossy(&last_invoke.payload);
+            messages.push_str(&format!(
+                "<div class=\"open-indicator\">Pending: {}</div>\n",
+                html_escape(&payload)
+            ));
+        }
     }
 
-    for entry in &session.history {
-        match entry {
-            HistoryEntry::User { user, at, .. } => {
+    for node in &nodes {
+        match node.message_type {
+            MessageType::Invoke => {
+                let payload = String::from_utf8_lossy(&node.payload);
+                let ts = node.created_at.format("%Y-%m-%d %H:%M:%S").to_string();
                 messages.push_str(&format!(
                     "<div class=\"msg user\">\
                      <div class=\"role\">User <span class=\"ts\">{}</span></div>\
                      <pre>{}</pre>\
                      </div>\n",
-                    html_escape(at),
-                    html_escape(user),
+                    html_escape(&ts),
+                    html_escape(&payload),
                 ));
             }
-            HistoryEntry::Agent { agent, at } => {
+            MessageType::Complete => {
+                let payload = String::from_utf8_lossy(&node.payload);
+                let ts = node.created_at.format("%Y-%m-%d %H:%M:%S").to_string();
                 messages.push_str(&format!(
                     "<div class=\"msg agent\">\
                      <div class=\"role\">Agent <span class=\"ts\">{}</span></div>\
                      <pre>{}</pre>\
                      </div>\n",
-                    html_escape(at),
-                    html_escape(agent),
+                    html_escape(&ts),
+                    html_escape(&payload),
                 ));
             }
+            _ => {} // Skip Request/Response/Delegate — internal protocol messages
         }
     }
 
-    let title = format!("{} / {}", session.agent, &session.session.as_str()[4..12.min(session.session.as_str().len())]);
+    let short_id = if session_id.len() > 12 { &session_id[..12] } else { session_id };
+    let title = format!("{} / {}", agent_name, short_id);
 
     Ok(html_page(&title, &format!(
         "<p><a href=\"/\">&larr; All sessions</a></p>\n\
@@ -320,21 +309,61 @@ fn html_response(status: u16, body: &str) -> tiny_http::Response<std::io::Cursor
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vlinder_core::domain::{SessionId, SubmissionId};
+    use chrono::{TimeZone, Utc};
+    use vlinder_core::domain::{DagNode, InMemoryDagStore, hash_dag_node};
 
-    fn test_session() -> Session {
-        let mut session = Session::new(
-            SessionId::from("ses-abc12345".to_string()),
+    fn make_node(
+        payload: &[u8],
+        parent_hash: &str,
+        message_type: MessageType,
+        from: &str,
+        to: &str,
+        session_id: &str,
+        created_at: chrono::DateTime<Utc>,
+    ) -> DagNode {
+        DagNode {
+            hash: hash_dag_node(payload, parent_hash, &message_type, &[]),
+            parent_hash: parent_hash.to_string(),
+            message_type,
+            from: from.to_string(),
+            to: to.to_string(),
+            session_id: session_id.to_string(),
+            submission_id: "sub-1".to_string(),
+            payload: payload.to_vec(),
+            diagnostics: Vec::new(),
+            stderr: Vec::new(),
+            created_at,
+            state: None,
+            protocol_version: String::new(),
+        }
+    }
+
+    fn test_store_with_session() -> Arc<InMemoryDagStore> {
+        let store = Arc::new(InMemoryDagStore::new());
+        let invoke = make_node(
+            b"summarize this article",
+            "",
+            MessageType::Invoke,
+            "cli",
             "pensieve",
+            "ses-abc12345",
+            Utc.with_ymd_and_hms(2026, 2, 8, 14, 30, 5).unwrap(),
         );
-        session.record_user_input("summarize this article", SubmissionId::from("a1b2c3d".to_string()));
-        session.record_agent_response("This article discusses several topics.");
-        session
+        let complete = make_node(
+            b"This article discusses several topics.",
+            &invoke.hash,
+            MessageType::Complete,
+            "pensieve",
+            "cli",
+            "ses-abc12345",
+            Utc.with_ymd_and_hms(2026, 2, 8, 14, 30, 10).unwrap(),
+        );
+        store.insert_node(&invoke).unwrap();
+        store.insert_node(&complete).unwrap();
+        store
     }
 
     fn get_body(port: u16, path: &str) -> (u16, String) {
-        // Use an agent that doesn't treat HTTP status codes as errors,
-        // so we can read both success and error responses.
         let agent: ureq::Agent = ureq::Agent::config_builder()
             .http_status_as_error(false)
             .build()
@@ -349,16 +378,16 @@ mod tests {
 
     #[test]
     fn server_starts_and_stops() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let server = SessionServer::start(tmp.path().to_path_buf(), 0).unwrap();
+        let store = Arc::new(InMemoryDagStore::new());
+        let server = SessionServer::start(store, 0).unwrap();
         assert!(server.port() > 0);
         server.stop();
     }
 
     #[test]
     fn index_returns_html() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let server = SessionServer::start(tmp.path().to_path_buf(), 0).unwrap();
+        let store = Arc::new(InMemoryDagStore::new());
+        let server = SessionServer::start(store, 0).unwrap();
         let port = server.port();
 
         let (status, body) = get_body(port, "/");
@@ -370,12 +399,8 @@ mod tests {
 
     #[test]
     fn index_lists_sessions() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let session = test_session();
-        let json = serde_json::to_string_pretty(&session).unwrap();
-        std::fs::write(tmp.path().join("2026-02-08T14-30-05Z_pensieve_abc12345.json"), &json).unwrap();
-
-        let server = SessionServer::start(tmp.path().to_path_buf(), 0).unwrap();
+        let store = test_store_with_session();
+        let server = SessionServer::start(store, 0).unwrap();
         let port = server.port();
 
         let (_, body) = get_body(port, "/");
@@ -387,16 +412,11 @@ mod tests {
 
     #[test]
     fn session_page_renders_history() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let session = test_session();
-        let filename = "2026-02-08T14-30-05Z_pensieve_abc12345.json";
-        let json = serde_json::to_string_pretty(&session).unwrap();
-        std::fs::write(tmp.path().join(filename), &json).unwrap();
-
-        let server = SessionServer::start(tmp.path().to_path_buf(), 0).unwrap();
+        let store = test_store_with_session();
+        let server = SessionServer::start(store, 0).unwrap();
         let port = server.port();
 
-        let (status, body) = get_body(port, &format!("/session/{}", filename));
+        let (status, body) = get_body(port, "/session/ses-abc12345");
         assert_eq!(status, 200);
         assert!(body.contains("summarize this article"));
         assert!(body.contains("This article discusses"));
@@ -406,11 +426,11 @@ mod tests {
 
     #[test]
     fn nonexistent_session_returns_404() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let server = SessionServer::start(tmp.path().to_path_buf(), 0).unwrap();
+        let store = Arc::new(InMemoryDagStore::new());
+        let server = SessionServer::start(store, 0).unwrap();
         let port = server.port();
 
-        let (status, _) = get_body(port, "/session/nosuch.json");
+        let (status, _) = get_body(port, "/session/ses-nonexistent");
         assert_eq!(status, 404);
 
         server.stop();
@@ -418,8 +438,8 @@ mod tests {
 
     #[test]
     fn path_traversal_rejected() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let server = SessionServer::start(tmp.path().to_path_buf(), 0).unwrap();
+        let store = Arc::new(InMemoryDagStore::new());
+        let server = SessionServer::start(store, 0).unwrap();
         let port = server.port();
 
         let (status, _) = get_body(port, "/session/../../etc/passwd");
@@ -436,27 +456,27 @@ mod tests {
     }
 
     #[test]
-    fn render_index_empty_dir() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let html = render_index(tmp.path());
+    fn render_index_empty_store() {
+        let store = InMemoryDagStore::new();
+        let html = render_index(&store);
         assert!(html.contains("No conversations yet"));
     }
 
     #[test]
     fn render_session_with_open_question() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let mut session = Session::new(
-            SessionId::from("ses-def67890".to_string()),
+        let store = InMemoryDagStore::new();
+        let invoke = make_node(
+            b"what next?",
+            "",
+            MessageType::Invoke,
+            "cli",
             "todoapp",
+            "ses-def67890",
+            Utc.with_ymd_and_hms(2026, 2, 8, 14, 30, 5).unwrap(),
         );
-        session.record_user_input("what next?", SubmissionId::from("b2c3d4e".to_string()));
-        // Don't record response — question is pending
+        store.insert_node(&invoke).unwrap();
 
-        let filename = "test_session.json";
-        let json = serde_json::to_string_pretty(&session).unwrap();
-        std::fs::write(tmp.path().join(filename), &json).unwrap();
-
-        let html = render_session(tmp.path(), filename).unwrap();
+        let html = render_session(&store, "ses-def67890").unwrap();
         assert!(html.contains("Pending"));
         assert!(html.contains("what next?"));
     }

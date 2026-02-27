@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use chrono::{DateTime, Utc};
 use rusqlite::Connection;
 
-use vlinder_core::domain::{DagNode, DagStore, MessageType, Timeline};
+use vlinder_core::domain::{DagNode, DagStore, MessageType, SessionSummary, Timeline};
 
 /// SQLite-backed DagStore.
 pub struct SqliteDagStore {
@@ -482,6 +482,50 @@ impl DagStore for SqliteDagStore {
         .flatten();
 
         Ok(broken_at.is_some())
+    }
+
+    fn list_sessions(&self) -> Result<Vec<SessionSummary>, String> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT
+                session_id,
+                MIN(CASE WHEN message_type = 'invoke' THEN receiver END) AS agent_name,
+                MIN(created_at) AS started_at,
+                COUNT(CASE WHEN message_type IN ('invoke', 'complete') THEN 1 END) AS msg_count,
+                (SELECT message_type FROM dag_nodes d2
+                 WHERE d2.session_id = dag_nodes.session_id
+                 ORDER BY created_at DESC LIMIT 1) AS last_type
+            FROM dag_nodes
+            GROUP BY session_id
+            ORDER BY started_at DESC"
+        ).map_err(|e| format!("list_sessions prepare failed: {}", e))?;
+
+        let rows = stmt.query_map([], |row| {
+            let session_id: String = row.get(0)?;
+            let agent_name: Option<String> = row.get(1)?;
+            let started_at_str: String = row.get(2)?;
+            let message_count: usize = row.get(3)?;
+            let last_type: Option<String> = row.get(4)?;
+
+            let started_at = DateTime::parse_from_rfc3339(&started_at_str)
+                .map(|dt| dt.with_timezone(&Utc))
+                .unwrap_or_default();
+            let is_open = last_type.as_deref() != Some("complete");
+
+            Ok(SessionSummary {
+                session_id,
+                agent_name: agent_name.unwrap_or_default(),
+                started_at,
+                message_count,
+                is_open,
+            })
+        }).map_err(|e| format!("list_sessions query failed: {}", e))?;
+
+        let mut summaries = Vec::new();
+        for row in rows {
+            summaries.push(row.map_err(|e| format!("list_sessions row failed: {}", e))?);
+        }
+        Ok(summaries)
     }
 }
 

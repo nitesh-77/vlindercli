@@ -408,6 +408,7 @@ mod tests {
             fn seal_timeline(&self, _: i64) -> Result<(), String> { Ok(()) }
             fn rename_timeline(&self, _: i64, _: &str) -> Result<(), String> { Ok(()) }
             fn is_timeline_sealed(&self, _: i64) -> Result<bool, String> { Ok(false) }
+            fn list_sessions(&self) -> Result<Vec<crate::domain::SessionSummary>, String> { Ok(vec![]) }
         }
 
         let store: Arc<dyn DagStore> = Arc::new(FailStore);

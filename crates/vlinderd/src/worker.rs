@@ -545,15 +545,17 @@ fn run_dag_git_worker(_config: &Config, shutdown: &AtomicBool) {
 }
 
 fn run_session_viewer_worker(_config: &Config, shutdown: &AtomicBool) {
-    use crate::config::conversations_dir;
-    use vlinder_sql_state::SessionServer;
+    use crate::config::dag_db_path;
+    use vlinder_sql_state::{SessionServer, SqliteDagStore};
 
     let port = std::env::var("VLINDER_SESSION_PORT")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(7777u16);
 
-    let server = SessionServer::start(conversations_dir(), port)
+    let store = SqliteDagStore::open(&dag_db_path())
+        .expect("Failed to open DAG store for session viewer");
+    let server = SessionServer::start(Arc::new(store), port)
         .expect("Failed to start session viewer");
 
     tracing::info!(port = server.port(), "Session viewer started: http://127.0.0.1:{}", server.port());

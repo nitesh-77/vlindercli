@@ -95,6 +95,16 @@ pub fn hash_dag_node(payload: &[u8], parent_hash: &str, message_type: &MessageTy
     format!("{:x}", hasher.finalize())
 }
 
+/// Summary of a session for the viewer index page.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SessionSummary {
+    pub session_id: String,
+    pub agent_name: String,
+    pub started_at: DateTime<Utc>,
+    pub message_count: usize,
+    pub is_open: bool,
+}
+
 /// A timeline row — represents a named branch of execution.
 ///
 /// Timeline 1 is always "main". Fork creates a new timeline pointing
@@ -182,6 +192,9 @@ pub trait DagStore: Send + Sync {
 
     /// Check whether a timeline has been sealed.
     fn is_timeline_sealed(&self, id: i64) -> Result<bool, String>;
+
+    /// List all sessions with summary information.
+    fn list_sessions(&self) -> Result<Vec<SessionSummary>, String>;
 }
 
 // ============================================================================
@@ -333,6 +346,33 @@ impl DagStore for InMemoryDagStore {
     fn is_timeline_sealed(&self, id: i64) -> Result<bool, String> {
         let timelines = self.timelines.lock().unwrap();
         Ok(timelines.iter().find(|t| t.id == id).map(|t| t.broken_at.is_some()).unwrap_or(false))
+    }
+
+    fn list_sessions(&self) -> Result<Vec<SessionSummary>, String> {
+        let nodes = self.nodes.lock().unwrap();
+        let mut sessions: std::collections::HashMap<String, Vec<&DagNode>> = std::collections::HashMap::new();
+        for node in nodes.iter() {
+            sessions.entry(node.session_id.clone()).or_default().push(node);
+        }
+
+        let mut summaries: Vec<SessionSummary> = sessions.into_iter().map(|(session_id, mut nodes)| {
+            nodes.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+            let agent_name = nodes.iter()
+                .find(|n| n.message_type == MessageType::Invoke)
+                .map(|n| n.to.clone())
+                .unwrap_or_default();
+            let started_at = nodes.first().map(|n| n.created_at).unwrap_or_default();
+            let message_count = nodes.iter()
+                .filter(|n| n.message_type == MessageType::Invoke || n.message_type == MessageType::Complete)
+                .count();
+            let is_open = nodes.last()
+                .map(|n| n.message_type != MessageType::Complete)
+                .unwrap_or(false);
+            SessionSummary { session_id, agent_name, started_at, message_count, is_open }
+        }).collect();
+
+        summaries.sort_by(|a, b| b.started_at.cmp(&a.started_at));
+        Ok(summaries)
     }
 }
 
