@@ -8,7 +8,7 @@ use std::sync::Arc;
 use vlinder_core::domain::{DagStore, MessageQueue, QueueError, Registry};
 use vlinder_nats::NatsQueue;
 use vlinder_core::queue::RecordingQueue;
-use vlinder_proto::registry_service::GrpcRegistryClient;
+use vlinder_sql_registry::registry_service::GrpcRegistryClient;
 use vlinder_sql_state::state_service::GrpcStateClient;
 
 /// Connect to NATS and wrap with DAG recording via the State Service.

@@ -8,7 +8,7 @@ use std::sync::Arc;
 use crate::config::CliConfig;
 use vlinder_core::domain::{DagStore, Harness, Registry};
 use vlinder_proto::harness_service::{GrpcHarnessClient, ping_harness};
-use vlinder_proto::registry_service::{GrpcRegistryClient, ping_registry};
+use vlinder_sql_registry::registry_service::{GrpcRegistryClient, ping_registry};
 use vlinder_sql_state::state_service::GrpcStateClient;
 
 /// Connect to the registry via gRPC, exiting on failure.

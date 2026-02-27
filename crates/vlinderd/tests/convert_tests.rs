@@ -4,7 +4,7 @@ use vlinder_core::domain::{
     Agent, Job, JobId, JobStatus, Model, ModelType, Protocol, Provider,
     Requirements, ResourceId, RuntimeType, ServiceConfig, ServiceType, SubmissionId,
 };
-use vlinder_proto::registry_service::proto;
+use vlinder_sql_registry::registry_service::proto;
 
 // ============================================================================
 // ResourceId round-trip

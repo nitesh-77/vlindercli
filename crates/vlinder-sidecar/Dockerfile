@@ -26,6 +26,7 @@ COPY crates/vlinder-podman-runtime/Cargo.toml crates/vlinder-podman-runtime/
 COPY crates/vlinder-catalog/Cargo.toml crates/vlinder-catalog/
 COPY crates/vlinder-sql-state/Cargo.toml crates/vlinder-sql-state/
 COPY crates/vlinder-git-dag/Cargo.toml crates/vlinder-git-dag/
+COPY crates/vlinder-sql-registry/Cargo.toml crates/vlinder-sql-registry/
 COPY crates/vlinderd/Cargo.toml crates/vlinderd/
 COPY crates/vlinder/Cargo.toml crates/vlinder/
 
@@ -41,6 +42,7 @@ RUN mkdir -p crates/vlinder-core/src && echo "" > crates/vlinder-core/src/lib.rs
     mkdir -p crates/vlinder-catalog/src && echo "" > crates/vlinder-catalog/src/lib.rs && \
     mkdir -p crates/vlinder-sql-state/src && echo "" > crates/vlinder-sql-state/src/lib.rs && \
     mkdir -p crates/vlinder-git-dag/src && echo "" > crates/vlinder-git-dag/src/lib.rs && \
+    mkdir -p crates/vlinder-sql-registry/src && echo "" > crates/vlinder-sql-registry/src/lib.rs && \
     mkdir -p crates/vlinder-sidecar/src && echo "fn main() {}" > crates/vlinder-sidecar/src/main.rs && \
     mkdir -p crates/vlinderd/src && echo "fn main() {}" > crates/vlinderd/src/main.rs && \
     mkdir -p crates/vlinder/src && echo "fn main() {}" > crates/vlinder/src/main.rs
@@ -52,6 +54,8 @@ COPY crates/vlinder-catalog/build.rs crates/vlinder-catalog/
 COPY crates/vlinder-catalog/proto crates/vlinder-catalog/proto
 COPY crates/vlinder-sql-state/build.rs crates/vlinder-sql-state/
 COPY crates/vlinder-sql-state/proto crates/vlinder-sql-state/proto
+COPY crates/vlinder-sql-registry/build.rs crates/vlinder-sql-registry/
+COPY crates/vlinder-sql-registry/proto crates/vlinder-sql-registry/proto
 
 # Pre-build dependencies (this layer is cached unless Cargo.toml changes)
 RUN cargo build --release -p vlinder-sidecar 2>/dev/null || true
@@ -68,6 +72,7 @@ COPY crates/vlinder-podman-runtime/src crates/vlinder-podman-runtime/src
 COPY crates/vlinder-catalog/src crates/vlinder-catalog/src
 COPY crates/vlinder-sql-state/src crates/vlinder-sql-state/src
 COPY crates/vlinder-git-dag/src crates/vlinder-git-dag/src
+COPY crates/vlinder-sql-registry/src crates/vlinder-sql-registry/src
 COPY crates/vlinder-sidecar/src crates/vlinder-sidecar/src
 
 # Touch source files to invalidate the cache for actual compilation
@@ -82,6 +87,7 @@ RUN touch crates/vlinder-core/src/lib.rs \
           crates/vlinder-catalog/src/lib.rs \
           crates/vlinder-sql-state/src/lib.rs \
           crates/vlinder-git-dag/src/lib.rs \
+          crates/vlinder-sql-registry/src/lib.rs \
           crates/vlinder-sidecar/src/main.rs
 
 # Build the sidecar binary

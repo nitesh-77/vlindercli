@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use crate::config::Config;
 use vlinder_catalog::catalog_service::ping_catalog_service;
 use vlinder_proto::harness_service::ping_harness;
-use vlinder_proto::registry_service::ping_registry;
+use vlinder_sql_registry::registry_service::ping_registry;
 use vlinder_proto::secret_service::ping_secret_service;
 use vlinder_sql_state::state_service::ping_state_service;
 use crate::worker_role::WorkerRole;

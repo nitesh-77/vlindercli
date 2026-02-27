@@ -14,7 +14,7 @@ use vlinder_core::domain::Registry;
 pub fn from_config(config: &Config) -> Result<Arc<dyn Registry>, Box<dyn std::error::Error>> {
     match config.distributed.registry_backend {
         RegistryBackend::Grpc => {
-            use vlinder_proto::registry_service::GrpcRegistryClient;
+            use vlinder_sql_registry::registry_service::GrpcRegistryClient;
 
             let addr = if config.distributed.registry_addr.starts_with("http://") {
                 config.distributed.registry_addr.clone()

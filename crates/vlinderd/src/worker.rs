@@ -71,8 +71,8 @@ fn run_registry_worker(config: &Config, shutdown: &AtomicBool) {
     use tonic::transport::Server;
     use crate::config::registry_db_path;
     use vlinder_core::domain::{RuntimeType, ObjectStorageType, VectorStorageType};
-    use crate::registry::PersistentRegistry;
-    use vlinder_proto::registry_service::RegistryServiceServer;
+    use vlinder_sql_registry::PersistentRegistry;
+    use vlinder_sql_registry::registry_service::RegistryServiceServer;
     use vlinder_proto::secret_service::GrpcSecretClient;
 
     let secret_addr = if config.distributed.secret_addr.starts_with("http://") {
@@ -86,7 +86,23 @@ fn run_registry_worker(config: &Config, shutdown: &AtomicBool) {
     );
 
     let db_path = registry_db_path();
-    let registry = PersistentRegistry::open(&db_path, config, secret_store)
+
+    // Build registry config from cluster topology
+    let mut inference_engines = Vec::new();
+    let mut embedding_engines = Vec::new();
+    if config.distributed.workers.inference.ollama > 0 {
+        inference_engines.push(vlinder_core::domain::Provider::Ollama);
+        embedding_engines.push(vlinder_core::domain::Provider::Ollama);
+    }
+    if config.distributed.workers.inference.openrouter > 0 {
+        inference_engines.push(vlinder_core::domain::Provider::OpenRouter);
+    }
+    let registry_config = vlinder_sql_registry::RegistryConfig {
+        inference_engines,
+        embedding_engines,
+    };
+
+    let registry = PersistentRegistry::open(&db_path, &registry_config, secret_store)
         .unwrap_or_else(|e| panic!("Failed to initialize registry: {}", e));
 
     // Register non-engine capabilities (engines are registered by open())
@@ -165,7 +181,7 @@ fn run_harness_worker(config: &Config, shutdown: &AtomicBool) {
     use vlinder_core::domain::HarnessType;
     use crate::harness::CoreHarness;
     use vlinder_proto::harness_service::HarnessServiceServer;
-    use vlinder_proto::registry_service::GrpcRegistryClient;
+    use vlinder_sql_registry::registry_service::GrpcRegistryClient;
 
     let queue = crate::queue_factory::recording_from_config(config).expect("Failed to create queue");
 
@@ -270,7 +286,7 @@ fn run_inference_openrouter_worker(config: &Config, shutdown: &AtomicBool) {
 fn run_storage_object_sqlite_worker(config: &Config, shutdown: &AtomicBool) {
     use vlinder_sqlite_kv::KvWorker;
 
-    use vlinder_proto::registry_service::GrpcRegistryClient;
+    use vlinder_sql_registry::registry_service::GrpcRegistryClient;
 
     let queue = crate::queue_factory::recording_from_config(config).expect("Failed to create queue");
 
@@ -293,7 +309,7 @@ fn run_storage_object_sqlite_worker(config: &Config, shutdown: &AtomicBool) {
 fn run_storage_object_memory_worker(config: &Config, shutdown: &AtomicBool) {
     use vlinder_sqlite_kv::KvWorker;
 
-    use vlinder_proto::registry_service::GrpcRegistryClient;
+    use vlinder_sql_registry::registry_service::GrpcRegistryClient;
 
     let queue = crate::queue_factory::recording_from_config(config).expect("Failed to create queue");
 
@@ -316,7 +332,7 @@ fn run_storage_object_memory_worker(config: &Config, shutdown: &AtomicBool) {
 fn run_storage_vector_sqlite_worker(config: &Config, shutdown: &AtomicBool) {
     use vlinder_sqlite_vec::SqliteVecWorker;
 
-    use vlinder_proto::registry_service::GrpcRegistryClient;
+    use vlinder_sql_registry::registry_service::GrpcRegistryClient;
 
     let queue = crate::queue_factory::recording_from_config(config).expect("Failed to create queue");
 
@@ -339,7 +355,7 @@ fn run_storage_vector_sqlite_worker(config: &Config, shutdown: &AtomicBool) {
 fn run_storage_vector_memory_worker(config: &Config, shutdown: &AtomicBool) {
     use vlinder_sqlite_vec::SqliteVecWorker;
 
-    use vlinder_proto::registry_service::GrpcRegistryClient;
+    use vlinder_sql_registry::registry_service::GrpcRegistryClient;
 
     let queue = crate::queue_factory::recording_from_config(config).expect("Failed to create queue");
 

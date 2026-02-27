@@ -1,20 +1,20 @@
-//! Registry implementations (ADR 076).
+//! Registry helpers for vlinderd.
 //!
 //! Domain types (Registry trait, Job, JobId, etc.) live in `vlinder_core::domain`.
-//! This module contains concrete implementations:
-//! - `InMemoryRegistry`: In-process with RwLock, used for tests and as read cache
-//! - `PersistentRegistry`: Write-through to SQLite via SqliteRegistryRepository
-
-mod persistent;
+//! Concrete implementations (PersistentRegistry, SqliteRegistryRepository, gRPC
+//! service) live in `vlinder_sql_registry`.
+//!
+//! This module retains:
+//! - `InMemoryRegistry` re-export for backward compatibility
+//! - `open_registry()` CLI helper (depends on Config)
 
 // Re-export from domain (canonical location) for backward compatibility
 pub use vlinder_core::domain::InMemoryRegistry;
-pub(crate) use persistent::PersistentRegistry;
 
 use std::sync::Arc;
 use crate::config::Config;
 use vlinder_core::domain::Registry;
-use vlinder_proto::registry_service::{GrpcRegistryClient, ping_registry};
+use vlinder_sql_registry::registry_service::{GrpcRegistryClient, ping_registry};
 
 /// Connect to the registry via gRPC.
 ///

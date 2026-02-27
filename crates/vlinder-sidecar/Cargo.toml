@@ -12,6 +12,7 @@ path = "src/main.rs"
 vlinder-core = { path = "../vlinder-core" }
 vlinder-nats = { path = "../vlinder-nats" }
 vlinder-proto = { path = "../vlinder-proto" }
+vlinder-sql-registry = { path = "../vlinder-sql-registry" }
 vlinder-sql-state = { path = "../vlinder-sql-state" }
 vlinder-ollama = { path = "../vlinder-ollama" }
 vlinder-infer-openrouter = { path = "../vlinder-infer-openrouter" }

@@ -5,7 +5,6 @@ pub mod queue_factory;
 pub mod registry;
 pub mod registry_factory;
 pub mod secret_store_factory;
-pub mod storage;
 pub mod supervisor;
 pub mod tracing_setup;
 pub mod worker;

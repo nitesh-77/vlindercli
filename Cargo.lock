@@ -3224,6 +3224,7 @@ dependencies = [
  "vlinder-catalog",
  "vlinder-core",
  "vlinder-proto",
+ "vlinder-sql-registry",
  "vlinder-sql-state",
 ]
 
@@ -3351,9 +3352,26 @@ dependencies = [
  "vlinder-nats",
  "vlinder-ollama",
  "vlinder-proto",
+ "vlinder-sql-registry",
  "vlinder-sql-state",
  "vlinder-sqlite-kv",
  "vlinder-sqlite-vec",
+]
+
+[[package]]
+name = "vlinder-sql-registry"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "prost",
+ "rusqlite",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tonic",
+ "tonic-build",
+ "tracing",
+ "vlinder-core",
 ]
 
 [[package]]
@@ -3415,7 +3433,6 @@ dependencies = [
  "indicatif",
  "rand",
  "reedline",
- "rusqlite",
  "serde",
  "serde_json",
  "sha2",
@@ -3439,6 +3456,7 @@ dependencies = [
  "vlinder-ollama",
  "vlinder-podman-runtime",
  "vlinder-proto",
+ "vlinder-sql-registry",
  "vlinder-sql-state",
  "vlinder-sqlite-kv",
  "vlinder-sqlite-vec",
