@@ -360,8 +360,10 @@ impl MessageQueue for NatsQueue {
                 timeline: get_header(headers, "timeline-id").map(TimelineId::from).unwrap_or_else(|_| TimelineId::main()),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
                 session: SessionId::from(get_header(headers, "session-id")?),
-                harness: parse_harness_type(&get_header(headers, "harness")?)?,
-                runtime: parse_runtime_type(&get_header(headers, "runtime")?)?,
+                harness: HarnessType::from_str(&get_header(headers, "harness")?)
+                    .ok_or_else(|| QueueError::ReceiveFailed("unknown harness type".to_string()))?,
+                runtime: RuntimeType::from_str(&get_header(headers, "runtime")?)
+                    .ok_or_else(|| QueueError::ReceiveFailed("unknown runtime type".to_string()))?,
                 agent_id: AgentId::new(get_header(headers, "agent-id")?),
                 payload: js_msg.payload.to_vec(),
                 state: get_header(headers, "state").ok(),
@@ -394,10 +396,12 @@ impl MessageQueue for NatsQueue {
                 session: SessionId::from(get_header(headers, "session-id")?),
                 agent_id: AgentId::new(get_header(headers, "agent-id")?),
                 service: ServiceBackend::from_parts(
-                    parse_service_type(&get_header(headers, "service")?)?,
+                    ServiceType::from_str(&get_header(headers, "service")?)
+                        .ok_or_else(|| QueueError::ReceiveFailed("unknown service type".to_string()))?,
                     &get_header(headers, "backend")?,
                 ).ok_or_else(|| QueueError::ReceiveFailed("invalid service/backend".to_string()))?,
-                operation: parse_operation(&get_header(headers, "operation")?)?,
+                operation: Operation::from_str(&get_header(headers, "operation")?)
+                    .ok_or_else(|| QueueError::ReceiveFailed("unknown operation".to_string()))?,
                 sequence: Sequence::from(get_header(headers, "sequence")?.parse::<u32>().unwrap_or(1)),
                 payload: js_msg.payload.to_vec(),
                 state: get_header(headers, "state").ok(),
@@ -435,10 +439,12 @@ impl MessageQueue for NatsQueue {
                 session: SessionId::from(get_header(headers, "session-id")?),
                 agent_id: AgentId::new(get_header(headers, "agent-id")?),
                 service: ServiceBackend::from_parts(
-                    parse_service_type(&get_header(headers, "service")?)?,
+                    ServiceType::from_str(&get_header(headers, "service")?)
+                        .ok_or_else(|| QueueError::ReceiveFailed("unknown service type".to_string()))?,
                     &get_header(headers, "backend")?,
                 ).ok_or_else(|| QueueError::ReceiveFailed("invalid service/backend".to_string()))?,
-                operation: parse_operation(&get_header(headers, "operation")?)?,
+                operation: Operation::from_str(&get_header(headers, "operation")?)
+                    .ok_or_else(|| QueueError::ReceiveFailed("unknown operation".to_string()))?,
                 sequence: Sequence::from(get_header(headers, "sequence")?.parse::<u32>().unwrap_or(1)),
                 payload: js_msg.payload.to_vec(),
                 correlation_id: MessageId::from(get_header(headers, "correlation-id")?),
@@ -472,7 +478,8 @@ impl MessageQueue for NatsQueue {
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
                 session: SessionId::from(get_header(headers, "session-id")?),
                 agent_id: AgentId::new(get_header(headers, "agent-id")?),
-                harness: parse_harness_type(&get_header(headers, "harness")?)?,
+                harness: HarnessType::from_str(&get_header(headers, "harness")?)
+                    .ok_or_else(|| QueueError::ReceiveFailed("unknown harness type".to_string()))?,
                 payload: js_msg.payload.to_vec(),
                 state: get_header(headers, "state").ok(),
                 diagnostics,
@@ -596,7 +603,8 @@ impl MessageQueue for NatsQueue {
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
                 session: SessionId::from(get_header(headers, "session-id")?),
                 agent_id: AgentId::new(get_header(headers, "agent-id")?),
-                harness: parse_harness_type(&get_header(headers, "harness")?)?,
+                harness: HarnessType::from_str(&get_header(headers, "harness")?)
+                    .ok_or_else(|| QueueError::ReceiveFailed("unknown harness type".to_string()))?,
                 payload: js_msg.payload.to_vec(),
                 state: get_header(headers, "state").ok(),
                 diagnostics,
@@ -921,38 +929,6 @@ fn get_header(headers: &async_nats::HeaderMap, key: &str) -> Result<String, Queu
         .get(key)
         .map(|v| v.to_string())
         .ok_or_else(|| QueueError::ReceiveFailed(format!("missing header: {}", key)))
-}
-
-/// Parse a harness type string.
-fn parse_harness_type(s: &str) -> Result<HarnessType, QueueError> {
-    match s {
-        "cli" => Ok(HarnessType::Cli),
-        "web" => Ok(HarnessType::Web),
-        "api" => Ok(HarnessType::Api),
-        "whatsapp" => Ok(HarnessType::Whatsapp),
-        "grpc" => Ok(HarnessType::Grpc),
-        _ => Err(QueueError::ReceiveFailed(format!("unknown harness type: {}", s))),
-    }
-}
-
-/// Parse a runtime type string.
-fn parse_runtime_type(s: &str) -> Result<RuntimeType, QueueError> {
-    match s {
-        "container" => Ok(RuntimeType::Container),
-        _ => Err(QueueError::ReceiveFailed(format!("unknown runtime type: {}", s))),
-    }
-}
-
-/// Parse a service type string.
-fn parse_service_type(s: &str) -> Result<ServiceType, QueueError> {
-    ServiceType::from_str(s)
-        .ok_or_else(|| QueueError::ReceiveFailed(format!("unknown service type: {}", s)))
-}
-
-/// Parse an operation string.
-fn parse_operation(s: &str) -> Result<Operation, QueueError> {
-    Operation::from_str(s)
-        .ok_or_else(|| QueueError::ReceiveFailed(format!("unknown operation: {}", s)))
 }
 
 // ============================================================================
