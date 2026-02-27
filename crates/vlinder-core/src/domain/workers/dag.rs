@@ -8,24 +8,13 @@
 use chrono::Utc;
 
 use crate::domain::{
-    DagNode, MessageType, hash_dag_node,
+    DagNode, hash_dag_node,
 };
 use crate::domain::message::ObservableMessage;
 
 // ============================================================================
 // ObservableMessage → DagNode conversion helpers
 // ============================================================================
-
-/// Determine the `MessageType` for a reconstructed message.
-pub fn observable_message_type(msg: &ObservableMessage) -> MessageType {
-    match msg {
-        ObservableMessage::Invoke(_) => MessageType::Invoke,
-        ObservableMessage::Request(_) => MessageType::Request,
-        ObservableMessage::Response(_) => MessageType::Response,
-        ObservableMessage::Complete(_) => MessageType::Complete,
-        ObservableMessage::Delegate(_) => MessageType::Delegate,
-    }
-}
 
 /// Extract (from, to) routing pair from a reconstructed message.
 pub fn observable_from_to(msg: &ObservableMessage) -> (String, String) {
@@ -93,7 +82,7 @@ pub fn observable_state(msg: &ObservableMessage) -> Option<String> {
 /// `parent_hash` is the hash of the previous node in the same session
 /// (empty string for the first message).
 pub fn build_dag_node(msg: &ObservableMessage, parent_hash: &str) -> DagNode {
-    let message_type = observable_message_type(msg);
+    let message_type = msg.message_type();
     let (from, to) = observable_from_to(msg);
     let diagnostics = serialize_diagnostics(msg);
     let stderr = extract_typed_stderr(msg);
@@ -129,7 +118,7 @@ mod tests {
     use crate::domain::{
         AgentId, CompleteMessage, ContainerDiagnostics, DagStore, DelegateDiagnostics,
         DelegateMessage, HarnessType, InferenceBackendType, InMemoryDagStore,
-        InvokeDiagnostics, InvokeMessage, Nonce, Operation, RequestDiagnostics,
+        InvokeDiagnostics, InvokeMessage, MessageType, Nonce, Operation, RequestDiagnostics,
         RequestMessage, ResponseMessage, RuntimeType, Sequence, ServiceBackend,
         SessionId, SubmissionId, ObjectStorageType, TimelineId,
     };

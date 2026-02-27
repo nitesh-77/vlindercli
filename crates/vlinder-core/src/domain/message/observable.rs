@@ -5,6 +5,7 @@
 //! the final `ObservableMessage` by attaching the payload via `assemble()`.
 
 use super::identity::{MessageId, SubmissionId, SessionId, TimelineId, Sequence, HarnessType};
+use super::super::dag::MessageType;
 use super::invoke::InvokeMessage;
 use super::request::RequestMessage;
 use super::response::ResponseMessage;
@@ -152,6 +153,16 @@ impl ObservableMessageHeaders {
 }
 
 impl ObservableMessage {
+    pub fn message_type(&self) -> MessageType {
+        match self {
+            ObservableMessage::Invoke(_) => MessageType::Invoke,
+            ObservableMessage::Request(_) => MessageType::Request,
+            ObservableMessage::Response(_) => MessageType::Response,
+            ObservableMessage::Complete(_) => MessageType::Complete,
+            ObservableMessage::Delegate(_) => MessageType::Delegate,
+        }
+    }
+
     pub fn protocol_version(&self) -> &str {
         match self {
             ObservableMessage::Invoke(m) => &m.protocol_version,
