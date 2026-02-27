@@ -304,7 +304,8 @@ pub fn build_dag_node(msg: &ObservableMessage, parent_hash: &str) -> DagNode {
     let stderr = extract_typed_stderr(msg);
     let state = observable_state(msg);
     let payload = msg.payload();
-    let hash = hash_dag_node(payload, parent_hash, &message_type, &diagnostics);
+    let session_id = msg.session().as_str().to_string();
+    let hash = hash_dag_node(payload, parent_hash, &message_type, &diagnostics, &session_id);
 
     DagNode {
         hash,
@@ -312,7 +313,7 @@ pub fn build_dag_node(msg: &ObservableMessage, parent_hash: &str) -> DagNode {
         message_type,
         from,
         to,
-        session_id: msg.session().as_str().to_string(),
+        session_id,
         submission_id: msg.submission().as_str().to_string(),
         payload: payload.to_vec(),
         diagnostics,

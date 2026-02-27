@@ -322,7 +322,7 @@ mod tests {
         created_at: chrono::DateTime<Utc>,
     ) -> DagNode {
         DagNode {
-            hash: hash_dag_node(payload, parent_hash, &message_type, &[]),
+            hash: hash_dag_node(payload, parent_hash, &message_type, &[], session_id),
             parent_hash: parent_hash.to_string(),
             message_type,
             from: from.to_string(),

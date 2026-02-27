@@ -558,7 +558,7 @@ mod tests {
     fn test_node(payload: &[u8], parent_hash: &str, message_type: MessageType) -> DagNode {
         let diagnostics = Vec::new();
         DagNode {
-            hash: hash_dag_node(payload, parent_hash, &message_type, &diagnostics),
+            hash: hash_dag_node(payload, parent_hash, &message_type, &diagnostics, "sess-1"),
             parent_hash: parent_hash.to_string(),
             message_type,
             from: "cli".to_string(),
@@ -591,7 +591,7 @@ mod tests {
         let diagnostics = b"{\"container\":{\"duration_ms\":50}}".to_vec();
         let stderr = b"WARN: something".to_vec();
         let node = DagNode {
-            hash: hash_dag_node(b"pay", "", &MessageType::Delegate, &diagnostics),
+            hash: hash_dag_node(b"pay", "", &MessageType::Delegate, &diagnostics, "sess-99"),
             parent_hash: "".to_string(),
             message_type: MessageType::Delegate,
             from: "coordinator".to_string(),

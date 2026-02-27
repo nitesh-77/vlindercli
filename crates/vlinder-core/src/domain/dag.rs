@@ -82,16 +82,18 @@ pub struct DagNode {
 
 /// Compute the content-addressed hash for a DAG node.
 ///
-/// `sha256(payload || parent_hash || message_type || diagnostics)` — the parent hash
-/// makes this a Merkle chain: changing any ancestor invalidates all descendants.
-/// The message type is included so identical payloads with different types
-/// produce different hashes. Diagnostics are included for integrity (ADR 071).
-pub fn hash_dag_node(payload: &[u8], parent_hash: &str, message_type: &MessageType, diagnostics: &[u8]) -> String {
+/// `sha256(payload || parent_hash || message_type || diagnostics || session_id)`
+/// — the parent hash makes this a Merkle chain: changing any ancestor
+/// invalidates all descendants. The session_id ensures that identical
+/// messages in different sessions produce different hashes (prevents
+/// INSERT OR IGNORE from silently dropping cross-session duplicates).
+pub fn hash_dag_node(payload: &[u8], parent_hash: &str, message_type: &MessageType, diagnostics: &[u8], session_id: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(payload);
     hasher.update(parent_hash.as_bytes());
     hasher.update(message_type.as_str().as_bytes());
     hasher.update(diagnostics);
+    hasher.update(session_id.as_bytes());
     format!("{:x}", hasher.finalize())
 }
 
@@ -404,43 +406,50 @@ mod tests {
 
     #[test]
     fn hash_is_valid_sha256() {
-        let hash = hash_dag_node(b"hello", "", &MessageType::Invoke, b"");
+        let hash = hash_dag_node(b"hello", "", &MessageType::Invoke, b"", "sess-1");
         assert_eq!(hash.len(), 64);
         assert!(hash.chars().all(|c| c.is_ascii_hexdigit()));
     }
 
     #[test]
     fn hash_changes_with_parent() {
-        let h1 = hash_dag_node(b"payload", "", &MessageType::Invoke, b"");
-        let h2 = hash_dag_node(b"payload", "parent-abc", &MessageType::Invoke, b"");
+        let h1 = hash_dag_node(b"payload", "", &MessageType::Invoke, b"", "sess-1");
+        let h2 = hash_dag_node(b"payload", "parent-abc", &MessageType::Invoke, b"", "sess-1");
         assert_ne!(h1, h2, "Merkle property: different parent → different hash");
     }
 
     #[test]
     fn hash_changes_with_payload() {
-        let h1 = hash_dag_node(b"payload-a", "", &MessageType::Invoke, b"");
-        let h2 = hash_dag_node(b"payload-b", "", &MessageType::Invoke, b"");
+        let h1 = hash_dag_node(b"payload-a", "", &MessageType::Invoke, b"", "sess-1");
+        let h2 = hash_dag_node(b"payload-b", "", &MessageType::Invoke, b"", "sess-1");
         assert_ne!(h1, h2);
     }
 
     #[test]
     fn hash_changes_with_message_type() {
-        let h1 = hash_dag_node(b"payload", "", &MessageType::Invoke, b"");
-        let h2 = hash_dag_node(b"payload", "", &MessageType::Complete, b"");
+        let h1 = hash_dag_node(b"payload", "", &MessageType::Invoke, b"", "sess-1");
+        let h2 = hash_dag_node(b"payload", "", &MessageType::Complete, b"", "sess-1");
         assert_ne!(h1, h2, "same payload, different type → different hash");
     }
 
     #[test]
     fn hash_changes_with_diagnostics() {
-        let h1 = hash_dag_node(b"payload", "", &MessageType::Invoke, b"");
-        let h2 = hash_dag_node(b"payload", "", &MessageType::Invoke, b"{\"duration_ms\":100}");
+        let h1 = hash_dag_node(b"payload", "", &MessageType::Invoke, b"", "sess-1");
+        let h2 = hash_dag_node(b"payload", "", &MessageType::Invoke, b"{\"duration_ms\":100}", "sess-1");
         assert_ne!(h1, h2, "different diagnostics → different hash");
     }
 
     #[test]
+    fn hash_changes_with_session_id() {
+        let h1 = hash_dag_node(b"payload", "", &MessageType::Invoke, b"", "sess-1");
+        let h2 = hash_dag_node(b"payload", "", &MessageType::Invoke, b"", "sess-2");
+        assert_ne!(h1, h2, "same payload in different sessions → different hash");
+    }
+
+    #[test]
     fn hash_is_deterministic() {
-        let h1 = hash_dag_node(b"same", "p", &MessageType::Request, b"diag");
-        let h2 = hash_dag_node(b"same", "p", &MessageType::Request, b"diag");
+        let h1 = hash_dag_node(b"same", "p", &MessageType::Request, b"diag", "sess-1");
+        let h2 = hash_dag_node(b"same", "p", &MessageType::Request, b"diag", "sess-1");
         assert_eq!(h1, h2);
     }
 }
