@@ -653,6 +653,78 @@ fn routing_key_to_subject(key: &RoutingKey) -> String {
     }
 }
 
+/// Parse a NATS subject back into a `RoutingKey`.
+///
+/// Inverse of `routing_key_to_subject`. Returns `None` for subjects
+/// that don't match the `vlinder.<timeline>.<submission>.<type>...` format.
+fn subject_to_routing_key(subject: &str) -> Option<RoutingKey> {
+    let s: Vec<&str> = subject.split('.').collect();
+    if s.len() < 4 || s[0] != "vlinder" {
+        return None;
+    }
+
+    let timeline = TimelineId::from(s[1].to_string());
+    let submission = SubmissionId::from(s[2].to_string());
+
+    match s[3] {
+        // vlinder.{timeline}.{submission}.invoke.{harness}.{runtime}.{agent}
+        "invoke" if s.len() == 7 => Some(RoutingKey::Invoke {
+            timeline,
+            submission,
+            harness: HarnessType::from_str(s[4])?,
+            runtime: RuntimeType::from_str(s[5])?,
+            agent: AgentId::new(s[6]),
+        }),
+        // vlinder.{timeline}.{submission}.req.{agent}.{svc}.{backend}.{op}.{seq}
+        "req" if s.len() == 9 => Some(RoutingKey::Request {
+            timeline,
+            submission,
+            agent: AgentId::new(s[4]),
+            service: ServiceBackend::from_parts(
+                ServiceType::from_str(s[5])?,
+                s[6],
+            )?,
+            operation: Operation::from_str(s[7])?,
+            sequence: Sequence::from(s[8].parse::<u32>().ok()?),
+        }),
+        // vlinder.{timeline}.{submission}.res.{svc}.{backend}.{agent}.{op}.{seq}
+        "res" if s.len() == 9 => Some(RoutingKey::Response {
+            timeline,
+            submission,
+            service: ServiceBackend::from_parts(
+                ServiceType::from_str(s[4])?,
+                s[5],
+            )?,
+            agent: AgentId::new(s[6]),
+            operation: Operation::from_str(s[7])?,
+            sequence: Sequence::from(s[8].parse::<u32>().ok()?),
+        }),
+        // vlinder.{timeline}.{submission}.complete.{agent}.{harness}
+        "complete" if s.len() == 6 => Some(RoutingKey::Complete {
+            timeline,
+            submission,
+            agent: AgentId::new(s[4]),
+            harness: HarnessType::from_str(s[5])?,
+        }),
+        // vlinder.{timeline}.{submission}.delegate.{caller}.{target}
+        "delegate" if s.len() == 6 => Some(RoutingKey::Delegate {
+            timeline,
+            submission,
+            caller: AgentId::new(s[4]),
+            target: AgentId::new(s[5]),
+        }),
+        // vlinder.{timeline}.{submission}.delegate-reply.{caller}.{target}.{nonce}
+        "delegate-reply" if s.len() == 7 => Some(RoutingKey::DelegateReply {
+            timeline,
+            submission,
+            caller: AgentId::new(s[4]),
+            target: AgentId::new(s[5]),
+            nonce: Nonce::new(s[6]),
+        }),
+        _ => None,
+    }
+}
+
 /// Derive a stable consumer name from a filter pattern.
 ///
 /// NATS consumer names must be alphanumeric + dash/underscore.
@@ -958,6 +1030,79 @@ mod tests {
         let delegate = RoutingKey::Delegate { timeline: timeline(), submission: submission(), caller: agent(), target: agent_alt() };
         let reply = RoutingKey::DelegateReply { timeline: timeline(), submission: submission(), caller: agent(), target: agent_alt(), nonce: Nonce::new("n") };
         assert_injective(&delegate, &reply);
+    }
+
+    // ========================================================================
+    // Round-trip: routing_key_to_subject → subject_to_routing_key
+    // ========================================================================
+
+    fn assert_round_trips(key: &RoutingKey) {
+        let subject = routing_key_to_subject(key);
+        let recovered = subject_to_routing_key(&subject)
+            .unwrap_or_else(|| panic!("failed to parse subject: {}", subject));
+        assert_eq!(&recovered, key, "round-trip failed for subject: {}", subject);
+    }
+
+    #[test]
+    fn invoke_round_trips() {
+        assert_round_trips(&RoutingKey::Invoke {
+            timeline: timeline(), submission: submission(),
+            harness: HarnessType::Cli, runtime: RuntimeType::Container, agent: agent(),
+        });
+    }
+
+    #[test]
+    fn request_round_trips() {
+        assert_round_trips(&RoutingKey::Request {
+            timeline: timeline(), submission: submission(), agent: agent(),
+            service: ServiceBackend::Kv(ObjectStorageType::Sqlite),
+            operation: Operation::Get, sequence: Sequence::first(),
+        });
+    }
+
+    #[test]
+    fn response_round_trips() {
+        assert_round_trips(&RoutingKey::Response {
+            timeline: timeline(), submission: submission(),
+            service: ServiceBackend::Infer(InferenceBackendType::Ollama),
+            agent: agent(), operation: Operation::Run, sequence: Sequence::from(3),
+        });
+    }
+
+    #[test]
+    fn complete_round_trips() {
+        assert_round_trips(&RoutingKey::Complete {
+            timeline: timeline(), submission: submission(),
+            agent: agent(), harness: HarnessType::Grpc,
+        });
+    }
+
+    #[test]
+    fn delegate_round_trips() {
+        assert_round_trips(&RoutingKey::Delegate {
+            timeline: timeline(), submission: submission(),
+            caller: agent(), target: agent_alt(),
+        });
+    }
+
+    #[test]
+    fn delegate_reply_round_trips() {
+        assert_round_trips(&RoutingKey::DelegateReply {
+            timeline: timeline(), submission: submission(),
+            caller: agent(), target: agent_alt(), nonce: Nonce::new("abc123"),
+        });
+    }
+
+    #[test]
+    fn subject_to_routing_key_rejects_garbage() {
+        assert!(subject_to_routing_key("not-a-subject").is_none());
+        assert!(subject_to_routing_key("").is_none());
+        assert!(subject_to_routing_key("vlinder.1.sub.unknown.stuff").is_none());
+    }
+
+    #[test]
+    fn subject_to_routing_key_rejects_too_few_segments() {
+        assert!(subject_to_routing_key("vlinder.1.sub").is_none());
     }
 }
 
