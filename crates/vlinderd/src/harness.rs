@@ -189,7 +189,7 @@ impl Harness for CoreHarness {
 mod tests {
     use super::*;
     use crate::registry::InMemoryRegistry;
-    use crate::queue::InMemoryQueue;
+    use vlinder_core::queue::InMemoryQueue;
     use crate::domain::InMemorySecretStore;
     use crate::domain::{RuntimeType, SecretStore};
     use std::path::PathBuf;

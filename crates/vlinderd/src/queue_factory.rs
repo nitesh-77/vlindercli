@@ -8,7 +8,7 @@ use std::sync::Arc;
 use crate::config::{Config, QueueBackend, StateBackend};
 use crate::domain::{DagStore, MessageQueue, QueueError};
 use vlinder_nats::NatsQueue;
-use crate::queue::RecordingQueue;
+use vlinder_core::queue::RecordingQueue;
 
 /// Create a queue from configuration.
 ///
@@ -22,7 +22,7 @@ pub fn from_config(config: &Config) -> Result<Arc<dyn MessageQueue + Send + Sync
         }
         #[cfg(any(test, feature = "test-support"))]
         QueueBackend::Memory => {
-            Ok(Arc::new(crate::queue::InMemoryQueue::new()))
+            Ok(Arc::new(vlinder_core::queue::InMemoryQueue::new()))
         }
     }
 }

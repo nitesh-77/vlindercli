@@ -1,5 +1,4 @@
 pub use vlinder_core::domain;
-pub use vlinder_core::queue;
 
 pub mod config;
 pub mod harness;
