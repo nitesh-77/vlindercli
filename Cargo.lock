@@ -3223,8 +3223,8 @@ dependencies = [
  "ureq 3.2.0",
  "vlinder-catalog",
  "vlinder-core",
+ "vlinder-harness",
  "vlinder-nats",
- "vlinder-proto",
  "vlinder-sql-registry",
  "vlinder-sql-state",
 ]
@@ -3268,6 +3268,18 @@ dependencies = [
  "tempfile",
  "toml",
  "tracing",
+ "vlinder-core",
+]
+
+[[package]]
+name = "vlinder-harness"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "prost",
+ "tokio",
+ "tonic",
+ "tonic-build",
  "vlinder-core",
 ]
 
@@ -3326,18 +3338,6 @@ dependencies = [
  "vlinder-ollama",
  "vlinder-sqlite-kv",
  "vlinder-sqlite-vec",
-]
-
-[[package]]
-name = "vlinder-proto"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "prost",
- "tokio",
- "tonic",
- "tonic-build",
- "vlinder-core",
 ]
 
 [[package]]
@@ -3454,11 +3454,11 @@ dependencies = [
  "vlinder-catalog",
  "vlinder-core",
  "vlinder-git-dag",
+ "vlinder-harness",
  "vlinder-infer-openrouter",
  "vlinder-nats",
  "vlinder-ollama",
  "vlinder-podman-runtime",
- "vlinder-proto",
  "vlinder-sql-registry",
  "vlinder-sql-state",
  "vlinder-sqlite-kv",

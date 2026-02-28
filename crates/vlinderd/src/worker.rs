@@ -179,7 +179,7 @@ fn run_secret_worker(config: &Config, shutdown: &AtomicBool) {
 fn run_harness_worker(config: &Config, shutdown: &AtomicBool) {
     use tonic::transport::Server;
     use vlinder_core::domain::{CoreHarness, HarnessType};
-    use vlinder_proto::harness_service::HarnessServiceServer;
+    use vlinder_harness::harness_service::HarnessServiceServer;
     use vlinder_sql_registry::registry_service::GrpcRegistryClient;
 
     let queue = crate::queue_factory::recording_from_config(config).expect("Failed to create queue");

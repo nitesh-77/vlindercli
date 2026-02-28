@@ -46,7 +46,7 @@ vlinder-sqlite-kv      SQLite object storage worker
 vlinder-sqlite-vec     SQLite-vec vector storage worker
 vlinder-podman-runtime Container runtime (Podman)
 vlinder-catalog        Catalog gRPC service
-vlinder-proto          gRPC services (harness, secret, catalog protos)
+vlinder-harness        Harness gRPC service (server + client)
 vlinder-sidecar        Agent sidecar container
 vlinder                CLI binary (vlinder)
 vlinderd               Daemon binary (vlinderd) + config + factories + supervisor
@@ -443,14 +443,12 @@ Tick-loop orchestrator: polls invoke/delegate queues, dispatches to containers v
 |------|------|-------------|
 | `CatalogServiceServer` | gRPC server | Wraps `CompositeCatalog`, serves gRPC |
 
-## Other gRPC Services (`vlinder-proto`)
+## Harness gRPC Service (`vlinder-harness`)
 
 | Type | Role | Description |
 |------|------|-------------|
 | `HarnessServiceServer` | gRPC server | Wraps a `Harness`, serves gRPC |
 | `GrpcHarnessClient` | gRPC client | Implements `Harness` trait via gRPC |
-| `SecretServiceServer` | gRPC server | Wraps a `SecretStore`, serves gRPC |
-| `GrpcSecretClient` | gRPC client | Implements `SecretStore` trait via gRPC |
 
 ---
 

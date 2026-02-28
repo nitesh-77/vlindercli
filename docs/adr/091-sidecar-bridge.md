@@ -64,7 +64,7 @@ connects to NATS and the gRPC registry/state services on the host via
 
 ### Sidecar binary crate
 
-`crates/vlinder-sidecar/` — depends on vlinder-core + vlinder-proto,
+`crates/vlinder-sidecar/` — depends on vlinder-core + vlinder-nats,
 does NOT depend on vlinderd. Keeps the binary lean.
 
 Configuration via environment variables (12-factor):

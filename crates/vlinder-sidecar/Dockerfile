@@ -15,7 +15,7 @@ WORKDIR /build
 # Copy workspace manifest and all crate manifests first (layer caching)
 COPY Cargo.toml ./
 COPY crates/vlinder-core/Cargo.toml crates/vlinder-core/
-COPY crates/vlinder-proto/Cargo.toml crates/vlinder-proto/
+COPY crates/vlinder-harness/Cargo.toml crates/vlinder-harness/
 COPY crates/vlinder-ollama/Cargo.toml crates/vlinder-ollama/
 COPY crates/vlinder-infer-openrouter/Cargo.toml crates/vlinder-infer-openrouter/
 COPY crates/vlinder-sqlite-vec/Cargo.toml crates/vlinder-sqlite-vec/
@@ -36,7 +36,7 @@ RUN mkdir -p crates/vlinder-core/src && echo "" > crates/vlinder-core/src/lib.rs
     mkdir -p crates/vlinder-infer-openrouter/src && echo "" > crates/vlinder-infer-openrouter/src/lib.rs && \
     mkdir -p crates/vlinder-sqlite-vec/src && echo "" > crates/vlinder-sqlite-vec/src/lib.rs && \
     mkdir -p crates/vlinder-sqlite-kv/src && echo "" > crates/vlinder-sqlite-kv/src/lib.rs && \
-    mkdir -p crates/vlinder-proto/src && echo "" > crates/vlinder-proto/src/lib.rs && \
+    mkdir -p crates/vlinder-harness/src && echo "" > crates/vlinder-harness/src/lib.rs && \
     mkdir -p crates/vlinder-nats/src && echo "" > crates/vlinder-nats/src/lib.rs && \
     mkdir -p crates/vlinder-podman-runtime/src && echo "" > crates/vlinder-podman-runtime/src/lib.rs && \
     mkdir -p crates/vlinder-catalog/src && echo "" > crates/vlinder-catalog/src/lib.rs && \
@@ -48,8 +48,8 @@ RUN mkdir -p crates/vlinder-core/src && echo "" > crates/vlinder-core/src/lib.rs
     mkdir -p crates/vlinder/src && echo "fn main() {}" > crates/vlinder/src/main.rs
 
 # Proto build dependencies (proto files needed for build.rs)
-COPY crates/vlinder-proto/build.rs crates/vlinder-proto/
-COPY crates/vlinder-proto/proto crates/vlinder-proto/proto
+COPY crates/vlinder-harness/build.rs crates/vlinder-harness/
+COPY crates/vlinder-harness/proto crates/vlinder-harness/proto
 COPY crates/vlinder-catalog/build.rs crates/vlinder-catalog/
 COPY crates/vlinder-catalog/proto crates/vlinder-catalog/proto
 COPY crates/vlinder-sql-state/build.rs crates/vlinder-sql-state/
@@ -68,7 +68,7 @@ COPY crates/vlinder-ollama/src crates/vlinder-ollama/src
 COPY crates/vlinder-infer-openrouter/src crates/vlinder-infer-openrouter/src
 COPY crates/vlinder-sqlite-vec/src crates/vlinder-sqlite-vec/src
 COPY crates/vlinder-sqlite-kv/src crates/vlinder-sqlite-kv/src
-COPY crates/vlinder-proto/src crates/vlinder-proto/src
+COPY crates/vlinder-harness/src crates/vlinder-harness/src
 COPY crates/vlinder-nats/src crates/vlinder-nats/src
 COPY crates/vlinder-podman-runtime/src crates/vlinder-podman-runtime/src
 COPY crates/vlinder-catalog/src crates/vlinder-catalog/src
@@ -85,7 +85,7 @@ RUN touch crates/vlinder-core/src/lib.rs \
           crates/vlinder-sqlite-kv/src/lib.rs \
           crates/vlinder-nats/src/lib.rs \
           crates/vlinder-podman-runtime/src/lib.rs \
-          crates/vlinder-proto/src/lib.rs \
+          crates/vlinder-harness/src/lib.rs \
           crates/vlinder-catalog/src/lib.rs \
           crates/vlinder-sql-state/src/lib.rs \
           crates/vlinder-git-dag/src/lib.rs \
