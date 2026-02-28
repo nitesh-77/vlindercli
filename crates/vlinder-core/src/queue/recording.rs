@@ -143,7 +143,7 @@ impl MessageQueue for RecordingQueue {
 mod tests {
     use super::*;
     use crate::domain::{
-        AgentId, ContainerDiagnostics, DagNode, DelegateDiagnostics, HarnessType,
+        AgentId, RuntimeDiagnostics, DagNode, DelegateDiagnostics, HarnessType,
         InMemoryDagStore, InferenceBackendType, InvokeDiagnostics, MessageType, Nonce, Operation,
         RequestDiagnostics, RuntimeType, Sequence, ServiceBackend,
         ServiceDiagnostics, SessionId, SubmissionId, TimelineId,
@@ -225,7 +225,7 @@ mod tests {
             HarnessType::Cli,
             b"done".to_vec(),
             None,
-            ContainerDiagnostics::placeholder(0),
+            RuntimeDiagnostics::placeholder(0),
         )
     }
 
@@ -239,7 +239,7 @@ mod tests {
             b"delegate this".to_vec(),
             Nonce::new("test-nonce"),
             None,
-            DelegateDiagnostics { container: ContainerDiagnostics::placeholder(0) },
+            DelegateDiagnostics { runtime: RuntimeDiagnostics::placeholder(0) },
         )
     }
 

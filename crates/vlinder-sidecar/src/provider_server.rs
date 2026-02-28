@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use tiny_http::{Method, StatusCode};
 use vlinder_core::domain::{
-    AgentId, ContainerDiagnostics, DelegateDiagnostics, DelegateMessage,
+    AgentId, RuntimeDiagnostics, DelegateDiagnostics, DelegateMessage,
     HttpMethod, InvokeMessage, MessageQueue, Nonce, ObjectStorageType,
     Provider, ProviderHost, ProviderRoute, Registry, RequestDiagnostics,
     RequestMessage, RoutingKey, SequenceCounter, ServiceType,
@@ -309,7 +309,7 @@ fn handle_delegate(
         input.as_bytes().to_vec(),
         nonce.clone(),
         None,
-        DelegateDiagnostics { container: ContainerDiagnostics::placeholder(0) },
+        DelegateDiagnostics { runtime: RuntimeDiagnostics::placeholder(0) },
     );
 
     let reply_key = delegate.reply_routing_key();

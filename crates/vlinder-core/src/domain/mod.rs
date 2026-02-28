@@ -65,7 +65,7 @@ pub use message_queue::{Acknowledgement, MessageQueue, QueueError, agent_routing
 pub use routing_key::{RoutingKey, AgentId, Nonce, ServiceBackend, InferenceBackendType, EmbeddingBackendType};
 pub use diagnostics::{
     InvokeDiagnostics, RequestDiagnostics, ServiceDiagnostics, ServiceMetrics,
-    ContainerDiagnostics, ContainerRuntimeInfo, DelegateDiagnostics,
+    RuntimeDiagnostics, RuntimeInfo, DelegateDiagnostics,
 };
 
 // ============================================================================

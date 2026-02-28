@@ -6,7 +6,7 @@ use super::{PROTOCOL_VERSION, ExpectsReply};
 use super::identity::{MessageId, SubmissionId, SessionId, TimelineId, HarnessType};
 use super::super::RuntimeType;
 use super::super::routing_key::{AgentId, RoutingKey};
-use super::super::diagnostics::{InvokeDiagnostics, ContainerDiagnostics};
+use super::super::diagnostics::{InvokeDiagnostics, RuntimeDiagnostics};
 use super::complete::CompleteMessage;
 
 /// Invoke message: Harness → Runtime
@@ -82,16 +82,16 @@ impl InvokeMessage {
             self.harness,
             payload,
             state,
-            ContainerDiagnostics::placeholder(0),
+            RuntimeDiagnostics::placeholder(0),
         )
     }
 
-    /// Create a reply with state and real container diagnostics (ADR 073).
+    /// Create a reply with state and real runtime diagnostics (ADR 073).
     pub fn create_reply_with_diagnostics(
         &self,
         payload: Vec<u8>,
         state: Option<String>,
-        diagnostics: ContainerDiagnostics,
+        diagnostics: RuntimeDiagnostics,
     ) -> CompleteMessage {
         CompleteMessage::new(
             self.timeline.clone(),
@@ -118,7 +118,7 @@ impl ExpectsReply for InvokeMessage {
             self.harness,
             payload,
             None,
-            ContainerDiagnostics::placeholder(0),
+            RuntimeDiagnostics::placeholder(0),
         )
     }
 }

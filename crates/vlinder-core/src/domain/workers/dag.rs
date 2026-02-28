@@ -56,12 +56,12 @@ pub fn serialize_diagnostics(msg: &ObservableMessage) -> Vec<u8> {
 
 /// Extract stderr bytes from a Complete or Delegate message.
 ///
-/// Stderr lives on `ContainerDiagnostics` — only Complete and Delegate carry it.
+/// Stderr lives on `RuntimeDiagnostics` — only Complete and Delegate carry it.
 /// Returns empty for other message types.
 pub fn extract_typed_stderr(msg: &ObservableMessage) -> Vec<u8> {
     match msg {
         ObservableMessage::Complete(m) => m.diagnostics.stderr.clone(),
-        ObservableMessage::Delegate(m) => m.diagnostics.container.stderr.clone(),
+        ObservableMessage::Delegate(m) => m.diagnostics.runtime.stderr.clone(),
         _ => Vec::new(),
     }
 }
@@ -116,7 +116,7 @@ pub fn build_dag_node(msg: &ObservableMessage, parent_hash: &str) -> DagNode {
 mod tests {
     use super::*;
     use crate::domain::{
-        AgentId, CompleteMessage, ContainerDiagnostics, DagStore, DelegateDiagnostics,
+        AgentId, CompleteMessage, RuntimeDiagnostics, DagStore, DelegateDiagnostics,
         DelegateMessage, HarnessType, InferenceBackendType, InMemoryDagStore,
         InvokeDiagnostics, InvokeMessage, MessageType, Nonce, Operation, RequestDiagnostics,
         RequestMessage, ResponseMessage, RuntimeType, Sequence, ServiceBackend,
@@ -159,7 +159,7 @@ mod tests {
         CompleteMessage::new(
             TimelineId::main(), submission(), session(), AgentId::new("myagent"),
             HarnessType::Cli, payload.to_vec(), state,
-            ContainerDiagnostics::placeholder(0),
+            RuntimeDiagnostics::placeholder(0),
         ).into()
     }
 
@@ -168,7 +168,7 @@ mod tests {
             TimelineId::main(), submission(), session(),
             AgentId::new("coordinator"), AgentId::new("summarizer"),
             payload.to_vec(), Nonce::new("nonce-1"), None,
-            DelegateDiagnostics { container: ContainerDiagnostics::placeholder(0) },
+            DelegateDiagnostics { runtime: RuntimeDiagnostics::placeholder(0) },
         ).into()
     }
 

@@ -16,7 +16,7 @@ use futures::StreamExt;
 use tokio::runtime::Runtime;
 
 use vlinder_core::domain::{
-    AgentId, CompleteMessage, ContainerDiagnostics, DelegateMessage, DelegateDiagnostics,
+    AgentId, CompleteMessage, RuntimeDiagnostics, DelegateMessage, DelegateDiagnostics,
     HarnessType, InvokeDiagnostics, InvokeMessage, MessageId, MessageQueue, Nonce,
     Operation, QueueError, RequestDiagnostics, RequestMessage,
     ResponseMessage, RoutingKey, RuntimeType, Sequence, ServiceBackend,
@@ -469,7 +469,7 @@ impl MessageQueue for NatsQueue {
 
             let diagnostics = get_header(headers, "diagnostics").ok()
                 .and_then(|s| serde_json::from_str(&s).ok())
-                .unwrap_or_else(|| ContainerDiagnostics::placeholder(0));
+                .unwrap_or_else(|| RuntimeDiagnostics::placeholder(0));
 
             let msg = CompleteMessage {
                 id: MessageId::from(get_header(headers, "msg-id")?),
@@ -532,7 +532,7 @@ impl MessageQueue for NatsQueue {
 
             let diagnostics = get_header(headers, "diagnostics").ok()
                 .and_then(|s| serde_json::from_str(&s).ok())
-                .unwrap_or_else(|| DelegateDiagnostics { container: ContainerDiagnostics::placeholder(0) });
+                .unwrap_or_else(|| DelegateDiagnostics { runtime: RuntimeDiagnostics::placeholder(0) });
 
             let msg = DelegateMessage {
                 id: MessageId::from(get_header(headers, "msg-id")?),
@@ -594,7 +594,7 @@ impl MessageQueue for NatsQueue {
 
             let diagnostics = get_header(headers, "diagnostics").ok()
                 .and_then(|s| serde_json::from_str(&s).ok())
-                .unwrap_or_else(|| ContainerDiagnostics::placeholder(0));
+                .unwrap_or_else(|| RuntimeDiagnostics::placeholder(0));
 
             let msg = CompleteMessage {
                 id: MessageId::from(get_header(headers, "msg-id")?),
@@ -882,7 +882,7 @@ pub fn from_nats_headers(
         RoutingKey::Complete { timeline, submission, agent, harness } => {
             let diagnostics = headers.get("diagnostics")
                 .and_then(|s| serde_json::from_str(s).ok())
-                .unwrap_or_else(|| ContainerDiagnostics::placeholder(0));
+                .unwrap_or_else(|| RuntimeDiagnostics::placeholder(0));
 
             Some(ObservableMessageHeaders::Complete {
                 id, protocol_version,
@@ -894,7 +894,7 @@ pub fn from_nats_headers(
             let diagnostics = headers.get("diagnostics")
                 .and_then(|s| serde_json::from_str(s).ok())
                 .unwrap_or_else(|| DelegateDiagnostics {
-                    container: ContainerDiagnostics::placeholder(0),
+                    runtime: RuntimeDiagnostics::placeholder(0),
                 });
             let nonce = Nonce::new(headers.get("nonce")?.clone());
 
@@ -1426,7 +1426,7 @@ mod tests {
         let original = CompleteMessage::new(
             timeline(), submission(), SessionId::from("ses-test".to_string()), agent(),
             HarnessType::Grpc, b"done".to_vec(), Some("state-z".to_string()),
-            ContainerDiagnostics::placeholder(0),
+            RuntimeDiagnostics::placeholder(0),
         );
         let key = original.routing_key();
         let headers = complete_to_nats_headers(&original);
@@ -1460,7 +1460,7 @@ mod tests {
             timeline(), submission(), SessionId::from("ses-test".to_string()),
             agent(), agent_alt(), b"task-data".to_vec(), Nonce::new("nonce-42"),
             None,
-            DelegateDiagnostics { container: ContainerDiagnostics::placeholder(0) },
+            DelegateDiagnostics { runtime: RuntimeDiagnostics::placeholder(0) },
         );
         let key = original.routing_key();
         let headers = delegate_to_nats_headers(&original);

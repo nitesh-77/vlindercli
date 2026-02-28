@@ -9,8 +9,8 @@
 //! | Invoke    | InvokeDiagnostics      | Harness                  |
 //! | Request   | RequestDiagnostics     | Provider server        |
 //! | Response  | ServiceDiagnostics     | Service workers          |
-//! | Complete  | ContainerDiagnostics   | Container runtime        |
-//! | Delegate  | DelegateDiagnostics    | Container runtime        |
+//! | Complete  | RuntimeDiagnostics     | Runtime                  |
+//! | Delegate  | DelegateDiagnostics    | Runtime                  |
 
 use serde::{Deserialize, Serialize};
 
@@ -125,44 +125,47 @@ impl ServiceDiagnostics {
 }
 
 // ============================================================================
-// ContainerDiagnostics — Container runtime (Complete)
+// RuntimeDiagnostics — Runtime (Complete)
 // ============================================================================
 
-/// Diagnostics emitted by the container runtime on task completion.
+/// Diagnostics emitted by the runtime on task completion.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct ContainerDiagnostics {
+pub struct RuntimeDiagnostics {
     /// Agent's stderr stream, extracted from the HTTP response.
     /// Stored as a separate binary file in the git tree, not in diagnostics.toml.
     #[serde(skip)]
     pub stderr: Vec<u8>,
-    /// Container runtime metadata.
-    pub runtime: ContainerRuntimeInfo,
+    /// Runtime-specific metadata (container, lambda, etc.).
+    pub runtime: RuntimeInfo,
     /// Wall-clock execution time in milliseconds.
     pub duration_ms: u64,
 }
 
-/// Container runtime metadata — populated entirely by the platform.
+/// Runtime-specific metadata — populated entirely by the platform.
+///
+/// Each variant carries the fields meaningful for that runtime type.
+/// Mirrors the `ServiceMetrics` pattern (tagged enum per backend).
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct ContainerRuntimeInfo {
-    /// Podman engine version (e.g., "5.3.1").
-    pub engine_version: String,
-    /// OCI image reference (e.g., "localhost/echo-agent:latest").
-    pub image_ref: Option<ImageRef>,
-    /// Image digest (e.g., "sha256:a80c4f17..."), if resolved.
-    pub image_digest: Option<ImageDigest>,
-    /// Container ID for this execution.
-    pub container_id: ContainerId,
+#[serde(tag = "type")]
+pub enum RuntimeInfo {
+    Container {
+        /// Podman engine version (e.g., "5.3.1").
+        engine_version: String,
+        /// OCI image reference (e.g., "localhost/echo-agent:latest").
+        image_ref: Option<ImageRef>,
+        /// Image digest (e.g., "sha256:a80c4f17..."), if resolved.
+        image_digest: Option<ImageDigest>,
+        /// Container ID for this execution.
+        container_id: ContainerId,
+    },
 }
 
-impl ContainerDiagnostics {
-    /// Placeholder diagnostics for when real container metadata is not yet available.
-    ///
-    /// Stderr and Podman metadata are deferred — this provides compile-time
-    /// completeness while the container integration catches up.
+impl RuntimeDiagnostics {
+    /// Placeholder diagnostics for when real runtime metadata is not yet available.
     pub fn placeholder(duration_ms: u64) -> Self {
         Self {
             stderr: Vec::new(),
-            runtime: ContainerRuntimeInfo {
+            runtime: RuntimeInfo::Container {
                 engine_version: "unknown".to_string(),
                 image_ref: None,
                 image_digest: None,
@@ -174,14 +177,14 @@ impl ContainerDiagnostics {
 }
 
 // ============================================================================
-// DelegateDiagnostics — Container runtime (Delegate)
+// DelegateDiagnostics — Runtime (Delegate)
 // ============================================================================
 
 /// Diagnostics emitted when an agent delegates to another agent.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct DelegateDiagnostics {
-    /// Delegation involves container execution — same diagnostics.
-    pub container: ContainerDiagnostics,
+    /// Delegation involves runtime execution — same diagnostics.
+    pub runtime: RuntimeDiagnostics,
 }
 
 #[cfg(test)]
@@ -306,9 +309,9 @@ mod tests {
     fn container_diagnostics_json_round_trip() {
         // stderr is #[serde(skip)] — stored as a separate binary blob (ADR 078).
         // Round-trip only preserves the non-skipped fields.
-        let diag = ContainerDiagnostics {
+        let diag = RuntimeDiagnostics {
             stderr: b"INFO: loaded model".to_vec(),
-            runtime: ContainerRuntimeInfo {
+            runtime: RuntimeInfo::Container {
                 engine_version: "5.3.1".to_string(),
                 image_ref: Some(ImageRef::parse("localhost/echo-agent:latest").unwrap()),
                 image_digest: Some(ImageDigest::parse("sha256:abc123").unwrap()),
@@ -318,7 +321,7 @@ mod tests {
         };
         let json = serde_json::to_string(&diag).unwrap();
         assert!(!json.contains("stderr"), "stderr should not appear in JSON");
-        let back: ContainerDiagnostics = serde_json::from_str(&json).unwrap();
+        let back: RuntimeDiagnostics = serde_json::from_str(&json).unwrap();
         assert!(back.stderr.is_empty(), "stderr defaults to empty on deserialize");
         assert_eq!(back.runtime, diag.runtime);
         assert_eq!(back.duration_ms, diag.duration_ms);
@@ -327,9 +330,9 @@ mod tests {
     #[test]
     fn container_diagnostics_toml_round_trip() {
         // stderr is #[serde(skip)] — stored as a separate binary blob (ADR 078).
-        let diag = ContainerDiagnostics {
+        let diag = RuntimeDiagnostics {
             stderr: b"WARN: truncated".to_vec(),
-            runtime: ContainerRuntimeInfo {
+            runtime: RuntimeInfo::Container {
                 engine_version: "5.3.1".to_string(),
                 image_ref: Some(ImageRef::parse("localhost/support-agent:latest").unwrap()),
                 image_digest: Some(ImageDigest::parse("sha256:a80c4f17").unwrap()),
@@ -339,24 +342,28 @@ mod tests {
         };
         let toml_str = toml::to_string_pretty(&diag).unwrap();
         assert!(!toml_str.contains("stderr"), "stderr should not appear in TOML");
-        let back: ContainerDiagnostics = toml::from_str(&toml_str).unwrap();
+        let back: RuntimeDiagnostics = toml::from_str(&toml_str).unwrap();
         assert!(back.stderr.is_empty(), "stderr defaults to empty on deserialize");
         assert_eq!(back.runtime, diag.runtime);
         assert_eq!(back.duration_ms, diag.duration_ms);
     }
 
     #[test]
-    fn container_diagnostics_placeholder() {
-        let diag = ContainerDiagnostics::placeholder(100);
+    fn runtime_diagnostics_placeholder() {
+        let diag = RuntimeDiagnostics::placeholder(100);
         assert!(diag.stderr.is_empty());
-        assert_eq!(diag.runtime.engine_version, "unknown");
         assert_eq!(diag.duration_ms, 100);
+        match &diag.runtime {
+            RuntimeInfo::Container { engine_version, .. } => {
+                assert_eq!(engine_version, "unknown");
+            }
+        }
     }
 
     #[test]
     fn delegate_diagnostics_json_round_trip() {
         let diag = DelegateDiagnostics {
-            container: ContainerDiagnostics::placeholder(50),
+            runtime: RuntimeDiagnostics::placeholder(50),
         };
         let json = serde_json::to_string(&diag).unwrap();
         let back: DelegateDiagnostics = serde_json::from_str(&json).unwrap();
@@ -366,7 +373,7 @@ mod tests {
     #[test]
     fn delegate_diagnostics_toml_round_trip() {
         let diag = DelegateDiagnostics {
-            container: ContainerDiagnostics::placeholder(50),
+            runtime: RuntimeDiagnostics::placeholder(50),
         };
         let toml_str = toml::to_string_pretty(&diag).unwrap();
         let back: DelegateDiagnostics = toml::from_str(&toml_str).unwrap();

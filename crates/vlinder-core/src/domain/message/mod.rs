@@ -49,7 +49,7 @@ mod tests {
     use super::super::routing_key::{AgentId, Nonce, RoutingKey, ServiceBackend, InferenceBackendType};
     use super::super::storage::ObjectStorageType;
     use super::super::diagnostics::{
-        InvokeDiagnostics, RequestDiagnostics, ContainerDiagnostics, DelegateDiagnostics,
+        InvokeDiagnostics, RequestDiagnostics, RuntimeDiagnostics, DelegateDiagnostics,
     };
     use super::super::operation::Operation;
 
@@ -139,7 +139,7 @@ mod tests {
         let agent_id = test_agent_id();
         let msg = CompleteMessage::new(
             TimelineId::main(), submission.clone(), session.clone(), agent_id.clone(),
-            HarnessType::Cli, b"result".to_vec(), None, ContainerDiagnostics::placeholder(0),
+            HarnessType::Cli, b"result".to_vec(), None, RuntimeDiagnostics::placeholder(0),
         );
 
         assert_eq!(msg.submission, submission);
@@ -294,7 +294,7 @@ mod tests {
     fn complete_routing_key() {
         let msg = CompleteMessage::new(
             TimelineId::main(), test_submission(), SessionId::new(), test_agent_id(),
-            HarnessType::Web, b"done".to_vec(), None, ContainerDiagnostics::placeholder(0),
+            HarnessType::Web, b"done".to_vec(), None, RuntimeDiagnostics::placeholder(0),
         );
 
         let key = msg.routing_key();
@@ -310,7 +310,7 @@ mod tests {
             TimelineId::main(), test_submission(), SessionId::new(),
             AgentId::new("coordinator"), AgentId::new("summarizer"),
             b"task".to_vec(), Nonce::new("test-nonce"), None,
-            DelegateDiagnostics { container: ContainerDiagnostics::placeholder(0) },
+            DelegateDiagnostics { runtime: RuntimeDiagnostics::placeholder(0) },
         );
 
         let key = msg.routing_key();
@@ -326,7 +326,7 @@ mod tests {
             TimelineId::main(), test_submission(), SessionId::new(),
             AgentId::new("coordinator"), AgentId::new("summarizer"),
             b"task".to_vec(), Nonce::new("abc123"), None,
-            DelegateDiagnostics { container: ContainerDiagnostics::placeholder(0) },
+            DelegateDiagnostics { runtime: RuntimeDiagnostics::placeholder(0) },
         );
 
         let reply_key = msg.reply_routing_key();
@@ -346,7 +346,7 @@ mod tests {
             TimelineId::main(), submission.clone(), session.clone(),
             AgentId::new("coordinator"), AgentId::new("summarizer"),
             b"summarize this".to_vec(), nonce.clone(), None,
-            DelegateDiagnostics { container: ContainerDiagnostics::placeholder(0) },
+            DelegateDiagnostics { runtime: RuntimeDiagnostics::placeholder(0) },
         );
 
         assert_eq!(msg.submission, submission);
@@ -364,7 +364,7 @@ mod tests {
             TimelineId::main(), submission.clone(), SessionId::new(),
             AgentId::new("coordinator"), AgentId::new("summarizer"),
             b"test".to_vec(), Nonce::generate(), None,
-            DelegateDiagnostics { container: ContainerDiagnostics::placeholder(0) },
+            DelegateDiagnostics { runtime: RuntimeDiagnostics::placeholder(0) },
         );
         let id = delegate.id.clone();
 

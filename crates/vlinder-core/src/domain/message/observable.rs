@@ -16,7 +16,7 @@ use super::super::routing_key::{AgentId, Nonce, ServiceBackend};
 use super::super::operation::Operation;
 use super::super::diagnostics::{
     InvokeDiagnostics, RequestDiagnostics, ServiceDiagnostics,
-    ContainerDiagnostics, DelegateDiagnostics,
+    RuntimeDiagnostics, DelegateDiagnostics,
 };
 
 /// Unified message type wrapping all typed messages.
@@ -91,7 +91,7 @@ pub enum ObservableMessageHeaders {
         agent_id: AgentId,
         harness: HarnessType,
         state: Option<String>,
-        diagnostics: ContainerDiagnostics,
+        diagnostics: RuntimeDiagnostics,
     },
     Delegate {
         id: MessageId,

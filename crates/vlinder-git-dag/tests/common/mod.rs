@@ -10,7 +10,7 @@ use chrono::{DateTime, Utc};
 
 use vlinder_git_dag::GitDagWorker;
 use vlinder_core::domain::{
-    CompleteMessage, ContainerDiagnostics, HarnessType, InvokeDiagnostics, InvokeMessage,
+    CompleteMessage, RuntimeDiagnostics, HarnessType, InvokeDiagnostics, InvokeMessage,
     AgentId, ObservableMessage, RuntimeType, SessionId, SubmissionId, TimelineId,
 };
 
@@ -125,7 +125,7 @@ pub fn make_complete(
         HarnessType::Cli,
         payload.to_vec(),
         state,
-        ContainerDiagnostics::placeholder(100),
+        RuntimeDiagnostics::placeholder(100),
     );
     let created_at = DateTime::from_timestamp(epoch_secs, 0).unwrap();
     (ObservableMessage::Complete(msg), created_at)

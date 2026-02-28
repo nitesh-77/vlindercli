@@ -175,8 +175,8 @@ impl GitDagWorker {
                     self.insert_field(&mut tb, "state", state)?;
                 }
                 self.insert_diagnostics_toml(&mut tb, &m.diagnostics)?;
-                if !m.diagnostics.container.stderr.is_empty() {
-                    let oid = self.write_blob(&m.diagnostics.container.stderr)?;
+                if !m.diagnostics.runtime.stderr.is_empty() {
+                    let oid = self.write_blob(&m.diagnostics.runtime.stderr)?;
                     tb.insert("stderr", oid, FileMode::Blob.into())
                         .map_err(|e| format!("insert stderr failed: {}", e))?;
                 }
@@ -468,7 +468,7 @@ mod tests {
         AgentId, InvokeMessage, RequestMessage, ResponseMessage, CompleteMessage, DelegateMessage,
         ObservableMessage, HarnessType, TimelineId, SubmissionId, SessionId, Sequence, Nonce,
         InvokeDiagnostics, RequestDiagnostics, ServiceDiagnostics, ServiceMetrics,
-        ContainerDiagnostics, ContainerRuntimeInfo, DelegateDiagnostics,
+        RuntimeDiagnostics, RuntimeInfo, DelegateDiagnostics,
         ContainerId, InferenceBackendType, Operation, RuntimeType, ServiceBackend,
         ServiceType, Agent, SecretStore, InMemorySecretStore, InMemoryRegistry,
     };
@@ -563,7 +563,7 @@ mod tests {
             HarnessType::Cli,
             payload.to_vec(),
             None,
-            ContainerDiagnostics::placeholder(100),
+            RuntimeDiagnostics::placeholder(100),
         );
         let created_at = DateTime::from_timestamp(epoch_secs, 0).unwrap();
         (ObservableMessage::Complete(msg), created_at)
@@ -579,7 +579,7 @@ mod tests {
             payload.to_vec(),
             Nonce::new("nonce-1"),
             None,
-            DelegateDiagnostics { container: ContainerDiagnostics::placeholder(50) },
+            DelegateDiagnostics { runtime: RuntimeDiagnostics::placeholder(50) },
         );
         let created_at = DateTime::from_timestamp(epoch_secs, 0).unwrap();
         (ObservableMessage::Delegate(msg), created_at)
@@ -702,7 +702,7 @@ mod tests {
             HarnessType::Cli,
             b"answer".to_vec(),
             Some("state-abc123".to_string()),
-            ContainerDiagnostics::placeholder(100),
+            RuntimeDiagnostics::placeholder(100),
         );
         let ts2 = DateTime::from_timestamp(1001, 0).unwrap();
         worker.on_observable_message(&ObservableMessage::Complete(complete), ts2);
@@ -827,9 +827,9 @@ mod tests {
             HarnessType::Cli,
             b"done".to_vec(),
             None,
-            ContainerDiagnostics {
+            RuntimeDiagnostics {
                 stderr: b"WARN: something".to_vec(),
-                runtime: ContainerRuntimeInfo {
+                runtime: RuntimeInfo::Container {
                     engine_version: "5.3.1".to_string(),
                     image_ref: None,
                     image_digest: None,

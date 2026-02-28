@@ -5,7 +5,7 @@ use serde::Serialize;
 use super::PROTOCOL_VERSION;
 use super::identity::{MessageId, SubmissionId, SessionId, TimelineId, HarnessType};
 use super::super::routing_key::{AgentId, RoutingKey};
-use super::super::diagnostics::ContainerDiagnostics;
+use super::super::diagnostics::RuntimeDiagnostics;
 
 /// Complete message: Runtime → Harness
 ///
@@ -24,9 +24,9 @@ pub struct CompleteMessage {
     /// Final state hash after this invocation (ADR 055).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub state: Option<String>,
-    /// Diagnostics from the container runtime (ADR 071).
+    /// Diagnostics from the runtime (ADR 071).
     #[serde(skip)]
-    pub diagnostics: ContainerDiagnostics,
+    pub diagnostics: RuntimeDiagnostics,
 }
 
 impl CompleteMessage {
@@ -38,7 +38,7 @@ impl CompleteMessage {
         harness: HarnessType,
         payload: Vec<u8>,
         state: Option<String>,
-        diagnostics: ContainerDiagnostics,
+        diagnostics: RuntimeDiagnostics,
     ) -> Self {
         Self {
             id: MessageId::new(),

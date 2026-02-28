@@ -7,7 +7,7 @@ use crate::domain::{
 };
 #[cfg(test)]
 use crate::domain::{
-    ContainerDiagnostics, DelegateDiagnostics, InvokeDiagnostics, RequestDiagnostics,
+    RuntimeDiagnostics, DelegateDiagnostics, InvokeDiagnostics, RequestDiagnostics,
 };
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
@@ -380,7 +380,7 @@ mod tests {
             b"payload".to_vec(),
             nonce.clone(),
             None,
-            DelegateDiagnostics { container: ContainerDiagnostics::placeholder(0) },
+            DelegateDiagnostics { runtime: RuntimeDiagnostics::placeholder(0) },
         );
         let original_id = delegate.id.clone();
 
@@ -410,7 +410,7 @@ mod tests {
             b"payload".to_vec(),
             Nonce::generate(),
             None,
-            DelegateDiagnostics { container: ContainerDiagnostics::placeholder(0) },
+            DelegateDiagnostics { runtime: RuntimeDiagnostics::placeholder(0) },
         );
 
         queue.send_delegate(delegate).unwrap();
@@ -440,7 +440,7 @@ mod tests {
             HarnessType::Cli,
             b"result".to_vec(),
             None,
-            ContainerDiagnostics::placeholder(0),
+            RuntimeDiagnostics::placeholder(0),
         );
 
         queue.send_delegate_reply(complete, &reply_key).unwrap();
@@ -477,7 +477,7 @@ mod tests {
             HarnessType::Cli,
             b"result".to_vec(),
             None,
-            ContainerDiagnostics::placeholder(0),
+            RuntimeDiagnostics::placeholder(0),
         );
 
         queue.send_delegate_reply(complete, &reply_key_a).unwrap();

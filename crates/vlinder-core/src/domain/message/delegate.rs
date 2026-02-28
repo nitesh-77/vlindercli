@@ -27,7 +27,7 @@ pub struct DelegateMessage {
     /// Caller's state hash at the time of delegation (ADR 055).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub state: Option<String>,
-    /// Diagnostics from the container runtime (ADR 071).
+    /// Diagnostics from the runtime (ADR 071).
     #[serde(skip)]
     pub diagnostics: DelegateDiagnostics,
 }

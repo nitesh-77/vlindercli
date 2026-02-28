@@ -83,7 +83,7 @@ mod tests {
 
     #[test]
     fn toml_round_trip() {
-        // ContainerId appears inside structs (e.g., ContainerRuntimeInfo),
+        // ContainerId appears inside structs (e.g., RuntimeInfo::Container),
         // so test via a wrapper — TOML requires a top-level table.
         #[derive(Serialize, Deserialize, PartialEq, Debug)]
         struct Wrapper { id: ContainerId }

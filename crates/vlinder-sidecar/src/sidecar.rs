@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use vlinder_core::domain::{
-    AgentId, CompleteMessage, ContainerDiagnostics, ContainerId, ContainerRuntimeInfo,
+    AgentId, CompleteMessage, RuntimeDiagnostics, ContainerId, RuntimeInfo,
     ExpectsReply, HarnessType, ImageDigest, ImageRef, InvokeDiagnostics,
     InvokeMessage, MessageQueue, RoutingKey,
     RuntimeType,
@@ -122,10 +122,10 @@ impl Sidecar {
     }
 
     /// Build diagnostics from env-var metadata (not Podman inspect).
-    fn build_diagnostics(&self, duration_ms: u64) -> ContainerDiagnostics {
-        ContainerDiagnostics {
+    fn build_diagnostics(&self, duration_ms: u64) -> RuntimeDiagnostics {
+        RuntimeDiagnostics {
             stderr: Vec::new(),
-            runtime: ContainerRuntimeInfo {
+            runtime: RuntimeInfo::Container {
                 engine_version: "sidecar".to_string(),
                 image_ref: self.image_ref.clone(),
                 image_digest: self.image_digest.clone(),
