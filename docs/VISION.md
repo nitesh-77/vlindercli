@@ -2,6 +2,25 @@
 
 AI agents that can time travel.
 
+### The Inversion
+
+The traditional software lifecycle is a funnel that eliminates non-determinism.
+Development is chaotic, staging narrows the space, and production is the most
+controlled substrate — known inputs, tested paths, bounded behavior. Decades of
+tooling (CI, observability, canary deploys) exist to keep it that way.
+
+LLMs invert this. The model is stochastic: same input, different output. Human
+input is unconstrained: no schema, no validation, infinite variety. State
+accumulates unpredictably: context windows, conversation history, tool results
+feeding back into prompts. Production becomes the *most* non-deterministic stage
+in the lifecycle — the exact opposite of what every existing tool assumes.
+
+Current observability is built for the old model. Metrics, traces, and logs
+assume that if something worked in staging, it works in production. That
+assumption breaks when the system's behavior is fundamentally unbounded. We are
+building for the new reality: infrastructure where non-determinism isn't a bug
+to eliminate, but a property to observe, navigate, and reason about.
+
 ### The Bet
 
 Agent systems are opaque. Something went wrong three turns ago and you'll never
