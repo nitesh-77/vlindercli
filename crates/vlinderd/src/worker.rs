@@ -73,7 +73,7 @@ fn run_registry_worker(config: &Config, shutdown: &AtomicBool) {
     use vlinder_core::domain::{RuntimeType, ObjectStorageType, VectorStorageType};
     use vlinder_sql_registry::PersistentRegistry;
     use vlinder_sql_registry::registry_service::RegistryServiceServer;
-    use vlinder_proto::secret_service::GrpcSecretClient;
+    use vlinder_nats::secret_service::GrpcSecretClient;
 
     let secret_addr = if config.distributed.secret_addr.starts_with("http://") {
         config.distributed.secret_addr.clone()
@@ -144,7 +144,7 @@ fn run_registry_worker(config: &Config, shutdown: &AtomicBool) {
 
 fn run_secret_worker(config: &Config, shutdown: &AtomicBool) {
     use tonic::transport::Server;
-    use vlinder_proto::secret_service::SecretServiceServer;
+    use vlinder_nats::secret_service::SecretServiceServer;
 
     let secret_store = crate::secret_store_factory::from_config(config)
         .unwrap_or_else(|e| panic!("Failed to open secret store: {}", e));

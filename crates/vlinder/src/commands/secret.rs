@@ -6,7 +6,7 @@ use clap::Subcommand;
 
 use crate::config::CliConfig;
 use vlinder_core::domain::SecretStore;
-use vlinder_proto::secret_service::GrpcSecretClient;
+use vlinder_nats::secret_service::GrpcSecretClient;
 
 #[derive(Subcommand, Debug, PartialEq)]
 pub enum SecretCommand {

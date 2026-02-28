@@ -56,6 +56,8 @@ COPY crates/vlinder-sql-state/build.rs crates/vlinder-sql-state/
 COPY crates/vlinder-sql-state/proto crates/vlinder-sql-state/proto
 COPY crates/vlinder-sql-registry/build.rs crates/vlinder-sql-registry/
 COPY crates/vlinder-sql-registry/proto crates/vlinder-sql-registry/proto
+COPY crates/vlinder-nats/build.rs crates/vlinder-nats/
+COPY crates/vlinder-nats/proto crates/vlinder-nats/proto
 
 # Pre-build dependencies (this layer is cached unless Cargo.toml changes)
 RUN cargo build --release -p vlinder-sidecar 2>/dev/null || true

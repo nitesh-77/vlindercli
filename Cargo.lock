@@ -3223,6 +3223,7 @@ dependencies = [
  "ureq 3.2.0",
  "vlinder-catalog",
  "vlinder-core",
+ "vlinder-nats",
  "vlinder-proto",
  "vlinder-sql-registry",
  "vlinder-sql-state",
@@ -3288,8 +3289,11 @@ version = "0.1.0"
 dependencies = [
  "async-nats",
  "futures",
+ "prost",
  "serde_json",
  "tokio",
+ "tonic",
+ "tonic-build",
  "tracing",
  "vlinder-core",
 ]
@@ -3351,7 +3355,6 @@ dependencies = [
  "vlinder-infer-openrouter",
  "vlinder-nats",
  "vlinder-ollama",
- "vlinder-proto",
  "vlinder-sql-registry",
  "vlinder-sql-state",
  "vlinder-sqlite-kv",

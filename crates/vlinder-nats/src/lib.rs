@@ -1,5 +1,6 @@
 mod queue;
 mod secret_store;
+pub mod secret_service;
 
 pub use queue::NatsQueue;
 pub use queue::{
