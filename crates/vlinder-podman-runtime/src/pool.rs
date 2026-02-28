@@ -413,9 +413,30 @@ impl ContainerRuntime {
         }
     }
 
-    /// Start pods for agents that don't have one yet.
+    /// Reconcile pods with the registry: remove orphans, start missing.
     fn ensure_containers(&mut self) {
         let agents = self.registry.get_agents_by_runtime(RuntimeType::Container);
+
+        // Collect agent names from registry
+        let agent_names: std::collections::HashSet<&str> = agents.iter()
+            .map(|a| a.name.as_str())
+            .collect();
+
+        // Stop pods for agents no longer in registry (orphan cleanup)
+        let orphaned: Vec<String> = self.pods.keys()
+            .filter(|name| !agent_names.contains(name.as_str()))
+            .cloned()
+            .collect();
+
+        for name in orphaned {
+            if let Some(pod) = self.pods.remove(&name) {
+                tracing::info!(event = "pod.orphaned", agent = %name, "Stopping orphaned pod");
+                self.podman.pod_stop_and_remove(&pod.pod_id, 5);
+                self.cleanup_mount_volumes(&pod.mount_volumes);
+            }
+        }
+
+        // Start pods for agents that don't have one yet
         for agent in &agents {
             if self.pods.contains_key(&agent.name) {
                 continue;

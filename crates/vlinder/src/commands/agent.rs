@@ -58,6 +58,11 @@ pub enum AgentCommand {
         /// Agent name
         name: String,
     },
+    /// Delete a deployed agent
+    Delete {
+        /// Agent name
+        name: String,
+    },
     /// Create a new agent from a template
     New {
         /// Template language
@@ -73,6 +78,7 @@ pub fn execute(cmd: AgentCommand) {
         AgentCommand::Run { name } => run(&name),
         AgentCommand::List => list(),
         AgentCommand::Get { name } => get(&name),
+        AgentCommand::Delete { name } => delete(&name),
         AgentCommand::New { language, name } => scaffold(&language, &name),
     }
 }
@@ -210,6 +216,18 @@ fn get(name: &str) {
         for (alias, name) in &agent.requirements.models {
             println!("  {} -> {}", alias, name);
         }
+    }
+}
+
+fn delete(name: &str) {
+    let config = CliConfig::load();
+    let registry = open_registry(&config);
+    let Some(registry) = registry else { return };
+
+    match registry.delete_agent(name) {
+        Ok(true) => println!("Deleted agent '{}'", name),
+        Ok(false) => eprintln!("Agent '{}' not found", name),
+        Err(e) => eprintln!("Error: {}", e),
     }
 }
 

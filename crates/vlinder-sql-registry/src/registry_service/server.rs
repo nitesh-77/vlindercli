@@ -10,6 +10,7 @@ use super::proto::{
     PingRequest, SemVer,
     GetAgentRequest, GetAgentResponse, GetAgentByNameRequest,
     RegisterAgentRequest, RegisterAgentResponse,
+    DeleteAgentRequest, DeleteAgentResponse,
     ListAgentsRequest, ListAgentsResponse,
     RegisterFleetRequest, RegisterFleetResponse,
     GetFleetRequest, GetFleetResponse,
@@ -107,6 +108,24 @@ impl RegistryService for RegistryServiceServer {
             })),
             Err(e) => Ok(Response::new(RegisterAgentResponse {
                 success: false,
+                error: Some(e.to_string()),
+            })),
+        }
+    }
+
+    async fn delete_agent(
+        &self,
+        request: Request<DeleteAgentRequest>,
+    ) -> Result<Response<DeleteAgentResponse>, Status> {
+        let req = request.into_inner();
+
+        match self.registry.delete_agent(&req.name) {
+            Ok(deleted) => Ok(Response::new(DeleteAgentResponse {
+                deleted,
+                error: None,
+            })),
+            Err(e) => Ok(Response::new(DeleteAgentResponse {
+                deleted: false,
                 error: Some(e.to_string()),
             })),
         }

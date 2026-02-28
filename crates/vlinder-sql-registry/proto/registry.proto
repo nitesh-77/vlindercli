@@ -14,6 +14,7 @@ service Registry {
   rpc GetAgent(GetAgentRequest) returns (GetAgentResponse);
   rpc GetAgentByName(GetAgentByNameRequest) returns (GetAgentResponse);
   rpc RegisterAgent(RegisterAgentRequest) returns (RegisterAgentResponse);
+  rpc DeleteAgent(DeleteAgentRequest) returns (DeleteAgentResponse);
   rpc ListAgents(ListAgentsRequest) returns (ListAgentsResponse);
 
   // Model operations
@@ -143,6 +144,15 @@ message RegisterAgentRequest {
 
 message RegisterAgentResponse {
   bool success = 1;
+  optional string error = 2;
+}
+
+message DeleteAgentRequest {
+  string name = 1;
+}
+
+message DeleteAgentResponse {
+  bool deleted = 1;
   optional string error = 2;
 }
 

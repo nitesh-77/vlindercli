@@ -92,6 +92,19 @@ impl InMemoryRegistry {
         let mut state = self.state.write().unwrap();
         state.models.remove(&model_id).is_some()
     }
+
+    /// Remove an agent by name. Returns true if the agent existed.
+    ///
+    /// Used by PersistentRegistry for cache eviction after disk delete.
+    pub fn remove_agent(&self, name: &str) -> bool {
+        let agent_id = self.agent_id_internal(name);
+        let mut state = self.state.write().unwrap();
+        let removed = state.agents.remove(&agent_id).is_some();
+        if removed {
+            state.manifests.remove(name);
+        }
+        removed
+    }
 }
 
 impl Registry for InMemoryRegistry {
@@ -322,6 +335,29 @@ impl Registry for InMemoryRegistry {
         }
 
         state.models.remove(&model_id);
+        Ok(true)
+    }
+
+    fn delete_agent(&self, name: &str) -> Result<bool, RegistrationError> {
+        let agent_id = self.agent_id_internal(name);
+        let mut state = self.state.write().unwrap();
+
+        if !state.agents.contains_key(&agent_id) {
+            return Ok(false);
+        }
+
+        // Check if any fleet references this agent
+        let dependent: Vec<String> = state.fleets.values()
+            .filter(|f| f.agents.contains(&agent_id))
+            .map(|f| f.name.clone())
+            .collect();
+
+        if !dependent.is_empty() {
+            return Err(RegistrationError::AgentInUse(name.to_string(), dependent));
+        }
+
+        state.agents.remove(&agent_id);
+        state.manifests.remove(name);
         Ok(true)
     }
 
@@ -967,5 +1003,60 @@ mod tests {
         assert_eq!(stored.entry, registry.agent_id("x").unwrap());
         assert!(stored.agents.contains(&registry.agent_id("x").unwrap()));
         assert!(stored.agents.contains(&registry.agent_id("y").unwrap()));
+    }
+
+    // --- delete_agent tests ---
+
+    #[test]
+    fn delete_agent_succeeds() {
+        let registry = InMemoryRegistry::new(test_secret_store());
+        registry.restore_agent(minimal_agent("echo")).unwrap();
+        assert_eq!(registry.get_agents().len(), 1);
+
+        let deleted = registry.delete_agent("echo").unwrap();
+        assert!(deleted);
+        assert!(registry.get_agents().is_empty());
+    }
+
+    #[test]
+    fn delete_agent_nonexistent_returns_false() {
+        let registry = InMemoryRegistry::new(test_secret_store());
+        let deleted = registry.delete_agent("nope").unwrap();
+        assert!(!deleted);
+    }
+
+    #[test]
+    fn delete_agent_blocked_by_fleet() {
+        let registry = InMemoryRegistry::new(test_secret_store());
+        registry.restore_agent(minimal_agent("alpha")).unwrap();
+        registry.restore_agent(minimal_agent("beta")).unwrap();
+
+        let fleet = make_fleet(&registry, "my-fleet", "alpha", &["alpha", "beta"]);
+        registry.register_fleet(fleet).unwrap();
+
+        let result = registry.delete_agent("alpha");
+        assert!(matches!(result, Err(RegistrationError::AgentInUse(_, _))));
+
+        // Agent should still exist
+        assert!(registry.get_agent_by_name("alpha").is_some());
+    }
+
+    #[test]
+    fn delete_agent_cleans_up_manifest() {
+        let registry = InMemoryRegistry::new(test_secret_store());
+        registry.register_runtime(RuntimeType::Container);
+
+        let manifest = minimal_manifest("echo");
+        registry.register_manifest(manifest).unwrap();
+        assert!(registry.get_agent_by_name("echo").is_some());
+
+        let deleted = registry.delete_agent("echo").unwrap();
+        assert!(deleted);
+        assert!(registry.get_agent_by_name("echo").is_none());
+
+        // Re-registering should work (manifest was cleaned up)
+        let manifest2 = minimal_manifest("echo");
+        registry.register_manifest(manifest2).unwrap();
+        assert!(registry.get_agent_by_name("echo").is_some());
     }
 }

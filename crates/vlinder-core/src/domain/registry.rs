@@ -90,6 +90,8 @@ pub enum RegistrationError {
     EmbeddingServiceWithoutModel,
     /// Model cannot be removed because deployed agents depend on it.
     ModelInUse(String, Vec<String>),
+    /// Agent cannot be removed because it belongs to one or more fleets.
+    AgentInUse(String, Vec<String>),
     /// Identity provisioning failed (ADR 084).
     IdentityFailed(String),
     /// Persistence operation failed (disk I/O, database error, etc.).
@@ -139,6 +141,7 @@ impl std::fmt::Display for RegistrationError {
                 write!(f, "agent declares [requirements.services.embed] but has no embedding model")
             }
             RegistrationError::ModelInUse(name, agents) => write!(f, "model '{}' is in use by agents: {}", name, agents.join(", ")),
+            RegistrationError::AgentInUse(name, fleets) => write!(f, "agent '{}' is in use by fleets: {}", name, fleets.join(", ")),
             RegistrationError::IdentityFailed(msg) => write!(f, "identity provisioning failed: {}", msg),
             RegistrationError::Persistence(msg) => write!(f, "persistence error: {}", msg),
             RegistrationError::FleetDuplicateName(name) => write!(f, "fleet already registered: {}", name),
@@ -256,6 +259,10 @@ pub trait Registry: Send + Sync {
 
     /// Delete a model by name. Returns true if the model existed.
     fn delete_model(&self, name: &str) -> Result<bool, RegistrationError>;
+
+    /// Delete an agent by name. Returns true if the agent existed.
+    /// Fails if the agent belongs to any fleet.
+    fn delete_agent(&self, name: &str) -> Result<bool, RegistrationError>;
 
     // --- Job operations ---
 
@@ -376,6 +383,18 @@ mod tests {
         let msg = format!("{}", err);
         assert!(msg.contains("agent-a"));
         assert!(msg.contains("agent-b"));
+    }
+
+    #[test]
+    fn display_agent_in_use_lists_fleets() {
+        let err = RegistrationError::AgentInUse(
+            "echo".into(),
+            vec!["fleet-a".into(), "fleet-b".into()],
+        );
+        let msg = format!("{}", err);
+        assert!(msg.contains("echo"));
+        assert!(msg.contains("fleet-a"));
+        assert!(msg.contains("fleet-b"));
     }
 
     #[test]

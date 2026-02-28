@@ -171,6 +171,35 @@ impl Registry for PersistentRegistry {
         Ok(deleted)
     }
 
+    fn delete_agent(&self, name: &str) -> Result<bool, RegistrationError> {
+        // Check if agent exists
+        let Some(_agent) = self.inner.get_agent_by_name(name) else {
+            return Ok(false);
+        };
+
+        // Check for fleet dependencies before deleting
+        let agent_id = self.inner.agent_id(name).unwrap();
+        let dependent: Vec<String> = self.inner.get_fleets()
+            .into_iter()
+            .filter(|f| f.agents.contains(&agent_id))
+            .map(|f| f.name)
+            .collect();
+
+        if !dependent.is_empty() {
+            return Err(RegistrationError::AgentInUse(name.to_string(), dependent));
+        }
+
+        // Disk first, then cache
+        let deleted = self.repo.delete_agent(name)
+            .map_err(|e| RegistrationError::Persistence(e.to_string()))?;
+
+        if deleted {
+            self.inner.remove_agent(name);
+        }
+
+        Ok(deleted)
+    }
+
     // --- Fleet operations (delegate to in-memory, persistence deferred) ---
 
     fn register_fleet(&self, fleet: Fleet) -> Result<(), RegistrationError> {
@@ -466,5 +495,37 @@ mod tests {
             assert!(agent.is_some(), "agent should survive restart");
             assert_eq!(agent.unwrap().name, "echo");
         }
+    }
+
+    // --- delete_agent tests ---
+
+    #[test]
+    fn delete_agent_removes_from_both() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let db_path = temp.path().join("registry.db");
+
+        let registry = open_with_runtime(&db_path);
+        registry.register_agent(test_agent("echo")).unwrap();
+        assert!(registry.get_agent_by_name("echo").is_some());
+
+        let deleted = registry.delete_agent("echo").unwrap();
+        assert!(deleted);
+
+        // Gone from in-memory
+        assert!(registry.get_agent_by_name("echo").is_none());
+
+        // Gone from disk
+        let repo = SqliteRegistryRepository::open(&db_path).unwrap();
+        assert!(!repo.agent_exists("echo").unwrap());
+    }
+
+    #[test]
+    fn delete_nonexistent_agent_returns_false() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let db_path = temp.path().join("registry.db");
+
+        let registry = open_with_runtime(&db_path);
+        let deleted = registry.delete_agent("nope").unwrap();
+        assert!(!deleted);
     }
 }

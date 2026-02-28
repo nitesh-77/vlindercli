@@ -247,6 +247,24 @@ impl Registry for GrpcRegistryClient {
         Ok(resp.deleted)
     }
 
+    fn delete_agent(&self, name: &str) -> Result<bool, RegistrationError> {
+        let request = proto::DeleteAgentRequest {
+            name: name.to_string(),
+        };
+
+        let response = self.runtime.block_on(async {
+            self.client.lock().unwrap()
+                .delete_agent(request)
+                .await
+        }).map_err(|e| RegistrationError::Remote(e.to_string()))?;
+
+        let resp = response.into_inner();
+        if let Some(error) = resp.error {
+            return Err(RegistrationError::Remote(error));
+        }
+        Ok(resp.deleted)
+    }
+
     // --- Job operations ---
 
     fn create_job(&self, submission_id: SubmissionId, agent_id: ResourceId, input: String) -> JobId {
