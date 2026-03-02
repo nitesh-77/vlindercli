@@ -83,7 +83,7 @@ build-council-fleet: build-council-orchestrator build-sales-advisor build-produc
 # =============================================================================
 
 # Build everything needed to run agents: CLI + sidecar + agent container images
-build-everything: build build-sidecar build-todoapp build-todoapp-fleet build-council-fleet build-s3-mount-test s3-start s3-seed
+build-everything: build build-sidecar build-todoapp build-todoapp-fleet build-council-fleet
 
 # Run a specific agent (usage: just run pensieve-container)
 # Uses ~/.vlinder by default (no VLINDER_DIR override needed)
