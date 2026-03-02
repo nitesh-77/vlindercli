@@ -2,9 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
   pull_request:
-    branches: [main]
 
 env:
   CARGO_TERM_COLOR: always
@@ -49,3 +47,30 @@ jobs:
         run: cargo install cargo-deny --locked
       - name: Check licenses
         run: cargo deny check licenses
+
+  build-arm:
+    name: Build ARM Linux
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-gnu
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: aarch64-unknown-linux-gnu
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler gcc-aarch64-linux-gnu
+      - name: Build
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+        run: cargo build --release --target aarch64-unknown-linux-gnu
+      - name: Upload to S3
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.CI_AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CI_AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: eu-west-1
+        run: |
+          aws s3 cp target/aarch64-unknown-linux-gnu/release/vlinderd "s3://${{ secrets.ARTIFACTS_BUCKET }}/${{ github.sha }}/vlinderd"
+          aws s3 cp target/aarch64-unknown-linux-gnu/release/vlinderd "s3://${{ secrets.ARTIFACTS_BUCKET }}/latest/vlinderd"
