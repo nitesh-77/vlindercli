@@ -299,6 +299,12 @@ pub struct RuntimeConfig {
 
     /// Execution timeout for Lambda functions in seconds.
     pub lambda_timeout_secs: i32,
+
+    /// VPC subnet IDs for Lambda ENI placement (comma-separated in env).
+    pub lambda_vpc_subnet_ids: Vec<String>,
+
+    /// VPC security group IDs for Lambda ENIs (comma-separated in env).
+    pub lambda_vpc_security_group_ids: Vec<String>,
 }
 
 // ============================================================================
@@ -401,6 +407,8 @@ impl Default for RuntimeConfig {
             lambda_region: "us-east-1".to_string(),
             lambda_memory_mb: 512,
             lambda_timeout_secs: 300,
+            lambda_vpc_subnet_ids: vec![],
+            lambda_vpc_security_group_ids: vec![],
         }
     }
 }
@@ -566,6 +574,20 @@ impl Config {
         }
         if let Ok(v) = std::env::var("VLINDER_RUNTIME_LAMBDA_TIMEOUT_SECS") {
             self.runtime.lambda_timeout_secs = v.parse().unwrap_or(300);
+        }
+        if let Ok(v) = std::env::var("VLINDER_RUNTIME_LAMBDA_VPC_SUBNET_IDS") {
+            self.runtime.lambda_vpc_subnet_ids = v
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+        }
+        if let Ok(v) = std::env::var("VLINDER_RUNTIME_LAMBDA_VPC_SECURITY_GROUP_IDS") {
+            self.runtime.lambda_vpc_security_group_ids = v
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
         }
     }
 
@@ -777,5 +799,38 @@ mod tests {
         std::env::remove_var("VLINDER_STATE_BACKEND");
 
         assert_eq!(config.state.backend, StateBackend::Grpc);
+    }
+
+    #[test]
+    fn lambda_vpc_defaults_to_empty() {
+        let config = Config::for_test();
+        assert!(config.runtime.lambda_vpc_subnet_ids.is_empty());
+        assert!(config.runtime.lambda_vpc_security_group_ids.is_empty());
+    }
+
+    #[test]
+    fn env_override_lambda_vpc_subnet_ids() {
+        std::env::set_var(
+            "VLINDER_RUNTIME_LAMBDA_VPC_SUBNET_IDS",
+            "subnet-aaa, subnet-bbb",
+        );
+        let mut config = Config::for_test();
+        config.apply_env_overrides();
+        std::env::remove_var("VLINDER_RUNTIME_LAMBDA_VPC_SUBNET_IDS");
+
+        assert_eq!(
+            config.runtime.lambda_vpc_subnet_ids,
+            vec!["subnet-aaa", "subnet-bbb"]
+        );
+    }
+
+    #[test]
+    fn env_override_lambda_vpc_security_group_ids() {
+        std::env::set_var("VLINDER_RUNTIME_LAMBDA_VPC_SECURITY_GROUP_IDS", "sg-xxx");
+        let mut config = Config::for_test();
+        config.apply_env_overrides();
+        std::env::remove_var("VLINDER_RUNTIME_LAMBDA_VPC_SECURITY_GROUP_IDS");
+
+        assert_eq!(config.runtime.lambda_vpc_security_group_ids, vec!["sg-xxx"]);
     }
 }

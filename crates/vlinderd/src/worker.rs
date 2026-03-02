@@ -275,6 +275,8 @@ fn run_agent_lambda_worker(config: &Config, shutdown: &AtomicBool) {
         } else {
             Some(config.distributed.secret_addr.clone())
         },
+        vpc_subnet_ids: config.runtime.lambda_vpc_subnet_ids.clone(),
+        vpc_security_group_ids: config.runtime.lambda_vpc_security_group_ids.clone(),
     };
 
     let mut runtime = LambdaRuntime::new(&lambda_config, registry, queue)

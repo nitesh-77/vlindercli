@@ -30,6 +30,20 @@ pub(crate) struct FunctionInfo {
     pub function_arn: String,
 }
 
+// ── Request types ───────────────────────────────────────────────────
+
+/// Parameters for creating a Lambda function.
+pub(crate) struct CreateFunctionRequest<'a> {
+    pub function_name: &'a str,
+    pub ecr_image_uri: &'a str,
+    pub role_arn: &'a str,
+    pub memory_mb: i32,
+    pub timeout_secs: i32,
+    pub env_vars: &'a [(&'a str, &'a str)],
+    pub vpc_subnet_ids: &'a [String],
+    pub vpc_security_group_ids: &'a [String],
+}
+
 // ── Trait ────────────────────────────────────────────────────────────
 
 /// Client abstraction over AWS Lambda + IAM.
@@ -49,15 +63,7 @@ pub(crate) trait LambdaClient: Send {
 
     /// Create a Lambda function from an ECR image.
     /// Returns the function ARN. Idempotent: returns existing ARN if function exists.
-    fn create_function(
-        &self,
-        function_name: &str,
-        ecr_image_uri: &str,
-        role_arn: &str,
-        memory_mb: i32,
-        timeout_secs: i32,
-        env_vars: &[(&str, &str)],
-    ) -> Result<String, LambdaError>;
+    fn create_function(&self, req: &CreateFunctionRequest) -> Result<String, LambdaError>;
 
     /// Get info about a Lambda function, or None if it doesn't exist.
     fn get_function(&self, function_name: &str) -> Result<Option<FunctionInfo>, LambdaError>;
@@ -212,18 +218,10 @@ impl LambdaClient for AwsLambdaClient {
         });
     }
 
-    fn create_function(
-        &self,
-        function_name: &str,
-        ecr_image_uri: &str,
-        role_arn: &str,
-        memory_mb: i32,
-        timeout_secs: i32,
-        env_vars: &[(&str, &str)],
-    ) -> Result<String, LambdaError> {
+    fn create_function(&self, req: &CreateFunctionRequest) -> Result<String, LambdaError> {
         self.rt.block_on(async {
             let mut env_map = std::collections::HashMap::new();
-            for (k, v) in env_vars {
+            for (k, v) in req.env_vars {
                 env_map.insert(k.to_string(), v.to_string());
             }
             let environment = aws_sdk_lambda::types::Environment::builder()
@@ -231,27 +229,34 @@ impl LambdaClient for AwsLambdaClient {
                 .build();
 
             let code = aws_sdk_lambda::types::FunctionCode::builder()
-                .image_uri(ecr_image_uri)
+                .image_uri(req.ecr_image_uri)
                 .build();
 
-            match self
+            let mut builder = self
                 .lambda
                 .create_function()
-                .function_name(function_name)
-                .role(role_arn)
+                .function_name(req.function_name)
+                .role(req.role_arn)
                 .code(code)
                 .package_type(aws_sdk_lambda::types::PackageType::Image)
                 .architectures(aws_sdk_lambda::types::Architecture::Arm64)
-                .memory_size(memory_mb)
-                .timeout(timeout_secs)
-                .environment(environment)
-                .send()
-                .await
-            {
+                .memory_size(req.memory_mb)
+                .timeout(req.timeout_secs)
+                .environment(environment);
+
+            if !req.vpc_subnet_ids.is_empty() || !req.vpc_security_group_ids.is_empty() {
+                let vpc_config = aws_sdk_lambda::types::VpcConfig::builder()
+                    .set_subnet_ids(Some(req.vpc_subnet_ids.to_vec()))
+                    .set_security_group_ids(Some(req.vpc_security_group_ids.to_vec()))
+                    .build();
+                builder = builder.vpc_config(vpc_config);
+            }
+
+            match builder.send().await {
                 Ok(output) => {
                     let arn = output.function_arn().unwrap_or_default().to_string();
                     tracing::info!(
-                        function = function_name,
+                        function = req.function_name,
                         arn = arn.as_str(),
                         "Created Lambda function"
                     );
@@ -261,10 +266,10 @@ impl LambdaClient for AwsLambdaClient {
                     // Idempotent: if the function already exists, fetch its ARN.
                     if is_resource_conflict(&sdk_err) {
                         tracing::debug!(
-                            function = function_name,
+                            function = req.function_name,
                             "Lambda function already exists, fetching ARN"
                         );
-                        let info = self.get_function_inner(function_name).await?;
+                        let info = self.get_function_inner(req.function_name).await?;
                         Ok(info.map(|f| f.function_arn).unwrap_or_default())
                     } else {
                         Err(LambdaError::Aws(format!(

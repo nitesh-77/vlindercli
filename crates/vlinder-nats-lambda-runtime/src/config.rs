@@ -24,4 +24,10 @@ pub struct LambdaRuntimeConfig {
     pub state_url: String,
     /// Secret store gRPC address (optional) for the lambda adapter.
     pub secret_url: Option<String>,
+    /// VPC subnet IDs for Lambda ENI placement.
+    /// Empty vec means no VPC config (Lambda runs in AWS-managed networking).
+    pub vpc_subnet_ids: Vec<String>,
+    /// VPC security group IDs for Lambda ENIs.
+    /// Empty vec means no VPC config.
+    pub vpc_security_group_ids: Vec<String>,
 }

@@ -11,7 +11,7 @@ use vlinder_core::domain::{
 };
 
 use crate::config::LambdaRuntimeConfig;
-use crate::lambda_client::{AwsLambdaClient, LambdaClient, LambdaError};
+use crate::lambda_client::{AwsLambdaClient, CreateFunctionRequest, LambdaClient, LambdaError};
 
 /// A deployed Lambda function: IAM role + Lambda function.
 #[allow(dead_code)]
@@ -138,14 +138,16 @@ impl LambdaRuntime {
             env_vars.push(("VLINDER_SECRET_URL", secret_url));
         }
 
-        let function_arn = self.client.create_function(
-            &function_name,
-            &agent.executable,
-            &role_arn,
-            self.config.memory_mb,
-            self.config.timeout_secs,
-            &env_vars,
-        )?;
+        let function_arn = self.client.create_function(&CreateFunctionRequest {
+            function_name: &function_name,
+            ecr_image_uri: &agent.executable,
+            role_arn: &role_arn,
+            memory_mb: self.config.memory_mb,
+            timeout_secs: self.config.timeout_secs,
+            env_vars: &env_vars,
+            vpc_subnet_ids: &self.config.vpc_subnet_ids,
+            vpc_security_group_ids: &self.config.vpc_security_group_ids,
+        })?;
 
         self.functions.insert(
             name.to_string(),
@@ -265,6 +267,8 @@ mod tests {
     struct MockLambdaClient {
         roles: RefCell<HashSet<String>>,
         functions: RefCell<HashSet<String>>,
+        last_vpc_subnet_ids: RefCell<Vec<String>>,
+        last_vpc_security_group_ids: RefCell<Vec<String>>,
     }
 
     impl MockLambdaClient {
@@ -272,6 +276,8 @@ mod tests {
             Self {
                 roles: RefCell::new(HashSet::new()),
                 functions: RefCell::new(HashSet::new()),
+                last_vpc_subnet_ids: RefCell::new(vec![]),
+                last_vpc_security_group_ids: RefCell::new(vec![]),
             }
         }
     }
@@ -290,21 +296,15 @@ mod tests {
             self.roles.borrow_mut().remove(role_name);
         }
 
-        fn create_function(
-            &self,
-            function_name: &str,
-            _ecr_image_uri: &str,
-            _role_arn: &str,
-            _memory_mb: i32,
-            _timeout_secs: i32,
-            _env_vars: &[(&str, &str)],
-        ) -> Result<String, LambdaError> {
+        fn create_function(&self, req: &CreateFunctionRequest) -> Result<String, LambdaError> {
             self.functions
                 .borrow_mut()
-                .insert(function_name.to_string());
+                .insert(req.function_name.to_string());
+            *self.last_vpc_subnet_ids.borrow_mut() = req.vpc_subnet_ids.to_vec();
+            *self.last_vpc_security_group_ids.borrow_mut() = req.vpc_security_group_ids.to_vec();
             Ok(format!(
                 "arn:aws:lambda:us-east-1:123456789012:function:{}",
-                function_name
+                req.function_name
             ))
         }
 
@@ -352,18 +352,10 @@ mod tests {
 
         fn delete_role(&self, _role_name: &str) {}
 
-        fn create_function(
-            &self,
-            function_name: &str,
-            _ecr_image_uri: &str,
-            _role_arn: &str,
-            _memory_mb: i32,
-            _timeout_secs: i32,
-            _env_vars: &[(&str, &str)],
-        ) -> Result<String, LambdaError> {
+        fn create_function(&self, req: &CreateFunctionRequest) -> Result<String, LambdaError> {
             Ok(format!(
                 "arn:aws:lambda:us-east-1:123456789012:function:{}",
-                function_name
+                req.function_name
             ))
         }
 
@@ -401,6 +393,8 @@ mod tests {
             nats_url: "nats://localhost:4222".to_string(),
             state_url: "http://127.0.0.1:9092".to_string(),
             secret_url: None,
+            vpc_subnet_ids: vec![],
+            vpc_security_group_ids: vec![],
         }
     }
 
@@ -632,5 +626,77 @@ mod tests {
             "expected error payload, got: {}",
             payload_str
         );
+    }
+
+    #[test]
+    fn deploy_passes_vpc_config_to_client() {
+        let registry = test_registry();
+        let agent = make_lambda_agent("echo");
+        registry.register_agent(agent).unwrap();
+
+        use std::sync::{Arc as StdArc, Mutex};
+
+        #[derive(Default)]
+        struct CapturedVpc {
+            subnet_ids: Vec<String>,
+            security_group_ids: Vec<String>,
+        }
+
+        let captured = StdArc::new(Mutex::new(CapturedVpc::default()));
+
+        struct CapturingClient {
+            captured: StdArc<Mutex<CapturedVpc>>,
+        }
+
+        impl LambdaClient for CapturingClient {
+            fn check_connectivity(&self) -> Result<(), LambdaError> {
+                Ok(())
+            }
+            fn create_role(&self, role_name: &str) -> Result<String, LambdaError> {
+                Ok(format!("arn:aws:iam::123456789012:role/{}", role_name))
+            }
+            fn delete_role(&self, _: &str) {}
+            fn create_function(&self, req: &CreateFunctionRequest) -> Result<String, LambdaError> {
+                let mut c = self.captured.lock().unwrap();
+                c.subnet_ids = req.vpc_subnet_ids.to_vec();
+                c.security_group_ids = req.vpc_security_group_ids.to_vec();
+                Ok(format!(
+                    "arn:aws:lambda:us-east-1:123456789012:function:{}",
+                    req.function_name
+                ))
+            }
+            fn get_function(
+                &self,
+                function_name: &str,
+            ) -> Result<Option<crate::lambda_client::FunctionInfo>, LambdaError> {
+                Ok(Some(crate::lambda_client::FunctionInfo {
+                    function_arn: format!(
+                        "arn:aws:lambda:us-east-1:123456789012:function:{}",
+                        function_name
+                    ),
+                }))
+            }
+            fn delete_function(&self, _: &str) {}
+            fn invoke_function(&self, _: &str, p: &[u8]) -> Result<Vec<u8>, LambdaError> {
+                Ok(p.to_vec())
+            }
+        }
+
+        let mut config = test_config();
+        config.vpc_subnet_ids = vec!["subnet-aaa".to_string(), "subnet-bbb".to_string()];
+        config.vpc_security_group_ids = vec!["sg-xxx".to_string()];
+
+        let client = CapturingClient {
+            captured: captured.clone(),
+        };
+        let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
+        let mut runtime =
+            LambdaRuntime::with_client(&config, registry, queue, Box::new(client)).unwrap();
+
+        runtime.tick();
+
+        let c = captured.lock().unwrap();
+        assert_eq!(c.subnet_ids, vec!["subnet-aaa", "subnet-bbb"]);
+        assert_eq!(c.security_group_ids, vec!["sg-xxx"]);
     }
 }
