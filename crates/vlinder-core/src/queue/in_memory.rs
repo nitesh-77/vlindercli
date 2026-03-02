@@ -106,13 +106,7 @@ impl MessageQueue for InMemoryQueue {
         &self,
         service: ServiceBackend,
         operation: Operation,
-    ) -> Result<
-        (
-            RequestMessage,
-            Box<dyn FnOnce() -> Result<(), QueueError> + Send>,
-        ),
-        QueueError,
-    > {
+    ) -> Result<(RequestMessage, Acknowledgement), QueueError> {
         let mut typed = self.typed_queues.lock().unwrap();
 
         for (key, queue) in typed.iter_mut() {

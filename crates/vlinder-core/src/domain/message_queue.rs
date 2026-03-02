@@ -66,13 +66,7 @@ pub trait MessageQueue {
         &self,
         service: ServiceBackend,
         operation: Operation,
-    ) -> Result<
-        (
-            RequestMessage,
-            Box<dyn FnOnce() -> Result<(), QueueError> + Send>,
-        ),
-        QueueError,
-    >;
+    ) -> Result<(RequestMessage, Acknowledgement), QueueError>;
 
     /// Receive a ResponseMessage for the given request.
     ///

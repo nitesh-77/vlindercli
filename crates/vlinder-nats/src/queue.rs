@@ -412,13 +412,7 @@ impl MessageQueue for NatsQueue {
         &self,
         service: ServiceBackend,
         operation: Operation,
-    ) -> Result<
-        (
-            RequestMessage,
-            Box<dyn FnOnce() -> Result<(), QueueError> + Send>,
-        ),
-        QueueError,
-    > {
+    ) -> Result<(RequestMessage, Acknowledgement), QueueError> {
         // Build filter: vlinder.{timeline}.{submission}.req.{agent}.{service}.{backend}.{op}.{seq}
         let filter = format!(
             "vlinder.*.*.req.*.{}.{}.{}.*",

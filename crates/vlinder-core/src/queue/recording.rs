@@ -124,13 +124,7 @@ impl MessageQueue for RecordingQueue {
         &self,
         service: crate::domain::ServiceBackend,
         operation: crate::domain::Operation,
-    ) -> Result<
-        (
-            RequestMessage,
-            Box<dyn FnOnce() -> Result<(), QueueError> + Send>,
-        ),
-        QueueError,
-    > {
+    ) -> Result<(RequestMessage, Acknowledgement), QueueError> {
         self.inner.receive_request(service, operation)
     }
 
