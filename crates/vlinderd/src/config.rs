@@ -139,6 +139,23 @@ pub struct QueueConfig {
     pub backend: QueueBackend,
     #[serde(default = "default_nats_url")]
     pub nats_url: String,
+    /// Optional path to a NATS .creds file for authenticated connections (e.g. NGS).
+    #[serde(default)]
+    pub nats_creds: Option<String>,
+}
+
+impl QueueConfig {
+    /// Produce the NATS connection config consumed by vlinder-nats.
+    ///
+    /// Single mapping point — factories and workers call this instead
+    /// of reaching into nats_url/nats_creds directly.
+    pub fn nats_config(&self) -> vlinder_nats::NatsConfig {
+        vlinder_nats::NatsConfig {
+            url: self.nats_url.clone(),
+            creds_file: self.nats_creds.clone(),
+            creds_content: None,
+        }
+    }
 }
 
 fn default_nats_url() -> String {
@@ -437,6 +454,7 @@ impl Config {
             queue: QueueConfig {
                 backend: QueueBackend::Memory,
                 nats_url: "nats://localhost:4222".to_string(),
+                nats_creds: None,
             },
             state: StateConfig {
                 backend: StateBackend::Memory,
@@ -474,6 +492,9 @@ impl Config {
         }
         if let Ok(v) = std::env::var("VLINDER_QUEUE_NATS_URL") {
             self.queue.nats_url = v;
+        }
+        if let Ok(v) = std::env::var("VLINDER_QUEUE_NATS_CREDS") {
+            self.queue.nats_creds = Some(v);
         }
 
         // State

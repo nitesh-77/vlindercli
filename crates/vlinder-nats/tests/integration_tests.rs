@@ -1,10 +1,15 @@
 //! Integration tests that require a running NATS server.
 
-use vlinder_nats::NatsQueue;
+use vlinder_nats::{NatsConfig, NatsQueue};
 
 #[test]
 #[ignore] // Run via: just run-integration-tests
 fn connect_to_localhost() {
-    let queue = NatsQueue::localhost();
+    let config = NatsConfig {
+        url: "nats://localhost:4222".to_string(),
+        creds_file: None,
+        creds_content: None,
+    };
+    let queue = NatsQueue::connect(&config);
     assert!(queue.is_ok());
 }

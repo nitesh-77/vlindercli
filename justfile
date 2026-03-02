@@ -146,7 +146,7 @@ clean-data:
     find agents fleets -name "*.db-shm" -path "*/data/*" -delete
     find agents fleets -name "*.db-wal" -path "*/data/*" -delete
 
-# Full reset: clean slate for testing. Preserves ~/.vlinder/config.toml only.
+# Full reset: clean slate for testing. Preserves config, credentials, and nats.conf.
 reset:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -205,7 +205,7 @@ reset:
 
     echo ""
     echo "=== Reset complete ==="
-    echo "Preserved: ~/.vlinder/config.toml, ~/.vlinder/client.toml, ~/.vlinder/nats.conf"
+    echo "Preserved: ~/.vlinder/config.toml, ~/.vlinder/client.toml, ~/.vlinder/nats.conf, ~/.vlinder/*.creds"
     echo ""
     echo "Next steps:"
     echo "  1. Rebuild:  just build-everything"

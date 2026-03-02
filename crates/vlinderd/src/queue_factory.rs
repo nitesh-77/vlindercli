@@ -17,7 +17,7 @@ use vlinder_nats::NatsQueue;
 pub fn from_config(config: &Config) -> Result<Arc<dyn MessageQueue + Send + Sync>, QueueError> {
     match config.queue.backend {
         QueueBackend::Nats => {
-            let queue = NatsQueue::connect(&config.queue.nats_url)?;
+            let queue = NatsQueue::connect(&config.queue.nats_config())?;
             Ok(Arc::new(queue))
         }
         #[cfg(any(test, feature = "test-support"))]

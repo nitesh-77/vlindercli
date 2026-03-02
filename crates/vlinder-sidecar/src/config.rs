@@ -14,6 +14,8 @@ pub struct SidecarConfig {
     pub registry_url: String,
     /// State service gRPC address (e.g. `http://host.containers.internal:9092`).
     pub state_url: String,
+    /// Secret store gRPC address (optional — only needed for remote NATS).
+    pub secret_url: Option<String>,
     /// Agent container port (default 8080, localhost inside the pod).
     pub container_port: u16,
     /// OCI image reference (diagnostics only).
@@ -35,6 +37,7 @@ impl SidecarConfig {
         let nats_url = required_env("VLINDER_NATS_URL")?;
         let registry_url = required_env("VLINDER_REGISTRY_URL")?;
         let state_url = required_env("VLINDER_STATE_URL")?;
+        let secret_url = std::env::var("VLINDER_SECRET_URL").ok();
 
         let container_port = std::env::var("VLINDER_CONTAINER_PORT")
             .ok()
@@ -50,6 +53,7 @@ impl SidecarConfig {
             nats_url,
             registry_url,
             state_url,
+            secret_url,
             container_port,
             image_ref,
             image_digest,

@@ -3982,6 +3982,7 @@ name = "vlinder-nats"
 version = "0.1.0"
 dependencies = [
  "async-nats",
+ "dirs",
  "futures",
  "prost",
  "serde_json",
@@ -4119,6 +4120,7 @@ dependencies = [
  "indicatif",
  "rand",
  "reedline",
+ "rustls",
  "serde",
  "serde_json",
  "sha2",
