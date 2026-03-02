@@ -64,6 +64,10 @@ pub(crate) trait LambdaClient: Send {
 
     /// Delete a Lambda function. Fire-and-forget: errors are logged, not returned.
     fn delete_function(&self, function_name: &str);
+
+    /// Invoke a Lambda function synchronously (RequestResponse).
+    /// Returns the function's output payload.
+    fn invoke_function(&self, function_name: &str, payload: &[u8]) -> Result<Vec<u8>, LambdaError>;
 }
 
 // ── AWS SDK implementation ──────────────────────────────────────────
@@ -79,17 +83,13 @@ pub(crate) struct AwsLambdaClient {
 }
 
 /// Trust policy that allows Lambda to assume the role.
-/// The role itself has zero permissions — the sidecar mediates all I/O.
-const LAMBDA_TRUST_POLICY: &str = r#"{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Principal": { "Service": "lambda.amazonaws.com" },
-      "Action": "sts:AssumeRole"
-    }
-  ]
-}"#;
+const LAMBDA_TRUST_POLICY: &str = include_str!("lambda-trust-policy.json");
+
+/// Permission policy: allows Lambda to decrypt env vars with any KMS key.
+/// Lambda encrypts environment variables at rest using the account's default
+/// KMS key (or a custom one). Without this, the function fails at invoke time
+/// with KmsAccessDeniedException.
+const LAMBDA_PERMISSIONS_POLICY: &str = include_str!("lambda-permissions-policy.json");
 
 impl AwsLambdaClient {
     /// Create a new AWS client for the given region.
@@ -132,7 +132,7 @@ impl LambdaClient for AwsLambdaClient {
 
     fn create_role(&self, role_name: &str) -> Result<String, LambdaError> {
         self.rt.block_on(async {
-            match self
+            let arn = match self
                 .iam
                 .create_role()
                 .role_name(role_name)
@@ -146,7 +146,7 @@ impl LambdaClient for AwsLambdaClient {
                         .map(|r| r.arn().to_string())
                         .unwrap_or_default();
                     tracing::info!(role = role_name, arn = arn.as_str(), "Created IAM role");
-                    Ok(arn)
+                    arn
                 }
                 Err(sdk_err) => {
                     // Idempotent: if the role already exists, fetch its ARN.
@@ -164,31 +164,52 @@ impl LambdaClient for AwsLambdaClient {
                                     format_sdk_error(&e)
                                 ))
                             })?;
-                        let arn = get.role().map(|r| r.arn().to_string()).unwrap_or_default();
-                        Ok(arn)
+                        get.role().map(|r| r.arn().to_string()).unwrap_or_default()
                     } else {
-                        Err(LambdaError::Aws(format!(
+                        return Err(LambdaError::Aws(format!(
                             "create_role: {}",
                             format_sdk_error(&sdk_err)
-                        )))
+                        )));
                     }
                 }
-            }
+            };
+
+            // Attach inline policy for KMS decrypt (idempotent — overwrites if exists).
+            self.iam
+                .put_role_policy()
+                .role_name(role_name)
+                .policy_name("vlinder-lambda-permissions")
+                .policy_document(LAMBDA_PERMISSIONS_POLICY)
+                .send()
+                .await
+                .map_err(|e| {
+                    LambdaError::Aws(format!("put_role_policy: {}", format_sdk_error(&e)))
+                })?;
+
+            Ok(arn)
         })
     }
 
     fn delete_role(&self, role_name: &str) {
-        let result = self
-            .rt
-            .block_on(async { self.iam.delete_role().role_name(role_name).send().await });
-        match result {
-            Ok(_) => tracing::info!(role = role_name, "Deleted IAM role"),
-            Err(e) => tracing::warn!(
-                role = role_name,
-                error = %format_sdk_error(&e),
-                "Failed to delete IAM role"
-            ),
-        }
+        self.rt.block_on(async {
+            // Remove inline policy first — IAM won't delete a role with policies attached.
+            let _ = self
+                .iam
+                .delete_role_policy()
+                .role_name(role_name)
+                .policy_name("vlinder-lambda-permissions")
+                .send()
+                .await;
+
+            match self.iam.delete_role().role_name(role_name).send().await {
+                Ok(_) => tracing::info!(role = role_name, "Deleted IAM role"),
+                Err(e) => tracing::warn!(
+                    role = role_name,
+                    error = %format_sdk_error(&e),
+                    "Failed to delete IAM role"
+                ),
+            }
+        });
     }
 
     fn create_function(
@@ -220,6 +241,7 @@ impl LambdaClient for AwsLambdaClient {
                 .role(role_arn)
                 .code(code)
                 .package_type(aws_sdk_lambda::types::PackageType::Image)
+                .architectures(aws_sdk_lambda::types::Architecture::Arm64)
                 .memory_size(memory_mb)
                 .timeout(timeout_secs)
                 .environment(environment)
@@ -276,6 +298,28 @@ impl LambdaClient for AwsLambdaClient {
                 "Failed to delete Lambda function"
             ),
         }
+    }
+
+    fn invoke_function(&self, function_name: &str, payload: &[u8]) -> Result<Vec<u8>, LambdaError> {
+        self.rt.block_on(async {
+            let result = self
+                .lambda
+                .invoke()
+                .function_name(function_name)
+                .payload(aws_smithy_types::Blob::new(payload))
+                .send()
+                .await
+                .map_err(|e| LambdaError::Aws(format!("invoke: {}", format_sdk_error(&e))))?;
+
+            if let Some(err) = result.function_error() {
+                return Err(LambdaError::Aws(format!("function error: {}", err)));
+            }
+
+            Ok(result
+                .payload()
+                .map(|b| b.as_ref().to_vec())
+                .unwrap_or_default())
+        })
     }
 }
 

@@ -3972,6 +3972,8 @@ dependencies = [
  "aws-config",
  "aws-sdk-iam",
  "aws-sdk-lambda",
+ "aws-smithy-types",
+ "serde_json",
  "tokio",
  "tracing",
  "vlinder-core",

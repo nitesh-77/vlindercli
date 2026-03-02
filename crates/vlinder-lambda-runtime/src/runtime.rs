@@ -6,7 +6,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use vlinder_core::domain::{Agent, Registry, ResourceId, Runtime, RuntimeType};
+use vlinder_core::domain::{
+    Agent, AgentId, ExpectsReply, MessageQueue, Registry, ResourceId, Runtime, RuntimeDiagnostics,
+    RuntimeType,
+};
 
 use crate::config::LambdaRuntimeConfig;
 use crate::lambda_client::{AwsLambdaClient, LambdaClient, LambdaError};
@@ -25,6 +28,7 @@ struct DeployedFunction {
 /// - A Lambda function `vlinder-{name}` running the agent's ECR image
 pub struct LambdaRuntime {
     id: ResourceId,
+    queue: Arc<dyn MessageQueue + Send + Sync>,
     registry: Arc<dyn Registry>,
     functions: HashMap<String, DeployedFunction>,
     config: LambdaRuntimeConfig,
@@ -38,15 +42,17 @@ impl LambdaRuntime {
     pub fn new(
         config: &LambdaRuntimeConfig,
         registry: Arc<dyn Registry>,
+        queue: Arc<dyn MessageQueue + Send + Sync>,
     ) -> Result<Self, LambdaError> {
         let client = AwsLambdaClient::new(&config.region)?;
-        Self::with_client(config, registry, Box::new(client))
+        Self::with_client(config, registry, queue, Box::new(client))
     }
 
     /// Create a runtime with an injected client (for testing).
     fn with_client(
         config: &LambdaRuntimeConfig,
         registry: Arc<dyn Registry>,
+        queue: Arc<dyn MessageQueue + Send + Sync>,
         client: Box<dyn LambdaClient>,
     ) -> Result<Self, LambdaError> {
         let registry_id = ResourceId::new(&config.registry_addr);
@@ -58,6 +64,7 @@ impl LambdaRuntime {
 
         Ok(Self {
             id,
+            queue,
             registry,
             functions: HashMap::new(),
             config: config.clone(),
@@ -115,6 +122,10 @@ impl LambdaRuntime {
 
         let role_arn = self.client.create_role(&role_name)?;
 
+        // IAM is eventually consistent — Lambda can't assume a role that was
+        // just created. Wait for IAM to propagate before creating the function.
+        std::thread::sleep(std::time::Duration::from_secs(10));
+
         let env_vars: Vec<(&str, &str)> = vec![("VLINDER_AGENT", &agent.name)];
 
         let function_arn = self.client.create_function(
@@ -143,6 +154,45 @@ impl LambdaRuntime {
         Ok(())
     }
 
+    /// Poll queue for invocations and dispatch to Lambda functions.
+    ///
+    /// Lambda requires JSON event payloads. We wrap the raw bytes as a JSON
+    /// string on the way in and unwrap on the way out. The Lambda Web Adapter
+    /// then POSTs this JSON string as the body to the agent's `/invoke` endpoint.
+    fn dispatch_invocations(&self) {
+        for name in self.functions.keys() {
+            let agent_id = AgentId::new(name);
+            if let Ok((invoke, ack)) = self.queue.receive_invoke(&agent_id) {
+                let _ = ack();
+                let function_name = format!("vlinder-{}", name);
+
+                // Wrap raw payload as a JSON string so Lambda accepts it.
+                let json_payload = serde_json::to_vec(&String::from_utf8_lossy(&invoke.payload))
+                    .unwrap_or_else(|_| invoke.payload.clone());
+
+                match self.client.invoke_function(&function_name, &json_payload) {
+                    Ok(output) => {
+                        // Unwrap JSON string response back to raw bytes.
+                        let raw_output = serde_json::from_slice::<String>(&output)
+                            .map(|s| s.into_bytes())
+                            .unwrap_or(output);
+
+                        let diagnostics = RuntimeDiagnostics::placeholder(0);
+                        let complete =
+                            invoke.create_reply_with_diagnostics(raw_output, None, diagnostics);
+                        let _ = self.queue.send_complete(complete);
+                    }
+                    Err(e) => {
+                        let complete = invoke.create_reply(
+                            format!("[error] Lambda invoke failed: {}", e).into_bytes(),
+                        );
+                        let _ = self.queue.send_complete(complete);
+                    }
+                }
+            }
+        }
+    }
+
     /// Tear down a deployed function: delete Lambda first, then IAM role.
     fn undeploy(&mut self, name: &str) {
         let function_name = format!("vlinder-{}", name);
@@ -165,7 +215,9 @@ impl Runtime for LambdaRuntime {
     }
 
     fn tick(&mut self) -> bool {
-        self.ensure_functions()
+        let changed = self.ensure_functions();
+        self.dispatch_invocations();
+        changed
     }
 
     fn shutdown(&mut self) {
@@ -191,6 +243,7 @@ mod tests {
     use std::cell::RefCell;
     use std::collections::HashSet;
     use vlinder_core::domain::InMemorySecretStore;
+    use vlinder_core::queue::InMemoryQueue;
 
     // ── Mock client ─────────────────────────────────────────────────
 
@@ -259,6 +312,15 @@ mod tests {
         fn delete_function(&self, function_name: &str) {
             self.functions.borrow_mut().remove(function_name);
         }
+
+        fn invoke_function(
+            &self,
+            _function_name: &str,
+            payload: &[u8],
+        ) -> Result<Vec<u8>, LambdaError> {
+            // Echo: return the payload as-is.
+            Ok(payload.to_vec())
+        }
     }
 
     // ── Helpers ─────────────────────────────────────────────────────
@@ -296,7 +358,9 @@ mod tests {
 
     fn make_runtime(registry: Arc<dyn Registry>) -> LambdaRuntime {
         let config = test_config();
-        LambdaRuntime::with_client(&config, registry, Box::new(MockLambdaClient::new())).unwrap()
+        let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
+        LambdaRuntime::with_client(&config, registry, queue, Box::new(MockLambdaClient::new()))
+            .unwrap()
     }
 
     // ── Tests ───────────────────────────────────────────────────────
@@ -377,12 +441,67 @@ mod tests {
 
         let mock = MockLambdaClient::new();
         let config = test_config();
-        let mut runtime = LambdaRuntime::with_client(&config, registry, Box::new(mock)).unwrap();
+        let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
+        let mut runtime =
+            LambdaRuntime::with_client(&config, registry, queue, Box::new(mock)).unwrap();
 
         runtime.tick();
 
         let deployed = &runtime.functions["echo"];
         assert!(deployed.role_arn.contains("vlinder-agent-echo"));
         assert!(deployed.function_arn.contains("vlinder-echo"));
+    }
+
+    #[test]
+    fn invoke_dispatches_to_lambda_and_sends_complete() {
+        use vlinder_core::domain::{
+            HarnessType, InvokeDiagnostics, InvokeMessage, SessionId, SubmissionId, TimelineId,
+        };
+
+        let registry = test_registry();
+        let agent = make_lambda_agent("echo");
+        registry.register_agent(agent).unwrap();
+
+        let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
+        let config = test_config();
+        let mut runtime = LambdaRuntime::with_client(
+            &config,
+            registry,
+            queue.clone(),
+            Box::new(MockLambdaClient::new()),
+        )
+        .unwrap();
+
+        // Deploy first.
+        runtime.tick();
+        assert_eq!(runtime.functions.len(), 1);
+
+        // Enqueue an invoke message.
+        let invoke = InvokeMessage::new(
+            TimelineId::main(),
+            SubmissionId::new(),
+            SessionId::new(),
+            HarnessType::Grpc,
+            RuntimeType::Lambda,
+            AgentId::new("echo"),
+            b"hello lambda".to_vec(),
+            None,
+            InvokeDiagnostics {
+                harness_version: "test".to_string(),
+                history_turns: 0,
+            },
+        );
+        let submission = invoke.submission.clone();
+        queue.send_invoke(invoke).unwrap();
+
+        // Tick again — should dispatch the invocation.
+        runtime.tick();
+
+        // The mock echoes the payload, so we should get a complete with the same bytes.
+        let (complete, ack) = queue
+            .receive_complete(&submission, HarnessType::Grpc)
+            .expect("should receive complete");
+        ack().unwrap();
+        assert_eq!(complete.payload, b"hello lambda");
     }
 }

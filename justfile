@@ -18,6 +18,10 @@ build-echo:
 build-echo-container:
     podman build -t localhost/echo-container:latest fleets/todoapp/agents/echo-container/
 
+# Build echo-lambda agent (OCI image via Podman, Lambda + Web Adapter)
+build-echo-lambda:
+    podman build -t localhost/echo-lambda:latest agents/echo-lambda/
+
 # Build openrouter-test agent (OCI image via Podman, exercises openrouter.vlinder.local)
 build-openrouter-test:
     podman build -t localhost/openrouter-test:latest agents/openrouter-test/

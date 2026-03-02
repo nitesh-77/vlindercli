@@ -260,6 +260,9 @@ fn run_agent_lambda_worker(config: &Config, shutdown: &AtomicBool) {
     let registry =
         crate::registry_factory::from_config(config).expect("Failed to connect to registry");
 
+    let queue = crate::queue_factory::from_config(config)
+        .expect("Failed to create queue for Lambda runtime");
+
     let lambda_config = LambdaRuntimeConfig {
         registry_addr: config.distributed.registry_addr.clone(),
         region: config.runtime.lambda_region.clone(),
@@ -267,8 +270,8 @@ fn run_agent_lambda_worker(config: &Config, shutdown: &AtomicBool) {
         timeout_secs: config.runtime.lambda_timeout_secs,
     };
 
-    let mut runtime =
-        LambdaRuntime::new(&lambda_config, registry).expect("Failed to create Lambda runtime");
+    let mut runtime = LambdaRuntime::new(&lambda_config, registry, queue)
+        .expect("Failed to create Lambda runtime");
 
     tracing::info!(
         region = config.runtime.lambda_region.as_str(),
