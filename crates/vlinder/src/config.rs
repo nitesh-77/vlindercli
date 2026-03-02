@@ -17,7 +17,7 @@ use std::path::PathBuf;
 /// Contains only what the CLI needs: logging level and daemon endpoint
 /// addresses. The daemon's own config (worker counts, Podman socket,
 /// queue backend, etc.) lives in config.toml and is not loaded here.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct CliConfig {
     pub logging: LoggingConfig,
@@ -44,14 +44,6 @@ pub struct DaemonConfig {
 // Defaults
 // ============================================================================
 
-impl Default for CliConfig {
-    fn default() -> Self {
-        Self {
-            logging: LoggingConfig::default(),
-            daemon: DaemonConfig::default(),
-        }
-    }
-}
 
 impl Default for LoggingConfig {
     fn default() -> Self {

@@ -91,7 +91,7 @@ impl RegistryRepository for SqliteRegistryRepository {
             .as_str()
             .unwrap()
             .to_string();
-        let provider: String = serde_json::to_value(&stored.provider)
+        let provider: String = serde_json::to_value(stored.provider)
             .map_err(|e| RepositoryError::Serialization(e.to_string()))?
             .as_str()
             .unwrap()

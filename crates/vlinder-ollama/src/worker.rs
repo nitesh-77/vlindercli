@@ -16,6 +16,27 @@ use crate::types::{
     OllamaGenerateRequest, OllamaGenerateResponse,
 };
 
+/// Successful inference result from the upstream API.
+struct InferenceSuccess {
+    body: Vec<u8>,
+    tokens_input: u32,
+    tokens_output: u32,
+    model: String,
+}
+
+/// Successful embedding result from the upstream API.
+struct EmbedSuccess {
+    body: Vec<u8>,
+    dimensions: u32,
+    model: String,
+}
+
+/// Error from the upstream API or request validation.
+struct WorkerError {
+    status_code: u16,
+    body: Vec<u8>,
+}
+
 pub struct OllamaWorker {
     queue: Arc<dyn MessageQueue + Send + Sync>,
     endpoint: String,
@@ -44,15 +65,12 @@ impl OllamaWorker {
         }
 
         // Poll for embed requests.
-        match self.queue.receive_request(
+        if let Ok((request, ack)) = self.queue.receive_request(
             ServiceBackend::Embed(EmbeddingBackendType::Ollama),
             Operation::Run,
         ) {
-            Ok((request, ack)) => {
-                self.process_embed(request, ack);
-                return true;
-            }
-            Err(_) => {}
+            self.process_embed(request, ack);
+            return true;
         }
 
         false
@@ -69,16 +87,16 @@ impl OllamaWorker {
 
         let (response_payload, status_code, tokens_input, tokens_output, model) = match operation {
             Operation::Run => match self.handle_openai(payload) {
-                Ok((body, ti, to, m)) => (body, 200, ti, to, m),
-                Err((code, err)) => (err, code, 0, 0, String::new()),
+                Ok(s) => (s.body, 200, s.tokens_input, s.tokens_output, s.model),
+                Err(e) => (e.body, e.status_code, 0, 0, String::new()),
             },
             Operation::Chat => match self.handle_chat(payload) {
-                Ok((body, ti, to, m)) => (body, 200, ti, to, m),
-                Err((code, err)) => (err, code, 0, 0, String::new()),
+                Ok(s) => (s.body, 200, s.tokens_input, s.tokens_output, s.model),
+                Err(e) => (e.body, e.status_code, 0, 0, String::new()),
             },
             Operation::Generate => match self.handle_generate(payload) {
-                Ok((body, ti, to, m)) => (body, 200, ti, to, m),
-                Err((code, err)) => (err, code, 0, 0, String::new()),
+                Ok(s) => (s.body, 200, s.tokens_input, s.tokens_output, s.model),
+                Err(e) => (e.body, e.status_code, 0, 0, String::new()),
             },
             _ => (
                 error_json("unsupported operation"),
@@ -112,15 +130,15 @@ impl OllamaWorker {
 
     // ---- OpenAI-compatible: /v1/chat/completions ----
 
-    fn handle_openai(&self, payload: &[u8]) -> Result<(Vec<u8>, u32, u32, String), (u16, Vec<u8>)> {
-        let req: CreateChatCompletionRequest =
-            serde_json::from_slice(payload).map_err(|e| (400, error_json(&e.to_string())))?;
+    fn handle_openai(&self, payload: &[u8]) -> Result<InferenceSuccess, WorkerError> {
+        let req: CreateChatCompletionRequest = serde_json::from_slice(payload)
+            .map_err(|e| WorkerError { status_code: 400, body: error_json(&e.to_string()) })?;
 
         let model_name = req.model.clone();
 
         let response = self
             .call_upstream("/v1/chat/completions", &req)
-            .map_err(|e| (500, error_json(&e)))?;
+            .map_err(|e| WorkerError { status_code: 500, body: error_json(&e) })?;
 
         let resp: CreateChatCompletionResponse = response;
         let (ti, to) = resp
@@ -129,52 +147,52 @@ impl OllamaWorker {
             .map(|u| (u.prompt_tokens, u.completion_tokens))
             .unwrap_or((0, 0));
 
-        let body = serde_json::to_vec(&resp).map_err(|e| (500, error_json(&e.to_string())))?;
+        let body = serde_json::to_vec(&resp)
+            .map_err(|e| WorkerError { status_code: 500, body: error_json(&e.to_string()) })?;
 
-        Ok((body, ti, to, model_name))
+        Ok(InferenceSuccess { body, tokens_input: ti, tokens_output: to, model: model_name })
     }
 
     // ---- Native: /api/chat ----
 
-    fn handle_chat(&self, payload: &[u8]) -> Result<(Vec<u8>, u32, u32, String), (u16, Vec<u8>)> {
-        let req: OllamaChatRequest =
-            serde_json::from_slice(payload).map_err(|e| (400, error_json(&e.to_string())))?;
+    fn handle_chat(&self, payload: &[u8]) -> Result<InferenceSuccess, WorkerError> {
+        let req: OllamaChatRequest = serde_json::from_slice(payload)
+            .map_err(|e| WorkerError { status_code: 400, body: error_json(&e.to_string()) })?;
 
         let model_name = req.model.clone();
 
         let resp: OllamaChatResponse = self
             .call_upstream("/api/chat", &req)
-            .map_err(|e| (500, error_json(&e)))?;
+            .map_err(|e| WorkerError { status_code: 500, body: error_json(&e) })?;
 
         let ti = resp.prompt_eval_count.unwrap_or(0);
         let to = resp.eval_count.unwrap_or(0);
 
-        let body = serde_json::to_vec(&resp).map_err(|e| (500, error_json(&e.to_string())))?;
+        let body = serde_json::to_vec(&resp)
+            .map_err(|e| WorkerError { status_code: 500, body: error_json(&e.to_string()) })?;
 
-        Ok((body, ti, to, model_name))
+        Ok(InferenceSuccess { body, tokens_input: ti, tokens_output: to, model: model_name })
     }
 
     // ---- Native: /api/generate ----
 
-    fn handle_generate(
-        &self,
-        payload: &[u8],
-    ) -> Result<(Vec<u8>, u32, u32, String), (u16, Vec<u8>)> {
-        let req: OllamaGenerateRequest =
-            serde_json::from_slice(payload).map_err(|e| (400, error_json(&e.to_string())))?;
+    fn handle_generate(&self, payload: &[u8]) -> Result<InferenceSuccess, WorkerError> {
+        let req: OllamaGenerateRequest = serde_json::from_slice(payload)
+            .map_err(|e| WorkerError { status_code: 400, body: error_json(&e.to_string()) })?;
 
         let model_name = req.model.clone();
 
         let resp: OllamaGenerateResponse = self
             .call_upstream("/api/generate", &req)
-            .map_err(|e| (500, error_json(&e)))?;
+            .map_err(|e| WorkerError { status_code: 500, body: error_json(&e) })?;
 
         let ti = resp.prompt_eval_count.unwrap_or(0);
         let to = resp.eval_count.unwrap_or(0);
 
-        let body = serde_json::to_vec(&resp).map_err(|e| (500, error_json(&e.to_string())))?;
+        let body = serde_json::to_vec(&resp)
+            .map_err(|e| WorkerError { status_code: 500, body: error_json(&e.to_string()) })?;
 
-        Ok((body, ti, to, model_name))
+        Ok(InferenceSuccess { body, tokens_input: ti, tokens_output: to, model: model_name })
     }
 
     // ---- Embed: /api/embed ----
@@ -188,8 +206,8 @@ impl OllamaWorker {
         let payload = request.payload.as_slice();
 
         let (response_payload, status_code, dimensions, model) = match self.handle_embed(payload) {
-            Ok((body, dims, m)) => (body, 200, dims, m),
-            Err((code, err)) => (err, code, 0, String::new()),
+            Ok(s) => (s.body, 200, s.dimensions, s.model),
+            Err(e) => (e.body, e.status_code, 0, String::new()),
         };
 
         let duration_ms = start.elapsed().as_millis() as u64;
@@ -209,21 +227,22 @@ impl OllamaWorker {
         let _ = ack();
     }
 
-    fn handle_embed(&self, payload: &[u8]) -> Result<(Vec<u8>, u32, String), (u16, Vec<u8>)> {
-        let req: OllamaEmbedRequest =
-            serde_json::from_slice(payload).map_err(|e| (400, error_json(&e.to_string())))?;
+    fn handle_embed(&self, payload: &[u8]) -> Result<EmbedSuccess, WorkerError> {
+        let req: OllamaEmbedRequest = serde_json::from_slice(payload)
+            .map_err(|e| WorkerError { status_code: 400, body: error_json(&e.to_string()) })?;
 
         let model_name = req.model.clone();
 
         let resp: OllamaEmbedResponse = self
             .call_upstream("/api/embed", &req)
-            .map_err(|e| (500, error_json(&e)))?;
+            .map_err(|e| WorkerError { status_code: 500, body: error_json(&e) })?;
 
         let dimensions = resp.embeddings.first().map(|v| v.len() as u32).unwrap_or(0);
 
-        let body = serde_json::to_vec(&resp).map_err(|e| (500, error_json(&e.to_string())))?;
+        let body = serde_json::to_vec(&resp)
+            .map_err(|e| WorkerError { status_code: 500, body: error_json(&e.to_string()) })?;
 
-        Ok((body, dimensions, model_name))
+        Ok(EmbedSuccess { body, dimensions, model: model_name })
     }
 
     // ---- HTTP ----

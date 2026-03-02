@@ -271,7 +271,7 @@ impl ContainerRuntime {
         let image_digest_str = self
             .podman
             .image_digest(image_ref)
-            .map(|d| String::from(d))
+            .map(String::from)
             .unwrap_or_default();
 
         let env_vars: Vec<(&str, String)> = vec![

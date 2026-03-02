@@ -20,7 +20,7 @@ pub fn init_tracing(config: &Config) {
         .with_target(false)
         .with_filter(
             EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new(&config.tracing_filter())),
+                .unwrap_or_else(|_| EnvFilter::new(config.tracing_filter())),
         );
 
     let file_layer = fmt::layer()

@@ -10,6 +10,20 @@ use vlinder_core::domain::{
     ServiceDiagnostics, ServiceMetrics, ServiceType,
 };
 
+/// Successful inference result from the upstream API.
+struct InferenceSuccess {
+    body: Vec<u8>,
+    tokens_input: u32,
+    tokens_output: u32,
+    model: String,
+}
+
+/// Error from the upstream API or request validation.
+struct WorkerError {
+    status_code: u16,
+    body: Vec<u8>,
+}
+
 pub struct OpenRouterWorker {
     queue: Arc<dyn MessageQueue + Send + Sync>,
     endpoint: String,
@@ -39,11 +53,9 @@ impl OpenRouterWorker {
                 let start = Instant::now();
 
                 let (response_payload, status_code, tokens_input, tokens_output, model) =
-                    match self.handle(&request.payload.as_slice()) {
-                        Ok((body, usage_in, usage_out, model)) => {
-                            (body, 200, usage_in, usage_out, model)
-                        }
-                        Err((code, err_bytes)) => (err_bytes, code, 0, 0, String::new()),
+                    match self.handle(request.payload.as_slice()) {
+                        Ok(s) => (s.body, 200, s.tokens_input, s.tokens_output, s.model),
+                        Err(e) => (e.body, e.status_code, 0, 0, String::new()),
                     };
 
                 let duration_ms = start.elapsed().as_millis() as u64;
@@ -74,19 +86,19 @@ impl OpenRouterWorker {
         }
     }
 
-    fn handle(&self, payload: &[u8]) -> Result<(Vec<u8>, u32, u32, String), (u16, Vec<u8>)> {
-        let req: CreateChatCompletionRequest = serde_json::from_slice(payload).map_err(|e| {
-            (
-                400,
-                openai_error_json(&e.to_string(), "invalid_request_error"),
-            )
-        })?;
+    fn handle(&self, payload: &[u8]) -> Result<InferenceSuccess, WorkerError> {
+        let req: CreateChatCompletionRequest =
+            serde_json::from_slice(payload).map_err(|e| WorkerError {
+                status_code: 400,
+                body: openai_error_json(&e.to_string(), "invalid_request_error"),
+            })?;
 
         let model_name = req.model.clone();
 
-        let response = self
-            .call_openrouter(&req)
-            .map_err(|e| (500, openai_error_json(&e, "server_error")))?;
+        let response = self.call_openrouter(&req).map_err(|e| WorkerError {
+            status_code: 500,
+            body: openai_error_json(&e, "server_error"),
+        })?;
 
         let (tokens_input, tokens_output) = response
             .usage
@@ -94,10 +106,17 @@ impl OpenRouterWorker {
             .map(|u| (u.prompt_tokens, u.completion_tokens))
             .unwrap_or((0, 0));
 
-        let body = serde_json::to_vec(&response)
-            .map_err(|e| (500, openai_error_json(&e.to_string(), "server_error")))?;
+        let body = serde_json::to_vec(&response).map_err(|e| WorkerError {
+            status_code: 500,
+            body: openai_error_json(&e.to_string(), "server_error"),
+        })?;
 
-        Ok((body, tokens_input, tokens_output, model_name))
+        Ok(InferenceSuccess {
+            body,
+            tokens_input,
+            tokens_output,
+            model: model_name,
+        })
     }
 
     fn call_openrouter(
@@ -186,7 +205,7 @@ mod tests {
         assert_eq!(response.status_code, 400);
         let body: serde_json::Value = serde_json::from_slice(response.payload.as_slice()).unwrap();
         assert_eq!(body["error"]["type"], "invalid_request_error");
-        assert!(body["error"]["message"].as_str().unwrap().len() > 0);
+        assert!(!body["error"]["message"].as_str().unwrap().is_empty());
         ack().unwrap();
     }
 
@@ -239,7 +258,7 @@ mod tests {
         assert_eq!(response.status_code, 500);
         let body: serde_json::Value = serde_json::from_slice(response.payload.as_slice()).unwrap();
         assert_eq!(body["error"]["type"], "server_error");
-        assert!(body["error"]["message"].as_str().unwrap().len() > 0);
+        assert!(!body["error"]["message"].as_str().unwrap().is_empty());
         ack().unwrap();
     }
 

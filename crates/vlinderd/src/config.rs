@@ -217,7 +217,7 @@ pub struct InferenceWorkerCounts {
 }
 
 /// Storage worker counts by backend.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct StorageWorkerCounts {
     /// Object storage workers
@@ -343,14 +343,6 @@ impl Default for InferenceWorkerCounts {
     }
 }
 
-impl Default for StorageWorkerCounts {
-    fn default() -> Self {
-        Self {
-            object: ObjectStorageWorkerCounts::default(),
-            vector: VectorStorageWorkerCounts::default(),
-        }
-    }
-}
 
 impl Default for ObjectStorageWorkerCounts {
     fn default() -> Self {

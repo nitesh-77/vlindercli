@@ -1,6 +1,5 @@
 //! gRPC client implementing the DagStore trait.
 
-use std::sync::Mutex;
 use tonic::transport::Channel;
 
 use super::proto::{self, state_service_client::StateServiceClient};
@@ -8,7 +7,7 @@ use vlinder_core::domain::{DagNode, DagStore, Timeline};
 
 /// DagStore implementation that makes gRPC calls to a remote State Service.
 pub struct GrpcStateClient {
-    client: Mutex<StateServiceClient<Channel>>,
+    client: StateServiceClient<Channel>,
     runtime: tokio::runtime::Runtime,
 }
 
@@ -19,10 +18,7 @@ impl GrpcStateClient {
         let client =
             runtime.block_on(async { StateServiceClient::connect(addr.to_string()).await })?;
 
-        Ok(Self {
-            client: Mutex::new(client),
-            runtime,
-        })
+        Ok(Self { client, runtime })
     }
 }
 
@@ -53,9 +49,10 @@ impl DagStore for GrpcStateClient {
             node: Some(proto_node),
         };
 
+        let mut client = self.client.clone();
         let response = self
             .runtime
-            .block_on(async { self.client.lock().unwrap().insert_node(request).await })
+            .block_on(async { client.insert_node(request).await })
             .map_err(|e| e.to_string())?;
 
         let resp = response.into_inner();
@@ -71,9 +68,10 @@ impl DagStore for GrpcStateClient {
             hash: hash.to_string(),
         };
 
+        let mut client = self.client.clone();
         let response = self
             .runtime
-            .block_on(async { self.client.lock().unwrap().get_node(request).await })
+            .block_on(async { client.get_node(request).await })
             .map_err(|e| e.to_string())?;
 
         match response.into_inner().node {
@@ -90,9 +88,10 @@ impl DagStore for GrpcStateClient {
             session_id: session_id.to_string(),
         };
 
+        let mut client = self.client.clone();
         let response = self
             .runtime
-            .block_on(async { self.client.lock().unwrap().get_session_nodes(request).await })
+            .block_on(async { client.get_session_nodes(request).await })
             .map_err(|e| e.to_string())?;
 
         response
@@ -108,9 +107,10 @@ impl DagStore for GrpcStateClient {
             parent_hash: parent_hash.to_string(),
         };
 
+        let mut client = self.client.clone();
         let response = self
             .runtime
-            .block_on(async { self.client.lock().unwrap().get_children(request).await })
+            .block_on(async { client.get_children(request).await })
             .map_err(|e| e.to_string())?;
 
         response
@@ -126,9 +126,10 @@ impl DagStore for GrpcStateClient {
             agent_name: agent_name.to_string(),
         };
 
+        let mut client = self.client.clone();
         let response = self
             .runtime
-            .block_on(async { self.client.lock().unwrap().latest_state(request).await })
+            .block_on(async { client.latest_state(request).await })
             .map_err(|e| e.to_string())?;
 
         Ok(response.into_inner().state)
@@ -139,9 +140,10 @@ impl DagStore for GrpcStateClient {
             session_id: session_id.to_string(),
         };
 
+        let mut client = self.client.clone();
         let response = self
             .runtime
-            .block_on(async { self.client.lock().unwrap().latest_node_hash(request).await })
+            .block_on(async { client.latest_node_hash(request).await })
             .map_err(|e| e.to_string())?;
 
         Ok(response.into_inner().hash)
@@ -153,15 +155,10 @@ impl DagStore for GrpcStateClient {
             state: state.to_string(),
         };
 
+        let mut client = self.client.clone();
         let response = self
             .runtime
-            .block_on(async {
-                self.client
-                    .lock()
-                    .unwrap()
-                    .set_checkout_state(request)
-                    .await
-            })
+            .block_on(async { client.set_checkout_state(request).await })
             .map_err(|e| e.to_string())?;
 
         let resp = response.into_inner();
@@ -177,12 +174,11 @@ impl DagStore for GrpcStateClient {
     // -------------------------------------------------------------------------
 
     fn ensure_main_timeline(&self) -> Result<i64, String> {
+        let mut client = self.client.clone();
         let response = self
             .runtime
             .block_on(async {
-                self.client
-                    .lock()
-                    .unwrap()
+                client
                     .ensure_main_timeline(proto::EnsureMainTimelineRequest {})
                     .await
             })
@@ -201,9 +197,10 @@ impl DagStore for GrpcStateClient {
             parent_id,
             fork_point: fork_point.map(|s| s.to_string()),
         };
+        let mut client = self.client.clone();
         let response = self
             .runtime
-            .block_on(async { self.client.lock().unwrap().create_timeline(request).await })
+            .block_on(async { client.create_timeline(request).await })
             .map_err(|e| e.to_string())?;
         Ok(response.into_inner().id)
     }
@@ -212,15 +209,10 @@ impl DagStore for GrpcStateClient {
         let request = proto::GetTimelineByBranchRequest {
             branch_name: branch_name.to_string(),
         };
+        let mut client = self.client.clone();
         let response = self
             .runtime
-            .block_on(async {
-                self.client
-                    .lock()
-                    .unwrap()
-                    .get_timeline_by_branch(request)
-                    .await
-            })
+            .block_on(async { client.get_timeline_by_branch(request).await })
             .map_err(|e| e.to_string())?;
 
         match response.into_inner().timeline {
@@ -231,9 +223,10 @@ impl DagStore for GrpcStateClient {
 
     fn get_timeline(&self, id: i64) -> Result<Option<Timeline>, String> {
         let request = proto::GetTimelineByIdRequest { id };
+        let mut client = self.client.clone();
         let response = self
             .runtime
-            .block_on(async { self.client.lock().unwrap().get_timeline(request).await })
+            .block_on(async { client.get_timeline(request).await })
             .map_err(|e| e.to_string())?;
 
         match response.into_inner().timeline {
@@ -244,9 +237,10 @@ impl DagStore for GrpcStateClient {
 
     fn seal_timeline(&self, id: i64) -> Result<(), String> {
         let request = proto::SealTimelineRequest { id };
+        let mut client = self.client.clone();
         let response = self
             .runtime
-            .block_on(async { self.client.lock().unwrap().seal_timeline(request).await })
+            .block_on(async { client.seal_timeline(request).await })
             .map_err(|e| e.to_string())?;
 
         let resp = response.into_inner();
@@ -262,9 +256,10 @@ impl DagStore for GrpcStateClient {
             id,
             new_name: new_name.to_string(),
         };
+        let mut client = self.client.clone();
         let response = self
             .runtime
-            .block_on(async { self.client.lock().unwrap().rename_timeline(request).await })
+            .block_on(async { client.rename_timeline(request).await })
             .map_err(|e| e.to_string())?;
 
         let resp = response.into_inner();
@@ -277,15 +272,10 @@ impl DagStore for GrpcStateClient {
 
     fn is_timeline_sealed(&self, id: i64) -> Result<bool, String> {
         let request = proto::IsTimelineSealedRequest { id };
+        let mut client = self.client.clone();
         let response = self
             .runtime
-            .block_on(async {
-                self.client
-                    .lock()
-                    .unwrap()
-                    .is_timeline_sealed(request)
-                    .await
-            })
+            .block_on(async { client.is_timeline_sealed(request).await })
             .map_err(|e| e.to_string())?;
         Ok(response.into_inner().sealed)
     }

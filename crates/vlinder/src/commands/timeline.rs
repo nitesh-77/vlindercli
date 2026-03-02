@@ -254,7 +254,7 @@ fn repair(dir: &Path, path: Option<PathBuf>) {
     // Count existing repair branches for today to generate unique suffix
     let counter = dag_store
         .as_ref()
-        .and_then(|store| {
+        .map(|store| {
             // Count timelines with branch_name like repair-{date}-%
             // We don't have a count method, so iterate by trying names
             let mut n = 0;
@@ -266,7 +266,7 @@ fn repair(dir: &Path, path: Option<PathBuf>) {
                     _ => break,
                 }
             }
-            Some(n)
+            n
         })
         .unwrap_or(1);
 

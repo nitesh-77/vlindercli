@@ -1,6 +1,5 @@
 //! gRPC client implementing the CatalogService trait.
 
-use std::sync::Mutex;
 use tonic::transport::Channel;
 
 use super::proto::{self, catalog_service_client::CatalogServiceClient};
@@ -11,7 +10,7 @@ use vlinder_core::domain::{CatalogError, CatalogService, Model, ModelInfo};
 /// A single client talks to the entire service — catalog names are passed
 /// per-call, not baked into the constructor.
 pub struct GrpcCatalogClient {
-    client: Mutex<CatalogServiceClient<Channel>>,
+    client: CatalogServiceClient<Channel>,
     runtime: tokio::runtime::Runtime,
 }
 
@@ -22,10 +21,7 @@ impl GrpcCatalogClient {
         let client =
             runtime.block_on(async { CatalogServiceClient::connect(addr.to_string()).await })?;
 
-        Ok(Self {
-            client: Mutex::new(client),
-            runtime,
-        })
+        Ok(Self { client, runtime })
     }
 }
 
@@ -48,13 +44,10 @@ pub fn ping_catalog_service(addr: &str) -> Option<(u32, u32, u32)> {
 
 impl CatalogService for GrpcCatalogClient {
     fn catalogs(&self) -> Vec<String> {
-        let result = self.runtime.block_on(async {
-            self.client
-                .lock()
-                .unwrap()
-                .list_catalogs(proto::ListCatalogsRequest {})
-                .await
-        });
+        let mut client = self.client.clone();
+        let result = self
+            .runtime
+            .block_on(async { client.list_catalogs(proto::ListCatalogsRequest {}).await });
 
         match result {
             Ok(resp) => resp.into_inner().catalogs,
@@ -68,9 +61,10 @@ impl CatalogService for GrpcCatalogClient {
             name: name.to_string(),
         };
 
+        let mut client = self.client.clone();
         let response = self
             .runtime
-            .block_on(async { self.client.lock().unwrap().resolve(request).await })
+            .block_on(async { client.resolve(request).await })
             .map_err(|e| CatalogError::Network(e.to_string()))?;
 
         let resp = response.into_inner();
@@ -78,7 +72,7 @@ impl CatalogService for GrpcCatalogClient {
             return Err(CatalogError::Network(err));
         }
         match resp.model {
-            Some(m) => Model::try_from(m).map_err(|e| CatalogError::Parse(e)),
+            Some(m) => Model::try_from(m).map_err(CatalogError::Parse),
             None => Err(CatalogError::NotFound(name.to_string())),
         }
     }
@@ -88,9 +82,10 @@ impl CatalogService for GrpcCatalogClient {
             catalog: catalog.to_string(),
         };
 
+        let mut client = self.client.clone();
         let response = self
             .runtime
-            .block_on(async { self.client.lock().unwrap().list(request).await })
+            .block_on(async { client.list(request).await })
             .map_err(|e| CatalogError::Network(e.to_string()))?;
 
         let resp = response.into_inner();
@@ -106,9 +101,10 @@ impl CatalogService for GrpcCatalogClient {
             name: name.to_string(),
         };
 
+        let mut client = self.client.clone();
         let result = self
             .runtime
-            .block_on(async { self.client.lock().unwrap().available(request).await });
+            .block_on(async { client.available(request).await });
 
         match result {
             Ok(resp) => resp.into_inner().available,
