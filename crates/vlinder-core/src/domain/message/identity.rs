@@ -92,6 +92,12 @@ impl SubmissionId {
     }
 }
 
+impl Default for SubmissionId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl fmt::Display for SubmissionId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
@@ -235,6 +241,12 @@ impl SequenceCounter {
     /// Reset the counter back to sequence 1.
     pub fn reset(&self) {
         *self.0.lock().unwrap() = Sequence::first();
+    }
+}
+
+impl Default for SequenceCounter {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

@@ -87,6 +87,7 @@ pub trait CatalogService: Send + Sync {
 ///
 /// Named "Composite" (not "InMemory") because the backends themselves make
 /// real HTTP calls — this is just the dispatch layer.
+#[derive(Default)]
 pub struct CompositeCatalog {
     sources: HashMap<String, Arc<dyn ModelCatalog>>,
 }
