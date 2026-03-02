@@ -35,6 +35,7 @@ pub struct InvokeMessage {
 }
 
 impl InvokeMessage {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         timeline: TimelineId,
         submission: SubmissionId,

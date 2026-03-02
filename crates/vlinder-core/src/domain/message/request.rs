@@ -35,6 +35,7 @@ pub struct RequestMessage {
 }
 
 impl RequestMessage {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         timeline: TimelineId,
         submission: SubmissionId,

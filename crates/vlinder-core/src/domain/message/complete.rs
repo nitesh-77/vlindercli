@@ -30,6 +30,7 @@ pub struct CompleteMessage {
 }
 
 impl CompleteMessage {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         timeline: TimelineId,
         submission: SubmissionId,

@@ -33,6 +33,7 @@ pub struct DelegateMessage {
 }
 
 impl DelegateMessage {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         timeline: TimelineId,
         submission: SubmissionId,
