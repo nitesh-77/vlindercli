@@ -28,6 +28,7 @@ fn container_runtime_executes_echo_agent() {
         nats_url: config.queue.nats_url.clone(),
         registry_addr: config.distributed.registry_addr.clone(),
         state_addr: config.distributed.state_addr.clone(),
+        secret_addr: config.distributed.secret_addr.clone(),
     };
     let mut runtime = ContainerRuntime::new(&podman_config, registry.clone()).unwrap();
 

@@ -41,7 +41,11 @@ impl Sidecar {
     /// Connects to NATS (with DAG recording) and the Registry Service,
     /// then fetches the Agent from the registry to determine storage backends.
     pub fn new(config: &SidecarConfig) -> Result<Self, Box<dyn std::error::Error>> {
-        let queue = factory::connect_queue(&config.nats_url, &config.state_url)?;
+        let queue = factory::connect_queue(
+            &config.nats_url,
+            &config.state_url,
+            config.secret_url.as_deref(),
+        )?;
         let image_ref = config
             .image_ref
             .as_ref()

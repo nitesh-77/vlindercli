@@ -58,6 +58,9 @@ futures = "0.3"
 # gRPC for registry service
 tonic = "0.12"
 
+# TLS — explicit provider selection (AWS SDK brings aws-lc-rs, async-nats brings ring)
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
+
 # Signal handling for graceful shutdown
 ctrlc = "3.4"
 

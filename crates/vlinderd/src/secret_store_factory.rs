@@ -16,7 +16,7 @@ use vlinder_nats::NatsSecretStore;
 pub fn from_config(config: &Config) -> Result<Arc<dyn SecretStore>, SecretStoreError> {
     match config.queue.backend {
         QueueBackend::Nats => {
-            let store = NatsSecretStore::connect(&config.queue.nats_url)?;
+            let store = NatsSecretStore::connect(&config.queue.nats_config())?;
             Ok(Arc::new(store))
         }
         #[cfg(any(test, feature = "test-support"))]

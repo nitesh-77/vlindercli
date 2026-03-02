@@ -30,7 +30,6 @@ impl RuntimeType {
             RuntimeType::Container => "container",
         }
     }
-
 }
 
 impl std::str::FromStr for RuntimeType {

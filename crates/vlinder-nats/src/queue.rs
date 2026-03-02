@@ -41,17 +41,17 @@ struct NatsQueueInner {
 }
 
 impl NatsQueue {
-    /// Connect to a NATS server.
+    /// Connect to a NATS server using the given config.
     ///
     /// Creates the VLINDER stream if it doesn't exist.
-    pub fn connect(url: &str) -> Result<Self, QueueError> {
+    pub fn connect(config: &crate::NatsConfig) -> Result<Self, QueueError> {
         let runtime = Runtime::new()
             .map_err(|e| QueueError::SendFailed(format!("failed to create runtime: {}", e)))?;
 
         let (client, jetstream) = runtime.block_on(async {
-            let client = async_nats::connect(url)
+            let client = crate::connect::nats_connect(config)
                 .await
-                .map_err(|e| QueueError::SendFailed(format!("failed to connect: {}", e)))?;
+                .map_err(QueueError::SendFailed)?;
 
             let jetstream = jetstream::new(client.clone());
 
@@ -71,11 +71,6 @@ impl NatsQueue {
         })
     }
 
-    /// Connect to localhost NATS (default port 4222).
-    pub fn localhost() -> Result<Self, QueueError> {
-        Self::connect("nats://localhost:4222")
-    }
-
     /// Ensure the VLINDER stream exists.
     async fn ensure_stream(jetstream: &jetstream::Context) -> Result<(), QueueError> {
         let config = stream::Config {
@@ -83,6 +78,7 @@ impl NatsQueue {
             subjects: vec!["vlinder.>".to_string()],
             retention: stream::RetentionPolicy::Limits,
             max_age: Duration::from_secs(7 * 24 * 60 * 60), // 7 days
+            max_bytes: 100 * 1024 * 1024,                   // 100 MiB — required by NGS
             ..Default::default()
         };
 

@@ -294,7 +294,6 @@ impl HarnessType {
             HarnessType::Grpc => "grpc",
         }
     }
-
 }
 
 impl std::str::FromStr for HarnessType {

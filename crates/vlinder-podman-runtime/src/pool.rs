@@ -267,6 +267,10 @@ impl ContainerRuntime {
             "http://host.containers.internal:{}",
             extract_port(&self.config.state_addr, 9092)
         );
+        let secret_url = format!(
+            "http://host.containers.internal:{}",
+            extract_port(&self.config.secret_addr, 9093)
+        );
 
         let image_digest_str = self
             .podman
@@ -279,6 +283,7 @@ impl ContainerRuntime {
             ("VLINDER_NATS_URL", nats_url),
             ("VLINDER_REGISTRY_URL", registry_url),
             ("VLINDER_STATE_URL", state_url),
+            ("VLINDER_SECRET_URL", secret_url),
             ("VLINDER_CONTAINER_PORT", "8080".to_string()),
             ("VLINDER_IMAGE_REF", image_ref.as_str().to_string()),
             ("VLINDER_IMAGE_DIGEST", image_digest_str),
@@ -552,6 +557,7 @@ mod tests {
             nats_url: "nats://localhost:4222".to_string(),
             registry_addr: "http://127.0.0.1:9090".to_string(),
             state_addr: "http://127.0.0.1:9092".to_string(),
+            secret_addr: "http://127.0.0.1:9093".to_string(),
         }
     }
 

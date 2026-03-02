@@ -311,7 +311,11 @@ fn download_tarball(url: &str) -> Result<PathBuf, String> {
 }
 
 /// Extract a tarball, moving files from the nested directory up into target.
-fn extract_tarball(tarball: &std::path::Path, target: &std::path::Path, suffix: &str) -> Result<(), String> {
+fn extract_tarball(
+    tarball: &std::path::Path,
+    target: &std::path::Path,
+    suffix: &str,
+) -> Result<(), String> {
     // tar xzf into target, then move contents from nested dir up
     let status = std::process::Command::new("tar")
         .args([
