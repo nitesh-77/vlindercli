@@ -139,13 +139,7 @@ impl MessageQueue for RecordingQueue {
         &self,
         submission: &SubmissionId,
         harness: crate::domain::HarnessType,
-    ) -> Result<
-        (
-            CompleteMessage,
-            Box<dyn FnOnce() -> Result<(), QueueError> + Send>,
-        ),
-        QueueError,
-    > {
+    ) -> Result<(CompleteMessage, Acknowledgement), QueueError> {
         self.inner.receive_complete(submission, harness)
     }
 
@@ -156,26 +150,14 @@ impl MessageQueue for RecordingQueue {
     fn receive_delegate(
         &self,
         target: &crate::domain::AgentId,
-    ) -> Result<
-        (
-            DelegateMessage,
-            Box<dyn FnOnce() -> Result<(), QueueError> + Send>,
-        ),
-        QueueError,
-    > {
+    ) -> Result<(DelegateMessage, Acknowledgement), QueueError> {
         self.inner.receive_delegate(target)
     }
 
     fn receive_delegate_reply(
         &self,
         reply_key: &crate::domain::RoutingKey,
-    ) -> Result<
-        (
-            CompleteMessage,
-            Box<dyn FnOnce() -> Result<(), QueueError> + Send>,
-        ),
-        QueueError,
-    > {
+    ) -> Result<(CompleteMessage, Acknowledgement), QueueError> {
         self.inner.receive_delegate_reply(reply_key)
     }
 }

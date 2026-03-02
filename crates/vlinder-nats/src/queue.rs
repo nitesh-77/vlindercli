@@ -536,13 +536,7 @@ impl MessageQueue for NatsQueue {
         &self,
         submission: &SubmissionId,
         harness: HarnessType,
-    ) -> Result<
-        (
-            CompleteMessage,
-            Box<dyn FnOnce() -> Result<(), QueueError> + Send>,
-        ),
-        QueueError,
-    > {
+    ) -> Result<(CompleteMessage, Acknowledgement), QueueError> {
         // Build filter: submission-scoped consumer (ADR 052) with timeline wildcard
         let filter = format!("vlinder.*.{}.complete.*.{}", submission, harness.as_str());
 
@@ -614,13 +608,7 @@ impl MessageQueue for NatsQueue {
     fn receive_delegate(
         &self,
         target: &AgentId,
-    ) -> Result<
-        (
-            DelegateMessage,
-            Box<dyn FnOnce() -> Result<(), QueueError> + Send>,
-        ),
-        QueueError,
-    > {
+    ) -> Result<(DelegateMessage, Acknowledgement), QueueError> {
         let filter = format!("vlinder.*.*.delegate.*.{}", target.as_str());
 
         self.inner.runtime.block_on(async {
@@ -696,13 +684,7 @@ impl MessageQueue for NatsQueue {
     fn receive_delegate_reply(
         &self,
         reply_key: &RoutingKey,
-    ) -> Result<
-        (
-            CompleteMessage,
-            Box<dyn FnOnce() -> Result<(), QueueError> + Send>,
-        ),
-        QueueError,
-    > {
+    ) -> Result<(CompleteMessage, Acknowledgement), QueueError> {
         let filter = routing_key_to_subject(reply_key);
 
         self.inner.runtime.block_on(async {

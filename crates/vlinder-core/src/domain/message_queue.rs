@@ -84,13 +84,7 @@ pub trait MessageQueue {
         &self,
         submission: &SubmissionId,
         harness: HarnessType,
-    ) -> Result<
-        (
-            CompleteMessage,
-            Box<dyn FnOnce() -> Result<(), QueueError> + Send>,
-        ),
-        QueueError,
-    >;
+    ) -> Result<(CompleteMessage, Acknowledgement), QueueError>;
 
     // -------------------------------------------------------------------------
     // Delegation methods (ADR 056, ADR 096 §7)
@@ -103,13 +97,7 @@ pub trait MessageQueue {
     fn receive_delegate(
         &self,
         target: &AgentId,
-    ) -> Result<
-        (
-            DelegateMessage,
-            Box<dyn FnOnce() -> Result<(), QueueError> + Send>,
-        ),
-        QueueError,
-    >;
+    ) -> Result<(DelegateMessage, Acknowledgement), QueueError>;
 
     /// Send a CompleteMessage as a delegation reply (ADR 096 §7).
     ///
@@ -127,13 +115,7 @@ pub trait MessageQueue {
     fn receive_delegate_reply(
         &self,
         reply_key: &RoutingKey,
-    ) -> Result<
-        (
-            CompleteMessage,
-            Box<dyn FnOnce() -> Result<(), QueueError> + Send>,
-        ),
-        QueueError,
-    >;
+    ) -> Result<(CompleteMessage, Acknowledgement), QueueError>;
 
     // -------------------------------------------------------------------------
     // Request-reply facades (ADR 092)

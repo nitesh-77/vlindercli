@@ -153,13 +153,7 @@ impl MessageQueue for InMemoryQueue {
         &self,
         submission: &SubmissionId,
         harness: HarnessType,
-    ) -> Result<
-        (
-            CompleteMessage,
-            Box<dyn FnOnce() -> Result<(), QueueError> + Send>,
-        ),
-        QueueError,
-    > {
+    ) -> Result<(CompleteMessage, Acknowledgement), QueueError> {
         let mut typed = self.typed_queues.lock().unwrap();
 
         for (key, queue) in typed.iter_mut() {
@@ -196,13 +190,7 @@ impl MessageQueue for InMemoryQueue {
     fn receive_delegate(
         &self,
         target: &AgentId,
-    ) -> Result<
-        (
-            DelegateMessage,
-            Box<dyn FnOnce() -> Result<(), QueueError> + Send>,
-        ),
-        QueueError,
-    > {
+    ) -> Result<(DelegateMessage, Acknowledgement), QueueError> {
         let mut typed = self.typed_queues.lock().unwrap();
 
         for (key, queue) in typed.iter_mut() {
@@ -238,13 +226,7 @@ impl MessageQueue for InMemoryQueue {
     fn receive_delegate_reply(
         &self,
         reply_key: &RoutingKey,
-    ) -> Result<
-        (
-            CompleteMessage,
-            Box<dyn FnOnce() -> Result<(), QueueError> + Send>,
-        ),
-        QueueError,
-    > {
+    ) -> Result<(CompleteMessage, Acknowledgement), QueueError> {
         let mut typed = self.typed_queues.lock().unwrap();
 
         if let Some(queue) = typed.get_mut(reply_key) {
