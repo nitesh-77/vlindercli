@@ -1,4 +1,4 @@
-//! vlinder-sidecar — standalone binary running alongside agent containers.
+//! vlinder-podman-sidecar — standalone binary running alongside agent containers.
 //!
 //! Deployed as an OCI container in a Podman pod. Reads configuration from
 //! environment variables, connects to NATS and the registry, waits for the

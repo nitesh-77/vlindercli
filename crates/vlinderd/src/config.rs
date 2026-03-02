@@ -287,7 +287,7 @@ pub struct RuntimeConfig {
     /// or an absolute path to the socket file.
     pub podman_socket: String,
 
-    /// OCI image reference for the vlinder-sidecar container.
+    /// OCI image reference for the vlinder-podman-sidecar container.
     /// Deployed alongside agent containers in a Podman pod.
     pub sidecar_image: String,
 
@@ -397,7 +397,7 @@ impl Default for RuntimeConfig {
         Self {
             image_policy: "mutable".to_string(),
             podman_socket: "auto".to_string(),
-            sidecar_image: "localhost/vlinder-sidecar:latest".to_string(),
+            sidecar_image: "localhost/vlinder-podman-sidecar:latest".to_string(),
             lambda_region: "us-east-1".to_string(),
             lambda_memory_mb: 512,
             lambda_timeout_secs: 300,

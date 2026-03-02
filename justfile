@@ -2,9 +2,9 @@
 # Platform Builds (OCI container images via Podman)
 # =============================================================================
 
-# Build vlinder-sidecar (OCI image via Podman, multi-stage Rust build)
+# Build vlinder-podman-sidecar (OCI image via Podman, multi-stage Rust build)
 build-sidecar:
-    podman build -t localhost/vlinder-sidecar:latest -f crates/vlinder-sidecar/Dockerfile .
+    podman build -t localhost/vlinder-podman-sidecar:latest -f crates/vlinder-podman-sidecar/Dockerfile .
 
 # =============================================================================
 # Agent Builds (OCI container images via Podman)

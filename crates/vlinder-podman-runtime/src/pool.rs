@@ -2,7 +2,7 @@
 //!
 //! Each agent runs as a pod containing two containers:
 //! 1. The agent container (user-provided OCI image)
-//! 2. The sidecar container (vlinder-sidecar, mediates queue ↔ agent)
+//! 2. The sidecar container (vlinder-podman-sidecar, mediates queue ↔ agent)
 //!
 //! The runtime creates pods, starts them, and tears them down on shutdown.
 //! Dead pod detection is deferred — ensure_containers restarts missing pods
@@ -123,7 +123,7 @@ impl ContainerRuntime {
     /// 1. Provision S3 mount volumes (ADR 107)
     /// 2. Create a Podman pod named `vlinder-{name}`
     /// 3. Add the agent container (user image, with mount volumes)
-    /// 4. Add the sidecar container (vlinder-sidecar image, env vars for config)
+    /// 4. Add the sidecar container (vlinder-podman-sidecar image, env vars for config)
     /// 5. Start the pod (all containers start together)
     fn start(&mut self, name: &str, agent: &Agent) -> Result<(), String> {
         if self.pods.contains_key(name) {
@@ -251,8 +251,9 @@ impl ContainerRuntime {
             .map_err(|e| e.to_string())?;
 
         // 4. Build sidecar env vars
-        let sidecar_image_ref = ImageRef::parse(&self.config.sidecar_image)
-            .unwrap_or_else(|_| ImageRef::parse("localhost/vlinder-sidecar:latest").unwrap());
+        let sidecar_image_ref = ImageRef::parse(&self.config.sidecar_image).unwrap_or_else(|_| {
+            ImageRef::parse("localhost/vlinder-podman-sidecar:latest").unwrap()
+        });
         let sidecar_target = RunTarget::Ref(&sidecar_image_ref);
 
         let nats_url = format!(
@@ -553,7 +554,7 @@ mod tests {
         PodmanRuntimeConfig {
             image_policy: "mutable".to_string(),
             podman_socket: "disabled".to_string(),
-            sidecar_image: "localhost/vlinder-sidecar:latest".to_string(),
+            sidecar_image: "localhost/vlinder-podman-sidecar:latest".to_string(),
             nats_url: "nats://localhost:4222".to_string(),
             registry_addr: "http://127.0.0.1:9090".to_string(),
             state_addr: "http://127.0.0.1:9092".to_string(),

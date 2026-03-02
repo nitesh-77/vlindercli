@@ -1,11 +1,11 @@
 [package]
-name = "vlinder-sidecar"
+name = "vlinder-podman-sidecar"
 version = "0.1.0"
 edition = "2021"
 publish = false
 
 [[bin]]
-name = "vlinder-sidecar"
+name = "vlinder-podman-sidecar"
 path = "src/main.rs"
 
 [dependencies]

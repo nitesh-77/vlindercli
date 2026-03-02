@@ -1,8 +1,8 @@
-# Multi-stage build for vlinder-sidecar.
+# Multi-stage build for vlinder-podman-sidecar.
 # Build context: workspace root (sidecar depends on sibling crates).
 #
 # Usage:
-#   podman build -t localhost/vlinder-sidecar:latest -f crates/vlinder-sidecar/Dockerfile .
+#   podman build -t localhost/vlinder-podman-sidecar:latest -f crates/vlinder-podman-sidecar/Dockerfile .
 
 # ── Build stage ──────────────────────────────────────────────────────
 FROM rust:1.90-bookworm AS builder
@@ -21,7 +21,7 @@ COPY crates/vlinder-infer-openrouter/Cargo.toml crates/vlinder-infer-openrouter/
 COPY crates/vlinder-sqlite-vec/Cargo.toml crates/vlinder-sqlite-vec/
 COPY crates/vlinder-sqlite-kv/Cargo.toml crates/vlinder-sqlite-kv/
 COPY crates/vlinder-nats/Cargo.toml crates/vlinder-nats/
-COPY crates/vlinder-sidecar/Cargo.toml crates/vlinder-sidecar/
+COPY crates/vlinder-podman-sidecar/Cargo.toml crates/vlinder-podman-sidecar/
 COPY crates/vlinder-podman-runtime/Cargo.toml crates/vlinder-podman-runtime/
 COPY crates/vlinder-catalog/Cargo.toml crates/vlinder-catalog/
 COPY crates/vlinder-sql-state/Cargo.toml crates/vlinder-sql-state/
@@ -43,7 +43,7 @@ RUN mkdir -p crates/vlinder-core/src && echo "" > crates/vlinder-core/src/lib.rs
     mkdir -p crates/vlinder-sql-state/src && echo "" > crates/vlinder-sql-state/src/lib.rs && \
     mkdir -p crates/vlinder-git-dag/src && echo "" > crates/vlinder-git-dag/src/lib.rs && \
     mkdir -p crates/vlinder-sql-registry/src && echo "" > crates/vlinder-sql-registry/src/lib.rs && \
-    mkdir -p crates/vlinder-sidecar/src && echo "fn main() {}" > crates/vlinder-sidecar/src/main.rs && \
+    mkdir -p crates/vlinder-podman-sidecar/src && echo "fn main() {}" > crates/vlinder-podman-sidecar/src/main.rs && \
     mkdir -p crates/vlinderd/src && echo "fn main() {}" > crates/vlinderd/src/main.rs && \
     mkdir -p crates/vlinder/src && echo "fn main() {}" > crates/vlinder/src/main.rs
 
@@ -60,7 +60,7 @@ COPY crates/vlinder-nats/build.rs crates/vlinder-nats/
 COPY crates/vlinder-nats/proto crates/vlinder-nats/proto
 
 # Pre-build dependencies (this layer is cached unless Cargo.toml changes)
-RUN cargo build --release -p vlinder-sidecar 2>/dev/null || true
+RUN cargo build --release -p vlinder-podman-sidecar 2>/dev/null || true
 
 # Copy actual source code
 COPY crates/vlinder-core/src crates/vlinder-core/src
@@ -75,7 +75,7 @@ COPY crates/vlinder-catalog/src crates/vlinder-catalog/src
 COPY crates/vlinder-sql-state/src crates/vlinder-sql-state/src
 COPY crates/vlinder-git-dag/src crates/vlinder-git-dag/src
 COPY crates/vlinder-sql-registry/src crates/vlinder-sql-registry/src
-COPY crates/vlinder-sidecar/src crates/vlinder-sidecar/src
+COPY crates/vlinder-podman-sidecar/src crates/vlinder-podman-sidecar/src
 
 # Touch source files to invalidate the cache for actual compilation
 RUN touch crates/vlinder-core/src/lib.rs \
@@ -90,10 +90,10 @@ RUN touch crates/vlinder-core/src/lib.rs \
           crates/vlinder-sql-state/src/lib.rs \
           crates/vlinder-git-dag/src/lib.rs \
           crates/vlinder-sql-registry/src/lib.rs \
-          crates/vlinder-sidecar/src/main.rs
+          crates/vlinder-podman-sidecar/src/main.rs
 
 # Build the sidecar binary
-RUN cargo build --release -p vlinder-sidecar
+RUN cargo build --release -p vlinder-podman-sidecar
 
 # ── Runtime stage ────────────────────────────────────────────────────
 FROM debian:bookworm-slim
@@ -101,6 +101,6 @@ FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /build/target/release/vlinder-sidecar /usr/local/bin/vlinder-sidecar
+COPY --from=builder /build/target/release/vlinder-podman-sidecar /usr/local/bin/vlinder-podman-sidecar
 
-ENTRYPOINT ["vlinder-sidecar"]
+ENTRYPOINT ["vlinder-podman-sidecar"]
