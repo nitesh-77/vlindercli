@@ -1,11 +1,13 @@
-//! Lambda runtime — stub for executing agents as AWS Lambda functions.
+//! Lambda runtime — executes agents as AWS Lambda functions.
 //!
-//! This crate mirrors the structure of `vlinder-podman-runtime` but targets
-//! AWS Lambda as the compute backend. Currently a spike: `tick()` is a no-op
-//! that logs the number of Lambda-assigned agents.
+//! Mirrors `vlinder-podman-runtime` but targets AWS Lambda as the compute
+//! backend. Manages IAM roles and Lambda functions for agents assigned to
+//! `RuntimeType::Lambda`.
 
 mod config;
+mod lambda_client;
 mod runtime;
 
 pub use config::LambdaRuntimeConfig;
+pub use lambda_client::LambdaError;
 pub use runtime::LambdaRuntime;

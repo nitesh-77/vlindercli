@@ -1,11 +1,13 @@
 use std::collections::HashMap;
 use std::path::Path;
+use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
 use super::provider::Provider;
 
 use super::resource_id::ResourceId;
+use super::runtime::RuntimeType;
 use super::service_type::ServiceType;
 
 /// Agent manifest as read from agent.toml.
@@ -52,9 +54,13 @@ impl AgentManifest {
             .unwrap_or_else(|_| path.parent().unwrap_or(Path::new(".")).to_path_buf());
 
         // Resolve executable for file-based runtimes only.
-        // Container image refs (e.g., "localhost/my-agent:latest") are passed through as-is.
-        if manifest.runtime != "container" {
-            manifest.executable = resolve_executable_path(&manifest.executable, &agent_dir)?;
+        // Image-based runtimes (container, lambda) pass through as-is.
+        let runtime_type = RuntimeType::from_str(&manifest.runtime).ok();
+        match runtime_type {
+            Some(RuntimeType::Container | RuntimeType::Lambda) => {}
+            _ => {
+                manifest.executable = resolve_executable_path(&manifest.executable, &agent_dir)?;
+            }
         }
 
         // Models are registry names (ADR 094) — no URI resolution needed.

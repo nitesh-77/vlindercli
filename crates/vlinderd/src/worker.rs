@@ -261,11 +261,18 @@ fn run_agent_lambda_worker(config: &Config, shutdown: &AtomicBool) {
 
     let lambda_config = LambdaRuntimeConfig {
         registry_addr: config.distributed.registry_addr.clone(),
+        region: config.runtime.lambda_region.clone(),
+        memory_mb: config.runtime.lambda_memory_mb,
+        timeout_secs: config.runtime.lambda_timeout_secs,
     };
 
-    let mut runtime = LambdaRuntime::new(&lambda_config, registry);
+    let mut runtime =
+        LambdaRuntime::new(&lambda_config, registry).expect("Failed to create Lambda runtime");
 
-    tracing::info!("Lambda agent worker ready");
+    tracing::info!(
+        region = config.runtime.lambda_region.as_str(),
+        "Lambda agent worker ready"
+    );
 
     while !shutdown.load(Ordering::Relaxed) {
         runtime.tick();

@@ -273,6 +273,15 @@ pub struct RuntimeConfig {
     /// OCI image reference for the vlinder-sidecar container.
     /// Deployed alongside agent containers in a Podman pod.
     pub sidecar_image: String,
+
+    /// AWS region for Lambda functions (one worker = one region).
+    pub lambda_region: String,
+
+    /// Memory allocation for Lambda functions in MB.
+    pub lambda_memory_mb: i32,
+
+    /// Execution timeout for Lambda functions in seconds.
+    pub lambda_timeout_secs: i32,
 }
 
 // ============================================================================
@@ -372,6 +381,9 @@ impl Default for RuntimeConfig {
             image_policy: "mutable".to_string(),
             podman_socket: "auto".to_string(),
             sidecar_image: "localhost/vlinder-sidecar:latest".to_string(),
+            lambda_region: "us-east-1".to_string(),
+            lambda_memory_mb: 512,
+            lambda_timeout_secs: 300,
         }
     }
 }
@@ -523,6 +535,16 @@ impl Config {
         }
         if let Ok(v) = std::env::var("VLINDER_RUNTIME_SIDECAR_IMAGE") {
             self.runtime.sidecar_image = v;
+        }
+        // Lambda runtime
+        if let Ok(v) = std::env::var("VLINDER_RUNTIME_LAMBDA_REGION") {
+            self.runtime.lambda_region = v;
+        }
+        if let Ok(v) = std::env::var("VLINDER_RUNTIME_LAMBDA_MEMORY_MB") {
+            self.runtime.lambda_memory_mb = v.parse().unwrap_or(512);
+        }
+        if let Ok(v) = std::env::var("VLINDER_RUNTIME_LAMBDA_TIMEOUT_SECS") {
+            self.runtime.lambda_timeout_secs = v.parse().unwrap_or(300);
         }
     }
 

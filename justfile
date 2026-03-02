@@ -10,6 +10,10 @@ build-sidecar:
 # Agent Builds (OCI container images via Podman)
 # =============================================================================
 
+# Build echo agent (OCI image via Podman, simplest possible agent)
+build-echo:
+    podman build -t localhost/echo:latest agents/echo/
+
 # Build echo-container agent (OCI image via Podman)
 build-echo-container:
     podman build -t localhost/echo-container:latest fleets/todoapp/agents/echo-container/
