@@ -11,12 +11,12 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use crate::config::Config;
+use crate::worker_role::WorkerRole;
 use vlinder_catalog::catalog_service::ping_catalog_service;
 use vlinder_harness::harness_service::ping_harness;
-use vlinder_sql_registry::registry_service::ping_registry;
 use vlinder_nats::secret_service::ping_secret_service;
+use vlinder_sql_registry::registry_service::ping_registry;
 use vlinder_sql_state::state_service::ping_state_service;
-use crate::worker_role::WorkerRole;
 
 /// Process manager for distributed worker processes.
 pub struct Supervisor {

@@ -19,9 +19,15 @@ fn sqlite_store_and_search() {
     let vec2 = make_test_vector(2.0);
     let vec3 = make_test_vector(1.1); // Similar to vec1
 
-    storage.store_embedding("doc1", &vec1, "first document").unwrap();
-    storage.store_embedding("doc2", &vec2, "second document").unwrap();
-    storage.store_embedding("doc3", &vec3, "third document").unwrap();
+    storage
+        .store_embedding("doc1", &vec1, "first document")
+        .unwrap();
+    storage
+        .store_embedding("doc2", &vec2, "second document")
+        .unwrap();
+    storage
+        .store_embedding("doc3", &vec3, "third document")
+        .unwrap();
 
     // Search with vec1 - should find doc1 first (exact match), then doc3 (similar)
     let results = storage.search_by_vector(&vec1, 3).unwrap();
@@ -40,7 +46,9 @@ fn sqlite_persistence() {
     // Store embedding
     {
         let storage = SqliteVectorStorage::open_at(&db_path).unwrap();
-        storage.store_embedding("persistent", &vec1, "survives restart").unwrap();
+        storage
+            .store_embedding("persistent", &vec1, "survives restart")
+            .unwrap();
     } // storage dropped, connection closed
 
     // Reopen and verify data persists
@@ -102,14 +110,18 @@ fn sqlite_agent_isolation() {
     let vec1 = make_test_vector(1.0);
 
     // Agent A stores an embedding
-    storage_a.store_embedding("secret", &vec1, "agent-a-data").unwrap();
+    storage_a
+        .store_embedding("secret", &vec1, "agent-a-data")
+        .unwrap();
 
     // Agent B cannot find Agent A's embedding
     let results_b = storage_b.search_by_vector(&vec1, 10).unwrap();
     assert!(results_b.is_empty());
 
     // Agent B stores its own embedding with same key
-    storage_b.store_embedding("secret", &vec1, "agent-b-data").unwrap();
+    storage_b
+        .store_embedding("secret", &vec1, "agent-b-data")
+        .unwrap();
 
     // Each agent sees only their own data
     let results_a = storage_a.search_by_vector(&vec1, 1).unwrap();

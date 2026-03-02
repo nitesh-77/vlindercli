@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use clap::Subcommand;
 
 use crate::config::CliConfig;
-use vlinder_core::domain::{Fleet, FleetManifest, Harness, Registry, agent_routing_key};
+use vlinder_core::domain::{agent_routing_key, Fleet, FleetManifest, Harness, Registry};
 
 use super::connect::{connect_harness, connect_registry, open_dag_store, read_latest_state};
 use super::repl;
@@ -86,9 +86,8 @@ fn scaffold(name: &str) {
 
 pub fn deploy(path: Option<PathBuf>) {
     let config = CliConfig::load();
-    let fleet_path = path.unwrap_or_else(|| {
-        std::env::current_dir().expect("Failed to get current directory")
-    });
+    let fleet_path =
+        path.unwrap_or_else(|| std::env::current_dir().expect("Failed to get current directory"));
 
     let absolute_path = fleet_path
         .canonicalize()
@@ -96,12 +95,11 @@ pub fn deploy(path: Option<PathBuf>) {
 
     // Load fleet manifest from disk
     let manifest_path = absolute_path.join("fleet.toml");
-    let manifest = FleetManifest::load(&manifest_path)
-        .unwrap_or_else(|e| {
-            eprintln!("Failed to load {}: {}", manifest_path.display(), e);
-            eprintln!("Run this command from a fleet directory, or pass --path <dir>.");
-            std::process::exit(1);
-        });
+    let manifest = FleetManifest::load(&manifest_path).unwrap_or_else(|e| {
+        eprintln!("Failed to load {}: {}", manifest_path.display(), e);
+        eprintln!("Run this command from a fleet directory, or pass --path <dir>.");
+        std::process::exit(1);
+    });
 
     // Deploy all agents in the fleet via registry gRPC
     let registry = connect_registry(&config);
@@ -119,20 +117,18 @@ pub fn deploy(path: Option<PathBuf>) {
     }
 
     // Build Fleet from manifest + registry, then register
-    let fleet = Fleet::from_manifest(manifest, &*registry)
-        .unwrap_or_else(|e| {
-            eprintln!("Failed to build fleet: {}", e);
-            std::process::exit(1);
-        });
+    let fleet = Fleet::from_manifest(manifest, &*registry).unwrap_or_else(|e| {
+        eprintln!("Failed to build fleet: {}", e);
+        std::process::exit(1);
+    });
 
     let fleet_name = fleet.name.clone();
     let entry_id = fleet.entry.clone();
 
-    registry.register_fleet(fleet)
-        .unwrap_or_else(|e| {
-            eprintln!("Failed to register fleet: {}", e);
-            std::process::exit(1);
-        });
+    registry.register_fleet(fleet).unwrap_or_else(|e| {
+        eprintln!("Failed to register fleet: {}", e);
+        std::process::exit(1);
+    });
 
     println!("Deployed fleet '{}' (entry: {})", fleet_name, entry_id);
 }
@@ -180,7 +176,10 @@ pub fn run(name: &str) {
     let fleet = match registry.get_fleet(name) {
         Some(f) => f,
         None => {
-            eprintln!("Fleet '{}' not found — deploy it first with: vlinder fleet deploy", name);
+            eprintln!(
+                "Fleet '{}' not found — deploy it first with: vlinder fleet deploy",
+                name
+            );
             std::process::exit(1);
         }
     };
@@ -200,7 +199,10 @@ pub fn run(name: &str) {
     // Read state from the state service (ADR 079)
     apply_latest_state(&config, &mut *harness, entry_agent_name.as_str());
 
-    println!("Fleet '{}' ready. Entry agent: {}", fleet.name, entry_agent_name);
+    println!(
+        "Fleet '{}' ready. Entry agent: {}",
+        fleet.name, entry_agent_name
+    );
 
     // Run REPL with synchronous run_agent (ADR 092)
     repl::run(|input| {
@@ -271,8 +273,20 @@ mod tests {
     #[test]
     fn deploy_fleet_models_registers_all_toml_files() {
         let dir = tempfile::tempdir().unwrap();
-        write_model_toml(dir.path(), "claude-sonnet.toml", "claude-sonnet", "openrouter", "openrouter://anthropic/claude-sonnet-4");
-        write_model_toml(dir.path(), "llama3.toml", "llama3", "ollama", "ollama://localhost:11434/llama3:latest");
+        write_model_toml(
+            dir.path(),
+            "claude-sonnet.toml",
+            "claude-sonnet",
+            "openrouter",
+            "openrouter://anthropic/claude-sonnet-4",
+        );
+        write_model_toml(
+            dir.path(),
+            "llama3.toml",
+            "llama3",
+            "ollama",
+            "ollama://localhost:11434/llama3:latest",
+        );
 
         let registry = test_registry();
         registry.register_inference_engine(Provider::OpenRouter);
@@ -298,7 +312,13 @@ mod tests {
     #[test]
     fn deploy_fleet_models_ignores_non_toml_files() {
         let dir = tempfile::tempdir().unwrap();
-        write_model_toml(dir.path(), "claude-sonnet.toml", "claude-sonnet", "openrouter", "openrouter://anthropic/claude-sonnet-4");
+        write_model_toml(
+            dir.path(),
+            "claude-sonnet.toml",
+            "claude-sonnet",
+            "openrouter",
+            "openrouter://anthropic/claude-sonnet-4",
+        );
 
         // Write a non-TOML file that should be ignored
         let models_dir = dir.path().join("models");
@@ -316,8 +336,20 @@ mod tests {
     fn deploy_fleet_models_returns_sorted_by_filename() {
         let dir = tempfile::tempdir().unwrap();
         // Write in reverse-alpha order to verify sorting
-        write_model_toml(dir.path(), "llama3.toml", "llama3", "ollama", "ollama://localhost:11434/llama3:latest");
-        write_model_toml(dir.path(), "claude-sonnet.toml", "claude-sonnet", "openrouter", "openrouter://anthropic/claude-sonnet-4");
+        write_model_toml(
+            dir.path(),
+            "llama3.toml",
+            "llama3",
+            "ollama",
+            "ollama://localhost:11434/llama3:latest",
+        );
+        write_model_toml(
+            dir.path(),
+            "claude-sonnet.toml",
+            "claude-sonnet",
+            "openrouter",
+            "openrouter://anthropic/claude-sonnet-4",
+        );
 
         let registry = test_registry();
         registry.register_inference_engine(Provider::OpenRouter);

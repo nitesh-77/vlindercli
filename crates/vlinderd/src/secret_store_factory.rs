@@ -2,8 +2,8 @@
 //!
 //! Follows the same pattern as `queue_factory`.
 
-use std::sync::Arc;
 use crate::config::{Config, QueueBackend};
+use std::sync::Arc;
 use vlinder_core::domain::{SecretStore, SecretStoreError};
 use vlinder_nats::NatsSecretStore;
 

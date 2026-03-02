@@ -2,12 +2,12 @@
 
 use serde::Serialize;
 
-use super::PROTOCOL_VERSION;
-use super::identity::{MessageId, SubmissionId, SessionId, TimelineId, Sequence};
-use super::request::RequestMessage;
+use super::super::diagnostics::ServiceDiagnostics;
 use super::super::operation::Operation;
 use super::super::routing_key::{AgentId, RoutingKey, ServiceBackend};
-use super::super::diagnostics::ServiceDiagnostics;
+use super::identity::{MessageId, Sequence, SessionId, SubmissionId, TimelineId};
+use super::request::RequestMessage;
+use super::PROTOCOL_VERSION;
 
 /// Response message: Service → Runtime
 ///
@@ -41,8 +41,11 @@ impl ResponseMessage {
     /// Create a response from a request, echoing all dimensions.
     pub fn from_request(request: &RequestMessage, payload: Vec<u8>) -> Self {
         let placeholder = ServiceDiagnostics::storage(
-            request.service.service_type(), request.service.backend_str(),
-            request.operation, 0, 0,
+            request.service.service_type(),
+            request.service.backend_str(),
+            request.operation,
+            0,
+            0,
         );
         Self::from_request_with_diagnostics(request, payload, placeholder)
     }

@@ -6,8 +6,8 @@
 use std::sync::Arc;
 
 use vlinder_core::domain::{DagStore, MessageQueue, QueueError, Registry};
-use vlinder_nats::NatsQueue;
 use vlinder_core::queue::RecordingQueue;
+use vlinder_nats::NatsQueue;
 use vlinder_sql_registry::registry_service::GrpcRegistryClient;
 use vlinder_sql_state::state_service::GrpcStateClient;
 
@@ -17,12 +17,9 @@ pub fn connect_queue(
     state_url: &str,
 ) -> Result<Arc<dyn MessageQueue + Send + Sync>, QueueError> {
     let inner = Arc::new(NatsQueue::connect(nats_url)?);
-    let store: Arc<dyn DagStore> = Arc::new(
-        GrpcStateClient::connect(state_url)
-            .map_err(|e| QueueError::SendFailed(
-                format!("state service at {} unreachable: {}", state_url, e)
-            ))?,
-    );
+    let store: Arc<dyn DagStore> = Arc::new(GrpcStateClient::connect(state_url).map_err(|e| {
+        QueueError::SendFailed(format!("state service at {} unreachable: {}", state_url, e))
+    })?);
     Ok(Arc::new(RecordingQueue::new(inner, store)))
 }
 

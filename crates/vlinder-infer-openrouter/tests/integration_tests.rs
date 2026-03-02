@@ -2,8 +2,8 @@
 //!
 //! These tests skip gracefully if VLINDER_OPENROUTER_API_KEY is not set.
 
+use vlinder_core::domain::{ModelCatalog, Provider};
 use vlinder_infer_openrouter::OpenRouterCatalog;
-use vlinder_core::domain::{Provider, ModelCatalog};
 
 /// Return the API key if set, or print a skip message and return None.
 fn openrouter_key_or_skip() -> Option<String> {

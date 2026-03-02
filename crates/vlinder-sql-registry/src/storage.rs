@@ -5,7 +5,10 @@ use std::sync::Mutex;
 
 use rusqlite::Connection;
 
-use vlinder_core::domain::{Agent, Model, ModelType, Provider, RegistryRepository, RepositoryError, StoredAgent, StoredModel};
+use vlinder_core::domain::{
+    Agent, Model, ModelType, Provider, RegistryRepository, RepositoryError, StoredAgent,
+    StoredModel,
+};
 
 /// SQLite-backed registry repository.
 pub struct SqliteRegistryRepository {
@@ -21,20 +24,23 @@ impl SqliteRegistryRepository {
                 .map_err(|e| RepositoryError::Database(e.to_string()))?;
         }
 
-        let conn = Connection::open(path)
-            .map_err(|e| RepositoryError::Database(e.to_string()))?;
+        let conn = Connection::open(path).map_err(|e| RepositoryError::Database(e.to_string()))?;
 
-        let repo = Self { conn: Mutex::new(conn) };
+        let repo = Self {
+            conn: Mutex::new(conn),
+        };
         repo.init_schema()?;
         Ok(repo)
     }
 
     /// Open an in-memory database (for testing).
     pub fn in_memory() -> Result<Self, RepositoryError> {
-        let conn = Connection::open_in_memory()
-            .map_err(|e| RepositoryError::Database(e.to_string()))?;
+        let conn =
+            Connection::open_in_memory().map_err(|e| RepositoryError::Database(e.to_string()))?;
 
-        let repo = Self { conn: Mutex::new(conn) };
+        let repo = Self {
+            conn: Mutex::new(conn),
+        };
         repo.init_schema()?;
         Ok(repo)
     }
@@ -50,7 +56,8 @@ impl SqliteRegistryRepository {
                 digest TEXT NOT NULL
             )",
             [],
-        ).map_err(|e| RepositoryError::Database(e.to_string()))?;
+        )
+        .map_err(|e| RepositoryError::Database(e.to_string()))?;
 
         conn.execute(
             "CREATE TABLE IF NOT EXISTS agents (
@@ -67,7 +74,8 @@ impl SqliteRegistryRepository {
                 public_key BLOB
             )",
             [],
-        ).map_err(|e| RepositoryError::Database(e.to_string()))?;
+        )
+        .map_err(|e| RepositoryError::Database(e.to_string()))?;
 
         Ok(())
     }
@@ -80,16 +88,27 @@ impl RegistryRepository for SqliteRegistryRepository {
 
         let model_type: String = serde_json::to_value(&stored.model_type)
             .map_err(|e| RepositoryError::Serialization(e.to_string()))?
-            .as_str().unwrap().to_string();
+            .as_str()
+            .unwrap()
+            .to_string();
         let provider: String = serde_json::to_value(&stored.provider)
             .map_err(|e| RepositoryError::Serialization(e.to_string()))?
-            .as_str().unwrap().to_string();
+            .as_str()
+            .unwrap()
+            .to_string();
 
         conn.execute(
             "INSERT OR REPLACE INTO models (name, model_type, provider, model_path, digest)
              VALUES (?1, ?2, ?3, ?4, ?5)",
-            [&stored.name, &model_type, &provider, &stored.model_path, &stored.digest],
-        ).map_err(|e| RepositoryError::Database(e.to_string()))?;
+            [
+                &stored.name,
+                &model_type,
+                &provider,
+                &stored.model_path,
+                &stored.digest,
+            ],
+        )
+        .map_err(|e| RepositoryError::Database(e.to_string()))?;
 
         Ok(())
     }
@@ -108,19 +127,35 @@ impl RegistryRepository for SqliteRegistryRepository {
                 let model_path: String = row.get(3)?;
                 let digest: String = row.get(4)?;
 
-                let model_type: ModelType = serde_json::from_value(
-                    serde_json::Value::String(model_type_str)
-                ).map_err(|e| rusqlite::Error::FromSqlConversionFailure(
-                    1, rusqlite::types::Type::Text, Box::new(e)
-                ))?;
+                let model_type: ModelType = serde_json::from_value(serde_json::Value::String(
+                    model_type_str,
+                ))
+                .map_err(|e| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        1,
+                        rusqlite::types::Type::Text,
+                        Box::new(e),
+                    )
+                })?;
 
-                let provider: Provider = serde_json::from_value(
-                    serde_json::Value::String(provider_str)
-                ).map_err(|e| rusqlite::Error::FromSqlConversionFailure(
-                    2, rusqlite::types::Type::Text, Box::new(e)
-                ))?;
+                let provider: Provider = serde_json::from_value(serde_json::Value::String(
+                    provider_str,
+                ))
+                .map_err(|e| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        2,
+                        rusqlite::types::Type::Text,
+                        Box::new(e),
+                    )
+                })?;
 
-                Ok(StoredModel { name, model_type, provider, model_path, digest })
+                Ok(StoredModel {
+                    name,
+                    model_type,
+                    provider,
+                    model_path,
+                    digest,
+                })
             })
             .map_err(|e| RepositoryError::Database(e.to_string()))?;
 
@@ -174,7 +209,8 @@ impl RegistryRepository for SqliteRegistryRepository {
                 stored.prompts_json,
                 stored.public_key,
             ],
-        ).map_err(|e| RepositoryError::Database(e.to_string()))?;
+        )
+        .map_err(|e| RepositoryError::Database(e.to_string()))?;
 
         Ok(())
     }
@@ -186,7 +222,7 @@ impl RegistryRepository for SqliteRegistryRepository {
                 "SELECT name, description, source, runtime, executable,
                  image_digest, object_storage, vector_storage,
                  requirements_json, prompts_json, public_key
-                 FROM agents"
+                 FROM agents",
             )
             .map_err(|e| RepositoryError::Database(e.to_string()))?;
 
@@ -242,8 +278,7 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
     use vlinder_core::domain::{
-        Agent, ImageDigest, ModelType, Prompts, Provider,
-        Requirements, ResourceId, RuntimeType,
+        Agent, ImageDigest, ModelType, Prompts, Provider, Requirements, ResourceId, RuntimeType,
     };
 
     fn test_model(name: &str) -> Model {
@@ -333,16 +368,19 @@ mod tests {
     }
 
     fn full_test_agent() -> Agent {
-        use vlinder_core::domain::{Provider, Protocol, ServiceConfig, ServiceType};
+        use vlinder_core::domain::{Protocol, Provider, ServiceConfig, ServiceType};
         let mut models = HashMap::new();
         models.insert("phi3".to_string(), "phi3:latest".to_string());
 
         let mut services = HashMap::new();
-        services.insert(ServiceType::Infer, ServiceConfig {
-            provider: Provider::Ollama,
-            protocol: Protocol::OpenAi,
-            models: vec!["phi3:latest".to_string()],
-        });
+        services.insert(
+            ServiceType::Infer,
+            ServiceConfig {
+                provider: Provider::Ollama,
+                protocol: Protocol::OpenAi,
+                models: vec!["phi3:latest".to_string()],
+            },
+        );
 
         Agent {
             id: Agent::placeholder_id("full"),
@@ -434,16 +472,33 @@ mod tests {
         let restored = &agents[0];
         assert_eq!(restored.name, "full");
         assert_eq!(restored.source.as_deref(), Some("https://example.com"));
-        assert_eq!(restored.image_digest.as_ref().map(|d| d.as_str()), Some("sha256:abc123"));
-        assert_eq!(restored.object_storage.as_ref().map(|r| r.as_str()), Some("sqlite:///data/objects.db"));
-        assert_eq!(restored.vector_storage.as_ref().map(|r| r.as_str()), Some("sqlite:///data/vectors.db"));
-        assert_eq!(restored.requirements.models.get("phi3").map(|s| s.as_str()), Some("phi3:latest"));
+        assert_eq!(
+            restored.image_digest.as_ref().map(|d| d.as_str()),
+            Some("sha256:abc123")
+        );
+        assert_eq!(
+            restored.object_storage.as_ref().map(|r| r.as_str()),
+            Some("sqlite:///data/objects.db")
+        );
+        assert_eq!(
+            restored.vector_storage.as_ref().map(|r| r.as_str()),
+            Some("sqlite:///data/vectors.db")
+        );
+        assert_eq!(
+            restored.requirements.models.get("phi3").map(|s| s.as_str()),
+            Some("phi3:latest")
+        );
         assert_eq!(restored.requirements.services.len(), 1);
         let infer = &restored.requirements.services[&vlinder_core::domain::ServiceType::Infer];
         assert_eq!(infer.provider, vlinder_core::domain::Provider::Ollama);
         assert_eq!(infer.protocol, vlinder_core::domain::Protocol::OpenAi);
         assert_eq!(infer.models, vec!["phi3:latest"]);
-        assert!(restored.prompts.as_ref().unwrap().intent_recognition.is_some());
+        assert!(restored
+            .prompts
+            .as_ref()
+            .unwrap()
+            .intent_recognition
+            .is_some());
     }
 
     #[test]

@@ -54,9 +54,11 @@ fn checkout_shows_trailers_and_state() {
     );
 
     // First commit (invoke) — has Session and Submission, but no State
-    let commits = git(&conv_dir, &["rev-list", "--reverse", "main"])
-        .expect("should list commits");
-    let first_commit = commits.lines().next().expect("should have at least one commit");
+    let commits = git(&conv_dir, &["rev-list", "--reverse", "main"]).expect("should list commits");
+    let first_commit = commits
+        .lines()
+        .next()
+        .expect("should have at least one commit");
 
     assert_eq!(
         read_trailer(&conv_dir, first_commit, "Session").as_deref(),
@@ -86,18 +88,11 @@ fn promote_moves_main_and_labels_old() {
     // Write invoke + complete
     let (invoke, t1) = make_invoke("sess-1", "sub-1", b"q", None, 1000);
     worker.on_observable_message(&invoke, t1);
-    let (complete, t2) = make_complete(
-        "sess-1",
-        "sub-1",
-        b"a",
-        Some("state-1".to_string()),
-        1001,
-    );
+    let (complete, t2) = make_complete("sess-1", "sub-1", b"a", Some("state-1".to_string()), 1001);
     worker.on_observable_message(&complete, t2);
 
     // Record original main SHA
-    let original_main = git(&conv_dir, &["rev-parse", "main"])
-        .expect("main should exist");
+    let original_main = git(&conv_dir, &["rev-parse", "main"]).expect("main should exist");
 
     // Get first commit (invoke)
     let commits = git(&conv_dir, &["rev-list", "--reverse", "main"]).unwrap();
@@ -172,9 +167,7 @@ fn fork_creates_independent_branch() {
 
     // Write a new complete on the repair branch (different answer)
     // Re-open the worker on the repair branch
-    let mut repair_worker =
-        GitDagWorker::open(&conv_dir, "test.local:9000", None)
-            .unwrap();
+    let mut repair_worker = GitDagWorker::open(&conv_dir, "test.local:9000", None).unwrap();
     let (alt_complete, t3) = make_complete(
         "sess-1",
         "sub-1",
@@ -275,9 +268,7 @@ fn checkout_then_promote_full_workflow() {
     git(&conv_dir, &["checkout", "-b", "repair-branch"]).unwrap();
 
     // Write a new alternative complete (different answer for turn 1)
-    let mut repair_worker =
-        GitDagWorker::open(&conv_dir, "test.local:9000", None)
-            .unwrap();
+    let mut repair_worker = GitDagWorker::open(&conv_dir, "test.local:9000", None).unwrap();
     let (alt_complete, t5) = make_complete(
         "sess-1",
         "sub-1",
@@ -323,6 +314,8 @@ fn checkout_then_promote_full_workflow() {
     assert_eq!(main_list[1], broken_list[1], "complete1 should be shared");
 
     // Third commit diverges
-    assert_ne!(main_list[2], broken_list[2], "should diverge after complete1");
+    assert_ne!(
+        main_list[2], broken_list[2],
+        "should diverge after complete1"
+    );
 }
-

@@ -61,7 +61,8 @@ pub fn hash_state_commit(snapshot_hash: &str, parent_hash: &str) -> String {
 pub fn sorted_entries_json(entries: &HashMap<String, String>) -> String {
     let mut sorted: Vec<(&String, &String)> = entries.iter().collect();
     sorted.sort_by_key(|(k, _)| k.as_str());
-    let map: serde_json::Map<String, serde_json::Value> = sorted.into_iter()
+    let map: serde_json::Map<String, serde_json::Value> = sorted
+        .into_iter()
         .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
         .collect();
     serde_json::to_string(&map).unwrap_or_else(|_| "{}".to_string())
@@ -84,8 +85,8 @@ impl SqliteStateStore {
                 .map_err(|e| format!("failed to create state store directory: {}", e))?;
         }
 
-        let conn = Connection::open(path)
-            .map_err(|e| format!("failed to open state store: {}", e))?;
+        let conn =
+            Connection::open(path).map_err(|e| format!("failed to open state store: {}", e))?;
 
         conn.execute_batch(
             "PRAGMA journal_mode=WAL;
@@ -101,8 +102,9 @@ impl SqliteStateStore {
                  hash TEXT PRIMARY KEY,
                  snapshot_hash TEXT NOT NULL,
                  parent_hash TEXT NOT NULL
-             );"
-        ).map_err(|e| format!("failed to initialize state store: {}", e))?;
+             );",
+        )
+        .map_err(|e| format!("failed to initialize state store: {}", e))?;
 
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
@@ -114,35 +116,45 @@ impl SqliteStateStore {
         conn.execute(
             "INSERT OR IGNORE INTO state_values (hash, content) VALUES (?1, ?2)",
             rusqlite::params![hash, content],
-        ).map_err(|e| format!("put_value failed: {}", e))?;
+        )
+        .map_err(|e| format!("put_value failed: {}", e))?;
         Ok(())
     }
 
     pub fn get_value(&self, hash: &str) -> Result<Option<Vec<u8>>, String> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT content FROM state_values WHERE hash = ?1")
+        let mut stmt = conn
+            .prepare("SELECT content FROM state_values WHERE hash = ?1")
             .map_err(|e| format!("get_value prepare failed: {}", e))?;
-        let result = stmt.query_row(rusqlite::params![hash], |row| row.get(0))
+        let result = stmt
+            .query_row(rusqlite::params![hash], |row| row.get(0))
             .optional()
             .map_err(|e| format!("get_value query failed: {}", e))?;
         Ok(result)
     }
 
-    pub fn put_snapshot(&self, hash: &str, entries: &HashMap<String, String>) -> Result<(), String> {
+    pub fn put_snapshot(
+        &self,
+        hash: &str,
+        entries: &HashMap<String, String>,
+    ) -> Result<(), String> {
         let json = sorted_entries_json(entries);
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "INSERT OR IGNORE INTO state_snapshots (hash, entries) VALUES (?1, ?2)",
             rusqlite::params![hash, json],
-        ).map_err(|e| format!("put_snapshot failed: {}", e))?;
+        )
+        .map_err(|e| format!("put_snapshot failed: {}", e))?;
         Ok(())
     }
 
     pub fn get_snapshot(&self, hash: &str) -> Result<Option<HashMap<String, String>>, String> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT entries FROM state_snapshots WHERE hash = ?1")
+        let mut stmt = conn
+            .prepare("SELECT entries FROM state_snapshots WHERE hash = ?1")
             .map_err(|e| format!("get_snapshot prepare failed: {}", e))?;
-        let result: Option<String> = stmt.query_row(rusqlite::params![hash], |row| row.get(0))
+        let result: Option<String> = stmt
+            .query_row(rusqlite::params![hash], |row| row.get(0))
             .optional()
             .map_err(|e| format!("get_snapshot query failed: {}", e))?;
 
@@ -172,19 +184,20 @@ impl SqliteStateStore {
 
     pub fn get_state_commit(&self, hash: &str) -> Result<Option<StateCommit>, String> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT hash, snapshot_hash, parent_hash FROM state_commits WHERE hash = ?1"
-        ).map_err(|e| format!("get_state_commit prepare failed: {}", e))?;
+        let mut stmt = conn
+            .prepare("SELECT hash, snapshot_hash, parent_hash FROM state_commits WHERE hash = ?1")
+            .map_err(|e| format!("get_state_commit prepare failed: {}", e))?;
 
-        let result = stmt.query_row(rusqlite::params![hash], |row| {
-            Ok(StateCommit {
-                hash: row.get(0)?,
-                snapshot_hash: row.get(1)?,
-                parent_hash: row.get(2)?,
+        let result = stmt
+            .query_row(rusqlite::params![hash], |row| {
+                Ok(StateCommit {
+                    hash: row.get(0)?,
+                    snapshot_hash: row.get(1)?,
+                    parent_hash: row.get(2)?,
+                })
             })
-        })
-        .optional()
-        .map_err(|e| format!("get_state_commit query failed: {}", e))?;
+            .optional()
+            .map_err(|e| format!("get_state_commit query failed: {}", e))?;
 
         Ok(result)
     }
@@ -288,7 +301,9 @@ mod tests {
         let parent_hash = "";
         let hash = hash_state_commit(snapshot_hash, parent_hash);
 
-        store.put_state_commit(&hash, snapshot_hash, parent_hash).unwrap();
+        store
+            .put_state_commit(&hash, snapshot_hash, parent_hash)
+            .unwrap();
 
         let commit = store.get_state_commit(&hash).unwrap().unwrap();
         assert_eq!(commit.snapshot_hash, snapshot_hash);

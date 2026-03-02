@@ -1,7 +1,7 @@
 //! Integration tests that require a running Ollama server.
 
+use vlinder_core::domain::{ModelCatalog, Provider};
 use vlinder_ollama::OllamaCatalog;
-use vlinder_core::domain::{Provider, ModelCatalog};
 
 #[test]
 #[ignore] // Run via: just run-integration-tests

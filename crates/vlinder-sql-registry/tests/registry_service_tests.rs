@@ -7,8 +7,8 @@ use std::thread;
 use std::time::Duration;
 
 use vlinder_core::domain::{
-    Agent, InMemoryRegistry, InMemorySecretStore, Registry, Requirements, RuntimeType,
-    SecretStore, SubmissionId,
+    Agent, InMemoryRegistry, InMemorySecretStore, Registry, Requirements, RuntimeType, SecretStore,
+    SubmissionId,
 };
 use vlinder_sql_registry::registry_service::{GrpcRegistryClient, RegistryServiceServer};
 

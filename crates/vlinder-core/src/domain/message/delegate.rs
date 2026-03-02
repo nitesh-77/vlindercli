@@ -2,10 +2,10 @@
 
 use serde::Serialize;
 
-use super::PROTOCOL_VERSION;
-use super::identity::{MessageId, SubmissionId, SessionId, TimelineId};
-use super::super::routing_key::{AgentId, Nonce, RoutingKey};
 use super::super::diagnostics::DelegateDiagnostics;
+use super::super::routing_key::{AgentId, Nonce, RoutingKey};
+use super::identity::{MessageId, SessionId, SubmissionId, TimelineId};
+use super::PROTOCOL_VERSION;
 
 /// Delegate message: Agent → Agent (via runtime)
 ///
@@ -33,6 +33,7 @@ pub struct DelegateMessage {
 }
 
 impl DelegateMessage {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         timeline: TimelineId,
         submission: SubmissionId,
@@ -71,6 +72,8 @@ impl DelegateMessage {
 
     /// Produce the reply routing key for this delegation (ADR 096 §7).
     pub fn reply_routing_key(&self) -> RoutingKey {
-        self.routing_key().reply_key(Some(self.nonce.clone())).unwrap()
+        self.routing_key()
+            .reply_key(Some(self.nonce.clone()))
+            .unwrap()
     }
 }

@@ -322,7 +322,10 @@ mod tests {
         let json = serde_json::to_string(&diag).unwrap();
         assert!(!json.contains("stderr"), "stderr should not appear in JSON");
         let back: RuntimeDiagnostics = serde_json::from_str(&json).unwrap();
-        assert!(back.stderr.is_empty(), "stderr defaults to empty on deserialize");
+        assert!(
+            back.stderr.is_empty(),
+            "stderr defaults to empty on deserialize"
+        );
         assert_eq!(back.runtime, diag.runtime);
         assert_eq!(back.duration_ms, diag.duration_ms);
     }
@@ -341,9 +344,15 @@ mod tests {
             duration_ms: 2300,
         };
         let toml_str = toml::to_string_pretty(&diag).unwrap();
-        assert!(!toml_str.contains("stderr"), "stderr should not appear in TOML");
+        assert!(
+            !toml_str.contains("stderr"),
+            "stderr should not appear in TOML"
+        );
         let back: RuntimeDiagnostics = toml::from_str(&toml_str).unwrap();
-        assert!(back.stderr.is_empty(), "stderr defaults to empty on deserialize");
+        assert!(
+            back.stderr.is_empty(),
+            "stderr defaults to empty on deserialize"
+        );
         assert_eq!(back.runtime, diag.runtime);
         assert_eq!(back.duration_ms, diag.duration_ms);
     }

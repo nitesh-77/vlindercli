@@ -7,6 +7,8 @@
 //! - Infer: Run, Chat, Generate
 //! - Embed: Run
 
+use std::str::FromStr;
+
 use serde::{Deserialize, Serialize};
 
 /// The operation being performed on a service.
@@ -39,18 +41,23 @@ impl Operation {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
+}
+
+impl FromStr for Operation {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "get" => Some(Operation::Get),
-            "put" => Some(Operation::Put),
-            "list" => Some(Operation::List),
-            "delete" => Some(Operation::Delete),
-            "store" => Some(Operation::Store),
-            "search" => Some(Operation::Search),
-            "run" => Some(Operation::Run),
-            "chat" => Some(Operation::Chat),
-            "generate" => Some(Operation::Generate),
-            _ => None,
+            "get" => Ok(Operation::Get),
+            "put" => Ok(Operation::Put),
+            "list" => Ok(Operation::List),
+            "delete" => Ok(Operation::Delete),
+            "store" => Ok(Operation::Store),
+            "search" => Ok(Operation::Search),
+            "run" => Ok(Operation::Run),
+            "chat" => Ok(Operation::Chat),
+            "generate" => Ok(Operation::Generate),
+            _ => Err(format!("unknown operation: {}", s)),
         }
     }
 }
@@ -68,19 +75,25 @@ mod tests {
     #[test]
     fn as_str_round_trips() {
         let ops = [
-            Operation::Get, Operation::Put, Operation::List, Operation::Delete,
-            Operation::Store, Operation::Search, Operation::Run,
-            Operation::Chat, Operation::Generate,
+            Operation::Get,
+            Operation::Put,
+            Operation::List,
+            Operation::Delete,
+            Operation::Store,
+            Operation::Search,
+            Operation::Run,
+            Operation::Chat,
+            Operation::Generate,
         ];
         for op in ops {
-            assert_eq!(Operation::from_str(op.as_str()), Some(op));
+            assert_eq!(Operation::from_str(op.as_str()), Ok(op));
         }
     }
 
     #[test]
     fn unknown_returns_none() {
-        assert_eq!(Operation::from_str("unknown"), None);
-        assert_eq!(Operation::from_str(""), None);
+        assert!(Operation::from_str("unknown").is_err());
+        assert!(Operation::from_str("").is_err());
     }
 
     #[test]

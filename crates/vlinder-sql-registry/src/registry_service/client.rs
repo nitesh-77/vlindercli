@@ -3,11 +3,11 @@
 use std::sync::Mutex;
 use tonic::transport::Channel;
 
-use vlinder_core::domain::{
-    Agent, Fleet, Job, JobId, JobStatus, Model, ObjectStorageType,
-    Provider, RegistrationError, Registry, ResourceId, RuntimeType, SubmissionId, VectorStorageType,
-};
 use super::proto::{self, registry_client::RegistryClient};
+use vlinder_core::domain::{
+    Agent, Fleet, Job, JobId, JobStatus, Model, ObjectStorageType, Provider, RegistrationError,
+    Registry, ResourceId, RuntimeType, SubmissionId, VectorStorageType,
+};
 
 /// Registry implementation that makes gRPC calls to a remote server.
 pub struct GrpcRegistryClient {
@@ -20,9 +20,7 @@ impl GrpcRegistryClient {
     /// Connect to a registry server.
     pub fn connect(addr: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let runtime = tokio::runtime::Runtime::new()?;
-        let client = runtime.block_on(async {
-            RegistryClient::connect(addr.to_string()).await
-        })?;
+        let client = runtime.block_on(async { RegistryClient::connect(addr.to_string()).await })?;
 
         Ok(Self {
             client: Mutex::new(client),
@@ -34,7 +32,9 @@ impl GrpcRegistryClient {
     /// Ping the registry server, returning its protocol version.
     pub fn ping(&self) -> Option<(u32, u32, u32)> {
         self.runtime.block_on(async {
-            self.client.lock().unwrap()
+            self.client
+                .lock()
+                .unwrap()
                 .ping(proto::PingRequest {})
                 .await
                 .ok()
@@ -79,18 +79,17 @@ impl Registry for GrpcRegistryClient {
             agent: Some(proto_agent),
         };
 
-        let response = self.runtime.block_on(async {
-            self.client.lock().unwrap()
-                .register_agent(request)
-                .await
-        }).map_err(|e| RegistrationError::Remote(e.to_string()))?;
+        let response = self
+            .runtime
+            .block_on(async { self.client.lock().unwrap().register_agent(request).await })
+            .map_err(|e| RegistrationError::Remote(e.to_string()))?;
 
         let resp = response.into_inner();
         if resp.success {
             Ok(())
         } else {
             Err(RegistrationError::Remote(
-                resp.error.unwrap_or_else(|| "unknown error".to_string())
+                resp.error.unwrap_or_else(|| "unknown error".to_string()),
             ))
         }
     }
@@ -100,11 +99,10 @@ impl Registry for GrpcRegistryClient {
             id: Some(id.into()),
         };
 
-        let response = self.runtime.block_on(async {
-            self.client.lock().unwrap()
-                .get_agent(request)
-                .await
-        }).ok()?;
+        let response = self
+            .runtime
+            .block_on(async { self.client.lock().unwrap().get_agent(request).await })
+            .ok()?;
 
         response.into_inner().agent.and_then(|a| a.try_into().ok())
     }
@@ -112,14 +110,14 @@ impl Registry for GrpcRegistryClient {
     fn get_agents(&self) -> Vec<Agent> {
         let request = proto::ListAgentsRequest {};
 
-        let response = self.runtime.block_on(async {
-            self.client.lock().unwrap()
-                .list_agents(request)
-                .await
-        });
+        let response = self
+            .runtime
+            .block_on(async { self.client.lock().unwrap().list_agents(request).await });
 
         match response {
-            Ok(resp) => resp.into_inner().agents
+            Ok(resp) => resp
+                .into_inner()
+                .agents
                 .into_iter()
                 .filter_map(|a| a.try_into().ok())
                 .collect(),
@@ -132,11 +130,10 @@ impl Registry for GrpcRegistryClient {
             name: name.to_string(),
         };
 
-        let response = self.runtime.block_on(async {
-            self.client.lock().unwrap()
-                .get_agent_by_name(request)
-                .await
-        }).ok()?;
+        let response = self
+            .runtime
+            .block_on(async { self.client.lock().unwrap().get_agent_by_name(request).await })
+            .ok()?;
 
         response.into_inner().agent.and_then(|a| a.try_into().ok())
     }
@@ -147,11 +144,10 @@ impl Registry for GrpcRegistryClient {
             name: name.to_string(),
         };
 
-        let response = self.runtime.block_on(async {
-            self.client.lock().unwrap()
-                .get_agent_by_name(request)
-                .await
-        }).ok()?;
+        let response = self
+            .runtime
+            .block_on(async { self.client.lock().unwrap().get_agent_by_name(request).await })
+            .ok()?;
 
         let agent = response.into_inner().agent?;
         Some(agent.id?.into())
@@ -170,18 +166,18 @@ impl Registry for GrpcRegistryClient {
             model: Some(proto_model),
         };
 
-        let response = self.runtime.block_on(async {
-            self.client.lock().unwrap()
-                .register_model(request)
-                .await
-        }).map_err(|e| RegistrationError::Persistence(e.to_string()))?;
+        let response = self
+            .runtime
+            .block_on(async { self.client.lock().unwrap().register_model(request).await })
+            .map_err(|e| RegistrationError::Persistence(e.to_string()))?;
 
         let resp = response.into_inner();
         if resp.success {
             Ok(())
         } else {
             Err(RegistrationError::Persistence(
-                resp.error.unwrap_or_else(|| "unknown server error".to_string())
+                resp.error
+                    .unwrap_or_else(|| "unknown server error".to_string()),
             ))
         }
     }
@@ -191,11 +187,10 @@ impl Registry for GrpcRegistryClient {
             name: name.to_string(),
         };
 
-        let response = self.runtime.block_on(async {
-            self.client.lock().unwrap()
-                .get_model(request)
-                .await
-        }).ok()?;
+        let response = self
+            .runtime
+            .block_on(async { self.client.lock().unwrap().get_model(request).await })
+            .ok()?;
 
         response.into_inner().model.and_then(|m| m.try_into().ok())
     }
@@ -203,14 +198,14 @@ impl Registry for GrpcRegistryClient {
     fn get_models(&self) -> Vec<Model> {
         let request = proto::ListModelsRequest {};
 
-        let response = self.runtime.block_on(async {
-            self.client.lock().unwrap()
-                .list_models(request)
-                .await
-        });
+        let response = self
+            .runtime
+            .block_on(async { self.client.lock().unwrap().list_models(request).await });
 
         match response {
-            Ok(resp) => resp.into_inner().models
+            Ok(resp) => resp
+                .into_inner()
+                .models
                 .into_iter()
                 .filter_map(|m| m.try_into().ok())
                 .collect(),
@@ -234,11 +229,10 @@ impl Registry for GrpcRegistryClient {
             name: name.to_string(),
         };
 
-        let response = self.runtime.block_on(async {
-            self.client.lock().unwrap()
-                .delete_model(request)
-                .await
-        }).map_err(|e| RegistrationError::Persistence(e.to_string()))?;
+        let response = self
+            .runtime
+            .block_on(async { self.client.lock().unwrap().delete_model(request).await })
+            .map_err(|e| RegistrationError::Persistence(e.to_string()))?;
 
         let resp = response.into_inner();
         if let Some(error) = resp.error {
@@ -252,11 +246,10 @@ impl Registry for GrpcRegistryClient {
             name: name.to_string(),
         };
 
-        let response = self.runtime.block_on(async {
-            self.client.lock().unwrap()
-                .delete_agent(request)
-                .await
-        }).map_err(|e| RegistrationError::Remote(e.to_string()))?;
+        let response = self
+            .runtime
+            .block_on(async { self.client.lock().unwrap().delete_agent(request).await })
+            .map_err(|e| RegistrationError::Remote(e.to_string()))?;
 
         let resp = response.into_inner();
         if let Some(error) = resp.error {
@@ -267,21 +260,26 @@ impl Registry for GrpcRegistryClient {
 
     // --- Job operations ---
 
-    fn create_job(&self, submission_id: SubmissionId, agent_id: ResourceId, input: String) -> JobId {
+    fn create_job(
+        &self,
+        submission_id: SubmissionId,
+        agent_id: ResourceId,
+        input: String,
+    ) -> JobId {
         let request = proto::CreateJobRequest {
             submission_id: Some(submission_id.into()),
             agent_id: Some(agent_id.into()),
             input,
         };
 
-        let response = self.runtime.block_on(async {
-            self.client.lock().unwrap()
-                .create_job(request)
-                .await
-        });
+        let response = self
+            .runtime
+            .block_on(async { self.client.lock().unwrap().create_job(request).await });
 
         match response {
-            Ok(resp) => resp.into_inner().job_id
+            Ok(resp) => resp
+                .into_inner()
+                .job_id
                 .map(|id| id.into())
                 .unwrap_or_else(|| JobId::from_string("error".to_string())),
             Err(_) => JobId::from_string("error".to_string()),
@@ -293,11 +291,10 @@ impl Registry for GrpcRegistryClient {
             id: Some(id.into()),
         };
 
-        let response = self.runtime.block_on(async {
-            self.client.lock().unwrap()
-                .get_job(request)
-                .await
-        }).ok()?;
+        let response = self
+            .runtime
+            .block_on(async { self.client.lock().unwrap().get_job(request).await })
+            .ok()?;
 
         response.into_inner().job.and_then(|j| j.try_into().ok())
     }
@@ -316,24 +313,22 @@ impl Registry for GrpcRegistryClient {
             output,
         };
 
-        let _ = self.runtime.block_on(async {
-            self.client.lock().unwrap()
-                .update_job_status(request)
-                .await
-        });
+        let _ = self
+            .runtime
+            .block_on(async { self.client.lock().unwrap().update_job_status(request).await });
     }
 
     fn pending_jobs(&self) -> Vec<Job> {
         let request = proto::ListPendingJobsRequest {};
 
-        let response = self.runtime.block_on(async {
-            self.client.lock().unwrap()
-                .list_pending_jobs(request)
-                .await
-        });
+        let response = self
+            .runtime
+            .block_on(async { self.client.lock().unwrap().list_pending_jobs(request).await });
 
         match response {
-            Ok(resp) => resp.into_inner().jobs
+            Ok(resp) => resp
+                .into_inner()
+                .jobs
                 .into_iter()
                 .filter_map(|j| j.try_into().ok())
                 .collect(),
@@ -349,18 +344,17 @@ impl Registry for GrpcRegistryClient {
             fleet: Some(proto_fleet),
         };
 
-        let response = self.runtime.block_on(async {
-            self.client.lock().unwrap()
-                .register_fleet(request)
-                .await
-        }).map_err(|e| RegistrationError::Remote(e.to_string()))?;
+        let response = self
+            .runtime
+            .block_on(async { self.client.lock().unwrap().register_fleet(request).await })
+            .map_err(|e| RegistrationError::Remote(e.to_string()))?;
 
         let resp = response.into_inner();
         if resp.success {
             Ok(())
         } else {
             Err(RegistrationError::Remote(
-                resp.error.unwrap_or_else(|| "unknown error".to_string())
+                resp.error.unwrap_or_else(|| "unknown error".to_string()),
             ))
         }
     }
@@ -370,11 +364,10 @@ impl Registry for GrpcRegistryClient {
             name: name.to_string(),
         };
 
-        let response = self.runtime.block_on(async {
-            self.client.lock().unwrap()
-                .get_fleet(request)
-                .await
-        }).ok()?;
+        let response = self
+            .runtime
+            .block_on(async { self.client.lock().unwrap().get_fleet(request).await })
+            .ok()?;
 
         response.into_inner().fleet.and_then(|f| f.try_into().ok())
     }
@@ -382,14 +375,14 @@ impl Registry for GrpcRegistryClient {
     fn get_fleets(&self) -> Vec<Fleet> {
         let request = proto::ListFleetsRequest {};
 
-        let response = self.runtime.block_on(async {
-            self.client.lock().unwrap()
-                .list_fleets(request)
-                .await
-        });
+        let response = self
+            .runtime
+            .block_on(async { self.client.lock().unwrap().list_fleets(request).await });
 
         match response {
-            Ok(resp) => resp.into_inner().fleets
+            Ok(resp) => resp
+                .into_inner()
+                .fleets
                 .into_iter()
                 .filter_map(|f| f.try_into().ok())
                 .collect(),

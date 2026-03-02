@@ -9,13 +9,14 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use crate::storage::SqliteRegistryRepository;
+use crate::RegistryConfig;
+use vlinder_core::domain::InMemoryRegistry;
 use vlinder_core::domain::{
     Agent, Fleet, Job, JobId, JobStatus, Model, ObjectStorageType, Provider, RegistrationError,
-    Registry, RegistryRepository, ResourceId, RuntimeType, SecretStore, SubmissionId, VectorStorageType,
+    Registry, RegistryRepository, ResourceId, RuntimeType, SecretStore, SubmissionId,
+    VectorStorageType,
 };
-use vlinder_core::domain::InMemoryRegistry;
-use crate::RegistryConfig;
-use crate::storage::SqliteRegistryRepository;
 
 /// Registry with write-through persistence to SQLite.
 ///
@@ -37,10 +38,13 @@ impl PersistentRegistry {
         config: &RegistryConfig,
         secret_store: Arc<dyn SecretStore>,
     ) -> Result<Self, RegistrationError> {
-        let repo = SqliteRegistryRepository::open(db_path)
-            .map_err(|e| RegistrationError::Persistence(
-                format!("failed to open registry database '{}': {}", db_path.display(), e)
-            ))?;
+        let repo = SqliteRegistryRepository::open(db_path).map_err(|e| {
+            RegistrationError::Persistence(format!(
+                "failed to open registry database '{}': {}",
+                db_path.display(),
+                e
+            ))
+        })?;
 
         let inner = InMemoryRegistry::new(secret_store);
 
@@ -53,20 +57,26 @@ impl PersistentRegistry {
         }
 
         // Load persisted models (each validated against registered engines)
-        let models = repo.load_models()
-            .map_err(|e| RegistrationError::Persistence(
-                format!("failed to load models from '{}': {}", db_path.display(), e)
-            ))?;
+        let models = repo.load_models().map_err(|e| {
+            RegistrationError::Persistence(format!(
+                "failed to load models from '{}': {}",
+                db_path.display(),
+                e
+            ))
+        })?;
 
         for model in models {
             inner.register_model(model)?;
         }
 
         // Load persisted agents (bypasses validation — capabilities not yet registered)
-        let agents = repo.load_agents()
-            .map_err(|e| RegistrationError::Persistence(
-                format!("failed to load agents from '{}': {}", db_path.display(), e)
-            ))?;
+        let agents = repo.load_agents().map_err(|e| {
+            RegistrationError::Persistence(format!(
+                "failed to load agents from '{}': {}",
+                db_path.display(),
+                e
+            ))
+        })?;
 
         for agent in agents {
             inner.restore_agent(agent)?;
@@ -74,7 +84,6 @@ impl PersistentRegistry {
 
         Ok(Self { inner, repo })
     }
-
 }
 
 // ============================================================================
@@ -93,7 +102,8 @@ impl Registry for PersistentRegistry {
         self.inner.register_agent(agent.clone())?;
 
         // Write to disk (agent already validated and cached)
-        self.repo.save_agent(&agent)
+        self.repo
+            .save_agent(&agent)
             .map_err(|e| RegistrationError::Persistence(e.to_string()))?;
 
         Ok(())
@@ -122,7 +132,8 @@ impl Registry for PersistentRegistry {
         self.inner.register_model(model.clone())?;
 
         // Write to disk (model already validated and cached)
-        self.repo.save_model(&model)
+        self.repo
+            .save_model(&model)
             .map_err(|e| RegistrationError::Persistence(e.to_string()))?;
 
         Ok(())
@@ -151,7 +162,9 @@ impl Registry for PersistentRegistry {
         };
 
         // Check for dependent agents before deleting
-        let dependent: Vec<String> = self.inner.get_agents_requiring_model(&model.name)
+        let dependent: Vec<String> = self
+            .inner
+            .get_agents_requiring_model(&model.name)
             .into_iter()
             .map(|a| a.name)
             .collect();
@@ -161,7 +174,9 @@ impl Registry for PersistentRegistry {
         }
 
         // Disk first, then cache
-        let deleted = self.repo.delete_model(name)
+        let deleted = self
+            .repo
+            .delete_model(name)
             .map_err(|e| RegistrationError::Persistence(e.to_string()))?;
 
         if deleted {
@@ -179,7 +194,9 @@ impl Registry for PersistentRegistry {
 
         // Check for fleet dependencies before deleting
         let agent_id = self.inner.agent_id(name).unwrap();
-        let dependent: Vec<String> = self.inner.get_fleets()
+        let dependent: Vec<String> = self
+            .inner
+            .get_fleets()
             .into_iter()
             .filter(|f| f.agents.contains(&agent_id))
             .map(|f| f.name)
@@ -190,7 +207,9 @@ impl Registry for PersistentRegistry {
         }
 
         // Disk first, then cache
-        let deleted = self.repo.delete_agent(name)
+        let deleted = self
+            .repo
+            .delete_agent(name)
             .map_err(|e| RegistrationError::Persistence(e.to_string()))?;
 
         if deleted {
@@ -216,7 +235,12 @@ impl Registry for PersistentRegistry {
 
     // --- Job operations (delegate directly) ---
 
-    fn create_job(&self, submission_id: SubmissionId, agent_id: ResourceId, input: String) -> JobId {
+    fn create_job(
+        &self,
+        submission_id: SubmissionId,
+        agent_id: ResourceId,
+        input: String,
+    ) -> JobId {
         self.inner.create_job(submission_id, agent_id, input)
     }
 
@@ -277,8 +301,8 @@ impl Registry for PersistentRegistry {
 mod tests {
     use super::*;
     use std::collections::HashMap;
-    use vlinder_core::domain::{ModelType, Requirements, RuntimeType};
     use vlinder_core::domain::InMemorySecretStore;
+    use vlinder_core::domain::{ModelType, Requirements, RuntimeType};
 
     fn test_secret_store() -> Arc<dyn SecretStore> {
         Arc::new(InMemorySecretStore::new())
@@ -307,9 +331,8 @@ mod tests {
         let temp = tempfile::TempDir::new().unwrap();
         let db_path = temp.path().join("registry.db");
 
-        let registry = PersistentRegistry::open(
-            &db_path, &test_config(), test_secret_store(),
-        ).unwrap();
+        let registry =
+            PersistentRegistry::open(&db_path, &test_config(), test_secret_store()).unwrap();
         assert!(registry.get_models().is_empty());
     }
 
@@ -324,9 +347,8 @@ mod tests {
             repo.save_model(&test_model("llama3")).unwrap();
         }
 
-        let registry = PersistentRegistry::open(
-            &db_path, &test_config(), test_secret_store(),
-        ).unwrap();
+        let registry =
+            PersistentRegistry::open(&db_path, &test_config(), test_secret_store()).unwrap();
         assert!(registry.get_model("llama3").is_some());
     }
 
@@ -335,9 +357,8 @@ mod tests {
         let temp = tempfile::TempDir::new().unwrap();
         let db_path = temp.path().join("registry.db");
 
-        let registry = PersistentRegistry::open(
-            &db_path, &test_config(), test_secret_store(),
-        ).unwrap();
+        let registry =
+            PersistentRegistry::open(&db_path, &test_config(), test_secret_store()).unwrap();
         registry.register_model(test_model("phi3")).unwrap();
 
         // Verify in-memory
@@ -355,9 +376,8 @@ mod tests {
         let temp = tempfile::TempDir::new().unwrap();
         let db_path = temp.path().join("registry.db");
 
-        let registry = PersistentRegistry::open(
-            &db_path, &test_config(), test_secret_store(),
-        ).unwrap();
+        let registry =
+            PersistentRegistry::open(&db_path, &test_config(), test_secret_store()).unwrap();
         registry.register_model(test_model("phi3")).unwrap();
         assert!(registry.get_model("phi3").is_some());
 
@@ -377,9 +397,8 @@ mod tests {
         let temp = tempfile::TempDir::new().unwrap();
         let db_path = temp.path().join("registry.db");
 
-        let registry = PersistentRegistry::open(
-            &db_path, &test_config(), test_secret_store(),
-        ).unwrap();
+        let registry =
+            PersistentRegistry::open(&db_path, &test_config(), test_secret_store()).unwrap();
         let deleted = registry.delete_model("nope").unwrap();
         assert!(!deleted);
     }
@@ -390,9 +409,7 @@ mod tests {
         let db_path = temp.path().join("registry.db");
         std::fs::write(&db_path, b"not a database").unwrap();
 
-        let result = PersistentRegistry::open(
-            &db_path, &test_config(), test_secret_store(),
-        );
+        let result = PersistentRegistry::open(&db_path, &test_config(), test_secret_store());
         let err = match result {
             Err(e) => e.to_string(),
             Ok(_) => panic!("expected error for corrupt db"),
@@ -407,17 +424,15 @@ mod tests {
 
         // First "session": add a model
         {
-            let registry = PersistentRegistry::open(
-                &db_path, &test_config(), test_secret_store(),
-            ).unwrap();
+            let registry =
+                PersistentRegistry::open(&db_path, &test_config(), test_secret_store()).unwrap();
             registry.register_model(test_model("llama3")).unwrap();
         }
 
         // Second "session": model should be there
         {
-            let registry = PersistentRegistry::open(
-                &db_path, &test_config(), test_secret_store(),
-            ).unwrap();
+            let registry =
+                PersistentRegistry::open(&db_path, &test_config(), test_secret_store()).unwrap();
             let model = registry.get_model("llama3");
             assert!(model.is_some(), "model should survive restart");
             assert_eq!(model.unwrap().name, "llama3");
@@ -449,9 +464,8 @@ mod tests {
 
     /// Open a PersistentRegistry with container runtime pre-registered.
     fn open_with_runtime(db_path: &std::path::Path) -> PersistentRegistry {
-        let registry = PersistentRegistry::open(
-            db_path, &test_config(), test_secret_store(),
-        ).unwrap();
+        let registry =
+            PersistentRegistry::open(db_path, &test_config(), test_secret_store()).unwrap();
         registry.register_runtime(RuntimeType::Container);
         registry
     }
@@ -488,9 +502,8 @@ mod tests {
 
         // Second "session": agent should be loaded via restore_agent
         {
-            let registry = PersistentRegistry::open(
-                &db_path, &test_config(), test_secret_store(),
-            ).unwrap();
+            let registry =
+                PersistentRegistry::open(&db_path, &test_config(), test_secret_store()).unwrap();
             let agent = registry.get_agent_by_name("echo");
             assert!(agent.is_some(), "agent should survive restart");
             assert_eq!(agent.unwrap().name, "echo");

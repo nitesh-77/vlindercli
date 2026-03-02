@@ -1,5 +1,5 @@
-use tracing_subscriber::{fmt, EnvFilter, Layer, layer::SubscriberExt, util::SubscriberInitExt};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
+use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer};
 
 use crate::config::Config;
 
@@ -18,8 +18,10 @@ pub fn init_tracing(config: &Config) {
     let stderr_layer = fmt::layer()
         .with_writer(std::io::stderr)
         .with_target(false)
-        .with_filter(EnvFilter::try_from_default_env()
-            .unwrap_or_else(|_| EnvFilter::new(&config.tracing_filter())));
+        .with_filter(
+            EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| EnvFilter::new(&config.tracing_filter())),
+        );
 
     let file_layer = fmt::layer()
         .json()

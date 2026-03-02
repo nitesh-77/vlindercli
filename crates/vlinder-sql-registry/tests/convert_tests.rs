@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use vlinder_core::domain::{
-    Agent, Job, JobId, JobStatus, Model, ModelType, Protocol, Provider,
-    Requirements, ResourceId, RuntimeType, ServiceConfig, ServiceType, SubmissionId,
+    Agent, Job, JobId, JobStatus, Model, ModelType, Protocol, Provider, Requirements, ResourceId,
+    RuntimeType, ServiceConfig, ServiceType, SubmissionId,
 };
 use vlinder_sql_registry::registry_service::proto;
 
@@ -58,11 +58,14 @@ fn submission_id_round_trip() {
 #[test]
 fn agent_domain_to_proto_preserves_fields() {
     let mut services = HashMap::new();
-    services.insert(ServiceType::Infer, ServiceConfig {
-        provider: Provider::Ollama,
-        protocol: Protocol::OpenAi,
-        models: vec!["phi3:latest".to_string()],
-    });
+    services.insert(
+        ServiceType::Infer,
+        ServiceConfig {
+            provider: Provider::Ollama,
+            protocol: Protocol::OpenAi,
+            models: vec!["phi3:latest".to_string()],
+        },
+    );
 
     let agent = Agent {
         name: "echo".to_string(),
@@ -74,9 +77,7 @@ fn agent_domain_to_proto_preserves_fields() {
         image_digest: None,
         public_key: None,
         requirements: Requirements {
-            models: HashMap::from([
-                ("phi3".to_string(), "phi3".to_string()),
-            ]),
+            models: HashMap::from([("phi3".to_string(), "phi3".to_string())]),
             services,
             mounts: HashMap::new(),
         },
@@ -92,9 +93,18 @@ fn agent_domain_to_proto_preserves_fields() {
     assert_eq!(proto_agent.runtime, "container");
     assert_eq!(proto_agent.executable, "localhost/echo:latest");
     assert_eq!(proto_agent.services.len(), 1);
-    assert_eq!(proto_agent.services[0].service_type, proto::ServiceType::Infer as i32);
-    assert_eq!(proto_agent.services[0].provider, proto::Provider::Ollama as i32);
-    assert_eq!(proto_agent.services[0].protocol, proto::Protocol::Openai as i32);
+    assert_eq!(
+        proto_agent.services[0].service_type,
+        proto::ServiceType::Infer as i32
+    );
+    assert_eq!(
+        proto_agent.services[0].provider,
+        proto::Provider::Ollama as i32
+    );
+    assert_eq!(
+        proto_agent.services[0].protocol,
+        proto::Protocol::Openai as i32
+    );
     assert!(proto_agent.object_storage.is_some());
     assert!(proto_agent.vector_storage.is_none());
 }
@@ -104,7 +114,9 @@ fn agent_proto_to_domain_round_trip() {
     let proto_agent = proto::Agent {
         name: "echo".to_string(),
         description: "Echoes input".to_string(),
-        id: Some(proto::ResourceId { uri: "http://localhost:9000/agents/echo".to_string() }),
+        id: Some(proto::ResourceId {
+            uri: "http://localhost:9000/agents/echo".to_string(),
+        }),
         runtime: "container".to_string(),
         executable: "localhost/echo:latest".to_string(),
         services: vec![proto::ServiceEntry {
@@ -132,11 +144,14 @@ fn agent_proto_to_domain_round_trip() {
 #[test]
 fn agent_models_survive_proto_round_trip() {
     let mut services = HashMap::new();
-    services.insert(ServiceType::Infer, ServiceConfig {
-        provider: Provider::Ollama,
-        protocol: Protocol::OpenAi,
-        models: vec!["phi3:latest".to_string()],
-    });
+    services.insert(
+        ServiceType::Infer,
+        ServiceConfig {
+            provider: Provider::Ollama,
+            protocol: Protocol::OpenAi,
+            models: vec!["phi3:latest".to_string()],
+        },
+    );
 
     let agent = Agent {
         name: "thinker".to_string(),
@@ -164,13 +179,23 @@ fn agent_models_survive_proto_round_trip() {
     let proto_agent: proto::Agent = agent.into();
     let back: Agent = proto_agent.try_into().unwrap();
 
-    assert_eq!(back.requirements.models.len(), 2, "models lost in proto round-trip");
     assert_eq!(
-        back.requirements.models.get("inference_model").map(|s| s.as_str()),
+        back.requirements.models.len(),
+        2,
+        "models lost in proto round-trip"
+    );
+    assert_eq!(
+        back.requirements
+            .models
+            .get("inference_model")
+            .map(|s| s.as_str()),
         Some("phi3:latest"),
     );
     assert_eq!(
-        back.requirements.models.get("embedding_model").map(|s| s.as_str()),
+        back.requirements
+            .models
+            .get("embedding_model")
+            .map(|s| s.as_str()),
         Some("nomic-embed"),
     );
 }
@@ -220,11 +245,15 @@ fn model_domain_to_proto() {
 #[test]
 fn model_proto_to_domain_round_trip() {
     let proto_model = proto::Model {
-        id: Some(proto::ResourceId { uri: "http://localhost/models/phi3".to_string() }),
+        id: Some(proto::ResourceId {
+            uri: "http://localhost/models/phi3".to_string(),
+        }),
         name: "phi3".to_string(),
         model_type: proto::ModelType::Embedding as i32,
         provider: proto::Provider::Ollama as i32,
-        model_path: Some(proto::ResourceId { uri: "ollama://localhost/phi3".to_string() }),
+        model_path: Some(proto::ResourceId {
+            uri: "ollama://localhost/phi3".to_string(),
+        }),
         digest: "sha256:abc".to_string(),
     };
 

@@ -31,10 +31,10 @@ impl OpenRouterWorker {
 
     /// Process one message if available. Returns true if a message was processed.
     pub fn tick(&self) -> bool {
-        match self
-            .queue
-            .receive_request(ServiceBackend::Infer(InferenceBackendType::OpenRouter), Operation::Run)
-        {
+        match self.queue.receive_request(
+            ServiceBackend::Infer(InferenceBackendType::OpenRouter),
+            Operation::Run,
+        ) {
             Ok((request, ack)) => {
                 let start = Instant::now();
 
@@ -59,8 +59,11 @@ impl OpenRouterWorker {
                     },
                 };
 
-                let mut response =
-                    ResponseMessage::from_request_with_diagnostics(&request, response_payload, diag);
+                let mut response = ResponseMessage::from_request_with_diagnostics(
+                    &request,
+                    response_payload,
+                    diag,
+                );
                 response.state = request.state.clone();
                 response.status_code = status_code;
                 let _ = self.queue.send_response(response);
@@ -72,8 +75,12 @@ impl OpenRouterWorker {
     }
 
     fn handle(&self, payload: &[u8]) -> Result<(Vec<u8>, u32, u32, String), (u16, Vec<u8>)> {
-        let req: CreateChatCompletionRequest = serde_json::from_slice(payload)
-            .map_err(|e| (400, openai_error_json(&e.to_string(), "invalid_request_error")))?;
+        let req: CreateChatCompletionRequest = serde_json::from_slice(payload).map_err(|e| {
+            (
+                400,
+                openai_error_json(&e.to_string(), "invalid_request_error"),
+            )
+        })?;
 
         let model_name = req.model.clone();
 
@@ -142,7 +149,11 @@ mod tests {
         }
     }
 
-    fn send_request(queue: &Arc<dyn MessageQueue + Send + Sync>, payload: Vec<u8>, state: Option<String>) -> RequestMessage {
+    fn send_request(
+        queue: &Arc<dyn MessageQueue + Send + Sync>,
+        payload: Vec<u8>,
+        state: Option<String>,
+    ) -> RequestMessage {
         let request = RequestMessage::new(
             TimelineId::main(),
             SubmissionId::from("sub-test".to_string()),
@@ -192,11 +203,19 @@ mod tests {
             "model": "anthropic/claude-sonnet-4",
             "messages": [{"role": "user", "content": "hello"}]
         });
-        let request = send_request(&queue, serde_json::to_vec(&body).unwrap(), Some("xyz".to_string()));
+        let request = send_request(
+            &queue,
+            serde_json::to_vec(&body).unwrap(),
+            Some("xyz".to_string()),
+        );
         assert!(worker.tick());
 
         let (response, ack) = queue.receive_response(&request).unwrap();
-        assert_eq!(response.state, Some("xyz".to_string()), "response should echo request state");
+        assert_eq!(
+            response.state,
+            Some("xyz".to_string()),
+            "response should echo request state"
+        );
         ack().unwrap();
     }
 
@@ -233,6 +252,9 @@ mod tests {
             "test-key".to_string(),
         );
 
-        assert!(!worker.tick(), "tick() should return false when queue is empty");
+        assert!(
+            !worker.tick(),
+            "tick() should return false when queue is empty"
+        );
     }
 }

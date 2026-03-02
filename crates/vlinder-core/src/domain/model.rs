@@ -31,7 +31,6 @@ pub enum ModelType {
     Embedding,
 }
 
-
 impl Model {
     /// Create a placeholder ID for models not yet registered.
     ///
@@ -56,7 +55,9 @@ impl Model {
     /// If the manifest has a `name` field, it becomes the registry name.
     /// Otherwise, the name is derived from `model_path` (legacy behavior).
     pub fn from_manifest(manifest: ModelManifest, digest: String) -> Model {
-        let name = manifest.name.clone()
+        let name = manifest
+            .name
+            .clone()
             .unwrap_or_else(|| pfname_from_path(&manifest.model_path, manifest.provider));
         Model {
             id: Self::placeholder_id(&name),
@@ -175,7 +176,6 @@ mod tests {
         let name = pfname_from_path("ollama://localhost:11434", Provider::Ollama);
         assert_eq!(name, "ollama://localhost:11434");
     }
-
 
     // ========================================================================
     // Model::from_manifest

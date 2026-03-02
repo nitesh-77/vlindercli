@@ -8,10 +8,12 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use vlinder_core::domain::Registry;
-use vlinder_core::domain::{MessageQueue, Operation, RequestMessage, ResponseMessage, ServiceBackend, ServiceDiagnostics};
+use vlinder_core::domain::{
+    MessageQueue, Operation, RequestMessage, ResponseMessage, ServiceBackend, ServiceDiagnostics,
+};
 
 use crate::storage::SqliteVectorStorage;
-use crate::types::{SqliteVecStoreRequest, SqliteVecSearchRequest, SqliteVecDeleteRequest};
+use crate::types::{SqliteVecDeleteRequest, SqliteVecSearchRequest, SqliteVecStoreRequest};
 
 // ============================================================================
 // Worker
@@ -44,23 +46,36 @@ impl SqliteVecWorker {
             return Ok(storage.clone());
         }
 
-        let agent = self.registry.get_agent_by_name(agent_id)
+        let agent = self
+            .registry
+            .get_agent_by_name(agent_id)
             .ok_or_else(|| format!("unknown agent: {}", agent_id))?;
-        let uri = agent.vector_storage
+        let uri = agent
+            .vector_storage
             .ok_or_else(|| format!("agent has no vector_storage declared: {}", agent_id))?;
-        let path = uri.path()
+        let path = uri
+            .path()
             .ok_or_else(|| format!("vector_storage URI has no path: {}", uri.as_str()))?;
 
         let storage = Arc::new(SqliteVectorStorage::open_at(std::path::Path::new(path))?);
-        self.stores.write().unwrap().insert(agent_id.to_string(), storage.clone());
+        self.stores
+            .write()
+            .unwrap()
+            .insert(agent_id.to_string(), storage.clone());
         Ok(storage)
     }
 
     /// Process one message if available. Returns true if processed.
     pub fn tick(&self) -> bool {
-        if self.try_store() { return true; }
-        if self.try_search() { return true; }
-        if self.try_delete() { return true; }
+        if self.try_store() {
+            return true;
+        }
+        if self.try_search() {
+            return true;
+        }
+        if self.try_delete() {
+            return true;
+        }
         false
     }
 
@@ -71,10 +86,16 @@ impl SqliteVecWorker {
                 let response_payload = self.handle_store(&request);
                 let duration_ms = start.elapsed().as_millis() as u64;
                 let diag = ServiceDiagnostics::storage(
-                    self.service.service_type(), self.service.backend_str(), Operation::Store, response_payload.len() as u64, duration_ms,
+                    self.service.service_type(),
+                    self.service.backend_str(),
+                    Operation::Store,
+                    response_payload.len() as u64,
+                    duration_ms,
                 );
                 let mut response = ResponseMessage::from_request_with_diagnostics(
-                    &request, response_payload, diag,
+                    &request,
+                    response_payload,
+                    diag,
                 );
                 response.state = request.state.clone();
                 let _ = self.queue.send_response(response);
@@ -92,10 +113,16 @@ impl SqliteVecWorker {
                 let response_payload = self.handle_search(&request);
                 let duration_ms = start.elapsed().as_millis() as u64;
                 let diag = ServiceDiagnostics::storage(
-                    self.service.service_type(), self.service.backend_str(), Operation::Search, response_payload.len() as u64, duration_ms,
+                    self.service.service_type(),
+                    self.service.backend_str(),
+                    Operation::Search,
+                    response_payload.len() as u64,
+                    duration_ms,
                 );
                 let mut response = ResponseMessage::from_request_with_diagnostics(
-                    &request, response_payload, diag,
+                    &request,
+                    response_payload,
+                    diag,
                 );
                 response.state = request.state.clone();
                 let _ = self.queue.send_response(response);
@@ -113,10 +140,16 @@ impl SqliteVecWorker {
                 let response_payload = self.handle_delete(&request);
                 let duration_ms = start.elapsed().as_millis() as u64;
                 let diag = ServiceDiagnostics::storage(
-                    self.service.service_type(), self.service.backend_str(), Operation::Delete, response_payload.len() as u64, duration_ms,
+                    self.service.service_type(),
+                    self.service.backend_str(),
+                    Operation::Delete,
+                    response_payload.len() as u64,
+                    duration_ms,
                 );
                 let mut response = ResponseMessage::from_request_with_diagnostics(
-                    &request, response_payload, diag,
+                    &request,
+                    response_payload,
+                    diag,
                 );
                 response.state = request.state.clone();
                 let _ = self.queue.send_response(response);
@@ -157,7 +190,8 @@ impl SqliteVecWorker {
 
         match store.search_by_vector(&req.vector, req.limit) {
             Ok(results) => {
-                let formatted: Vec<serde_json::Value> = results.iter()
+                let formatted: Vec<serde_json::Value> = results
+                    .iter()
                     .map(|(key, metadata, distance)| {
                         serde_json::json!({
                             "key": key,
@@ -196,11 +230,14 @@ impl SqliteVecWorker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vlinder_core::domain::{Agent, AgentId, Registry};
     use vlinder_core::domain::InMemoryRegistry;
-    use vlinder_core::domain::{Operation, RequestDiagnostics, Sequence, ServiceBackend, SessionId, SubmissionId, TimelineId, VectorStorageType};
-    use vlinder_core::domain::SecretStore;
     use vlinder_core::domain::InMemorySecretStore;
+    use vlinder_core::domain::SecretStore;
+    use vlinder_core::domain::{Agent, AgentId, Registry};
+    use vlinder_core::domain::{
+        Operation, RequestDiagnostics, Sequence, ServiceBackend, SessionId, SubmissionId,
+        TimelineId, VectorStorageType,
+    };
     use vlinder_core::queue::InMemoryQueue;
 
     fn test_secret_store() -> Arc<dyn SecretStore> {
@@ -208,7 +245,12 @@ mod tests {
     }
 
     fn test_request_diag() -> RequestDiagnostics {
-        RequestDiagnostics { sequence: 0, endpoint: String::new(), request_bytes: 0, received_at_ms: 0 }
+        RequestDiagnostics {
+            sequence: 0,
+            endpoint: String::new(),
+            request_bytes: 0,
+            received_at_ms: 0,
+        }
     }
 
     fn test_agent_id() -> AgentId {
@@ -247,7 +289,11 @@ mod tests {
         let agent = test_agent_with_vector_storage(&db_path);
         registry.register_agent(agent).unwrap();
         let registry: Arc<dyn Registry> = Arc::new(registry);
-        let handler = SqliteVecWorker::new(Arc::clone(&queue), Arc::clone(&registry), ServiceBackend::Vec(VectorStorageType::SqliteVec));
+        let handler = SqliteVecWorker::new(
+            Arc::clone(&queue),
+            Arc::clone(&registry),
+            ServiceBackend::Vec(VectorStorageType::SqliteVec),
+        );
 
         let embedding: Vec<f32> = (0..768).map(|i| i as f32 * 0.001).collect();
         let store_payload = serde_json::json!({
@@ -257,8 +303,12 @@ mod tests {
         });
         let store_request = RequestMessage::new(
             TimelineId::main(),
-            test_submission(), SessionId::new(), test_agent_id(),
-            ServiceBackend::Vec(VectorStorageType::SqliteVec), Operation::Store, Sequence::first(),
+            test_submission(),
+            SessionId::new(),
+            test_agent_id(),
+            ServiceBackend::Vec(VectorStorageType::SqliteVec),
+            Operation::Store,
+            Sequence::first(),
             serde_json::to_vec(&store_payload).unwrap(),
             Some("state-vec".to_string()),
             test_request_diag(),
@@ -267,7 +317,11 @@ mod tests {
         handler.tick();
         let (store_resp, ack) = queue.receive_response(&store_request).unwrap();
         ack().unwrap();
-        assert_eq!(store_resp.state, Some("state-vec".to_string()), "store should echo request.state");
+        assert_eq!(
+            store_resp.state,
+            Some("state-vec".to_string()),
+            "store should echo request.state"
+        );
 
         let search_payload = serde_json::json!({
             "vector": embedding,
@@ -275,8 +329,12 @@ mod tests {
         });
         let search_request = RequestMessage::new(
             TimelineId::main(),
-            test_submission(), SessionId::new(), test_agent_id(),
-            ServiceBackend::Vec(VectorStorageType::SqliteVec), Operation::Search, Sequence::from(2),
+            test_submission(),
+            SessionId::new(),
+            test_agent_id(),
+            ServiceBackend::Vec(VectorStorageType::SqliteVec),
+            Operation::Search,
+            Sequence::from(2),
             serde_json::to_vec(&search_payload).unwrap(),
             Some("state-vec2".to_string()),
             test_request_diag(),
@@ -285,7 +343,11 @@ mod tests {
         handler.tick();
         let (search_resp, ack) = queue.receive_response(&search_request).unwrap();
         ack().unwrap();
-        assert_eq!(search_resp.state, Some("state-vec2".to_string()), "search should echo request.state");
+        assert_eq!(
+            search_resp.state,
+            Some("state-vec2".to_string()),
+            "search should echo request.state"
+        );
     }
 
     #[test]
@@ -300,7 +362,11 @@ mod tests {
         let agent = test_agent_with_vector_storage(&db_path);
         registry.register_agent(agent).unwrap();
         let registry: Arc<dyn Registry> = Arc::new(registry);
-        let handler = SqliteVecWorker::new(Arc::clone(&queue), Arc::clone(&registry), ServiceBackend::Vec(VectorStorageType::SqliteVec));
+        let handler = SqliteVecWorker::new(
+            Arc::clone(&queue),
+            Arc::clone(&registry),
+            ServiceBackend::Vec(VectorStorageType::SqliteVec),
+        );
 
         let embedding: Vec<f32> = (0..768).map(|i| i as f32 * 0.001).collect();
         let store_payload = serde_json::json!({
@@ -310,8 +376,12 @@ mod tests {
         });
         let store_request = RequestMessage::new(
             TimelineId::main(),
-            test_submission(), SessionId::new(), test_agent_id(),
-            ServiceBackend::Vec(VectorStorageType::SqliteVec), Operation::Store, Sequence::first(),
+            test_submission(),
+            SessionId::new(),
+            test_agent_id(),
+            ServiceBackend::Vec(VectorStorageType::SqliteVec),
+            Operation::Store,
+            Sequence::first(),
             serde_json::to_vec(&store_payload).unwrap(),
             None,
             test_request_diag(),
@@ -329,8 +399,12 @@ mod tests {
         });
         let search_request = RequestMessage::new(
             TimelineId::main(),
-            test_submission(), SessionId::new(), test_agent_id(),
-            ServiceBackend::Vec(VectorStorageType::SqliteVec), Operation::Search, Sequence::from(2),
+            test_submission(),
+            SessionId::new(),
+            test_agent_id(),
+            ServiceBackend::Vec(VectorStorageType::SqliteVec),
+            Operation::Search,
+            Sequence::from(2),
             serde_json::to_vec(&search_payload).unwrap(),
             None,
             test_request_diag(),
@@ -339,7 +413,8 @@ mod tests {
         queue.send_request(search_request.clone()).unwrap();
         assert!(handler.tick());
         let (response, ack) = queue.receive_response(&search_request).unwrap();
-        let results: Vec<serde_json::Value> = serde_json::from_slice(response.payload.as_slice()).unwrap();
+        let results: Vec<serde_json::Value> =
+            serde_json::from_slice(response.payload.as_slice()).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0]["key"], "doc1");
         ack().unwrap();

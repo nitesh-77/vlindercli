@@ -2,12 +2,12 @@
 
 use serde::Serialize;
 
-use super::{PROTOCOL_VERSION, ExpectsReply};
-use super::identity::{MessageId, SubmissionId, SessionId, TimelineId, Sequence};
-use super::response::ResponseMessage;
+use super::super::diagnostics::RequestDiagnostics;
 use super::super::operation::Operation;
 use super::super::routing_key::{AgentId, RoutingKey, ServiceBackend};
-use super::super::diagnostics::RequestDiagnostics;
+use super::identity::{MessageId, Sequence, SessionId, SubmissionId, TimelineId};
+use super::response::ResponseMessage;
+use super::{ExpectsReply, PROTOCOL_VERSION};
 
 /// Request message: Runtime → Service
 ///
@@ -35,6 +35,7 @@ pub struct RequestMessage {
 }
 
 impl RequestMessage {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         timeline: TimelineId,
         submission: SubmissionId,

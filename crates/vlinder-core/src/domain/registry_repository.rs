@@ -1,9 +1,13 @@
 //! Repository trait for Registry persistence.
 
 use std::collections::HashMap;
+use std::str::FromStr;
 
-use super::{Agent, ImageDigest, Model, ModelType, MountConfig, Prompts, Provider, Requirements, ResourceId, ServiceConfig, ServiceType};
 use super::runtime::RuntimeType;
+use super::{
+    Agent, ImageDigest, Model, ModelType, MountConfig, Prompts, Provider, Requirements, ResourceId,
+    ServiceConfig, ServiceType,
+};
 
 /// Repository for persisting Registry state.
 ///
@@ -126,7 +130,8 @@ impl StoredAgent {
 
         let requirements_json = serde_json::to_string(&requirements)
             .map_err(|e| RepositoryError::Serialization(e.to_string()))?;
-        let prompts_json = prompts.map(|p| serde_json::to_string(&p))
+        let prompts_json = prompts
+            .map(|p| serde_json::to_string(&p))
             .transpose()
             .map_err(|e| RepositoryError::Serialization(e.to_string()))?;
 
@@ -137,23 +142,31 @@ impl StoredAgent {
             runtime: agent.runtime.as_str().to_string(),
             executable: agent.executable.clone(),
             image_digest: agent.image_digest.as_ref().map(|d| d.as_str().to_string()),
-            object_storage: agent.object_storage.as_ref().map(|r| r.as_str().to_string()),
-            vector_storage: agent.vector_storage.as_ref().map(|r| r.as_str().to_string()),
+            object_storage: agent
+                .object_storage
+                .as_ref()
+                .map(|r| r.as_str().to_string()),
+            vector_storage: agent
+                .vector_storage
+                .as_ref()
+                .map(|r| r.as_str().to_string()),
             requirements_json,
             prompts_json,
-            public_key: agent.public_key.as_ref().map(|k| {
-                base64::Engine::encode(&base64::engine::general_purpose::STANDARD, k)
-            }),
+            public_key: agent
+                .public_key
+                .as_ref()
+                .map(|k| base64::Engine::encode(&base64::engine::general_purpose::STANDARD, k)),
         })
     }
 
     pub fn to_agent(&self) -> Result<Agent, RepositoryError> {
-        let runtime = RuntimeType::from_str(&self.runtime)
-            .ok_or_else(|| RepositoryError::Serialization(
-                format!("unknown runtime: {}", self.runtime)
-            ))?;
+        let runtime = RuntimeType::from_str(&self.runtime).map_err(|_| {
+            RepositoryError::Serialization(format!("unknown runtime: {}", self.runtime))
+        })?;
 
-        let image_digest = self.image_digest.as_ref()
+        let image_digest = self
+            .image_digest
+            .as_ref()
             .map(ImageDigest::parse)
             .transpose()
             .map_err(RepositoryError::Serialization)?;
@@ -161,17 +174,23 @@ impl StoredAgent {
         let requirements: RequirementsJson = serde_json::from_str(&self.requirements_json)
             .map_err(|e| RepositoryError::Serialization(e.to_string()))?;
 
-        let prompts: Option<PromptsJson> = self.prompts_json.as_ref()
+        let prompts: Option<PromptsJson> = self
+            .prompts_json
+            .as_ref()
             .map(|s| serde_json::from_str(s))
             .transpose()
             .map_err(|e| RepositoryError::Serialization(e.to_string()))?;
 
         let models = requirements.models;
 
-        let public_key = self.public_key.as_ref()
+        let public_key = self
+            .public_key
+            .as_ref()
             .map(|b64| base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b64))
             .transpose()
-            .map_err(|e| RepositoryError::Serialization(format!("invalid public_key base64: {}", e)))?;
+            .map_err(|e| {
+                RepositoryError::Serialization(format!("invalid public_key base64: {}", e))
+            })?;
 
         Ok(Agent {
             id: Agent::placeholder_id(&self.name),
@@ -184,7 +203,11 @@ impl StoredAgent {
             public_key,
             object_storage: self.object_storage.as_ref().map(ResourceId::new),
             vector_storage: self.vector_storage.as_ref().map(ResourceId::new),
-            requirements: Requirements { models, services: requirements.services, mounts: requirements.mounts },
+            requirements: Requirements {
+                models,
+                services: requirements.services,
+                mounts: requirements.mounts,
+            },
             prompts: prompts.map(|p| Prompts {
                 intent_recognition: p.intent_recognition,
                 query_expansion: p.query_expansion,
@@ -219,7 +242,7 @@ struct PromptsJson {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{Provider, Protocol};
+    use crate::domain::{Protocol, Provider};
 
     fn minimal_agent() -> Agent {
         Agent {
@@ -248,11 +271,14 @@ mod tests {
         models.insert("nomic".to_string(), "nomic-embed".to_string());
 
         let mut services = HashMap::new();
-        services.insert(ServiceType::Infer, ServiceConfig {
-            provider: Provider::Ollama,
-            protocol: Protocol::OpenAi,
-            models: vec!["phi3:latest".to_string()],
-        });
+        services.insert(
+            ServiceType::Infer,
+            ServiceConfig {
+                provider: Provider::Ollama,
+                protocol: Protocol::OpenAi,
+                models: vec!["phi3:latest".to_string()],
+            },
+        );
 
         Agent {
             id: Agent::placeholder_id("thinker"),
@@ -308,12 +334,24 @@ mod tests {
 
         assert_eq!(restored.name, "thinker");
         assert_eq!(restored.description, "A thinking agent");
-        assert_eq!(restored.source.as_deref(), Some("https://github.com/example/thinker"));
+        assert_eq!(
+            restored.source.as_deref(),
+            Some("https://github.com/example/thinker")
+        );
         assert_eq!(restored.runtime, RuntimeType::Container);
         assert_eq!(restored.executable, "localhost/thinker:latest");
-        assert_eq!(restored.image_digest.as_ref().map(|d| d.as_str()), Some("sha256:abc123def456"));
-        assert_eq!(restored.object_storage.as_ref().map(|r| r.as_str()), Some("sqlite:///data/objects.db"));
-        assert_eq!(restored.vector_storage.as_ref().map(|r| r.as_str()), Some("sqlite:///data/vectors.db"));
+        assert_eq!(
+            restored.image_digest.as_ref().map(|d| d.as_str()),
+            Some("sha256:abc123def456")
+        );
+        assert_eq!(
+            restored.object_storage.as_ref().map(|r| r.as_str()),
+            Some("sqlite:///data/objects.db")
+        );
+        assert_eq!(
+            restored.vector_storage.as_ref().map(|r| r.as_str()),
+            Some("sqlite:///data/vectors.db")
+        );
 
         // Models (ADR 094: values are registry names, not URIs)
         assert_eq!(restored.requirements.models.len(), 2);
@@ -331,18 +369,24 @@ mod tests {
 
         // Prompts
         let prompts = restored.prompts.unwrap();
-        assert_eq!(prompts.intent_recognition.as_deref(), Some("Classify intent"));
+        assert_eq!(
+            prompts.intent_recognition.as_deref(),
+            Some("Classify intent")
+        );
         assert!(prompts.query_expansion.is_none());
-        assert_eq!(prompts.answer_generation.as_deref(), Some("Generate answer"));
-
+        assert_eq!(
+            prompts.answer_generation.as_deref(),
+            Some("Generate answer")
+        );
     }
 
     #[test]
     fn round_trip_with_public_key() {
         let mut agent = minimal_agent();
-        agent.public_key = Some(vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
-                                     11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
-                                     21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]);
+        agent.public_key = Some(vec![
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
+            25, 26, 27, 28, 29, 30, 31, 32,
+        ]);
 
         let stored = StoredAgent::from_agent(&agent).unwrap();
         assert!(stored.public_key.is_some());

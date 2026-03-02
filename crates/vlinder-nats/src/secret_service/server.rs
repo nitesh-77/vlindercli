@@ -3,15 +3,11 @@
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
 
-use vlinder_core::domain::SecretStore;
 use super::proto::{
-    secret_store_service_server::SecretStoreService,
-    PingRequest, SemVer,
-    PutRequest, PutResponse,
-    GetRequest, GetResponse,
-    ExistsRequest, ExistsResponse,
-    DeleteRequest, DeleteResponse,
+    secret_store_service_server::SecretStoreService, DeleteRequest, DeleteResponse, ExistsRequest,
+    ExistsResponse, GetRequest, GetResponse, PingRequest, PutRequest, PutResponse, SemVer,
 };
+use vlinder_core::domain::SecretStore;
 
 /// gRPC server that wraps a SecretStore implementation.
 pub struct SecretServiceServer {
@@ -24,17 +20,16 @@ impl SecretServiceServer {
     }
 
     /// Create a tonic service from this server.
-    pub fn into_service(self) -> super::proto::secret_store_service_server::SecretStoreServiceServer<Self> {
+    pub fn into_service(
+        self,
+    ) -> super::proto::secret_store_service_server::SecretStoreServiceServer<Self> {
         super::proto::secret_store_service_server::SecretStoreServiceServer::new(self)
     }
 }
 
 #[tonic::async_trait]
 impl SecretStoreService for SecretServiceServer {
-    async fn ping(
-        &self,
-        _request: Request<PingRequest>,
-    ) -> Result<Response<SemVer>, Status> {
+    async fn ping(&self, _request: Request<PingRequest>) -> Result<Response<SemVer>, Status> {
         Ok(Response::new(SemVer {
             major: 0,
             minor: 0,
@@ -42,18 +37,15 @@ impl SecretStoreService for SecretServiceServer {
         }))
     }
 
-    async fn put(
-        &self,
-        request: Request<PutRequest>,
-    ) -> Result<Response<PutResponse>, Status> {
+    async fn put(&self, request: Request<PutRequest>) -> Result<Response<PutResponse>, Status> {
         let req = request.into_inner();
         let store = Arc::clone(&self.store);
         let name = req.name;
         let value = req.value;
 
-        let result = tokio::task::spawn_blocking(move || {
-            store.put(&name, &value)
-        }).await.map_err(|e| Status::internal(e.to_string()))?;
+        let result = tokio::task::spawn_blocking(move || store.put(&name, &value))
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
 
         match result {
             Ok(()) => Ok(Response::new(PutResponse {
@@ -67,17 +59,14 @@ impl SecretStoreService for SecretServiceServer {
         }
     }
 
-    async fn get(
-        &self,
-        request: Request<GetRequest>,
-    ) -> Result<Response<GetResponse>, Status> {
+    async fn get(&self, request: Request<GetRequest>) -> Result<Response<GetResponse>, Status> {
         let req = request.into_inner();
         let store = Arc::clone(&self.store);
         let name = req.name;
 
-        let result = tokio::task::spawn_blocking(move || {
-            store.get(&name)
-        }).await.map_err(|e| Status::internal(e.to_string()))?;
+        let result = tokio::task::spawn_blocking(move || store.get(&name))
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
 
         match result {
             Ok(value) => Ok(Response::new(GetResponse {
@@ -108,9 +97,9 @@ impl SecretStoreService for SecretServiceServer {
         let store = Arc::clone(&self.store);
         let name = req.name;
 
-        let result = tokio::task::spawn_blocking(move || {
-            store.exists(&name)
-        }).await.map_err(|e| Status::internal(e.to_string()))?;
+        let result = tokio::task::spawn_blocking(move || store.exists(&name))
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
 
         match result {
             Ok(exists) => Ok(Response::new(ExistsResponse {
@@ -132,9 +121,9 @@ impl SecretStoreService for SecretServiceServer {
         let store = Arc::clone(&self.store);
         let name = req.name;
 
-        let result = tokio::task::spawn_blocking(move || {
-            store.delete(&name)
-        }).await.map_err(|e| Status::internal(e.to_string()))?;
+        let result = tokio::task::spawn_blocking(move || store.delete(&name))
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
 
         match result {
             Ok(()) => Ok(Response::new(DeleteResponse {

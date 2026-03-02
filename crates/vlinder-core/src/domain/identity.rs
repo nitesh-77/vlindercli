@@ -68,10 +68,7 @@ pub fn ensure_agent_identity(
         // Derive public key from existing private key
         let private_bytes = store.get(&key_name)?;
         let seed: [u8; 32] = private_bytes.try_into().map_err(|v: Vec<u8>| {
-            IdentityError::InvalidKey(format!(
-                "expected 32 bytes, got {}",
-                v.len()
-            ))
+            IdentityError::InvalidKey(format!("expected 32 bytes, got {}", v.len()))
         })?;
         let signing_key = SigningKey::from_bytes(&seed);
         let public_key = signing_key.verifying_key().to_bytes();
@@ -88,8 +85,8 @@ pub fn ensure_agent_identity(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::InMemorySecretStore;
+    use super::*;
 
     #[test]
     fn private_key_name_convention() {

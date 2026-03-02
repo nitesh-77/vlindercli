@@ -31,11 +31,15 @@ impl RuntimeType {
         }
     }
 
-    /// Parse from manifest string.
-    pub fn from_str(s: &str) -> Option<Self> {
+}
+
+impl std::str::FromStr for RuntimeType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "container" => Some(RuntimeType::Container),
-            _ => None,
+            "container" => Ok(RuntimeType::Container),
+            _ => Err(format!("unknown runtime type: {}", s)),
         }
     }
 }

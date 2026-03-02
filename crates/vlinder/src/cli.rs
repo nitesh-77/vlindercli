@@ -55,7 +55,11 @@ pub fn create_skin() -> MadSkin {
     skin.set_headers_fg(Color::Cyan);
     skin.bold.set_fg(Color::Yellow);
     skin.italic.set_fg(Color::Magenta);
-    skin.code_block.set_bg(Color::Rgb { r: 40, g: 40, b: 40 });
+    skin.code_block.set_bg(Color::Rgb {
+        r: 40,
+        g: 40,
+        b: 40,
+    });
     skin
 }
 

@@ -4,6 +4,7 @@
 //! worker processes a request. ServiceType is the first dimension.
 
 use std::fmt;
+use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
@@ -33,13 +34,18 @@ impl ServiceType {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
+}
+
+impl FromStr for ServiceType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "kv" => Some(ServiceType::Kv),
-            "vec" => Some(ServiceType::Vec),
-            "infer" => Some(ServiceType::Infer),
-            "embed" => Some(ServiceType::Embed),
-            _ => None,
+            "kv" => Ok(ServiceType::Kv),
+            "vec" => Ok(ServiceType::Vec),
+            "infer" => Ok(ServiceType::Infer),
+            "embed" => Ok(ServiceType::Embed),
+            _ => Err(format!("unknown service type: {}", s)),
         }
     }
 }
@@ -64,15 +70,20 @@ mod tests {
 
     #[test]
     fn from_str_round_trip() {
-        for st in [ServiceType::Kv, ServiceType::Vec, ServiceType::Infer, ServiceType::Embed] {
-            assert_eq!(ServiceType::from_str(st.as_str()), Some(st));
+        for st in [
+            ServiceType::Kv,
+            ServiceType::Vec,
+            ServiceType::Infer,
+            ServiceType::Embed,
+        ] {
+            assert_eq!(ServiceType::from_str(st.as_str()), Ok(st));
         }
     }
 
     #[test]
     fn from_str_unknown() {
-        assert_eq!(ServiceType::from_str("unknown"), None);
-        assert_eq!(ServiceType::from_str(""), None);
+        assert!(ServiceType::from_str("unknown").is_err());
+        assert!(ServiceType::from_str("").is_err());
     }
 
     #[test]
@@ -93,9 +104,13 @@ mod tests {
     #[test]
     fn toml_round_trip() {
         #[derive(Serialize, Deserialize, PartialEq, Debug)]
-        struct Wrapper { service: ServiceType }
+        struct Wrapper {
+            service: ServiceType,
+        }
 
-        let w = Wrapper { service: ServiceType::Vec };
+        let w = Wrapper {
+            service: ServiceType::Vec,
+        };
         let toml_str = toml::to_string(&w).unwrap();
         let back: Wrapper = toml::from_str(&toml_str).unwrap();
         assert_eq!(w, back);

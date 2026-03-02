@@ -9,7 +9,10 @@
 //! Each receive method returns a tuple of (TypedMessage, AckFn) where
 //! AckFn acknowledges successful processing.
 
-use super::{AgentId, CompleteMessage, DelegateMessage, HarnessType, InvokeMessage, Operation, RequestMessage, ResponseMessage, ResourceId, RoutingKey, ServiceBackend, SubmissionId};
+use super::{
+    AgentId, CompleteMessage, DelegateMessage, HarnessType, InvokeMessage, Operation,
+    RequestMessage, ResourceId, ResponseMessage, RoutingKey, ServiceBackend, SubmissionId,
+};
 use std::fmt;
 
 /// One-shot closure that acknowledges a received message was processed.
@@ -50,24 +53,38 @@ pub trait MessageQueue {
     /// Receive an InvokeMessage for a specific agent.
     ///
     /// Returns the typed message with all dimensions intact.
-    fn receive_invoke(&self, agent: &AgentId) -> Result<(InvokeMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError>;
+    fn receive_invoke(
+        &self,
+        agent: &AgentId,
+    ) -> Result<(InvokeMessage, Acknowledgement), QueueError>;
 
     /// Receive a RequestMessage for a service-backend/operation pair.
     ///
     /// Used by workers to receive typed service requests.
     /// Returns the typed message with all dimensions intact.
-    fn receive_request(&self, service: ServiceBackend, operation: Operation) -> Result<(RequestMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError>;
+    fn receive_request(
+        &self,
+        service: ServiceBackend,
+        operation: Operation,
+    ) -> Result<(RequestMessage, Acknowledgement), QueueError>;
 
     /// Receive a ResponseMessage for the given request.
     ///
     /// The queue builds the filter pattern from the request's dimensions.
     /// Returns the typed message with all dimensions intact.
-    fn receive_response(&self, request: &RequestMessage) -> Result<(ResponseMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError>;
+    fn receive_response(
+        &self,
+        request: &RequestMessage,
+    ) -> Result<(ResponseMessage, Acknowledgement), QueueError>;
 
     /// Receive a CompleteMessage for a specific submission.
     ///
     /// Each invocation polls its own submission-scoped consumer (ADR 052).
-    fn receive_complete(&self, submission: &SubmissionId, harness: HarnessType) -> Result<(CompleteMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError>;
+    fn receive_complete(
+        &self,
+        submission: &SubmissionId,
+        harness: HarnessType,
+    ) -> Result<(CompleteMessage, Acknowledgement), QueueError>;
 
     // -------------------------------------------------------------------------
     // Delegation methods (ADR 056, ADR 096 §7)
@@ -77,18 +94,28 @@ pub trait MessageQueue {
     fn send_delegate(&self, msg: DelegateMessage) -> Result<(), QueueError>;
 
     /// Receive a DelegateMessage for a target agent.
-    fn receive_delegate(&self, target: &AgentId) -> Result<(DelegateMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError>;
+    fn receive_delegate(
+        &self,
+        target: &AgentId,
+    ) -> Result<(DelegateMessage, Acknowledgement), QueueError>;
 
     /// Send a CompleteMessage as a delegation reply (ADR 096 §7).
     ///
     /// Routes via `RoutingKey::DelegateReply` — the nonce ensures uniqueness
     /// when the same caller delegates to the same target multiple times.
-    fn send_delegate_reply(&self, msg: CompleteMessage, reply_key: &RoutingKey) -> Result<(), QueueError>;
+    fn send_delegate_reply(
+        &self,
+        msg: CompleteMessage,
+        reply_key: &RoutingKey,
+    ) -> Result<(), QueueError>;
 
     /// Receive a delegation reply (ADR 096 §7).
     ///
     /// Polls for a CompleteMessage at the given `DelegateReply` routing key.
-    fn receive_delegate_reply(&self, reply_key: &RoutingKey) -> Result<(CompleteMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError>;
+    fn receive_delegate_reply(
+        &self,
+        reply_key: &RoutingKey,
+    ) -> Result<(CompleteMessage, Acknowledgement), QueueError>;
 
     // -------------------------------------------------------------------------
     // Request-reply facades (ADR 092)
@@ -174,7 +201,8 @@ impl std::error::Error for QueueError {}
 /// The last path component is the agent name, used as the NATS subject token.
 pub fn agent_routing_key(agent_id: &ResourceId) -> AgentId {
     let name = if let Some(path) = agent_id.path() {
-        path.rsplit('/').next()
+        path.rsplit('/')
+            .next()
             .filter(|n| !n.is_empty())
             .unwrap_or(agent_id.as_str())
     } else {

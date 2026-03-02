@@ -27,8 +27,8 @@ pub fn from_config(config: &Config) -> Result<Arc<dyn Registry>, Box<dyn std::er
         }
         #[cfg(any(test, feature = "test-support"))]
         RegistryBackend::Memory => {
-            use vlinder_core::domain::InMemorySecretStore;
             use vlinder_core::domain::InMemoryRegistry;
+            use vlinder_core::domain::InMemorySecretStore;
 
             let secret_store = Arc::new(InMemorySecretStore::new());
             Ok(Arc::new(InMemoryRegistry::new(secret_store)))

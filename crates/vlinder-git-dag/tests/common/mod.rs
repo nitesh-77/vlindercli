@@ -8,11 +8,11 @@ use std::process::Command;
 
 use chrono::{DateTime, Utc};
 
-use vlinder_git_dag::GitDagWorker;
 use vlinder_core::domain::{
-    CompleteMessage, RuntimeDiagnostics, HarnessType, InvokeDiagnostics, InvokeMessage,
-    AgentId, ObservableMessage, RuntimeType, SessionId, SubmissionId, TimelineId,
+    AgentId, CompleteMessage, HarnessType, InvokeDiagnostics, InvokeMessage, ObservableMessage,
+    RuntimeDiagnostics, RuntimeType, SessionId, SubmissionId, TimelineId,
 };
+use vlinder_git_dag::GitDagWorker;
 
 /// Create an isolated VLINDER_DIR for this test.
 ///
@@ -67,7 +67,11 @@ pub fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
 pub fn read_trailer(dir: &Path, commit: &str, key: &str) -> Option<String> {
     let format = format!("%(trailers:key={},valueonly)", key);
     let value = git(dir, &["log", "-1", &format!("--format={}", format), commit]).ok()?;
-    if value.is_empty() { None } else { Some(value) }
+    if value.is_empty() {
+        None
+    } else {
+        Some(value)
+    }
 }
 
 /// Get the current HEAD commit SHA.

@@ -2,12 +2,12 @@
 
 use serde::Serialize;
 
-use super::{PROTOCOL_VERSION, ExpectsReply};
-use super::identity::{MessageId, SubmissionId, SessionId, TimelineId, HarnessType};
-use super::super::RuntimeType;
-use super::super::routing_key::{AgentId, RoutingKey};
 use super::super::diagnostics::{InvokeDiagnostics, RuntimeDiagnostics};
+use super::super::routing_key::{AgentId, RoutingKey};
+use super::super::RuntimeType;
 use super::complete::CompleteMessage;
+use super::identity::{HarnessType, MessageId, SessionId, SubmissionId, TimelineId};
+use super::{ExpectsReply, PROTOCOL_VERSION};
 
 /// Invoke message: Harness → Runtime
 ///
@@ -35,6 +35,7 @@ pub struct InvokeMessage {
 }
 
 impl InvokeMessage {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         timeline: TimelineId,
         submission: SubmissionId,
@@ -73,7 +74,11 @@ impl InvokeMessage {
     }
 
     /// Create a reply with the final state hash (ADR 055).
-    pub fn create_reply_with_state(&self, payload: Vec<u8>, state: Option<String>) -> CompleteMessage {
+    pub fn create_reply_with_state(
+        &self,
+        payload: Vec<u8>,
+        state: Option<String>,
+    ) -> CompleteMessage {
         CompleteMessage::new(
             self.timeline.clone(),
             self.submission.clone(),

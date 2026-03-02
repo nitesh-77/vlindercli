@@ -12,7 +12,10 @@
 //! - `PersistentRegistry` — `crate::registry`
 //! - `GrpcRegistryClient` — `crate::registry_service`
 
-use crate::domain::{Agent, AgentManifest, Fleet, Model, ObjectStorageType, Provider, ResourceId, RuntimeType, VectorStorageType};
+use crate::domain::{
+    Agent, AgentManifest, Fleet, Model, ObjectStorageType, Provider, ResourceId, RuntimeType,
+    VectorStorageType,
+};
 
 /// Unique identifier for a submitted job.
 ///
@@ -42,7 +45,7 @@ impl JobId {
 #[derive(Clone, Debug)]
 pub struct Job {
     pub id: JobId,
-    pub submission_id: super::SubmissionId,  // ADR 044: tracks message flow
+    pub submission_id: super::SubmissionId, // ADR 044: tracks message flow
     pub agent_id: ResourceId,
     pub input: String,
     pub status: JobStatus,
@@ -110,15 +113,29 @@ pub enum RegistrationError {
 impl std::fmt::Display for RegistrationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            RegistrationError::DuplicateName(name) => write!(f, "agent already registered: {}", name),
-            RegistrationError::ConfigMismatch(name) => write!(f, "agent '{}' already registered with different configuration", name),
+            RegistrationError::DuplicateName(name) => {
+                write!(f, "agent already registered: {}", name)
+            }
+            RegistrationError::ConfigMismatch(name) => write!(
+                f,
+                "agent '{}' already registered with different configuration",
+                name
+            ),
             RegistrationError::NoRuntime(id) => {
                 write!(f, "no runtime available for agent executable: {}\n\nIs the daemon running? Start it with: vlinder daemon", id)
             }
-            RegistrationError::UnknownObjectStorageScheme(s) => write!(f, "unknown object storage scheme: {}", s),
-            RegistrationError::ObjectStorageUnavailable(t) => write!(f, "object storage not available: {:?}", t),
-            RegistrationError::UnknownVectorStorageScheme(s) => write!(f, "unknown vector storage scheme: {}", s),
-            RegistrationError::VectorStorageUnavailable(t) => write!(f, "vector storage not available: {:?}", t),
+            RegistrationError::UnknownObjectStorageScheme(s) => {
+                write!(f, "unknown object storage scheme: {}", s)
+            }
+            RegistrationError::ObjectStorageUnavailable(t) => {
+                write!(f, "object storage not available: {:?}", t)
+            }
+            RegistrationError::UnknownVectorStorageScheme(s) => {
+                write!(f, "unknown vector storage scheme: {}", s)
+            }
+            RegistrationError::VectorStorageUnavailable(t) => {
+                write!(f, "vector storage not available: {:?}", t)
+            }
             RegistrationError::ModelNotRegistered(alias, name) => {
                 write!(f, "model '{}' (registry name: '{}') is not registered\n\nAdd it first: vlinder model add {}", alias, name, name)
             }
@@ -135,17 +152,41 @@ impl std::fmt::Display for RegistrationError {
                 write!(f, "model '{}' is an embedding model but agent does not declare [requirements.services.embed]", model)
             }
             RegistrationError::InferenceServiceWithoutModel => {
-                write!(f, "agent declares [requirements.services.infer] but has no inference model")
+                write!(
+                    f,
+                    "agent declares [requirements.services.infer] but has no inference model"
+                )
             }
             RegistrationError::EmbeddingServiceWithoutModel => {
-                write!(f, "agent declares [requirements.services.embed] but has no embedding model")
+                write!(
+                    f,
+                    "agent declares [requirements.services.embed] but has no embedding model"
+                )
             }
-            RegistrationError::ModelInUse(name, agents) => write!(f, "model '{}' is in use by agents: {}", name, agents.join(", ")),
-            RegistrationError::AgentInUse(name, fleets) => write!(f, "agent '{}' is in use by fleets: {}", name, fleets.join(", ")),
-            RegistrationError::IdentityFailed(msg) => write!(f, "identity provisioning failed: {}", msg),
+            RegistrationError::ModelInUse(name, agents) => write!(
+                f,
+                "model '{}' is in use by agents: {}",
+                name,
+                agents.join(", ")
+            ),
+            RegistrationError::AgentInUse(name, fleets) => write!(
+                f,
+                "agent '{}' is in use by fleets: {}",
+                name,
+                fleets.join(", ")
+            ),
+            RegistrationError::IdentityFailed(msg) => {
+                write!(f, "identity provisioning failed: {}", msg)
+            }
             RegistrationError::Persistence(msg) => write!(f, "persistence error: {}", msg),
-            RegistrationError::FleetDuplicateName(name) => write!(f, "fleet already registered: {}", name),
-            RegistrationError::FleetConfigMismatch(name) => write!(f, "fleet '{}' already registered with different configuration", name),
+            RegistrationError::FleetDuplicateName(name) => {
+                write!(f, "fleet already registered: {}", name)
+            }
+            RegistrationError::FleetConfigMismatch(name) => write!(
+                f,
+                "fleet '{}' already registered with different configuration",
+                name
+            ),
             RegistrationError::FleetAgentNotRegistered(fleet, agent) => {
                 write!(f, "fleet '{}' references agent '{}' which is not registered\n\nDeploy the agent first: vlinder agent deploy", fleet, agent)
             }
@@ -153,7 +194,6 @@ impl std::fmt::Display for RegistrationError {
         }
     }
 }
-
 
 // ============================================================================
 // Registry Trait
@@ -185,10 +225,9 @@ pub trait Registry: Send + Sync {
         let agent = Agent::from_manifest(manifest)
             .map_err(|e| RegistrationError::Persistence(format!("{:?}", e)))?;
         self.register_agent(agent)?;
-        self.get_agent_by_name(&name)
-            .ok_or_else(|| RegistrationError::Persistence(
-                format!("agent '{}' not found after registration", name),
-            ))
+        self.get_agent_by_name(&name).ok_or_else(|| {
+            RegistrationError::Persistence(format!("agent '{}' not found after registration", name))
+        })
     }
 
     /// Get the registry-issued ID for an agent name.
@@ -210,7 +249,8 @@ pub trait Registry: Send + Sync {
 
     /// Get all agents assigned to a specific runtime type.
     fn get_agents_by_runtime(&self, runtime: RuntimeType) -> Vec<Agent> {
-        self.get_agents().into_iter()
+        self.get_agents()
+            .into_iter()
             .filter(|a| self.select_runtime(a) == Some(runtime))
             .collect()
     }
@@ -222,21 +262,39 @@ pub trait Registry: Send + Sync {
     /// registered model by registry name (ADR 094), and returns the provider
     /// as a routing string.
     fn resolve_model_backend(&self, agent_name: &str, model: &str) -> Result<String, String> {
-        let agent = self.get_agent_by_name(agent_name)
+        let agent = self
+            .get_agent_by_name(agent_name)
             .ok_or_else(|| format!("agent '{}' not found in registry", agent_name))?;
-        let model_name = agent.requirements.models.get(model)
-            .ok_or_else(|| format!("agent called service with undeclared model '{}'\n\nDeclared models: {:?}",
-                model, agent.requirements.models.keys().collect::<Vec<_>>()))?;
-        let registered = self.get_model(model_name)
-            .ok_or_else(|| format!("model '{}' (registry name: '{}') not found in registry", model, model_name))?;
+        let model_name = agent.requirements.models.get(model).ok_or_else(|| {
+            format!(
+                "agent called service with undeclared model '{}'\n\nDeclared models: {:?}",
+                model,
+                agent.requirements.models.keys().collect::<Vec<_>>()
+            )
+        })?;
+        let registered = self.get_model(model_name).ok_or_else(|| {
+            format!(
+                "model '{}' (registry name: '{}') not found in registry",
+                model, model_name
+            )
+        })?;
         Ok(serde_json::to_value(registered.provider)
-            .unwrap().as_str().unwrap().to_string())
+            .unwrap()
+            .as_str()
+            .unwrap()
+            .to_string())
     }
 
     /// Get all agents whose model requirements reference the given model name.
     fn get_agents_requiring_model(&self, model_name: &str) -> Vec<Agent> {
-        self.get_agents().into_iter()
-            .filter(|a| a.requirements.models.values().any(|name| name == model_name))
+        self.get_agents()
+            .into_iter()
+            .filter(|a| {
+                a.requirements
+                    .models
+                    .values()
+                    .any(|name| name == model_name)
+            })
             .collect()
     }
 
@@ -267,7 +325,12 @@ pub trait Registry: Send + Sync {
     // --- Job operations ---
 
     /// Create a new job with submission tracking (ADR 044).
-    fn create_job(&self, submission_id: super::SubmissionId, agent_id: ResourceId, input: String) -> JobId;
+    fn create_job(
+        &self,
+        submission_id: super::SubmissionId,
+        agent_id: ResourceId,
+        input: String,
+    ) -> JobId;
 
     /// Get a job by ID.
     fn get_job(&self, id: &JobId) -> Option<Job>;
@@ -365,10 +428,8 @@ mod tests {
 
     #[test]
     fn display_model_not_registered_includes_hint() {
-        let err = RegistrationError::ModelNotRegistered(
-            "inference_model".into(),
-            "claude-sonnet".into(),
-        );
+        let err =
+            RegistrationError::ModelNotRegistered("inference_model".into(), "claude-sonnet".into());
         let msg = format!("{}", err);
         assert!(msg.contains("claude-sonnet"));
         assert!(msg.contains("vlinder model add"));
@@ -376,10 +437,8 @@ mod tests {
 
     #[test]
     fn display_model_in_use_lists_agents() {
-        let err = RegistrationError::ModelInUse(
-            "phi3".into(),
-            vec!["agent-a".into(), "agent-b".into()],
-        );
+        let err =
+            RegistrationError::ModelInUse("phi3".into(), vec!["agent-a".into(), "agent-b".into()]);
         let msg = format!("{}", err);
         assert!(msg.contains("agent-a"));
         assert!(msg.contains("agent-b"));
@@ -387,10 +446,8 @@ mod tests {
 
     #[test]
     fn display_agent_in_use_lists_fleets() {
-        let err = RegistrationError::AgentInUse(
-            "echo".into(),
-            vec!["fleet-a".into(), "fleet-b".into()],
-        );
+        let err =
+            RegistrationError::AgentInUse("echo".into(), vec!["fleet-a".into(), "fleet-b".into()]);
         let msg = format!("{}", err);
         assert!(msg.contains("echo"));
         assert!(msg.contains("fleet-a"));

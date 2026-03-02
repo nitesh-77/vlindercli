@@ -87,6 +87,7 @@ pub trait CatalogService: Send + Sync {
 ///
 /// Named "Composite" (not "InMemory") because the backends themselves make
 /// real HTTP calls — this is just the dispatch layer.
+#[derive(Default)]
 pub struct CompositeCatalog {
     sources: HashMap<String, Arc<dyn ModelCatalog>>,
 }
@@ -201,10 +202,7 @@ mod tests {
     #[test]
     fn composite_catalogs_lists_names() {
         let mut composite = composite_with_mock();
-        composite.add(
-            "another".to_string(),
-            Arc::new(MockCatalog::new(vec![])),
-        );
+        composite.add("another".to_string(), Arc::new(MockCatalog::new(vec![])));
         let names = composite.catalogs();
         assert_eq!(names, vec!["another", "mock"]);
     }

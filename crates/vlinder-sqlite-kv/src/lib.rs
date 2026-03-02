@@ -1,17 +1,19 @@
 //! SQLite-kv provider — declares the hostname and routes
 //! for the sqlite-backed KV (object) storage backend.
 
-mod storage;
 pub mod state_store;
+mod storage;
 mod types;
 mod worker;
 
-pub use storage::SqliteObjectStorage;
 pub use state_store::SqliteStateStore;
-pub use types::{KvGetRequest, KvPutRequest, KvDeleteRequest, KvListRequest};
+pub use storage::SqliteObjectStorage;
+pub use types::{KvDeleteRequest, KvGetRequest, KvListRequest, KvPutRequest};
 pub use worker::KvWorker;
 
-use vlinder_core::domain::{HttpMethod, ObjectStorageType, Operation, ProviderHost, ProviderRoute, ServiceBackend};
+use vlinder_core::domain::{
+    HttpMethod, ObjectStorageType, Operation, ProviderHost, ProviderRoute, ServiceBackend,
+};
 
 /// The virtual hostname the sidecar will serve for sqlite-kv.
 pub const HOSTNAME: &str = "sqlite-kv.vlinder.local";
@@ -20,32 +22,35 @@ pub const HOSTNAME: &str = "sqlite-kv.vlinder.local";
 pub fn provider_host() -> ProviderHost {
     let backend = ServiceBackend::Kv(ObjectStorageType::Sqlite);
 
-    ProviderHost::new(HOSTNAME, vec![
-        ProviderRoute::new::<KvGetRequest, serde_json::Value>(
-            HttpMethod::Post,
-            "/get",
-            backend,
-            Operation::Get,
-        ),
-        ProviderRoute::new::<KvPutRequest, serde_json::Value>(
-            HttpMethod::Post,
-            "/put",
-            backend,
-            Operation::Put,
-        ),
-        ProviderRoute::new::<KvDeleteRequest, serde_json::Value>(
-            HttpMethod::Post,
-            "/delete",
-            backend,
-            Operation::Delete,
-        ),
-        ProviderRoute::new::<KvListRequest, serde_json::Value>(
-            HttpMethod::Post,
-            "/list",
-            backend,
-            Operation::List,
-        ),
-    ])
+    ProviderHost::new(
+        HOSTNAME,
+        vec![
+            ProviderRoute::new::<KvGetRequest, serde_json::Value>(
+                HttpMethod::Post,
+                "/get",
+                backend,
+                Operation::Get,
+            ),
+            ProviderRoute::new::<KvPutRequest, serde_json::Value>(
+                HttpMethod::Post,
+                "/put",
+                backend,
+                Operation::Put,
+            ),
+            ProviderRoute::new::<KvDeleteRequest, serde_json::Value>(
+                HttpMethod::Post,
+                "/delete",
+                backend,
+                Operation::Delete,
+            ),
+            ProviderRoute::new::<KvListRequest, serde_json::Value>(
+                HttpMethod::Post,
+                "/list",
+                backend,
+                Operation::List,
+            ),
+        ],
+    )
 }
 
 #[cfg(test)]

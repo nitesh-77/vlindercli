@@ -22,10 +22,7 @@ pub struct OllamaWorker {
 }
 
 impl OllamaWorker {
-    pub fn new(
-        queue: Arc<dyn MessageQueue + Send + Sync>,
-        endpoint: String,
-    ) -> Self {
+    pub fn new(queue: Arc<dyn MessageQueue + Send + Sync>, endpoint: String) -> Self {
         Self { queue, endpoint }
     }
 
@@ -34,7 +31,10 @@ impl OllamaWorker {
     pub fn tick(&self) -> bool {
         // Try each inference operation in turn.
         for op in [Operation::Run, Operation::Chat, Operation::Generate] {
-            match self.queue.receive_request(ServiceBackend::Infer(InferenceBackendType::Ollama), op) {
+            match self
+                .queue
+                .receive_request(ServiceBackend::Infer(InferenceBackendType::Ollama), op)
+            {
                 Ok((request, ack)) => {
                     self.process(request, ack, op);
                     return true;
@@ -44,7 +44,10 @@ impl OllamaWorker {
         }
 
         // Poll for embed requests.
-        match self.queue.receive_request(ServiceBackend::Embed(EmbeddingBackendType::Ollama), Operation::Run) {
+        match self.queue.receive_request(
+            ServiceBackend::Embed(EmbeddingBackendType::Ollama),
+            Operation::Run,
+        ) {
             Ok((request, ack)) => {
                 self.process_embed(request, ack);
                 return true;
@@ -64,28 +67,27 @@ impl OllamaWorker {
         let start = Instant::now();
         let payload = request.payload.as_slice();
 
-        let (response_payload, status_code, tokens_input, tokens_output, model) =
-            match operation {
-                Operation::Run => match self.handle_openai(payload) {
-                    Ok((body, ti, to, m)) => (body, 200, ti, to, m),
-                    Err((code, err)) => (err, code, 0, 0, String::new()),
-                },
-                Operation::Chat => match self.handle_chat(payload) {
-                    Ok((body, ti, to, m)) => (body, 200, ti, to, m),
-                    Err((code, err)) => (err, code, 0, 0, String::new()),
-                },
-                Operation::Generate => match self.handle_generate(payload) {
-                    Ok((body, ti, to, m)) => (body, 200, ti, to, m),
-                    Err((code, err)) => (err, code, 0, 0, String::new()),
-                },
-                _ => (
-                    error_json("unsupported operation"),
-                    400,
-                    0,
-                    0,
-                    String::new(),
-                ),
-            };
+        let (response_payload, status_code, tokens_input, tokens_output, model) = match operation {
+            Operation::Run => match self.handle_openai(payload) {
+                Ok((body, ti, to, m)) => (body, 200, ti, to, m),
+                Err((code, err)) => (err, code, 0, 0, String::new()),
+            },
+            Operation::Chat => match self.handle_chat(payload) {
+                Ok((body, ti, to, m)) => (body, 200, ti, to, m),
+                Err((code, err)) => (err, code, 0, 0, String::new()),
+            },
+            Operation::Generate => match self.handle_generate(payload) {
+                Ok((body, ti, to, m)) => (body, 200, ti, to, m),
+                Err((code, err)) => (err, code, 0, 0, String::new()),
+            },
+            _ => (
+                error_json("unsupported operation"),
+                400,
+                0,
+                0,
+                String::new(),
+            ),
+        };
 
         let duration_ms = start.elapsed().as_millis() as u64;
 
@@ -110,12 +112,9 @@ impl OllamaWorker {
 
     // ---- OpenAI-compatible: /v1/chat/completions ----
 
-    fn handle_openai(
-        &self,
-        payload: &[u8],
-    ) -> Result<(Vec<u8>, u32, u32, String), (u16, Vec<u8>)> {
-        let req: CreateChatCompletionRequest = serde_json::from_slice(payload)
-            .map_err(|e| (400, error_json(&e.to_string())))?;
+    fn handle_openai(&self, payload: &[u8]) -> Result<(Vec<u8>, u32, u32, String), (u16, Vec<u8>)> {
+        let req: CreateChatCompletionRequest =
+            serde_json::from_slice(payload).map_err(|e| (400, error_json(&e.to_string())))?;
 
         let model_name = req.model.clone();
 
@@ -130,20 +129,16 @@ impl OllamaWorker {
             .map(|u| (u.prompt_tokens, u.completion_tokens))
             .unwrap_or((0, 0));
 
-        let body =
-            serde_json::to_vec(&resp).map_err(|e| (500, error_json(&e.to_string())))?;
+        let body = serde_json::to_vec(&resp).map_err(|e| (500, error_json(&e.to_string())))?;
 
         Ok((body, ti, to, model_name))
     }
 
     // ---- Native: /api/chat ----
 
-    fn handle_chat(
-        &self,
-        payload: &[u8],
-    ) -> Result<(Vec<u8>, u32, u32, String), (u16, Vec<u8>)> {
-        let req: OllamaChatRequest = serde_json::from_slice(payload)
-            .map_err(|e| (400, error_json(&e.to_string())))?;
+    fn handle_chat(&self, payload: &[u8]) -> Result<(Vec<u8>, u32, u32, String), (u16, Vec<u8>)> {
+        let req: OllamaChatRequest =
+            serde_json::from_slice(payload).map_err(|e| (400, error_json(&e.to_string())))?;
 
         let model_name = req.model.clone();
 
@@ -154,8 +149,7 @@ impl OllamaWorker {
         let ti = resp.prompt_eval_count.unwrap_or(0);
         let to = resp.eval_count.unwrap_or(0);
 
-        let body =
-            serde_json::to_vec(&resp).map_err(|e| (500, error_json(&e.to_string())))?;
+        let body = serde_json::to_vec(&resp).map_err(|e| (500, error_json(&e.to_string())))?;
 
         Ok((body, ti, to, model_name))
     }
@@ -166,8 +160,8 @@ impl OllamaWorker {
         &self,
         payload: &[u8],
     ) -> Result<(Vec<u8>, u32, u32, String), (u16, Vec<u8>)> {
-        let req: OllamaGenerateRequest = serde_json::from_slice(payload)
-            .map_err(|e| (400, error_json(&e.to_string())))?;
+        let req: OllamaGenerateRequest =
+            serde_json::from_slice(payload).map_err(|e| (400, error_json(&e.to_string())))?;
 
         let model_name = req.model.clone();
 
@@ -178,8 +172,7 @@ impl OllamaWorker {
         let ti = resp.prompt_eval_count.unwrap_or(0);
         let to = resp.eval_count.unwrap_or(0);
 
-        let body =
-            serde_json::to_vec(&resp).map_err(|e| (500, error_json(&e.to_string())))?;
+        let body = serde_json::to_vec(&resp).map_err(|e| (500, error_json(&e.to_string())))?;
 
         Ok((body, ti, to, model_name))
     }
@@ -216,12 +209,9 @@ impl OllamaWorker {
         let _ = ack();
     }
 
-    fn handle_embed(
-        &self,
-        payload: &[u8],
-    ) -> Result<(Vec<u8>, u32, String), (u16, Vec<u8>)> {
-        let req: OllamaEmbedRequest = serde_json::from_slice(payload)
-            .map_err(|e| (400, error_json(&e.to_string())))?;
+    fn handle_embed(&self, payload: &[u8]) -> Result<(Vec<u8>, u32, String), (u16, Vec<u8>)> {
+        let req: OllamaEmbedRequest =
+            serde_json::from_slice(payload).map_err(|e| (400, error_json(&e.to_string())))?;
 
         let model_name = req.model.clone();
 
@@ -231,8 +221,7 @@ impl OllamaWorker {
 
         let dimensions = resp.embeddings.first().map(|v| v.len() as u32).unwrap_or(0);
 
-        let body =
-            serde_json::to_vec(&resp).map_err(|e| (500, error_json(&e.to_string())))?;
+        let body = serde_json::to_vec(&resp).map_err(|e| (500, error_json(&e.to_string())))?;
 
         Ok((body, dimensions, model_name))
     }
@@ -246,9 +235,7 @@ impl OllamaWorker {
     ) -> Result<Resp, String> {
         let url = format!("{}{}", self.endpoint, path);
 
-        let mut response = ureq::post(&url)
-            .send_json(req)
-            .map_err(|e| e.to_string())?;
+        let mut response = ureq::post(&url).send_json(req).map_err(|e| e.to_string())?;
 
         response
             .body_mut()
@@ -557,11 +544,7 @@ mod tests {
             "model": "nomic-embed-text",
             "input": "hello world"
         });
-        let request = send_embed_request(
-            &queue,
-            serde_json::to_vec(&body).unwrap(),
-            None,
-        );
+        let request = send_embed_request(&queue, serde_json::to_vec(&body).unwrap(), None);
         assert!(worker.tick());
 
         let (response, ack) = queue.receive_response(&request).unwrap();

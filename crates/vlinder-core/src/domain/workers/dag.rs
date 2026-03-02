@@ -7,10 +7,8 @@
 
 use chrono::Utc;
 
-use crate::domain::{
-    DagNode, hash_dag_node,
-};
 use crate::domain::message::ObservableMessage;
+use crate::domain::{hash_dag_node, DagNode};
 
 // ============================================================================
 // ObservableMessage → DagNode conversion helpers
@@ -19,10 +17,7 @@ use crate::domain::message::ObservableMessage;
 /// Extract (from, to) routing pair from a reconstructed message.
 pub fn observable_from_to(msg: &ObservableMessage) -> (String, String) {
     match msg {
-        ObservableMessage::Invoke(m) => (
-            m.harness.as_str().to_string(),
-            m.agent_id.to_string(),
-        ),
+        ObservableMessage::Invoke(m) => (m.harness.as_str().to_string(), m.agent_id.to_string()),
         ObservableMessage::Request(m) => (
             m.agent_id.to_string(),
             format!("{}.{}", m.service.service_type(), m.service.backend_str()),
@@ -31,14 +26,8 @@ pub fn observable_from_to(msg: &ObservableMessage) -> (String, String) {
             format!("{}.{}", m.service.service_type(), m.service.backend_str()),
             m.agent_id.to_string(),
         ),
-        ObservableMessage::Complete(m) => (
-            m.agent_id.to_string(),
-            m.harness.as_str().to_string(),
-        ),
-        ObservableMessage::Delegate(m) => (
-            m.caller.to_string(),
-            m.target.to_string(),
-        ),
+        ObservableMessage::Complete(m) => (m.agent_id.to_string(), m.harness.as_str().to_string()),
+        ObservableMessage::Delegate(m) => (m.caller.to_string(), m.target.to_string()),
     }
 }
 
@@ -89,7 +78,13 @@ pub fn build_dag_node(msg: &ObservableMessage, parent_hash: &str) -> DagNode {
     let state = observable_state(msg);
     let payload = msg.payload();
     let session_id = msg.session().as_str().to_string();
-    let hash = hash_dag_node(payload, parent_hash, &message_type, &diagnostics, &session_id);
+    let hash = hash_dag_node(
+        payload,
+        parent_hash,
+        &message_type,
+        &diagnostics,
+        &session_id,
+    );
 
     DagNode {
         hash,
@@ -116,60 +111,112 @@ pub fn build_dag_node(msg: &ObservableMessage, parent_hash: &str) -> DagNode {
 mod tests {
     use super::*;
     use crate::domain::{
-        AgentId, CompleteMessage, RuntimeDiagnostics, DagStore, DelegateDiagnostics,
-        DelegateMessage, HarnessType, InferenceBackendType, InMemoryDagStore,
-        InvokeDiagnostics, InvokeMessage, MessageType, Nonce, Operation, RequestDiagnostics,
-        RequestMessage, ResponseMessage, RuntimeType, Sequence, ServiceBackend,
-        SessionId, SubmissionId, ObjectStorageType, TimelineId,
+        AgentId, CompleteMessage, DagStore, DelegateDiagnostics, DelegateMessage, HarnessType,
+        InMemoryDagStore, InferenceBackendType, InvokeDiagnostics, InvokeMessage, MessageType,
+        Nonce, Operation, RequestDiagnostics, RequestMessage, ResponseMessage,
+        RuntimeDiagnostics, RuntimeType, Sequence, ServiceBackend, SessionId, SubmissionId,
+        TimelineId,
     };
 
-    fn session() -> SessionId { SessionId::from("sess-1".to_string()) }
-    fn submission() -> SubmissionId { SubmissionId::from("sub-1".to_string()) }
-    fn submission_alt() -> SubmissionId { SubmissionId::from("sub-2".to_string()) }
+    fn session() -> SessionId {
+        SessionId::from("sess-1".to_string())
+    }
+    fn submission() -> SubmissionId {
+        SubmissionId::from("sub-1".to_string())
+    }
+    fn submission_alt() -> SubmissionId {
+        SubmissionId::from("sub-2".to_string())
+    }
 
     fn test_invoke(payload: &[u8]) -> ObservableMessage {
         InvokeMessage::new(
-            TimelineId::main(), submission(), session(),
-            HarnessType::Cli, RuntimeType::Container, AgentId::new("myagent"),
-            payload.to_vec(), None,
-            InvokeDiagnostics { harness_version: "0.1.0".to_string(), history_turns: 0 },
-        ).into()
+            TimelineId::main(),
+            submission(),
+            session(),
+            HarnessType::Cli,
+            RuntimeType::Container,
+            AgentId::new("myagent"),
+            payload.to_vec(),
+            None,
+            InvokeDiagnostics {
+                harness_version: "0.1.0".to_string(),
+                history_turns: 0,
+            },
+        )
+        .into()
     }
 
     fn test_request(payload: &[u8]) -> ObservableMessage {
         RequestMessage::new(
-            TimelineId::main(), submission(), session(), AgentId::new("myagent"),
-            ServiceBackend::Infer(InferenceBackendType::Ollama), Operation::Run,
-            Sequence::first(), payload.to_vec(), None,
-            RequestDiagnostics { sequence: 1, endpoint: "/infer".to_string(), request_bytes: 0, received_at_ms: 0 },
-        ).into()
+            TimelineId::main(),
+            submission(),
+            session(),
+            AgentId::new("myagent"),
+            ServiceBackend::Infer(InferenceBackendType::Ollama),
+            Operation::Run,
+            Sequence::first(),
+            payload.to_vec(),
+            None,
+            RequestDiagnostics {
+                sequence: 1,
+                endpoint: "/infer".to_string(),
+                request_bytes: 0,
+                received_at_ms: 0,
+            },
+        )
+        .into()
     }
 
     fn test_response(payload: &[u8]) -> ObservableMessage {
         let request = RequestMessage::new(
-            TimelineId::main(), submission(), session(), AgentId::new("myagent"),
-            ServiceBackend::Infer(InferenceBackendType::Ollama), Operation::Run,
-            Sequence::first(), b"prompt".to_vec(), None,
-            RequestDiagnostics { sequence: 1, endpoint: "/infer".to_string(), request_bytes: 0, received_at_ms: 0 },
+            TimelineId::main(),
+            submission(),
+            session(),
+            AgentId::new("myagent"),
+            ServiceBackend::Infer(InferenceBackendType::Ollama),
+            Operation::Run,
+            Sequence::first(),
+            b"prompt".to_vec(),
+            None,
+            RequestDiagnostics {
+                sequence: 1,
+                endpoint: "/infer".to_string(),
+                request_bytes: 0,
+                received_at_ms: 0,
+            },
         );
         ResponseMessage::from_request(&request, payload.to_vec()).into()
     }
 
     fn test_complete(payload: &[u8], state: Option<String>) -> ObservableMessage {
         CompleteMessage::new(
-            TimelineId::main(), submission(), session(), AgentId::new("myagent"),
-            HarnessType::Cli, payload.to_vec(), state,
+            TimelineId::main(),
+            submission(),
+            session(),
+            AgentId::new("myagent"),
+            HarnessType::Cli,
+            payload.to_vec(),
+            state,
             RuntimeDiagnostics::placeholder(0),
-        ).into()
+        )
+        .into()
     }
 
     fn test_delegate(payload: &[u8]) -> ObservableMessage {
         DelegateMessage::new(
-            TimelineId::main(), submission(), session(),
-            AgentId::new("coordinator"), AgentId::new("summarizer"),
-            payload.to_vec(), Nonce::new("nonce-1"), None,
-            DelegateDiagnostics { runtime: RuntimeDiagnostics::placeholder(0) },
-        ).into()
+            TimelineId::main(),
+            submission(),
+            session(),
+            AgentId::new("coordinator"),
+            AgentId::new("summarizer"),
+            payload.to_vec(),
+            Nonce::new("nonce-1"),
+            None,
+            DelegateDiagnostics {
+                runtime: RuntimeDiagnostics::placeholder(0),
+            },
+        )
+        .into()
     }
 
     // --- ObservableMessage → DagNode conversion tests ---
@@ -279,12 +326,20 @@ mod tests {
 
         // Different session
         let msg2: ObservableMessage = InvokeMessage::new(
-            TimelineId::main(), submission_alt(),
+            TimelineId::main(),
+            submission_alt(),
             SessionId::from("sess-2".to_string()),
-            HarnessType::Cli, RuntimeType::Container, AgentId::new("agent-b"),
-            b"sess2-first".to_vec(), None,
-            InvokeDiagnostics { harness_version: "0.1.0".to_string(), history_turns: 0 },
-        ).into();
+            HarnessType::Cli,
+            RuntimeType::Container,
+            AgentId::new("agent-b"),
+            b"sess2-first".to_vec(),
+            None,
+            InvokeDiagnostics {
+                harness_version: "0.1.0".to_string(),
+                history_turns: 0,
+            },
+        )
+        .into();
         let node2 = build_dag_node(&msg2, "");
         store.insert_node(&node2).unwrap();
 

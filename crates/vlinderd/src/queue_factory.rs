@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use crate::config::{Config, QueueBackend};
 use vlinder_core::domain::{MessageQueue, QueueError};
-use vlinder_nats::NatsQueue;
 use vlinder_core::queue::RecordingQueue;
+use vlinder_nats::NatsQueue;
 
 /// Create a queue from configuration.
 ///
@@ -21,9 +21,7 @@ pub fn from_config(config: &Config) -> Result<Arc<dyn MessageQueue + Send + Sync
             Ok(Arc::new(queue))
         }
         #[cfg(any(test, feature = "test-support"))]
-        QueueBackend::Memory => {
-            Ok(Arc::new(vlinder_core::queue::InMemoryQueue::new()))
-        }
+        QueueBackend::Memory => Ok(Arc::new(vlinder_core::queue::InMemoryQueue::new())),
     }
 }
 
@@ -34,7 +32,9 @@ pub fn from_config(config: &Config) -> Result<Arc<dyn MessageQueue + Send + Sync
 ///
 /// In production, the DagStore is the gRPC State Service.
 /// In test builds with `StateBackend::Memory`, uses `InMemoryDagStore`.
-pub fn recording_from_config(config: &Config) -> Result<Arc<dyn MessageQueue + Send + Sync>, QueueError> {
+pub fn recording_from_config(
+    config: &Config,
+) -> Result<Arc<dyn MessageQueue + Send + Sync>, QueueError> {
     let inner = from_config(config)?;
 
     let store = crate::state_factory::from_config(config)

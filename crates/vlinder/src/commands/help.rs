@@ -42,5 +42,7 @@ fn bundled_fleet_path() -> PathBuf {
         return installed;
     }
     // Development: source tree
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fleets").join("support")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("fleets")
+        .join("support")
 }

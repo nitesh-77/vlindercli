@@ -9,15 +9,14 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use vlinder_core::domain::{
-    AgentId, CompleteMessage, RuntimeDiagnostics, ContainerId, RuntimeInfo,
-    ExpectsReply, HarnessType, ImageDigest, ImageRef, InvokeDiagnostics,
-    InvokeMessage, MessageQueue, RoutingKey,
+    AgentId, CompleteMessage, ContainerId, ExpectsReply, HarnessType, ImageDigest, ImageRef,
+    InvokeDiagnostics, InvokeMessage, MessageQueue, RoutingKey, RuntimeDiagnostics, RuntimeInfo,
     RuntimeType,
 };
 
-use crate::provider_server::ProviderServer;
 use crate::config::SidecarConfig;
 use crate::factory;
+use crate::provider_server::ProviderServer;
 
 /// The sidecar process — mediates between the platform queue and the agent container.
 pub struct Sidecar {
@@ -43,11 +42,17 @@ impl Sidecar {
     /// then fetches the Agent from the registry to determine storage backends.
     pub fn new(config: &SidecarConfig) -> Result<Self, Box<dyn std::error::Error>> {
         let queue = factory::connect_queue(&config.nats_url, &config.state_url)?;
-        let image_ref = config.image_ref.as_ref()
+        let image_ref = config
+            .image_ref
+            .as_ref()
             .and_then(|r| ImageRef::parse(r).ok());
-        let image_digest = config.image_digest.as_ref()
+        let image_digest = config
+            .image_digest
+            .as_ref()
             .and_then(|d| ImageDigest::parse(d).ok());
-        let container_id = config.container_id.as_ref()
+        let container_id = config
+            .container_id
+            .as_ref()
             .map(|id| ContainerId::new(id))
             .unwrap_or_else(ContainerId::unknown);
 
@@ -88,18 +93,22 @@ impl Sidecar {
         match self.http_client.post(&agent_url).send_bytes(&payload) {
             Ok(response) => {
                 let mut output = Vec::new();
-                response.into_reader().read_to_end(&mut output)
+                response
+                    .into_reader()
+                    .read_to_end(&mut output)
                     .map_err(|e| format!("Failed to read agent response body: {}", e))?;
-                let final_state = provider_server.as_ref()
-                    .and_then(|ps| ps.final_state());
+                let final_state = provider_server.as_ref().and_then(|ps| ps.final_state());
                 let duration_ms = started_at.elapsed().as_millis() as u64;
                 let diagnostics = self.build_diagnostics(duration_ms);
-                let complete = invoke.create_reply_with_diagnostics(output, final_state, diagnostics);
+                let complete =
+                    invoke.create_reply_with_diagnostics(output, final_state, diagnostics);
                 self.send_reply(complete, reply_key);
                 Ok(())
             }
             Err(ureq::Error::Status(code, response)) => {
-                let err_body = response.into_string().unwrap_or_else(|_| "unknown error".to_string());
+                let err_body = response
+                    .into_string()
+                    .unwrap_or_else(|_| "unknown error".to_string());
                 tracing::warn!(
                     event = "container.error",
                     container = %self.container_id,
@@ -107,7 +116,9 @@ impl Sidecar {
                     reason = %err_body,
                     "Agent container returned an error"
                 );
-                let complete = invoke.create_reply(format!("[error] agent container error: {}", err_body).into_bytes());
+                let complete = invoke.create_reply(
+                    format!("[error] agent container error: {}", err_body).into_bytes(),
+                );
                 self.send_reply(complete, reply_key);
                 Err(format!("Agent returned error: {}", err_body))
             }

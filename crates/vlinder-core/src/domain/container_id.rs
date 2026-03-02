@@ -86,9 +86,13 @@ mod tests {
         // ContainerId appears inside structs (e.g., RuntimeInfo::Container),
         // so test via a wrapper — TOML requires a top-level table.
         #[derive(Serialize, Deserialize, PartialEq, Debug)]
-        struct Wrapper { id: ContainerId }
+        struct Wrapper {
+            id: ContainerId,
+        }
 
-        let w = Wrapper { id: ContainerId::new("abc123") };
+        let w = Wrapper {
+            id: ContainerId::new("abc123"),
+        };
         let toml_str = toml::to_string(&w).unwrap();
         let back: Wrapper = toml::from_str(&toml_str).unwrap();
         assert_eq!(w, back);

@@ -51,7 +51,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use git2::{Repository, Oid, Signature, TreeBuilder, FileMode};
+use git2::{FileMode, Oid, Repository, Signature, TreeBuilder};
 
 use vlinder_core::domain::{DagWorker, ObservableMessage, Registry};
 
@@ -78,10 +78,13 @@ impl GitDagWorker {
             std::fs::create_dir_all(repo_path)
                 .map_err(|e| format!("failed to create repo directory: {}", e))?;
             Repository::init(repo_path)
-        }.map_err(|e| format!("git repo open/init failed: {}", e))?;
+        }
+        .map_err(|e| format!("git repo open/init failed: {}", e))?;
 
         // Read current HEAD for commit chaining (resume after restart)
-        let last_commit = repo.head().ok()
+        let last_commit = repo
+            .head()
+            .ok()
             .and_then(|r| r.peel_to_commit().ok())
             .map(|c| c.id());
 
@@ -99,7 +102,9 @@ impl GitDagWorker {
         msg: &ObservableMessage,
         created_at: DateTime<Utc>,
     ) -> Result<Oid, String> {
-        let mut tb = self.repo.treebuilder(None)
+        let mut tb = self
+            .repo
+            .treebuilder(None)
             .map_err(|e| format!("treebuilder failed: {}", e))?;
 
         let created_at_str = created_at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
@@ -183,7 +188,8 @@ impl GitDagWorker {
             }
         }
 
-        tb.write().map_err(|e| format!("write message subtree failed: {}", e))
+        tb.write()
+            .map_err(|e| format!("write message subtree failed: {}", e))
     }
 
     /// Build the accumulated tree: all previous message directories + new one + metadata.
@@ -196,11 +202,14 @@ impl GitDagWorker {
         msg_type: &str,
     ) -> Result<Oid, String> {
         // Start from the parent commit's tree (if any)
-        let parent_tree = self.last_commit
+        let parent_tree = self
+            .last_commit
             .and_then(|oid| self.repo.find_commit(oid).ok())
             .and_then(|c| c.tree().ok());
 
-        let mut tb = self.repo.treebuilder(parent_tree.as_ref())
+        let mut tb = self
+            .repo
+            .treebuilder(parent_tree.as_ref())
             .map_err(|e| format!("treebuilder failed: {}", e))?;
 
         // Remove top-level metadata — we re-add fresh copies
@@ -231,7 +240,9 @@ impl GitDagWorker {
                 }
 
                 if !agent.requirements.models.is_empty() {
-                    if let Ok(models_oid) = self.build_models_subtree(registry, &agent.requirements.models) {
+                    if let Ok(models_oid) =
+                        self.build_models_subtree(registry, &agent.requirements.models)
+                    {
                         let _ = tb.insert("models", models_oid, FileMode::Tree.into());
                     }
                 }
@@ -248,7 +259,8 @@ impl GitDagWorker {
             }
         }
 
-        tb.write().map_err(|e| format!("write accumulated tree failed: {}", e))
+        tb.write()
+            .map_err(|e| format!("write accumulated tree failed: {}", e))
     }
 
     /// Build a models/ subtree with one TOML file per model.
@@ -257,7 +269,9 @@ impl GitDagWorker {
         registry: &Arc<dyn Registry>,
         models: &std::collections::HashMap<String, String>,
     ) -> Result<Oid, String> {
-        let mut tb = self.repo.treebuilder(None)
+        let mut tb = self
+            .repo
+            .treebuilder(None)
             .map_err(|e| format!("treebuilder failed: {}", e))?;
 
         let mut has_entries = false;
@@ -277,12 +291,15 @@ impl GitDagWorker {
             return Err("no models to write".to_string());
         }
 
-        tb.write().map_err(|e| format!("write models subtree failed: {}", e))
+        tb.write()
+            .map_err(|e| format!("write models subtree failed: {}", e))
     }
 
     /// Write a blob to the git object store.
     fn write_blob(&self, data: &[u8]) -> Result<Oid, String> {
-        self.repo.blob(data).map_err(|e| format!("blob write failed: {}", e))
+        self.repo
+            .blob(data)
+            .map_err(|e| format!("blob write failed: {}", e))
     }
 
     /// Write a scalar string field as a blob and insert into a tree builder.
@@ -315,7 +332,9 @@ impl DagWorker for GitDagWorker {
 
             // 1. Build accumulated tree (all previous messages + new one)
             let tree_oid = self.build_accumulated_tree(msg, created_at, &from, &to, msg_type)?;
-            let tree = self.repo.find_tree(tree_oid)
+            let tree = self
+                .repo
+                .find_tree(tree_oid)
                 .map_err(|e| format!("find tree failed: {}", e))?;
 
             // 2. Build commit message with trailers for filtering
@@ -344,7 +363,8 @@ impl DagWorker for GitDagWorker {
                 .map_err(|e| format!("committer signature failed: {}", e))?;
 
             // 4. Parent is the previous commit (chronological order)
-            let parent_commit = self.last_commit
+            let parent_commit = self
+                .last_commit
                 .and_then(|oid| self.repo.find_commit(oid).ok());
             let parents: Vec<&git2::Commit> = parent_commit.iter().collect();
 
@@ -358,14 +378,10 @@ impl DagWorker for GitDagWorker {
             );
 
             // 5. Create commit object (no ref update — we own the chain)
-            let commit_oid = self.repo.commit(
-                None,
-                &author,
-                &committer,
-                &message,
-                &tree,
-                &parents,
-            ).map_err(|e| format!("commit failed: {}", e))?;
+            let commit_oid = self
+                .repo
+                .commit(None, &author, &committer, &message, &tree, &parents)
+                .map_err(|e| format!("commit failed: {}", e))?;
 
             // 6. Advance HEAD — matches `git update-ref HEAD <hash>`:
             //    - HEAD attached (normal): advances the branch it points to
@@ -373,20 +389,26 @@ impl DagWorker for GitDagWorker {
             //      leaving the branch untouched
             let reflog_msg = format!("{}: {} → {}", msg_type, from, to);
             if self.repo.head_detached().unwrap_or(false) {
-                self.repo.set_head_detached(commit_oid)
+                self.repo
+                    .set_head_detached(commit_oid)
                     .map_err(|e| format!("set_head_detached failed: {}", e))?;
             } else {
-                let branch = self.repo.find_reference("HEAD").ok()
+                let branch = self
+                    .repo
+                    .find_reference("HEAD")
+                    .ok()
                     .and_then(|r| r.symbolic_target().map(|s| s.to_string()))
                     .unwrap_or_else(|| "refs/heads/main".to_string());
-                self.repo.reference(&branch, commit_oid, true, &reflog_msg)
+                self.repo
+                    .reference(&branch, commit_oid, true, &reflog_msg)
                     .map_err(|e| format!("ref update failed: {}", e))?;
             }
 
             // 7. Sync working tree so files are visible in the directory
             let mut checkout = git2::build::CheckoutBuilder::new();
             checkout.force();
-            self.repo.checkout_head(Some(&mut checkout))
+            self.repo
+                .checkout_head(Some(&mut checkout))
                 .map_err(|e| format!("checkout failed: {}", e))?;
 
             // 8. Track last commit
@@ -426,25 +448,17 @@ fn message_routing(msg: &ObservableMessage) -> (String, String, &'static str) {
             m.harness.as_str().to_string(),
             "complete",
         ),
-        ObservableMessage::Delegate(m) => (
-            m.caller.to_string(),
-            m.target.to_string(),
-            "delegate",
-        ),
+        ObservableMessage::Delegate(m) => (m.caller.to_string(), m.target.to_string(), "delegate"),
     }
 }
 
 /// Extract the agent name for registry lookup.
 fn message_agent_name(msg: &ObservableMessage) -> String {
     match msg {
-        ObservableMessage::Invoke(m) =>
-            m.agent_id.to_string(),
-        ObservableMessage::Request(m) =>
-            m.agent_id.to_string(),
-        ObservableMessage::Response(m) =>
-            m.agent_id.to_string(),
-        ObservableMessage::Complete(m) =>
-            m.agent_id.to_string(),
+        ObservableMessage::Invoke(m) => m.agent_id.to_string(),
+        ObservableMessage::Request(m) => m.agent_id.to_string(),
+        ObservableMessage::Response(m) => m.agent_id.to_string(),
+        ObservableMessage::Complete(m) => m.agent_id.to_string(),
         ObservableMessage::Delegate(m) => m.target.to_string(),
     }
 }
@@ -465,12 +479,12 @@ mod tests {
     use super::*;
     use std::process::Command;
     use vlinder_core::domain::{
-        AgentId, InvokeMessage, RequestMessage, ResponseMessage, CompleteMessage, DelegateMessage,
-        ObservableMessage, HarnessType, TimelineId, SubmissionId, SessionId, Sequence, Nonce,
-        InvokeDiagnostics, RequestDiagnostics, ServiceDiagnostics, ServiceMetrics,
-        RuntimeDiagnostics, RuntimeInfo, DelegateDiagnostics,
-        ContainerId, InferenceBackendType, Operation, RuntimeType, ServiceBackend,
-        ServiceType, Agent, SecretStore, InMemorySecretStore, InMemoryRegistry,
+        Agent, AgentId, CompleteMessage, ContainerId, DelegateDiagnostics, DelegateMessage,
+        HarnessType, InMemoryRegistry, InMemorySecretStore, InferenceBackendType,
+        InvokeDiagnostics, InvokeMessage, Nonce, ObservableMessage, Operation, RequestDiagnostics,
+        RequestMessage, ResponseMessage, RuntimeDiagnostics, RuntimeInfo, RuntimeType, SecretStore,
+        Sequence, ServiceBackend, ServiceDiagnostics, ServiceMetrics, ServiceType, SessionId,
+        SubmissionId, TimelineId,
     };
 
     fn test_agent_id() -> AgentId {
@@ -579,7 +593,9 @@ mod tests {
             payload.to_vec(),
             Nonce::new("nonce-1"),
             None,
-            DelegateDiagnostics { runtime: RuntimeDiagnostics::placeholder(50) },
+            DelegateDiagnostics {
+                runtime: RuntimeDiagnostics::placeholder(50),
+            },
         );
         let created_at = DateTime::from_timestamp(epoch_secs, 0).unwrap();
         (ObservableMessage::Delegate(msg), created_at)
@@ -600,21 +616,25 @@ mod tests {
         let registry = Arc::new(InMemoryRegistry::new(test_secret_store()));
         registry.register_runtime(RuntimeType::Container);
 
-        let agent = Agent::from_toml(r#"
+        let agent = Agent::from_toml(
+            r#"
             name = "support-agent"
             description = "Support"
             runtime = "container"
             executable = "localhost/support-agent:latest"
             [requirements]
 
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
         registry.register_agent(agent).unwrap();
 
         let worker = GitDagWorker::open(
             tmp.path(),
             "registry.local:9000",
             Some(Arc::clone(&registry) as Arc<dyn Registry>),
-        ).unwrap();
+        )
+        .unwrap();
 
         (worker, tmp, registry)
     }
@@ -707,15 +727,36 @@ mod tests {
         let ts2 = DateTime::from_timestamp(1001, 0).unwrap();
         worker.on_observable_message(&ObservableMessage::Complete(complete), ts2);
 
-        let session = git(tmp.path(), &[
-            "log", "-1", "--format=%(trailers:key=Session,valueonly)", "main"
-        ]).unwrap();
-        let submission = git(tmp.path(), &[
-            "log", "-1", "--format=%(trailers:key=Submission,valueonly)", "main"
-        ]).unwrap();
-        let state = git(tmp.path(), &[
-            "log", "-1", "--format=%(trailers:key=State,valueonly)", "main"
-        ]).unwrap();
+        let session = git(
+            tmp.path(),
+            &[
+                "log",
+                "-1",
+                "--format=%(trailers:key=Session,valueonly)",
+                "main",
+            ],
+        )
+        .unwrap();
+        let submission = git(
+            tmp.path(),
+            &[
+                "log",
+                "-1",
+                "--format=%(trailers:key=Submission,valueonly)",
+                "main",
+            ],
+        )
+        .unwrap();
+        let state = git(
+            tmp.path(),
+            &[
+                "log",
+                "-1",
+                "--format=%(trailers:key=State,valueonly)",
+                "main",
+            ],
+        )
+        .unwrap();
 
         assert_eq!(session.trim(), "sess-1");
         assert_eq!(submission.trim(), "sub-1");
@@ -851,7 +892,11 @@ mod tests {
         assert_eq!(show("stderr").unwrap(), "WARN: something");
         let diag = show("diagnostics.toml").unwrap();
         assert!(diag.contains("duration_ms"), "diag: {}", diag);
-        assert!(!diag.contains("stderr"), "stderr should be stripped from diagnostics: {}", diag);
+        assert!(
+            !diag.contains("stderr"),
+            "stderr should be stripped from diagnostics: {}",
+            diag
+        );
     }
 
     #[test]
@@ -882,7 +927,10 @@ mod tests {
             test_agent_id(),
             b"hello".to_vec(),
             Some("abc123state".to_string()),
-            InvokeDiagnostics { harness_version: "0.1.0".to_string(), history_turns: 0 },
+            InvokeDiagnostics {
+                harness_version: "0.1.0".to_string(),
+                history_turns: 0,
+            },
         );
         let msg = ObservableMessage::Invoke(invoke);
         let ts = DateTime::from_timestamp(1000, 0).unwrap();
@@ -935,8 +983,16 @@ mod tests {
 
         let ls = git(tmp.path(), &["ls-tree", "--name-only", "main"]).unwrap();
         assert!(ls.contains("19700101-001640.000-cli-invoke"), "ls: {}", ls);
-        assert!(ls.contains("19700101-001641.000-support-agent-request"), "ls: {}", ls);
-        assert!(ls.contains("19700101-001642.000-infer.ollama-response"), "ls: {}", ls);
+        assert!(
+            ls.contains("19700101-001641.000-support-agent-request"),
+            "ls: {}",
+            ls
+        );
+        assert!(
+            ls.contains("19700101-001642.000-infer.ollama-response"),
+            "ls: {}",
+            ls
+        );
     }
 
     #[test]
@@ -1008,7 +1064,11 @@ mod tests {
 
         let content = git(tmp.path(), &["show", "main:platform.toml"]).unwrap();
         assert!(content.contains("version"), "platform.toml: {}", content);
-        assert!(content.contains("registry_host"), "platform.toml: {}", content);
+        assert!(
+            content.contains("registry_host"),
+            "platform.toml: {}",
+            content
+        );
     }
 
     #[test]
@@ -1078,7 +1138,10 @@ mod tests {
 
         // main must NOT have moved — it stays at commit 3
         let main_after = git(tmp.path(), &["rev-parse", "main"]).unwrap();
-        assert_eq!(main_before, main_after, "main should not advance during time-travel");
+        assert_eq!(
+            main_before, main_after,
+            "main should not advance during time-travel"
+        );
 
         // HEAD (detached) should have advanced to include commit 4
         let head_count = git(tmp.path(), &["rev-list", "--count", "HEAD"]).unwrap();
@@ -1130,7 +1193,10 @@ mod tests {
         worker.on_observable_message(&m4, t4);
 
         // main unchanged
-        assert_eq!(git(tmp.path(), &["rev-parse", "main"]).unwrap(), main_before);
+        assert_eq!(
+            git(tmp.path(), &["rev-parse", "main"]).unwrap(),
+            main_before
+        );
 
         // Return to main
         git(tmp.path(), &["checkout", "main"]).unwrap();
@@ -1172,9 +1238,21 @@ mod tests {
 
         // The tree at HEAD (detached) should have all 3 message directories
         let ls = git(tmp.path(), &["ls-tree", "--name-only", "HEAD"]).unwrap();
-        assert!(ls.contains("19700101-001640.000-cli-invoke"), "missing invoke: {}", ls);
-        assert!(ls.contains("19700101-001641.000-support-agent-request"), "missing request: {}", ls);
-        assert!(ls.contains("19700101-001642.000-infer.ollama-response"), "missing response: {}", ls);
+        assert!(
+            ls.contains("19700101-001640.000-cli-invoke"),
+            "missing invoke: {}",
+            ls
+        );
+        assert!(
+            ls.contains("19700101-001641.000-support-agent-request"),
+            "missing request: {}",
+            ls
+        );
+        assert!(
+            ls.contains("19700101-001642.000-infer.ollama-response"),
+            "missing response: {}",
+            ls
+        );
     }
 
     #[test]

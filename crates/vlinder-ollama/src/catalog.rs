@@ -3,7 +3,7 @@
 use serde::Deserialize;
 
 use vlinder_core::domain::{
-    CatalogError, Provider, Model, ModelCatalog, ModelInfo, ModelType, ResourceId,
+    CatalogError, Model, ModelCatalog, ModelInfo, ModelType, Provider, ResourceId,
 };
 
 /// Catalog that queries Ollama's API for available models.
@@ -39,7 +39,9 @@ impl ModelCatalog for OllamaCatalog {
         };
 
         let host = self.endpoint.trim_start_matches("http://");
-        let digest = info.digest.clone()
+        let digest = info
+            .digest
+            .clone()
             .ok_or_else(|| CatalogError::Parse("missing digest from Ollama API".to_string()))?;
 
         Ok(Model {

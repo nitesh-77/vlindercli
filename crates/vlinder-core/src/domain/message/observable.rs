@@ -4,20 +4,20 @@
 //! Transports deserialize their wire format into headers; the domain assembles
 //! the final `ObservableMessage` by attaching the payload via `assemble()`.
 
-use super::identity::{MessageId, SubmissionId, SessionId, TimelineId, Sequence, HarnessType};
 use super::super::dag::MessageType;
+use super::super::diagnostics::{
+    DelegateDiagnostics, InvokeDiagnostics, RequestDiagnostics, RuntimeDiagnostics,
+    ServiceDiagnostics,
+};
+use super::super::operation::Operation;
+use super::super::routing_key::{AgentId, Nonce, ServiceBackend};
+use super::super::RuntimeType;
+use super::complete::CompleteMessage;
+use super::delegate::DelegateMessage;
+use super::identity::{HarnessType, MessageId, Sequence, SessionId, SubmissionId, TimelineId};
 use super::invoke::InvokeMessage;
 use super::request::RequestMessage;
 use super::response::ResponseMessage;
-use super::complete::CompleteMessage;
-use super::delegate::DelegateMessage;
-use super::super::RuntimeType;
-use super::super::routing_key::{AgentId, Nonce, ServiceBackend};
-use super::super::operation::Operation;
-use super::super::diagnostics::{
-    InvokeDiagnostics, RequestDiagnostics, ServiceDiagnostics,
-    RuntimeDiagnostics, DelegateDiagnostics,
-};
 
 /// Unified message type wrapping all typed messages.
 ///
@@ -112,41 +112,130 @@ impl ObservableMessageHeaders {
     pub fn assemble(self, payload: Vec<u8>) -> ObservableMessage {
         match self {
             Self::Invoke {
-                id, protocol_version, timeline, submission, session,
-                harness, runtime, agent_id, state, diagnostics,
+                id,
+                protocol_version,
+                timeline,
+                submission,
+                session,
+                harness,
+                runtime,
+                agent_id,
+                state,
+                diagnostics,
             } => ObservableMessage::Invoke(InvokeMessage {
-                id, protocol_version, timeline, submission, session,
-                harness, runtime, agent_id, payload, state, diagnostics,
+                id,
+                protocol_version,
+                timeline,
+                submission,
+                session,
+                harness,
+                runtime,
+                agent_id,
+                payload,
+                state,
+                diagnostics,
             }),
             Self::Request {
-                id, protocol_version, timeline, submission, session,
-                agent_id, service, operation, sequence, state, diagnostics,
+                id,
+                protocol_version,
+                timeline,
+                submission,
+                session,
+                agent_id,
+                service,
+                operation,
+                sequence,
+                state,
+                diagnostics,
             } => ObservableMessage::Request(RequestMessage {
-                id, protocol_version, timeline, submission, session,
-                agent_id, service, operation, sequence, payload, state, diagnostics,
+                id,
+                protocol_version,
+                timeline,
+                submission,
+                session,
+                agent_id,
+                service,
+                operation,
+                sequence,
+                payload,
+                state,
+                diagnostics,
             }),
             Self::Response {
-                id, protocol_version, timeline, submission, session,
-                agent_id, service, operation, sequence, correlation_id,
-                state, diagnostics, status_code,
+                id,
+                protocol_version,
+                timeline,
+                submission,
+                session,
+                agent_id,
+                service,
+                operation,
+                sequence,
+                correlation_id,
+                state,
+                diagnostics,
+                status_code,
             } => ObservableMessage::Response(ResponseMessage {
-                id, protocol_version, timeline, submission, session,
-                agent_id, service, operation, sequence, payload,
-                correlation_id, state, diagnostics, status_code,
+                id,
+                protocol_version,
+                timeline,
+                submission,
+                session,
+                agent_id,
+                service,
+                operation,
+                sequence,
+                payload,
+                correlation_id,
+                state,
+                diagnostics,
+                status_code,
             }),
             Self::Complete {
-                id, protocol_version, timeline, submission, session,
-                agent_id, harness, state, diagnostics,
+                id,
+                protocol_version,
+                timeline,
+                submission,
+                session,
+                agent_id,
+                harness,
+                state,
+                diagnostics,
             } => ObservableMessage::Complete(CompleteMessage {
-                id, protocol_version, timeline, submission, session,
-                agent_id, harness, payload, state, diagnostics,
+                id,
+                protocol_version,
+                timeline,
+                submission,
+                session,
+                agent_id,
+                harness,
+                payload,
+                state,
+                diagnostics,
             }),
             Self::Delegate {
-                id, protocol_version, timeline, submission, session,
-                caller, target, nonce, state, diagnostics,
+                id,
+                protocol_version,
+                timeline,
+                submission,
+                session,
+                caller,
+                target,
+                nonce,
+                state,
+                diagnostics,
             } => ObservableMessage::Delegate(DelegateMessage {
-                id, protocol_version, timeline, submission, session,
-                caller, target, payload, nonce, state, diagnostics,
+                id,
+                protocol_version,
+                timeline,
+                submission,
+                session,
+                caller,
+                target,
+                payload,
+                nonce,
+                state,
+                diagnostics,
             }),
         }
     }
@@ -226,21 +315,31 @@ impl ObservableMessage {
 }
 
 impl From<InvokeMessage> for ObservableMessage {
-    fn from(msg: InvokeMessage) -> Self { ObservableMessage::Invoke(msg) }
+    fn from(msg: InvokeMessage) -> Self {
+        ObservableMessage::Invoke(msg)
+    }
 }
 
 impl From<RequestMessage> for ObservableMessage {
-    fn from(msg: RequestMessage) -> Self { ObservableMessage::Request(msg) }
+    fn from(msg: RequestMessage) -> Self {
+        ObservableMessage::Request(msg)
+    }
 }
 
 impl From<ResponseMessage> for ObservableMessage {
-    fn from(msg: ResponseMessage) -> Self { ObservableMessage::Response(msg) }
+    fn from(msg: ResponseMessage) -> Self {
+        ObservableMessage::Response(msg)
+    }
 }
 
 impl From<CompleteMessage> for ObservableMessage {
-    fn from(msg: CompleteMessage) -> Self { ObservableMessage::Complete(msg) }
+    fn from(msg: CompleteMessage) -> Self {
+        ObservableMessage::Complete(msg)
+    }
 }
 
 impl From<DelegateMessage> for ObservableMessage {
-    fn from(msg: DelegateMessage) -> Self { ObservableMessage::Delegate(msg) }
+    fn from(msg: DelegateMessage) -> Self {
+        ObservableMessage::Delegate(msg)
+    }
 }

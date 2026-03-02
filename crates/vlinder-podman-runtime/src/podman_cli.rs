@@ -27,7 +27,13 @@ impl PodmanClient for PodmanCliClient {
 
     fn image_digest(&self, image_ref: &ImageRef) -> Option<ImageDigest> {
         Command::new("podman")
-            .args(["image", "inspect", image_ref.as_str(), "--format", "{{.Digest}}"])
+            .args([
+                "image",
+                "inspect",
+                image_ref.as_str(),
+                "--format",
+                "{{.Digest}}",
+            ])
             .output()
             .ok()
             .filter(|o| o.status.success())
@@ -40,7 +46,8 @@ impl PodmanClient for PodmanCliClient {
 
     fn pod_create(&self, name: &str, host_aliases: &[String]) -> Result<PodId, PodmanError> {
         let mut args = vec!["pod", "create", "--name", name];
-        let add_host_args: Vec<String> = host_aliases.iter()
+        let add_host_args: Vec<String> = host_aliases
+            .iter()
             .flat_map(|alias| vec!["--add-host".to_string(), alias.clone()])
             .collect();
         let add_host_refs: Vec<&str> = add_host_args.iter().map(|s| s.as_str()).collect();
@@ -53,7 +60,10 @@ impl PodmanClient for PodmanCliClient {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(PodmanError::Run(format!("podman pod create failed: {}", stderr)));
+            return Err(PodmanError::Run(format!(
+                "podman pod create failed: {}",
+                stderr
+            )));
         }
 
         let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -92,7 +102,10 @@ impl PodmanClient for PodmanCliClient {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(PodmanError::Run(format!("podman create in pod failed: {}", stderr)));
+            return Err(PodmanError::Run(format!(
+                "podman create in pod failed: {}",
+                stderr
+            )));
         }
 
         let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -126,7 +139,10 @@ impl PodmanClient for PodmanCliClient {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(PodmanError::Run(format!("podman volume create failed: {}", stderr)));
+            return Err(PodmanError::Run(format!(
+                "podman volume create failed: {}",
+                stderr
+            )));
         }
 
         Ok(())
@@ -146,7 +162,10 @@ impl PodmanClient for PodmanCliClient {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(PodmanError::Run(format!("podman pod start failed: {}", stderr)));
+            return Err(PodmanError::Run(format!(
+                "podman pod start failed: {}",
+                stderr
+            )));
         }
 
         Ok(())
@@ -179,10 +198,7 @@ mod tests {
 
     #[test]
     fn parse_version_valid() {
-        assert_eq!(
-            parse_version("4.9.3"),
-            Some(semver::Version::new(4, 9, 3))
-        );
+        assert_eq!(parse_version("4.9.3"), Some(semver::Version::new(4, 9, 3)));
     }
 
     #[test]

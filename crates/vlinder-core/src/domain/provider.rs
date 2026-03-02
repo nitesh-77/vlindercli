@@ -6,8 +6,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::routing_key::ServiceBackend;
 use super::operation::Operation;
+use super::routing_key::ServiceBackend;
 
 /// Model provider — the service that hosts and serves the model.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -98,6 +98,9 @@ impl ProviderRoute {
 
 impl ProviderHost {
     pub fn new(hostname: impl Into<String>, routes: Vec<ProviderRoute>) -> Self {
-        Self { hostname: hostname.into(), routes }
+        Self {
+            hostname: hostname.into(),
+            routes,
+        }
     }
 }
