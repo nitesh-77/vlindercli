@@ -21,6 +21,7 @@ COPY crates/vlinder-infer-openrouter/Cargo.toml crates/vlinder-infer-openrouter/
 COPY crates/vlinder-sqlite-vec/Cargo.toml crates/vlinder-sqlite-vec/
 COPY crates/vlinder-sqlite-kv/Cargo.toml crates/vlinder-sqlite-kv/
 COPY crates/vlinder-nats/Cargo.toml crates/vlinder-nats/
+COPY crates/vlinder-provider-server/Cargo.toml crates/vlinder-provider-server/
 COPY crates/vlinder-podman-sidecar/Cargo.toml crates/vlinder-podman-sidecar/
 COPY crates/vlinder-podman-runtime/Cargo.toml crates/vlinder-podman-runtime/
 COPY crates/vlinder-catalog/Cargo.toml crates/vlinder-catalog/
@@ -43,6 +44,7 @@ RUN mkdir -p crates/vlinder-core/src && echo "" > crates/vlinder-core/src/lib.rs
     mkdir -p crates/vlinder-sql-state/src && echo "" > crates/vlinder-sql-state/src/lib.rs && \
     mkdir -p crates/vlinder-git-dag/src && echo "" > crates/vlinder-git-dag/src/lib.rs && \
     mkdir -p crates/vlinder-sql-registry/src && echo "" > crates/vlinder-sql-registry/src/lib.rs && \
+    mkdir -p crates/vlinder-provider-server/src && echo "" > crates/vlinder-provider-server/src/lib.rs && \
     mkdir -p crates/vlinder-podman-sidecar/src && echo "fn main() {}" > crates/vlinder-podman-sidecar/src/main.rs && \
     mkdir -p crates/vlinderd/src && echo "fn main() {}" > crates/vlinderd/src/main.rs && \
     mkdir -p crates/vlinder/src && echo "fn main() {}" > crates/vlinder/src/main.rs
@@ -75,6 +77,7 @@ COPY crates/vlinder-catalog/src crates/vlinder-catalog/src
 COPY crates/vlinder-sql-state/src crates/vlinder-sql-state/src
 COPY crates/vlinder-git-dag/src crates/vlinder-git-dag/src
 COPY crates/vlinder-sql-registry/src crates/vlinder-sql-registry/src
+COPY crates/vlinder-provider-server/src crates/vlinder-provider-server/src
 COPY crates/vlinder-podman-sidecar/src crates/vlinder-podman-sidecar/src
 
 # Touch source files to invalidate the cache for actual compilation
@@ -90,6 +93,7 @@ RUN touch crates/vlinder-core/src/lib.rs \
           crates/vlinder-sql-state/src/lib.rs \
           crates/vlinder-git-dag/src/lib.rs \
           crates/vlinder-sql-registry/src/lib.rs \
+          crates/vlinder-provider-server/src/lib.rs \
           crates/vlinder-podman-sidecar/src/main.rs
 
 # Build the sidecar binary

@@ -1,12 +1,10 @@
 //! Provider server — virtual-host HTTP server that emulates upstream provider APIs.
 //!
-//! Spawned per invoke, dies when the invoke completes. Self-contained: reads
-//! config from env, connects to the registry, checks the agent's requirements,
-//! builds its own host table from linked provider crates, and connects to the
-//! message queue. Incoming requests are matched against the host table and
-//! forwarded to NATS via `call_service()`.
+//! Spawned per invoke, dies when the invoke completes. Incoming requests are
+//! matched against a host table and forwarded to NATS via `call_service()`.
 //!
-//! The only input is the `InvokeMessage`.
+//! The server is decoupled from configuration: callers provide hosts, queue,
+//! registry, and state as explicit parameters.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -15,14 +13,11 @@ use std::time::Duration;
 
 use tiny_http::{Method, StatusCode};
 use vlinder_core::domain::{
-    AgentId, DelegateDiagnostics, DelegateMessage, HttpMethod, InvokeMessage, MessageQueue, Nonce,
-    ObjectStorageType, Provider, ProviderHost, ProviderRoute, Registry, RequestDiagnostics,
+    Agent, AgentId, DelegateDiagnostics, DelegateMessage, HttpMethod, InvokeMessage, MessageQueue,
+    Nonce, ObjectStorageType, Provider, ProviderHost, ProviderRoute, Registry, RequestDiagnostics,
     RequestMessage, RoutingKey, RuntimeDiagnostics, SequenceCounter, ServiceType,
     VectorStorageType,
 };
-
-use crate::config::SidecarConfig;
-use crate::factory;
 
 /// A running provider server, scoped to one invoke.
 ///
@@ -44,31 +39,36 @@ pub struct ProviderServer {
 }
 
 impl ProviderServer {
-    /// Start the provider server on port 80.
+    /// Start the provider server on the given port.
     ///
-    /// Connects to the registry, looks up the agent from `invoke.agent_id`,
-    /// checks which providers are needed, connects to the queue, and serves
-    /// their hostnames. Always starts — even agents with no provider services
-    /// need the server for delegation endpoints.
-    pub fn start(invoke: &InvokeMessage) -> Option<Self> {
-        let (hosts, queue, registry, invoke, initial_state) = build_context(invoke);
-
-        let server = tiny_http::Server::http("0.0.0.0:80")
-            .expect("failed to bind provider server on port 80");
+    /// Takes all dependencies explicitly: hosts, queue, registry, and initial
+    /// state. Even agents with no provider services need the server for
+    /// delegation endpoints on `runtime.vlinder.local`.
+    pub fn start(
+        invoke: &InvokeMessage,
+        hosts: Vec<ProviderHost>,
+        queue: Arc<dyn MessageQueue + Send + Sync>,
+        registry: Arc<dyn Registry>,
+        initial_state: Option<String>,
+        port: u16,
+    ) -> Self {
+        let bind = format!("0.0.0.0:{}", port);
+        let server = tiny_http::Server::http(&bind)
+            .unwrap_or_else(|_| panic!("failed to bind provider server on port {}", port));
         tracing::info!(
             event = "provider_server.listening",
-            port = 80,
+            port = port,
             "Provider server started"
         );
 
-        Some(Self::start_request_loop(
+        Self::start_request_loop(
             server,
             hosts,
             queue,
             registry,
-            invoke,
+            invoke.clone(),
             initial_state,
-        ))
+        )
     }
 
     /// Read the final state hash after an invocation completes.
@@ -114,6 +114,67 @@ impl ProviderServer {
             state,
         }
     }
+}
+
+/// Build the virtual-host table from an agent's service requirements.
+pub fn build_hosts(agent: &Agent) -> Vec<ProviderHost> {
+    let mut hosts = Vec::new();
+
+    let needs_openrouter = agent
+        .requirements
+        .services
+        .get(&ServiceType::Infer)
+        .map(|svc| svc.provider == Provider::OpenRouter)
+        .unwrap_or(false);
+
+    if needs_openrouter {
+        hosts.push(vlinder_infer_openrouter::provider_host());
+    }
+
+    let needs_ollama_infer = agent
+        .requirements
+        .services
+        .get(&ServiceType::Infer)
+        .map(|svc| svc.provider == Provider::Ollama)
+        .unwrap_or(false);
+
+    let needs_ollama_embed = agent
+        .requirements
+        .services
+        .get(&ServiceType::Embed)
+        .map(|svc| svc.provider == Provider::Ollama)
+        .unwrap_or(false);
+
+    if needs_ollama_infer || needs_ollama_embed {
+        hosts.push(vlinder_ollama::provider_host(
+            needs_ollama_infer,
+            needs_ollama_embed,
+        ));
+    }
+
+    let needs_sqlite_vec = agent
+        .vector_storage
+        .as_ref()
+        .and_then(|uri| VectorStorageType::from_scheme(uri.scheme()))
+        .map(|t| t == VectorStorageType::SqliteVec)
+        .unwrap_or(false);
+
+    if needs_sqlite_vec {
+        hosts.push(vlinder_sqlite_vec::provider_host());
+    }
+
+    // KV storage: any agent with object_storage gets the sqlite-kv provider
+    let has_object_storage = agent
+        .object_storage
+        .as_ref()
+        .and_then(|uri| ObjectStorageType::from_scheme(uri.scheme()))
+        .is_some();
+
+    if has_object_storage {
+        hosts.push(vlinder_sqlite_kv::provider_host());
+    }
+
+    hosts
 }
 
 /// The main request loop — runs on a background thread for the lifetime of
@@ -186,98 +247,6 @@ fn request_loop(
         }
     }
     tracing::info!(event = "provider_server.stopped", "Provider server stopped");
-}
-
-/// Build the provider server context: hosts, queue, registry, and invoke.
-///
-/// Reads config from env, connects to the registry, looks up the agent,
-/// checks its service requirements, and connects to the message queue.
-/// Always returns a context — even agents with no provider services need
-/// the server for delegation endpoints on `runtime.vlinder.local`.
-fn build_context(
-    invoke: &InvokeMessage,
-) -> (
-    Vec<ProviderHost>,
-    Arc<dyn MessageQueue + Send + Sync>,
-    Arc<dyn Registry>,
-    InvokeMessage,
-    Option<String>,
-) {
-    let config = SidecarConfig::from_env().expect("failed to parse sidecar config from env");
-    let registry = factory::connect_registry(&config.registry_url)
-        .expect("failed to connect to registry from provider server");
-
-    let agent = registry
-        .get_agent_by_name(invoke.agent_id.as_str())
-        .expect("agent not found in registry");
-
-    let mut hosts = Vec::new();
-    let mut initial_state: Option<String> = None;
-
-    let needs_openrouter = agent
-        .requirements
-        .services
-        .get(&ServiceType::Infer)
-        .map(|svc| svc.provider == Provider::OpenRouter)
-        .unwrap_or(false);
-
-    if needs_openrouter {
-        hosts.push(vlinder_infer_openrouter::provider_host());
-    }
-
-    let needs_ollama_infer = agent
-        .requirements
-        .services
-        .get(&ServiceType::Infer)
-        .map(|svc| svc.provider == Provider::Ollama)
-        .unwrap_or(false);
-
-    let needs_ollama_embed = agent
-        .requirements
-        .services
-        .get(&ServiceType::Embed)
-        .map(|svc| svc.provider == Provider::Ollama)
-        .unwrap_or(false);
-
-    if needs_ollama_infer || needs_ollama_embed {
-        hosts.push(vlinder_ollama::provider_host(
-            needs_ollama_infer,
-            needs_ollama_embed,
-        ));
-    }
-
-    let needs_sqlite_vec = agent
-        .vector_storage
-        .as_ref()
-        .and_then(|uri| VectorStorageType::from_scheme(uri.scheme()))
-        .map(|t| t == VectorStorageType::SqliteVec)
-        .unwrap_or(false);
-
-    if needs_sqlite_vec {
-        hosts.push(vlinder_sqlite_vec::provider_host());
-    }
-
-    // KV storage: any agent with object_storage gets the sqlite-kv provider
-    let has_object_storage = agent
-        .object_storage
-        .as_ref()
-        .and_then(|uri| ObjectStorageType::from_scheme(uri.scheme()))
-        .is_some();
-
-    if has_object_storage {
-        hosts.push(vlinder_sqlite_kv::provider_host());
-        // Bootstrap state: use invoke.state, or "" if the agent has KV but no state yet
-        initial_state = Some(invoke.state.clone().unwrap_or_default());
-    }
-
-    let queue = factory::connect_queue(
-        &config.nats_url,
-        &config.state_url,
-        config.secret_url.as_deref(),
-    )
-    .expect("failed to connect to queue from provider server");
-
-    (hosts, queue, registry, invoke.clone(), initial_state)
 }
 
 /// Extract the Host header value from a request, or "" if absent.

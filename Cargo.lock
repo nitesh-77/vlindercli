@@ -4031,11 +4031,20 @@ version = "0.1.0"
 dependencies = [
  "semver",
  "serde",
- "serde_json",
- "tiny_http",
  "tracing",
  "tracing-subscriber",
  "ureq 2.12.1",
+ "vlinder-core",
+ "vlinder-provider-server",
+]
+
+[[package]]
+name = "vlinder-provider-server"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "tiny_http",
+ "tracing",
  "vlinder-core",
  "vlinder-infer-openrouter",
  "vlinder-nats",

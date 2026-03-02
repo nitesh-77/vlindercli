@@ -5,8 +5,6 @@
 //! agent container to be healthy, then enters the dispatch loop.
 
 mod config;
-mod factory;
-mod provider_server;
 mod sidecar;
 
 use config::SidecarConfig;

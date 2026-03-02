@@ -1,0 +1,18 @@
+[package]
+name = "vlinder-provider-server"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+vlinder-core = { path = "../vlinder-core" }
+vlinder-nats = { path = "../vlinder-nats" }
+vlinder-sql-registry = { path = "../vlinder-sql-registry" }
+vlinder-sql-state = { path = "../vlinder-sql-state" }
+vlinder-ollama = { path = "../vlinder-ollama" }
+vlinder-infer-openrouter = { path = "../vlinder-infer-openrouter" }
+vlinder-sqlite-vec = { path = "../vlinder-sqlite-vec" }
+vlinder-sqlite-kv = { path = "../vlinder-sqlite-kv" }
+serde_json = "1"
+tracing = "0.1"
+tiny_http = "0.12"

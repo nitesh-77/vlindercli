@@ -10,17 +10,19 @@ use std::time::{Duration, Instant};
 
 use vlinder_core::domain::{
     AgentId, CompleteMessage, ContainerId, ExpectsReply, HarnessType, ImageDigest, ImageRef,
-    InvokeDiagnostics, InvokeMessage, MessageQueue, RoutingKey, RuntimeDiagnostics, RuntimeInfo,
-    RuntimeType,
+    InvokeDiagnostics, InvokeMessage, MessageQueue, Registry, RoutingKey, RuntimeDiagnostics,
+    RuntimeInfo, RuntimeType,
 };
 
+use vlinder_provider_server::factory;
+use vlinder_provider_server::provider_server::{build_hosts, ProviderServer};
+
 use crate::config::SidecarConfig;
-use crate::factory;
-use crate::provider_server::ProviderServer;
 
 /// The sidecar process — mediates between the platform queue and the agent container.
 pub struct Sidecar {
     queue: Arc<dyn MessageQueue + Send + Sync>,
+    registry: Arc<dyn Registry>,
     /// Agent container port (localhost inside the pod).
     container_port: u16,
     /// Agent name (queue subscription key).
@@ -46,6 +48,7 @@ impl Sidecar {
             &config.state_url,
             config.secret_url.as_deref(),
         )?;
+        let registry = factory::connect_registry(&config.registry_url)?;
         let image_ref = config
             .image_ref
             .as_ref()
@@ -62,6 +65,7 @@ impl Sidecar {
 
         Ok(Self {
             queue,
+            registry,
             container_port: config.container_port,
             agent_name: config.agent.clone(),
             image_ref,
@@ -88,8 +92,27 @@ impl Sidecar {
     ) -> Result<(), String> {
         let started_at = Instant::now();
 
+        // Look up agent to build provider hosts and determine initial state.
+        let agent = self
+            .registry
+            .get_agent_by_name(invoke.agent_id.as_str())
+            .expect("agent not found");
+        let hosts = build_hosts(&agent);
+        let initial_state = if agent.object_storage.is_some() {
+            Some(invoke.state.clone().unwrap_or_default())
+        } else {
+            None
+        };
+
         // Spawn provider server for this invoke — drops when this method returns.
-        let provider_server = ProviderServer::start(invoke);
+        let provider_server = ProviderServer::start(
+            invoke,
+            hosts,
+            self.queue.clone(),
+            self.registry.clone(),
+            initial_state,
+            80,
+        );
 
         let agent_url = format!("http://127.0.0.1:{}/invoke", self.container_port);
         let payload = invoke.payload.clone();
@@ -101,7 +124,7 @@ impl Sidecar {
                     .into_reader()
                     .read_to_end(&mut output)
                     .map_err(|e| format!("Failed to read agent response body: {}", e))?;
-                let final_state = provider_server.as_ref().and_then(|ps| ps.final_state());
+                let final_state = provider_server.final_state();
                 let duration_ms = started_at.elapsed().as_millis() as u64;
                 let diagnostics = self.build_diagnostics(duration_ms);
                 let complete =
