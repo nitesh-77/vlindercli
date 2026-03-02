@@ -131,13 +131,7 @@ impl MessageQueue for RecordingQueue {
     fn receive_response(
         &self,
         request: &RequestMessage,
-    ) -> Result<
-        (
-            ResponseMessage,
-            Box<dyn FnOnce() -> Result<(), QueueError> + Send>,
-        ),
-        QueueError,
-    > {
+    ) -> Result<(ResponseMessage, Acknowledgement), QueueError> {
         self.inner.receive_response(request)
     }
 

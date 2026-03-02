@@ -472,13 +472,7 @@ impl MessageQueue for NatsQueue {
     fn receive_response(
         &self,
         request: &RequestMessage,
-    ) -> Result<
-        (
-            ResponseMessage,
-            Box<dyn FnOnce() -> Result<(), QueueError> + Send>,
-        ),
-        QueueError,
-    > {
+    ) -> Result<(ResponseMessage, Acknowledgement), QueueError> {
         // Build filter from request dimensions
         // Wildcards match: {timeline}, {agent}.{operation}.{sequence}
         let filter = format!(

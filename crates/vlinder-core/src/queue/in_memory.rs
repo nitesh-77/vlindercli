@@ -133,13 +133,7 @@ impl MessageQueue for InMemoryQueue {
     fn receive_response(
         &self,
         request: &RequestMessage,
-    ) -> Result<
-        (
-            ResponseMessage,
-            Box<dyn FnOnce() -> Result<(), QueueError> + Send>,
-        ),
-        QueueError,
-    > {
+    ) -> Result<(ResponseMessage, Acknowledgement), QueueError> {
         // Exact lookup via reply_key (ADR 096 §6).
         let reply_key = request.routing_key().reply_key(None).unwrap();
         let mut typed = self.typed_queues.lock().unwrap();

@@ -75,13 +75,7 @@ pub trait MessageQueue {
     fn receive_response(
         &self,
         request: &RequestMessage,
-    ) -> Result<
-        (
-            ResponseMessage,
-            Box<dyn FnOnce() -> Result<(), QueueError> + Send>,
-        ),
-        QueueError,
-    >;
+    ) -> Result<(ResponseMessage, Acknowledgement), QueueError>;
 
     /// Receive a CompleteMessage for a specific submission.
     ///
