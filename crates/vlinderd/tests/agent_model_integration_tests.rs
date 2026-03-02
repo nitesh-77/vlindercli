@@ -45,7 +45,7 @@ fn model_name_returns_none_for_undeclared() {
 fn model_values_are_plain_strings() {
     let agent = Agent::load(&agent_fixture("model-test-agent")).unwrap();
 
-    for (_alias, name) in &agent.requirements.models {
+    for name in agent.requirements.models.values() {
         // Values are registry names, not URIs
         assert!(
             !name.contains("://"),

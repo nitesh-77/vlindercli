@@ -17,18 +17,11 @@ impl SqliteVectorStorage {
                 .map_err(|e| format!("failed to create storage directory: {}", e))?;
         }
 
-        type SqliteExtensionEntryPoint = unsafe extern "C" fn(
-            *mut rusqlite::ffi::sqlite3,
-            *mut *mut i8,
-            *const rusqlite::ffi::sqlite3_api_routines,
-        ) -> i32;
-
         unsafe {
-            rusqlite::ffi::sqlite3_auto_extension(Some(
-                std::mem::transmute::<*const (), SqliteExtensionEntryPoint>(
-                    sqlite3_vec_init as *const (),
-                ),
-            ));
+            #[allow(clippy::missing_transmute_annotations)]
+            rusqlite::ffi::sqlite3_auto_extension(Some(std::mem::transmute(
+                sqlite3_vec_init as *const (),
+            )));
         }
 
         let conn =
