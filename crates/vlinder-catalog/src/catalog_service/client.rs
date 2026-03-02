@@ -78,7 +78,7 @@ impl CatalogService for GrpcCatalogClient {
             return Err(CatalogError::Network(err));
         }
         match resp.model {
-            Some(m) => Model::try_from(m).map_err(|e| CatalogError::Parse(e)),
+            Some(m) => Model::try_from(m).map_err(CatalogError::Parse),
             None => Err(CatalogError::NotFound(name.to_string())),
         }
     }
