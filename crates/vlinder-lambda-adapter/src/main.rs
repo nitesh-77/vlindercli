@@ -16,19 +16,19 @@
 //!    e. Send complete to NATS
 //!    f. POST response back to Lambda Runtime API
 
+mod adapter;
 mod config;
 
 use std::io::Read;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use vlinder_core::domain::{
-    InvokeMessage, MessageQueue, Registry, RuntimeDiagnostics, RuntimeInfo,
-};
+use vlinder_core::domain::{MessageQueue, Registry};
 
 use vlinder_provider_server::factory;
 use vlinder_provider_server::provider_server::{build_hosts, ProviderServer};
 
+use adapter::{build_complete, build_error_body, build_lambda_diagnostics, deserialize_invoke};
 use config::AdapterConfig;
 
 fn main() {
@@ -174,13 +174,9 @@ fn runtime_api_loop(
                     "http://{}/2018-06-01/runtime/invocation/{}/error",
                     config.runtime_api, request_id,
                 );
-                let error_body = serde_json::json!({
-                    "errorMessage": e,
-                    "errorType": "AdapterError",
-                });
                 let _ = http
                     .post(&error_url)
-                    .send_bytes(error_body.to_string().as_bytes());
+                    .send_bytes(build_error_body(&e).as_bytes());
             }
         }
     }
@@ -199,9 +195,7 @@ fn handle_invocation(
     request_id: &str,
     body: &[u8],
 ) -> Result<Vec<u8>, String> {
-    let invoke: InvokeMessage = serde_json::from_slice(body)
-        .map_err(|e| format!("failed to deserialize InvokeMessage: {}", e))?;
-
+    let invoke = deserialize_invoke(body)?;
     let started_at = Instant::now();
 
     // Look up agent for provider host table and initial state.
@@ -246,16 +240,9 @@ fn handle_invocation(
         .or_else(|_| std::env::var("AWS_DEFAULT_REGION"))
         .unwrap_or_else(|_| "unknown".to_string());
 
-    let diagnostics = RuntimeDiagnostics {
-        stderr: Vec::new(),
-        runtime: RuntimeInfo::Lambda {
-            function_name: config.agent.clone(),
-            region,
-        },
-        duration_ms,
-    };
+    let diagnostics = build_lambda_diagnostics(&config.agent, &region, duration_ms);
+    let complete = build_complete(&invoke, output.clone(), final_state, diagnostics);
 
-    let complete = invoke.create_reply_with_diagnostics(output.clone(), final_state, diagnostics);
     queue
         .send_complete(complete)
         .map_err(|e| format!("failed to send complete to NATS: {}", e))?;

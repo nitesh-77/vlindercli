@@ -1,0 +1,177 @@
+//! Adapter core logic — testable without real infrastructure.
+//!
+//! Pure functions for deserializing invocations, building diagnostics,
+//! and constructing complete messages. The main module wires these to
+//! the Lambda Runtime API and real HTTP.
+
+use vlinder_core::domain::{CompleteMessage, InvokeMessage, RuntimeDiagnostics, RuntimeInfo};
+
+/// Deserialize a Lambda invocation body into an InvokeMessage.
+///
+/// The daemon serializes the full InvokeMessage as the Lambda payload.
+/// This is the adapter's entry point for each invocation.
+pub fn deserialize_invoke(body: &[u8]) -> Result<InvokeMessage, String> {
+    serde_json::from_slice(body).map_err(|e| format!("failed to deserialize InvokeMessage: {}", e))
+}
+
+/// Build Lambda-specific runtime diagnostics.
+pub fn build_lambda_diagnostics(
+    function_name: &str,
+    region: &str,
+    duration_ms: u64,
+) -> RuntimeDiagnostics {
+    RuntimeDiagnostics {
+        stderr: Vec::new(),
+        runtime: RuntimeInfo::Lambda {
+            function_name: function_name.to_string(),
+            region: region.to_string(),
+        },
+        duration_ms,
+    }
+}
+
+/// Build the complete message from an invocation result.
+///
+/// Combines the invoke context, agent output, final state, and diagnostics
+/// into a CompleteMessage ready to send to NATS.
+pub fn build_complete(
+    invoke: &InvokeMessage,
+    output: Vec<u8>,
+    final_state: Option<String>,
+    diagnostics: RuntimeDiagnostics,
+) -> CompleteMessage {
+    invoke.create_reply_with_diagnostics(output, final_state, diagnostics)
+}
+
+/// Build the Lambda Runtime API error body.
+pub fn build_error_body(message: &str) -> String {
+    serde_json::json!({
+        "errorMessage": message,
+        "errorType": "AdapterError",
+    })
+    .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vlinder_core::domain::{
+        AgentId, HarnessType, InvokeDiagnostics, RuntimeType, SessionId, SubmissionId, TimelineId,
+    };
+
+    /// Build a test InvokeMessage and serialize it to JSON, simulating what
+    /// the daemon sends as the Lambda payload.
+    fn make_invoke_json(payload: &[u8]) -> Vec<u8> {
+        let invoke = InvokeMessage::new(
+            TimelineId::main(),
+            SubmissionId::from("sub-test".to_string()),
+            SessionId::from("ses-test".to_string()),
+            HarnessType::Cli,
+            RuntimeType::Lambda,
+            AgentId::new("echo-lambda"),
+            payload.to_vec(),
+            Some("state-abc".to_string()),
+            InvokeDiagnostics {
+                harness_version: "0.1.0".to_string(),
+                history_turns: 0,
+            },
+        );
+        serde_json::to_vec(&invoke).unwrap()
+    }
+
+    #[test]
+    fn deserialize_invoke_round_trips() {
+        let json = make_invoke_json(b"hello from lambda");
+        let invoke = deserialize_invoke(&json).unwrap();
+
+        assert_eq!(invoke.agent_id.as_str(), "echo-lambda");
+        assert_eq!(invoke.payload, b"hello from lambda");
+        assert_eq!(invoke.runtime, RuntimeType::Lambda);
+        assert_eq!(invoke.state, Some("state-abc".to_string()));
+        assert_eq!(invoke.diagnostics.harness_version, "0.1.0");
+    }
+
+    #[test]
+    fn deserialize_invoke_rejects_invalid_json() {
+        let result = deserialize_invoke(b"not json at all");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("failed to deserialize"));
+    }
+
+    #[test]
+    fn deserialize_invoke_rejects_wrong_schema() {
+        let result = deserialize_invoke(b"{\"foo\": \"bar\"}");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn deserialize_invoke_preserves_empty_payload() {
+        let json = make_invoke_json(b"");
+        let invoke = deserialize_invoke(&json).unwrap();
+        assert!(invoke.payload.is_empty());
+    }
+
+    #[test]
+    fn deserialize_invoke_preserves_binary_payload() {
+        let binary: Vec<u8> = (0..=255).collect();
+        let json = make_invoke_json(&binary);
+        let invoke = deserialize_invoke(&json).unwrap();
+        assert_eq!(invoke.payload, binary);
+    }
+
+    #[test]
+    fn build_lambda_diagnostics_populates_fields() {
+        let diag = build_lambda_diagnostics("my-function", "eu-west-1", 450);
+
+        assert_eq!(diag.duration_ms, 450);
+        assert!(diag.stderr.is_empty());
+        match &diag.runtime {
+            RuntimeInfo::Lambda {
+                function_name,
+                region,
+            } => {
+                assert_eq!(function_name, "my-function");
+                assert_eq!(region, "eu-west-1");
+            }
+            other => panic!("expected Lambda, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn build_complete_carries_output_and_state() {
+        let json = make_invoke_json(b"input");
+        let invoke = deserialize_invoke(&json).unwrap();
+        let diag = build_lambda_diagnostics("fn", "us-east-1", 100);
+
+        let complete = build_complete(
+            &invoke,
+            b"output bytes".to_vec(),
+            Some("final-state-hash".to_string()),
+            diag,
+        );
+
+        assert_eq!(complete.payload, b"output bytes");
+        assert_eq!(complete.state, Some("final-state-hash".to_string()));
+        assert_eq!(complete.agent_id.as_str(), "echo-lambda");
+    }
+
+    #[test]
+    fn build_complete_with_no_state() {
+        let json = make_invoke_json(b"input");
+        let invoke = deserialize_invoke(&json).unwrap();
+        let diag = build_lambda_diagnostics("fn", "us-east-1", 50);
+
+        let complete = build_complete(&invoke, b"out".to_vec(), None, diag);
+
+        assert!(complete.state.is_none());
+    }
+
+    #[test]
+    fn build_error_body_is_valid_json() {
+        let body = build_error_body("something went wrong");
+        let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
+
+        assert_eq!(parsed["errorMessage"], "something went wrong");
+        assert_eq!(parsed["errorType"], "AdapterError");
+    }
+}

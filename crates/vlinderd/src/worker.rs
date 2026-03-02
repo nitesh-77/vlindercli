@@ -268,6 +268,13 @@ fn run_agent_lambda_worker(config: &Config, shutdown: &AtomicBool) {
         region: config.runtime.lambda_region.clone(),
         memory_mb: config.runtime.lambda_memory_mb,
         timeout_secs: config.runtime.lambda_timeout_secs,
+        nats_url: config.queue.nats_url.clone(),
+        state_url: config.distributed.state_addr.clone(),
+        secret_url: if config.distributed.secret_addr.is_empty() {
+            None
+        } else {
+            Some(config.distributed.secret_addr.clone())
+        },
     };
 
     let mut runtime = LambdaRuntime::new(&lambda_config, registry, queue)

@@ -7,8 +7,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use vlinder_core::domain::{
-    Agent, AgentId, ExpectsReply, MessageQueue, Registry, ResourceId, Runtime, RuntimeDiagnostics,
-    RuntimeType,
+    Agent, AgentId, ExpectsReply, MessageQueue, Registry, ResourceId, Runtime, RuntimeType,
 };
 
 use crate::config::LambdaRuntimeConfig;
@@ -116,6 +115,9 @@ impl LambdaRuntime {
     }
 
     /// Deploy a single agent as a Lambda function.
+    ///
+    /// Passes platform URLs as environment variables so the lambda adapter
+    /// inside the container can connect back to NATS, registry, and state.
     fn deploy(&mut self, name: &str, agent: &Agent) -> Result<(), LambdaError> {
         let role_name = format!("vlinder-agent-{}", name);
         let function_name = format!("vlinder-{}", name);
@@ -126,7 +128,15 @@ impl LambdaRuntime {
         // just created. Wait for IAM to propagate before creating the function.
         std::thread::sleep(std::time::Duration::from_secs(10));
 
-        let env_vars: Vec<(&str, &str)> = vec![("VLINDER_AGENT", &agent.name)];
+        let mut env_vars: Vec<(&str, &str)> = vec![
+            ("VLINDER_AGENT", &agent.name),
+            ("VLINDER_NATS_URL", &self.config.nats_url),
+            ("VLINDER_REGISTRY_URL", &self.config.registry_addr),
+            ("VLINDER_STATE_URL", &self.config.state_url),
+        ];
+        if let Some(ref secret_url) = self.config.secret_url {
+            env_vars.push(("VLINDER_SECRET_URL", secret_url));
+        }
 
         let function_arn = self.client.create_function(
             &function_name,
@@ -156,9 +166,10 @@ impl LambdaRuntime {
 
     /// Poll queue for invocations and dispatch to Lambda functions.
     ///
-    /// Lambda requires JSON event payloads. We wrap the raw bytes as a JSON
-    /// string on the way in and unwrap on the way out. The Lambda Web Adapter
-    /// then POSTs this JSON string as the body to the agent's `/invoke` endpoint.
+    /// Serializes the full InvokeMessage as the Lambda payload. The adapter
+    /// inside the container deserializes it, runs the ProviderServer, and
+    /// sends complete to NATS — the daemon only needs to handle invoke-level
+    /// failures (Lambda itself couldn't run).
     fn dispatch_invocations(&self) {
         for name in self.functions.keys() {
             let agent_id = AgentId::new(name);
@@ -166,23 +177,27 @@ impl LambdaRuntime {
                 let _ = ack();
                 let function_name = format!("vlinder-{}", name);
 
-                // Wrap raw payload as a JSON string so Lambda accepts it.
-                let json_payload = serde_json::to_vec(&String::from_utf8_lossy(&invoke.payload))
-                    .unwrap_or_else(|_| invoke.payload.clone());
+                let json_payload = serde_json::to_vec(&invoke).unwrap_or_else(|_| b"{}".to_vec());
 
                 match self.client.invoke_function(&function_name, &json_payload) {
-                    Ok(output) => {
-                        // Unwrap JSON string response back to raw bytes.
-                        let raw_output = serde_json::from_slice::<String>(&output)
-                            .map(|s| s.into_bytes())
-                            .unwrap_or(output);
-
-                        let diagnostics = RuntimeDiagnostics::placeholder(0);
-                        let complete =
-                            invoke.create_reply_with_diagnostics(raw_output, None, diagnostics);
-                        let _ = self.queue.send_complete(complete);
+                    Ok(_) => {
+                        // Adapter sends complete via NATS — nothing to do here.
+                        tracing::info!(
+                            event = "lambda.invoke_ok",
+                            agent = name.as_str(),
+                            function = function_name.as_str(),
+                            "Lambda invocation succeeded"
+                        );
                     }
                     Err(e) => {
+                        // Lambda-level failure — adapter never ran, daemon must
+                        // send error complete so the harness doesn't hang.
+                        tracing::error!(
+                            event = "lambda.invoke_failed",
+                            agent = name.as_str(),
+                            error = %e,
+                            "Lambda invocation failed"
+                        );
                         let complete = invoke.create_reply(
                             format!("[error] Lambda invoke failed: {}", e).into_bytes(),
                         );
@@ -323,6 +338,58 @@ mod tests {
         }
     }
 
+    /// Mock client where invoke_function always fails (deploy succeeds).
+    struct FailingLambdaClient;
+
+    impl LambdaClient for FailingLambdaClient {
+        fn check_connectivity(&self) -> Result<(), LambdaError> {
+            Ok(())
+        }
+
+        fn create_role(&self, role_name: &str) -> Result<String, LambdaError> {
+            Ok(format!("arn:aws:iam::123456789012:role/{}", role_name))
+        }
+
+        fn delete_role(&self, _role_name: &str) {}
+
+        fn create_function(
+            &self,
+            function_name: &str,
+            _ecr_image_uri: &str,
+            _role_arn: &str,
+            _memory_mb: i32,
+            _timeout_secs: i32,
+            _env_vars: &[(&str, &str)],
+        ) -> Result<String, LambdaError> {
+            Ok(format!(
+                "arn:aws:lambda:us-east-1:123456789012:function:{}",
+                function_name
+            ))
+        }
+
+        fn get_function(
+            &self,
+            function_name: &str,
+        ) -> Result<Option<crate::lambda_client::FunctionInfo>, LambdaError> {
+            Ok(Some(crate::lambda_client::FunctionInfo {
+                function_arn: format!(
+                    "arn:aws:lambda:us-east-1:123456789012:function:{}",
+                    function_name
+                ),
+            }))
+        }
+
+        fn delete_function(&self, _function_name: &str) {}
+
+        fn invoke_function(
+            &self,
+            _function_name: &str,
+            _payload: &[u8],
+        ) -> Result<Vec<u8>, LambdaError> {
+            Err(LambdaError::Aws("simulated Lambda failure".to_string()))
+        }
+    }
+
     // ── Helpers ─────────────────────────────────────────────────────
 
     fn test_config() -> LambdaRuntimeConfig {
@@ -331,6 +398,9 @@ mod tests {
             region: "us-east-1".to_string(),
             memory_mb: 512,
             timeout_secs: 300,
+            nats_url: "nats://localhost:4222".to_string(),
+            state_url: "http://127.0.0.1:9092".to_string(),
+            secret_url: None,
         }
     }
 
@@ -453,7 +523,7 @@ mod tests {
     }
 
     #[test]
-    fn invoke_dispatches_to_lambda_and_sends_complete() {
+    fn invoke_dispatches_to_lambda_consumes_from_queue() {
         use vlinder_core::domain::{
             HarnessType, InvokeDiagnostics, InvokeMessage, SessionId, SubmissionId, TimelineId,
         };
@@ -491,17 +561,76 @@ mod tests {
                 history_turns: 0,
             },
         );
-        let submission = invoke.submission.clone();
         queue.send_invoke(invoke).unwrap();
 
         // Tick again — should dispatch the invocation.
         runtime.tick();
 
-        // The mock echoes the payload, so we should get a complete with the same bytes.
+        // The invoke should be consumed — the adapter sends complete via NATS,
+        // not the daemon. No complete on the queue from daemon side.
+        let agent_id = AgentId::new("echo");
+        assert!(
+            queue.receive_invoke(&agent_id).is_err(),
+            "invoke should have been consumed from the queue"
+        );
+    }
+
+    #[test]
+    fn invoke_failure_sends_error_complete() {
+        use vlinder_core::domain::{
+            HarnessType, InvokeDiagnostics, InvokeMessage, SessionId, SubmissionId, TimelineId,
+        };
+
+        let registry = test_registry();
+        let agent = make_lambda_agent("echo");
+        registry.register_agent(agent).unwrap();
+
+        let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
+        let config = test_config();
+
+        // Use a failing mock client.
+        let mut runtime = LambdaRuntime::with_client(
+            &config,
+            registry,
+            queue.clone(),
+            Box::new(FailingLambdaClient),
+        )
+        .unwrap();
+
+        // Deploy first (create_role/create_function succeed on FailingLambdaClient).
+        runtime.tick();
+        assert_eq!(runtime.functions.len(), 1);
+
+        // Enqueue an invoke message.
+        let invoke = InvokeMessage::new(
+            TimelineId::main(),
+            SubmissionId::new(),
+            SessionId::new(),
+            HarnessType::Grpc,
+            RuntimeType::Lambda,
+            AgentId::new("echo"),
+            b"hello".to_vec(),
+            None,
+            InvokeDiagnostics {
+                harness_version: "test".to_string(),
+                history_turns: 0,
+            },
+        );
+        let submission = invoke.submission.clone();
+        queue.send_invoke(invoke).unwrap();
+
+        // Tick — invoke_function fails, so daemon sends error complete.
+        runtime.tick();
+
         let (complete, ack) = queue
             .receive_complete(&submission, HarnessType::Grpc)
-            .expect("should receive complete");
+            .expect("should receive error complete from daemon");
         ack().unwrap();
-        assert_eq!(complete.payload, b"hello lambda");
+        let payload_str = String::from_utf8_lossy(&complete.payload);
+        assert!(
+            payload_str.contains("[error]"),
+            "expected error payload, got: {}",
+            payload_str
+        );
     }
 }

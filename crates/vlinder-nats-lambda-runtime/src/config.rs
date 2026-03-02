@@ -4,6 +4,10 @@
 ///
 /// One worker = one region. The worker manages IAM roles and Lambda functions
 /// for all agents assigned to `RuntimeType::Lambda`.
+///
+/// Platform URLs (nats, state, secret) are passed as environment variables
+/// to Lambda functions so the adapter inside the container can connect back
+/// to the platform.
 #[derive(Clone, Debug)]
 pub struct LambdaRuntimeConfig {
     /// Registry gRPC address for agent discovery.
@@ -14,4 +18,10 @@ pub struct LambdaRuntimeConfig {
     pub memory_mb: i32,
     /// Execution timeout for Lambda functions in seconds.
     pub timeout_secs: i32,
+    /// NATS URL for the lambda adapter to connect back to the platform.
+    pub nats_url: String,
+    /// State service gRPC address for the lambda adapter.
+    pub state_url: String,
+    /// Secret store gRPC address (optional) for the lambda adapter.
+    pub secret_url: Option<String>,
 }
