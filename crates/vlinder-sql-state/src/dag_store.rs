@@ -293,7 +293,7 @@ impl DagStore for SqliteDagStore {
         ).map_err(|e| format!("get_node prepare failed: {}", e))?;
 
         let result = stmt
-            .query_row(rusqlite::params![hash], |row| row_to_dag_node(row))
+            .query_row(rusqlite::params![hash], row_to_dag_node)
             .optional()
             .map_err(|e| format!("get_node query failed: {}", e))?;
 
@@ -308,7 +308,7 @@ impl DagStore for SqliteDagStore {
         ).map_err(|e| format!("get_session_nodes prepare failed: {}", e))?;
 
         let rows = stmt
-            .query_map(rusqlite::params![session_id], |row| row_to_dag_node(row))
+            .query_map(rusqlite::params![session_id], row_to_dag_node)
             .map_err(|e| format!("get_session_nodes query failed: {}", e))?;
 
         let mut nodes = Vec::new();
@@ -326,7 +326,7 @@ impl DagStore for SqliteDagStore {
         ).map_err(|e| format!("get_children prepare failed: {}", e))?;
 
         let rows = stmt
-            .query_map(rusqlite::params![parent_hash], |row| row_to_dag_node(row))
+            .query_map(rusqlite::params![parent_hash], row_to_dag_node)
             .map_err(|e| format!("get_children query failed: {}", e))?;
 
         let mut nodes = Vec::new();
@@ -440,7 +440,7 @@ impl DagStore for SqliteDagStore {
             )
             .map_err(|e| format!("get_timeline_by_branch prepare failed: {}", e))?;
 
-        stmt.query_row(rusqlite::params![branch_name], |row| row_to_timeline(row))
+        stmt.query_row(rusqlite::params![branch_name], row_to_timeline)
             .optional()
             .map_err(|e| format!("get_timeline_by_branch query failed: {}", e))
     }
@@ -454,7 +454,7 @@ impl DagStore for SqliteDagStore {
             )
             .map_err(|e| format!("get_timeline prepare failed: {}", e))?;
 
-        stmt.query_row(rusqlite::params![id], |row| row_to_timeline(row))
+        stmt.query_row(rusqlite::params![id], row_to_timeline)
             .optional()
             .map_err(|e| format!("get_timeline query failed: {}", e))
     }
