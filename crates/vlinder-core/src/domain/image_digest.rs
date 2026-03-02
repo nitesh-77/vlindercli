@@ -20,7 +20,8 @@ impl ImageDigest {
     /// Returns `Err` if the input doesn't match `sha256:<hex>`.
     pub fn parse(s: impl Into<String>) -> Result<Self, String> {
         let s = s.into();
-        let hex = s.strip_prefix("sha256:")
+        let hex = s
+            .strip_prefix("sha256:")
             .ok_or_else(|| format!("image digest must start with 'sha256:': {}", s))?;
 
         if hex.is_empty() {
@@ -75,8 +76,14 @@ mod tests {
     #[test]
     fn parse_full_length_digest() {
         // 64-char hex string (typical sha256 output)
-        let d = ImageDigest::parse("sha256:a80c4f17a612ca1f5a33cf1ef5e2c3b92e8a1eb3adf09bb133a9e3fbb0a1234").unwrap();
-        assert_eq!(d.as_str(), "sha256:a80c4f17a612ca1f5a33cf1ef5e2c3b92e8a1eb3adf09bb133a9e3fbb0a1234");
+        let d = ImageDigest::parse(
+            "sha256:a80c4f17a612ca1f5a33cf1ef5e2c3b92e8a1eb3adf09bb133a9e3fbb0a1234",
+        )
+        .unwrap();
+        assert_eq!(
+            d.as_str(),
+            "sha256:a80c4f17a612ca1f5a33cf1ef5e2c3b92e8a1eb3adf09bb133a9e3fbb0a1234"
+        );
     }
 
     #[test]

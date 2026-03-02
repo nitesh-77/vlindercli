@@ -85,9 +85,8 @@ pub fn execute(cmd: AgentCommand) {
 
 fn deploy(path: Option<PathBuf>) {
     let config = CliConfig::load();
-    let agent_path = path.unwrap_or_else(|| {
-        std::env::current_dir().expect("Failed to get current directory")
-    });
+    let agent_path =
+        path.unwrap_or_else(|| std::env::current_dir().expect("Failed to get current directory"));
 
     let absolute_path = agent_path
         .canonicalize()
@@ -104,11 +103,10 @@ fn deploy(path: Option<PathBuf>) {
 /// Shared by `agent deploy` and `fleet deploy`.
 pub(super) fn deploy_agent_from_path(agent_dir: &Path, registry: &dyn Registry) -> Agent {
     let manifest_path = agent_dir.join("agent.toml");
-    let manifest = AgentManifest::load(&manifest_path)
-        .unwrap_or_else(|e| {
-            eprintln!("Failed to load agent manifest: {:?}", e);
-            std::process::exit(1);
-        });
+    let manifest = AgentManifest::load(&manifest_path).unwrap_or_else(|e| {
+        eprintln!("Failed to load agent manifest: {:?}", e);
+        std::process::exit(1);
+    });
 
     // Auto-deploy models from <agent_dir>/models/<name>.toml
     match auto_deploy_models(agent_dir, &manifest, registry) {
@@ -123,11 +121,10 @@ pub(super) fn deploy_agent_from_path(agent_dir: &Path, registry: &dyn Registry) 
         }
     }
 
-    registry.register_manifest(manifest)
-        .unwrap_or_else(|e| {
-            eprintln!("Failed to deploy agent: {}", e);
-            std::process::exit(1);
-        })
+    registry.register_manifest(manifest).unwrap_or_else(|e| {
+        eprintln!("Failed to deploy agent: {}", e);
+        std::process::exit(1);
+    })
 }
 
 fn run(name: &str) {
@@ -138,7 +135,10 @@ fn run(name: &str) {
     let agent = match registry.get_agent_by_name(name) {
         Some(a) => a,
         None => {
-            eprintln!("Agent '{}' not found — deploy it first with: vlinder agent deploy", name);
+            eprintln!(
+                "Agent '{}' not found — deploy it first with: vlinder agent deploy",
+                name
+            );
             std::process::exit(1);
         }
     };
@@ -156,11 +156,9 @@ fn run(name: &str) {
     apply_latest_state(&config, &mut *harness, name);
 
     // Run REPL with synchronous run_agent (ADR 092)
-    repl::run(|input| {
-        match harness.run_agent(&agent_id, input) {
-            Ok(result) => result,
-            Err(e) => format!("[error] {}", e),
-        }
+    repl::run(|input| match harness.run_agent(&agent_id, input) {
+        Ok(result) => result,
+        Err(e) => format!("[error] {}", e),
     });
 }
 
@@ -187,7 +185,12 @@ fn list() {
     }
     println!("Deployed agents:");
     for agent in agents {
-        println!("  {} ({}, {})", agent.name, agent.runtime.as_str(), agent.executable);
+        println!(
+            "  {} ({}, {})",
+            agent.name,
+            agent.runtime.as_str(),
+            agent.executable
+        );
     }
 }
 
@@ -293,9 +296,7 @@ fn scaffold(language: &Language, name: &str) {
 
 /// Download a URL to a temporary file and return the path.
 fn download_tarball(url: &str) -> Result<PathBuf, String> {
-    let mut resp = ureq::get(url)
-        .call()
-        .map_err(|e| format!("{}", e))?;
+    let mut resp = ureq::get(url).call().map_err(|e| format!("{}", e))?;
 
     let tmp_dir = std::env::temp_dir();
     let tmp_path = tmp_dir.join("vlinder-template.tar.gz");
@@ -313,7 +314,12 @@ fn download_tarball(url: &str) -> Result<PathBuf, String> {
 fn extract_tarball(tarball: &PathBuf, target: &PathBuf, suffix: &str) -> Result<(), String> {
     // tar xzf into target, then move contents from nested dir up
     let status = std::process::Command::new("tar")
-        .args(["xzf", &tarball.display().to_string(), "-C", &target.display().to_string()])
+        .args([
+            "xzf",
+            &tarball.display().to_string(),
+            "-C",
+            &target.display().to_string(),
+        ])
         .status()
         .map_err(|e| format!("failed to run tar: {}", e))?;
 
@@ -385,8 +391,8 @@ pub(super) fn auto_deploy_models(
 mod tests {
     use super::*;
     use std::sync::Arc;
-    use vlinder_core::domain::{InMemoryRegistry, InMemorySecretStore, Provider};
     use vlinder_core::domain::RequirementsConfig;
+    use vlinder_core::domain::{InMemoryRegistry, InMemorySecretStore, Provider};
 
     fn test_registry() -> Arc<InMemoryRegistry> {
         let store = Arc::new(InMemorySecretStore::new());
@@ -427,7 +433,12 @@ mod tests {
     #[test]
     fn auto_deploy_registers_discovered_models() {
         let dir = tempfile::tempdir().unwrap();
-        write_model_toml(dir.path(), "claude-sonnet", "openrouter", "openrouter://anthropic/claude-sonnet-4");
+        write_model_toml(
+            dir.path(),
+            "claude-sonnet",
+            "openrouter",
+            "openrouter://anthropic/claude-sonnet-4",
+        );
 
         let registry = test_registry();
         registry.register_inference_engine(Provider::OpenRouter);
@@ -454,7 +465,12 @@ mod tests {
     #[test]
     fn auto_deploy_deduplicates_model_names() {
         let dir = tempfile::tempdir().unwrap();
-        write_model_toml(dir.path(), "claude-sonnet", "openrouter", "openrouter://anthropic/claude-sonnet-4");
+        write_model_toml(
+            dir.path(),
+            "claude-sonnet",
+            "openrouter",
+            "openrouter://anthropic/claude-sonnet-4",
+        );
 
         let registry = test_registry();
         registry.register_inference_engine(Provider::OpenRouter);
@@ -474,7 +490,12 @@ mod tests {
     #[test]
     fn auto_deploy_handles_multiple_models() {
         let dir = tempfile::tempdir().unwrap();
-        write_model_toml(dir.path(), "claude-sonnet", "openrouter", "openrouter://anthropic/claude-sonnet-4");
+        write_model_toml(
+            dir.path(),
+            "claude-sonnet",
+            "openrouter",
+            "openrouter://anthropic/claude-sonnet-4",
+        );
 
         // Write an embedding model TOML
         let models_dir = dir.path().join("models");
@@ -512,7 +533,12 @@ mod tests {
     #[test]
     fn auto_deploy_propagates_registration_error() {
         let dir = tempfile::tempdir().unwrap();
-        write_model_toml(dir.path(), "claude-sonnet", "openrouter", "openrouter://anthropic/claude-sonnet-4");
+        write_model_toml(
+            dir.path(),
+            "claude-sonnet",
+            "openrouter",
+            "openrouter://anthropic/claude-sonnet-4",
+        );
 
         let registry = test_registry();
         // Don't register OpenRouter engine — registration should fail

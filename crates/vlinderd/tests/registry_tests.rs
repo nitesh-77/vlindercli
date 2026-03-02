@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use vlinder_core::domain::{
-    Agent, InMemoryRegistry, InMemorySecretStore, Model, ModelType, Provider, Registry,
-    RegistrationError, ResourceId, RuntimeType, SecretStore,
+    Agent, InMemoryRegistry, InMemorySecretStore, Model, ModelType, Provider, RegistrationError,
+    Registry, ResourceId, RuntimeType, SecretStore,
 };
 
 fn test_secret_store() -> Arc<dyn SecretStore> {
@@ -45,7 +45,10 @@ fn agent_registration() {
     assert_eq!(agent.name, "echo-agent");
 
     // Identity provisioned: public key is 32 bytes (Ed25519)
-    let public_key = agent.public_key.as_ref().expect("public_key must be set after registration");
+    let public_key = agent
+        .public_key
+        .as_ref()
+        .expect("public_key must be set after registration");
     assert_eq!(public_key.len(), 32);
 }
 
@@ -61,7 +64,10 @@ fn select_runtime_identifies_container_agent() {
     let agent = load_agent("echo-agent");
 
     // Agent declares runtime = "container" → Container runtime selected
-    assert_eq!(registry.select_runtime(&agent), Some(RuntimeType::Container));
+    assert_eq!(
+        registry.select_runtime(&agent),
+        Some(RuntimeType::Container)
+    );
 }
 
 #[test]
@@ -102,7 +108,9 @@ fn register_model_test_agent(registry: &InMemoryRegistry) {
     registry.register_embedding_engine(Provider::Ollama);
     registry.register_model(phi3).unwrap();
     registry.register_model(nomic).unwrap();
-    registry.register_agent(load_agent("model-test-agent")).unwrap();
+    registry
+        .register_agent(load_agent("model-test-agent"))
+        .unwrap();
 }
 
 #[test]
@@ -221,7 +229,8 @@ fn register_agent_rejected_when_inference_model_has_no_service() {
     registry.register_model(model).unwrap();
 
     // Agent declares an inference model but no services.infer
-    let agent = Agent::from_toml(r#"
+    let agent = Agent::from_toml(
+        r#"
         name = "no-infer-service"
         description = "Has inference model but no infer service"
         runtime = "container"
@@ -229,7 +238,9 @@ fn register_agent_rejected_when_inference_model_has_no_service() {
 
         [requirements.models]
         phi3 = "phi3"
-    "#).unwrap();
+    "#,
+    )
+    .unwrap();
 
     let result = registry.register_agent(agent);
     match result.unwrap_err() {
@@ -257,7 +268,8 @@ fn register_agent_rejected_when_embedding_model_has_no_service() {
     registry.register_model(model).unwrap();
 
     // Agent declares an embedding model but no services.embed
-    let agent = Agent::from_toml(r#"
+    let agent = Agent::from_toml(
+        r#"
         name = "no-embed-service"
         description = "Has embedding model but no embed service"
         runtime = "container"
@@ -265,7 +277,9 @@ fn register_agent_rejected_when_embedding_model_has_no_service() {
 
         [requirements.models]
         nomic-embed = "nomic-embed"
-    "#).unwrap();
+    "#,
+    )
+    .unwrap();
 
     let result = registry.register_agent(agent);
     match result.unwrap_err() {
@@ -282,7 +296,8 @@ fn register_agent_rejected_when_infer_service_has_no_model() {
     registry.register_runtime(RuntimeType::Container);
 
     // Agent declares services.infer but no models
-    let agent = Agent::from_toml(r#"
+    let agent = Agent::from_toml(
+        r#"
         name = "service-no-model"
         description = "Has infer service but no inference model"
         runtime = "container"
@@ -292,7 +307,9 @@ fn register_agent_rejected_when_infer_service_has_no_model() {
         provider = "openrouter"
         protocol = "anthropic"
         models = ["anthropic/claude-3.5-sonnet"]
-    "#).unwrap();
+    "#,
+    )
+    .unwrap();
 
     let result = registry.register_agent(agent);
     match result.unwrap_err() {
@@ -307,7 +324,8 @@ fn register_agent_rejected_when_embed_service_has_no_model() {
     registry.register_runtime(RuntimeType::Container);
 
     // Agent declares services.embed but no models
-    let agent = Agent::from_toml(r#"
+    let agent = Agent::from_toml(
+        r#"
         name = "embed-no-model"
         description = "Has embed service but no embedding model"
         runtime = "container"
@@ -317,7 +335,9 @@ fn register_agent_rejected_when_embed_service_has_no_model() {
         provider = "ollama"
         protocol = "openai"
         models = ["nomic-embed-text"]
-    "#).unwrap();
+    "#,
+    )
+    .unwrap();
 
     let result = registry.register_agent(agent);
     match result.unwrap_err() {

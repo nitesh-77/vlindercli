@@ -21,7 +21,9 @@ fn sqlite_persistence() {
     // Write data
     {
         let storage = SqliteObjectStorage::open_at(&db_path).unwrap();
-        storage.put_file("/persistent.txt", b"survives restart").unwrap();
+        storage
+            .put_file("/persistent.txt", b"survives restart")
+            .unwrap();
     } // storage dropped, connection closed
 
     // Reopen and verify data persists
@@ -44,7 +46,12 @@ fn sqlite_cannot_read_host_filesystem() {
     // Attempt to read host files - should return None
     // because these are just database keys, not real paths
     assert_eq!(storage.get_file("/etc/hosts").unwrap(), None);
-    assert_eq!(storage.get_file("/System/Library/CoreServices/SystemVersion.plist").unwrap(), None);
+    assert_eq!(
+        storage
+            .get_file("/System/Library/CoreServices/SystemVersion.plist")
+            .unwrap(),
+        None
+    );
     assert_eq!(storage.get_file("../../../etc/hosts").unwrap(), None);
     assert_eq!(storage.get_file(env!("CARGO_MANIFEST_DIR")).unwrap(), None);
 
@@ -62,13 +69,17 @@ fn sqlite_agent_isolation() {
     let storage_b = SqliteObjectStorage::open_at(&dir_b.path().join("agent.db")).unwrap();
 
     // Agent A writes a secret
-    storage_a.put_file("/secret.txt", b"agent-a-secret").unwrap();
+    storage_a
+        .put_file("/secret.txt", b"agent-a-secret")
+        .unwrap();
 
     // Agent B cannot read Agent A's files
     assert_eq!(storage_b.get_file("/secret.txt").unwrap(), None);
 
     // Agent B's own file is separate
-    storage_b.put_file("/secret.txt", b"agent-b-secret").unwrap();
+    storage_b
+        .put_file("/secret.txt", b"agent-b-secret")
+        .unwrap();
 
     // Each agent sees only their own data
     assert_eq!(

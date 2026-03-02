@@ -8,19 +8,19 @@
 
 #![cfg(feature = "test-support")]
 
-use vlinderd::config::Config;
 use vlinder_core::domain::{
-    Agent, AgentId, Runtime, RuntimeType,
-    InvokeDiagnostics, InvokeMessage, HarnessType, SessionId, SubmissionId, TimelineId,
+    Agent, AgentId, HarnessType, InvokeDiagnostics, InvokeMessage, Runtime, RuntimeType, SessionId,
+    SubmissionId, TimelineId,
 };
 use vlinder_podman_runtime::{ContainerRuntime, PodmanRuntimeConfig};
+use vlinderd::config::Config;
 
 #[test]
 #[ignore] // Run via: just run-integration-tests
 fn container_runtime_executes_echo_agent() {
     let config = Config::for_test();
-    let registry = vlinderd::registry_factory::from_config(&config)
-        .expect("Failed to create registry");
+    let registry =
+        vlinderd::registry_factory::from_config(&config).expect("Failed to create registry");
     let podman_config = PodmanRuntimeConfig {
         image_policy: config.runtime.image_policy.clone(),
         podman_socket: config.runtime.podman_socket.clone(),
@@ -37,14 +37,17 @@ fn container_runtime_executes_echo_agent() {
 
     registry.register_runtime(RuntimeType::Container);
 
-    let agent = Agent::from_toml(r#"
+    let agent = Agent::from_toml(
+        r#"
         name = "echo-container"
         description = "Echo container agent"
         runtime = "container"
         executable = "localhost/echo-container:latest"
         [requirements]
 
-    "#).unwrap();
+    "#,
+    )
+    .unwrap();
     registry.register_agent(agent).unwrap();
     let agent_id = AgentId::new("echo-container");
 
@@ -59,7 +62,10 @@ fn container_runtime_executes_echo_agent() {
         agent_id,
         b"hello from container".to_vec(),
         None,
-        InvokeDiagnostics { harness_version: String::new(), history_turns: 0 },
+        InvokeDiagnostics {
+            harness_version: String::new(),
+            history_turns: 0,
+        },
     );
     queue.send_invoke(invoke).unwrap();
 

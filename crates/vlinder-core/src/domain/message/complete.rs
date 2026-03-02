@@ -2,10 +2,10 @@
 
 use serde::Serialize;
 
-use super::PROTOCOL_VERSION;
-use super::identity::{MessageId, SubmissionId, SessionId, TimelineId, HarnessType};
-use super::super::routing_key::{AgentId, RoutingKey};
 use super::super::diagnostics::RuntimeDiagnostics;
+use super::super::routing_key::{AgentId, RoutingKey};
+use super::identity::{HarnessType, MessageId, SessionId, SubmissionId, TimelineId};
+use super::PROTOCOL_VERSION;
 
 /// Complete message: Runtime → Harness
 ///

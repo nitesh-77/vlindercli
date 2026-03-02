@@ -201,10 +201,7 @@ mod tests {
     #[test]
     fn composite_catalogs_lists_names() {
         let mut composite = composite_with_mock();
-        composite.add(
-            "another".to_string(),
-            Arc::new(MockCatalog::new(vec![])),
-        );
+        composite.add("another".to_string(), Arc::new(MockCatalog::new(vec![])));
         let names = composite.catalogs();
         assert_eq!(names, vec!["another", "mock"]);
     }

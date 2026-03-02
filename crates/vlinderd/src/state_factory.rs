@@ -18,7 +18,8 @@ pub fn from_config(config: &Config) -> Result<Arc<dyn DagStore>, Box<dyn std::er
             use vlinder_sql_state::state_service::GrpcStateClient;
 
             let addr = if config.distributed.state_addr.starts_with("http://")
-                || config.distributed.state_addr.starts_with("https://") {
+                || config.distributed.state_addr.starts_with("https://")
+            {
                 config.distributed.state_addr.clone()
             } else {
                 format!("http://{}", config.distributed.state_addr)

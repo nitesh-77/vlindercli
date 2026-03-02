@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use clap::Subcommand;
 
-use vlinder_catalog::catalog_service::{GrpcCatalogClient, ping_catalog_service};
 use crate::config::CliConfig;
+use vlinder_catalog::catalog_service::{ping_catalog_service, GrpcCatalogClient};
 use vlinder_core::domain::{CatalogService, Model, Registry};
 
 /// Load a model from a TOML manifest and register it with the registry.
@@ -62,11 +62,18 @@ pub fn execute(cmd: ModelCommand) {
     let config = CliConfig::load();
 
     match cmd {
-        ModelCommand::Add { name, catalog, endpoint: _ } => {
+        ModelCommand::Add {
+            name,
+            catalog,
+            endpoint: _,
+        } => {
             let registry = open_registry(&config);
             let Some(registry) = registry else { return };
 
-            let model = if Path::new(&name).extension().is_some_and(|ext| ext == "toml") {
+            let model = if Path::new(&name)
+                .extension()
+                .is_some_and(|ext| ext == "toml")
+            {
                 match load_and_register_model(Path::new(&name), &*registry) {
                     Ok(m) => m,
                     Err(e) => {
@@ -75,7 +82,9 @@ pub fn execute(cmd: ModelCommand) {
                     }
                 }
             } else {
-                let Some(model) = resolve_from_catalog(&name, &catalog, &config) else { return };
+                let Some(model) = resolve_from_catalog(&name, &catalog, &config) else {
+                    return;
+                };
                 if let Err(e) = registry.register_model(model.clone()) {
                     eprintln!("Failed to register model: {}", e);
                     return;
@@ -88,9 +97,11 @@ pub fn execute(cmd: ModelCommand) {
             println!("  Engine: {:?}", model.provider);
             println!("  Path:   {}", model.model_path);
         }
-        ModelCommand::Available { filter, ref catalog, endpoint: _ } => {
-            list_available(catalog, filter.as_deref(), &config)
-        }
+        ModelCommand::Available {
+            filter,
+            ref catalog,
+            endpoint: _,
+        } => list_available(catalog, filter.as_deref(), &config),
         ModelCommand::List => {
             let registry = open_registry(&config);
             let Some(registry) = registry else { return };
@@ -102,7 +113,10 @@ pub fn execute(cmd: ModelCommand) {
             }
             println!("Registered models:");
             for model in models {
-                println!("  {} ({:?}, {:?})", model.name, model.model_type, model.provider);
+                println!(
+                    "  {} ({:?}, {:?})",
+                    model.name, model.model_type, model.provider
+                );
             }
         }
         ModelCommand::Remove { name } => {
@@ -125,14 +139,18 @@ fn open_registry(config: &CliConfig) -> Option<Arc<dyn Registry>> {
 /// Connect to the daemon's gRPC catalog service.
 fn open_catalog_service(config: &CliConfig) -> Option<GrpcCatalogClient> {
     let catalog_addr = if config.daemon.catalog_addr.starts_with("http://")
-        || config.daemon.catalog_addr.starts_with("https://") {
+        || config.daemon.catalog_addr.starts_with("https://")
+    {
         config.daemon.catalog_addr.clone()
     } else {
         format!("http://{}", config.daemon.catalog_addr)
     };
 
     if ping_catalog_service(&catalog_addr).is_none() {
-        eprintln!("Cannot reach catalog service at {}. Is the daemon running?", catalog_addr);
+        eprintln!(
+            "Cannot reach catalog service at {}. Is the daemon running?",
+            catalog_addr
+        );
         return None;
     }
 
@@ -159,7 +177,9 @@ fn resolve_from_catalog(name: &str, catalog: &str, config: &CliConfig) -> Option
 }
 
 fn list_available(catalog_name: &str, filter: Option<&str>, config: &CliConfig) {
-    let Some(service) = open_catalog_service(config) else { return };
+    let Some(service) = open_catalog_service(config) else {
+        return;
+    };
 
     let available_catalogs = service.catalogs();
     let catalogs: Vec<&str> = if catalog_name == "all" {
@@ -168,7 +188,10 @@ fn list_available(catalog_name: &str, filter: Option<&str>, config: &CliConfig) 
         vec![catalog_name]
     } else {
         let names = available_catalogs.join(", ");
-        eprintln!("Unknown catalog: {}. Available: all, {}", catalog_name, names);
+        eprintln!(
+            "Unknown catalog: {}. Available: all, {}",
+            catalog_name, names
+        );
         return;
     };
 
@@ -180,7 +203,10 @@ fn list_available(catalog_name: &str, filter: Option<&str>, config: &CliConfig) 
             Ok(models) => {
                 let filtered: Vec<_> = if let Some(q) = filter {
                     let q = q.to_lowercase();
-                    models.into_iter().filter(|m| m.name.to_lowercase().contains(&q)).collect()
+                    models
+                        .into_iter()
+                        .filter(|m| m.name.to_lowercase().contains(&q))
+                        .collect()
                 } else {
                     models
                 };
@@ -236,15 +262,20 @@ mod tests {
     #[test]
     fn load_and_register_model_registers_from_toml() {
         let dir = tempfile::tempdir().unwrap();
-        write_model_toml(dir.path(), "claude-sonnet.toml", "claude-sonnet", "openrouter", "openrouter://anthropic/claude-sonnet-4");
+        write_model_toml(
+            dir.path(),
+            "claude-sonnet.toml",
+            "claude-sonnet",
+            "openrouter",
+            "openrouter://anthropic/claude-sonnet-4",
+        );
 
         let registry = test_registry();
         registry.register_inference_engine(Provider::OpenRouter);
 
-        let model = load_and_register_model(
-            &dir.path().join("models/claude-sonnet.toml"),
-            &*registry,
-        ).unwrap();
+        let model =
+            load_and_register_model(&dir.path().join("models/claude-sonnet.toml"), &*registry)
+                .unwrap();
 
         assert_eq!(model.name, "claude-sonnet");
         // Verify it's actually in the registry
@@ -261,15 +292,19 @@ mod tests {
     #[test]
     fn load_and_register_model_fails_when_engine_unavailable() {
         let dir = tempfile::tempdir().unwrap();
-        write_model_toml(dir.path(), "claude-sonnet.toml", "claude-sonnet", "openrouter", "openrouter://anthropic/claude-sonnet-4");
+        write_model_toml(
+            dir.path(),
+            "claude-sonnet.toml",
+            "claude-sonnet",
+            "openrouter",
+            "openrouter://anthropic/claude-sonnet-4",
+        );
 
         let registry = test_registry();
         // Don't register OpenRouter engine — should fail at register_model
 
-        let result = load_and_register_model(
-            &dir.path().join("models/claude-sonnet.toml"),
-            &*registry,
-        );
+        let result =
+            load_and_register_model(&dir.path().join("models/claude-sonnet.toml"), &*registry);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Failed to register model"));
     }
@@ -277,7 +312,13 @@ mod tests {
     #[test]
     fn load_and_register_model_is_idempotent() {
         let dir = tempfile::tempdir().unwrap();
-        write_model_toml(dir.path(), "claude-sonnet.toml", "claude-sonnet", "openrouter", "openrouter://anthropic/claude-sonnet-4");
+        write_model_toml(
+            dir.path(),
+            "claude-sonnet.toml",
+            "claude-sonnet",
+            "openrouter",
+            "openrouter://anthropic/claude-sonnet-4",
+        );
 
         let registry = test_registry();
         registry.register_inference_engine(Provider::OpenRouter);
@@ -341,7 +382,9 @@ mod tests {
 
         let cli = TestCli::try_parse_from(["test", "available"]).unwrap();
         match cli.cmd {
-            ModelCommand::Available { catalog, filter, .. } => {
+            ModelCommand::Available {
+                catalog, filter, ..
+            } => {
                 assert_eq!(catalog, "all");
                 assert_eq!(filter, None);
             }
@@ -361,7 +404,9 @@ mod tests {
 
         let cli = TestCli::try_parse_from(["test", "available", "claude"]).unwrap();
         match cli.cmd {
-            ModelCommand::Available { filter, catalog, .. } => {
+            ModelCommand::Available {
+                filter, catalog, ..
+            } => {
                 assert_eq!(filter, Some("claude".to_string()));
                 assert_eq!(catalog, "all");
             }
@@ -379,9 +424,13 @@ mod tests {
             cmd: ModelCommand,
         }
 
-        let cli = TestCli::try_parse_from(["test", "available", "--catalog", "openrouter", "claude"]).unwrap();
+        let cli =
+            TestCli::try_parse_from(["test", "available", "--catalog", "openrouter", "claude"])
+                .unwrap();
         match cli.cmd {
-            ModelCommand::Available { filter, catalog, .. } => {
+            ModelCommand::Available {
+                filter, catalog, ..
+            } => {
                 assert_eq!(filter, Some("claude".to_string()));
                 assert_eq!(catalog, "openrouter");
             }

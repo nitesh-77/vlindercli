@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use crate::config::CliConfig;
 use vlinder_core::domain::{DagStore, Harness, Registry};
-use vlinder_harness::harness_service::{GrpcHarnessClient, ping_harness};
-use vlinder_sql_registry::registry_service::{GrpcRegistryClient, ping_registry};
+use vlinder_harness::harness_service::{ping_harness, GrpcHarnessClient};
+use vlinder_sql_registry::registry_service::{ping_registry, GrpcRegistryClient};
 use vlinder_sql_state::state_service::GrpcStateClient;
 
 /// Connect to the registry via gRPC, exiting on failure.
@@ -16,14 +16,14 @@ pub fn connect_registry(config: &CliConfig) -> Arc<dyn Registry> {
     let registry_addr = normalize_addr(&config.daemon.registry_addr);
 
     if ping_registry(&registry_addr).is_none() {
-        eprintln!("Cannot reach registry at {}. Is the daemon running?", registry_addr);
+        eprintln!(
+            "Cannot reach registry at {}. Is the daemon running?",
+            registry_addr
+        );
         std::process::exit(1);
     }
 
-    Arc::new(
-        GrpcRegistryClient::connect(&registry_addr)
-            .expect("Failed to connect to registry")
-    )
+    Arc::new(GrpcRegistryClient::connect(&registry_addr).expect("Failed to connect to registry"))
 }
 
 /// Connect to the registry via gRPC, returning None on failure.
@@ -31,7 +31,10 @@ pub fn open_registry(config: &CliConfig) -> Option<Arc<dyn Registry>> {
     let registry_addr = normalize_addr(&config.daemon.registry_addr);
 
     if ping_registry(&registry_addr).is_none() {
-        eprintln!("Cannot reach registry at {}. Is the daemon running?", registry_addr);
+        eprintln!(
+            "Cannot reach registry at {}. Is the daemon running?",
+            registry_addr
+        );
         return None;
     }
 
@@ -49,14 +52,14 @@ pub fn connect_harness(config: &CliConfig) -> Box<dyn Harness> {
     let harness_addr = normalize_addr(&config.daemon.harness_addr);
 
     if ping_harness(&harness_addr).is_none() {
-        eprintln!("Cannot reach harness at {}. Is the daemon running?", harness_addr);
+        eprintln!(
+            "Cannot reach harness at {}. Is the daemon running?",
+            harness_addr
+        );
         std::process::exit(1);
     }
 
-    Box::new(
-        GrpcHarnessClient::connect(&harness_addr)
-            .expect("Failed to connect to harness")
-    )
+    Box::new(GrpcHarnessClient::connect(&harness_addr).expect("Failed to connect to harness"))
 }
 
 /// Open the DagStore via gRPC state service.

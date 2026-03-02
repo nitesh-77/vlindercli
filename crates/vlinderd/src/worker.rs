@@ -17,8 +17,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use crate::config::Config;
-use vlinder_core::domain::Registry;
 use crate::worker_role::WorkerRole;
+use vlinder_core::domain::Registry;
 
 /// Helper to get gRPC registry address with http:// prefix.
 fn grpc_registry_addr(config: &Config) -> String {
@@ -62,18 +62,17 @@ pub fn run_worker_loop(role: WorkerRole, shutdown: Arc<AtomicBool>) {
 // Factory helpers
 // ============================================================================
 
-
 // ============================================================================
 // Worker Implementations
 // ============================================================================
 
 fn run_registry_worker(config: &Config, shutdown: &AtomicBool) {
-    use tonic::transport::Server;
     use crate::config::registry_db_path;
-    use vlinder_core::domain::{RuntimeType, ObjectStorageType, VectorStorageType};
-    use vlinder_sql_registry::PersistentRegistry;
-    use vlinder_sql_registry::registry_service::RegistryServiceServer;
+    use tonic::transport::Server;
+    use vlinder_core::domain::{ObjectStorageType, RuntimeType, VectorStorageType};
     use vlinder_nats::secret_service::GrpcSecretClient;
+    use vlinder_sql_registry::registry_service::RegistryServiceServer;
+    use vlinder_sql_registry::PersistentRegistry;
 
     let secret_addr = if config.distributed.secret_addr.starts_with("http://") {
         config.distributed.secret_addr.clone()
@@ -82,7 +81,7 @@ fn run_registry_worker(config: &Config, shutdown: &AtomicBool) {
     };
     let secret_store: Arc<dyn vlinder_core::domain::SecretStore> = Arc::new(
         GrpcSecretClient::connect(&secret_addr)
-            .unwrap_or_else(|e| panic!("Failed to connect to secret service: {}", e))
+            .unwrap_or_else(|e| panic!("Failed to connect to secret service: {}", e)),
     );
 
     let db_path = registry_db_path();
@@ -113,11 +112,12 @@ fn run_registry_worker(config: &Config, shutdown: &AtomicBool) {
     let registry: Arc<dyn Registry> = Arc::new(registry);
 
     // Parse address, stripping http:// prefix if present
-    let addr_str = config.distributed.registry_addr
+    let addr_str = config
+        .distributed
+        .registry_addr
         .strip_prefix("http://")
         .unwrap_or(&config.distributed.registry_addr);
-    let addr: std::net::SocketAddr = addr_str.parse()
-        .expect("Invalid registry address");
+    let addr: std::net::SocketAddr = addr_str.parse().expect("Invalid registry address");
 
     tracing::info!(?addr, "Starting registry gRPC server");
 
@@ -150,11 +150,12 @@ fn run_secret_worker(config: &Config, shutdown: &AtomicBool) {
         .unwrap_or_else(|e| panic!("Failed to open secret store: {}", e));
 
     // Parse address, stripping http:// prefix if present
-    let addr_str = config.distributed.secret_addr
+    let addr_str = config
+        .distributed
+        .secret_addr
         .strip_prefix("http://")
         .unwrap_or(&config.distributed.secret_addr);
-    let addr: std::net::SocketAddr = addr_str.parse()
-        .expect("Invalid secret service address");
+    let addr: std::net::SocketAddr = addr_str.parse().expect("Invalid secret service address");
 
     tracing::info!(?addr, "Starting secret store gRPC server");
 
@@ -182,22 +183,23 @@ fn run_harness_worker(config: &Config, shutdown: &AtomicBool) {
     use vlinder_harness::harness_service::HarnessServiceServer;
     use vlinder_sql_registry::registry_service::GrpcRegistryClient;
 
-    let queue = crate::queue_factory::recording_from_config(config).expect("Failed to create queue");
+    let queue =
+        crate::queue_factory::recording_from_config(config).expect("Failed to create queue");
 
     let registry_addr = grpc_registry_addr(config);
     let registry: Arc<dyn Registry> = Arc::new(
-        GrpcRegistryClient::connect(&registry_addr)
-            .expect("Failed to connect to registry")
+        GrpcRegistryClient::connect(&registry_addr).expect("Failed to connect to registry"),
     );
 
     let harness = CoreHarness::new(queue, registry, HarnessType::Grpc);
 
     // Parse address, stripping http:// prefix if present
-    let addr_str = config.distributed.harness_addr
+    let addr_str = config
+        .distributed
+        .harness_addr
         .strip_prefix("http://")
         .unwrap_or(&config.distributed.harness_addr);
-    let addr: std::net::SocketAddr = addr_str.parse()
-        .expect("Invalid harness address");
+    let addr: std::net::SocketAddr = addr_str.parse().expect("Invalid harness address");
 
     tracing::info!(?addr, registry = %registry_addr, "Starting harness gRPC server");
 
@@ -220,11 +222,11 @@ fn run_harness_worker(config: &Config, shutdown: &AtomicBool) {
 }
 
 fn run_agent_container_worker(config: &Config, shutdown: &AtomicBool) {
-    use vlinder_podman_runtime::{ContainerRuntime, PodmanRuntimeConfig};
     use vlinder_core::domain::Runtime;
+    use vlinder_podman_runtime::{ContainerRuntime, PodmanRuntimeConfig};
 
-    let registry = crate::registry_factory::from_config(config)
-        .expect("Failed to connect to registry");
+    let registry =
+        crate::registry_factory::from_config(config).expect("Failed to connect to registry");
 
     let podman_config = PodmanRuntimeConfig {
         image_policy: config.runtime.image_policy.clone(),
@@ -249,8 +251,8 @@ fn run_agent_container_worker(config: &Config, shutdown: &AtomicBool) {
 fn run_inference_ollama_worker(config: &Config, shutdown: &AtomicBool) {
     use vlinder_ollama::OllamaWorker;
 
-    let queue = crate::queue_factory::recording_from_config(config)
-        .expect("Failed to create queue");
+    let queue =
+        crate::queue_factory::recording_from_config(config).expect("Failed to create queue");
 
     let worker = OllamaWorker::new(queue, config.ollama.endpoint.clone());
 
@@ -265,8 +267,8 @@ fn run_inference_ollama_worker(config: &Config, shutdown: &AtomicBool) {
 fn run_inference_openrouter_worker(config: &Config, shutdown: &AtomicBool) {
     use vlinder_infer_openrouter::OpenRouterWorker;
 
-    let queue = crate::queue_factory::recording_from_config(config)
-        .expect("Failed to create queue");
+    let queue =
+        crate::queue_factory::recording_from_config(config).expect("Failed to create queue");
 
     let worker = OpenRouterWorker::new(
         queue,
@@ -287,16 +289,20 @@ fn run_storage_object_sqlite_worker(config: &Config, shutdown: &AtomicBool) {
 
     use vlinder_sql_registry::registry_service::GrpcRegistryClient;
 
-    let queue = crate::queue_factory::recording_from_config(config).expect("Failed to create queue");
+    let queue =
+        crate::queue_factory::recording_from_config(config).expect("Failed to create queue");
 
     let registry_addr = grpc_registry_addr(config);
     let registry: Arc<dyn Registry> = Arc::new(
-        GrpcRegistryClient::connect(&registry_addr)
-            .expect("Failed to connect to registry")
+        GrpcRegistryClient::connect(&registry_addr).expect("Failed to connect to registry"),
     );
 
     use vlinder_core::domain::{ObjectStorageType, ServiceBackend};
-    let worker = KvWorker::new(queue, registry, ServiceBackend::Kv(ObjectStorageType::Sqlite));
+    let worker = KvWorker::new(
+        queue,
+        registry,
+        ServiceBackend::Kv(ObjectStorageType::Sqlite),
+    );
 
     tracing::info!(registry = %registry_addr, "SQLite object storage worker ready");
 
@@ -311,16 +317,20 @@ fn run_storage_object_memory_worker(config: &Config, shutdown: &AtomicBool) {
 
     use vlinder_sql_registry::registry_service::GrpcRegistryClient;
 
-    let queue = crate::queue_factory::recording_from_config(config).expect("Failed to create queue");
+    let queue =
+        crate::queue_factory::recording_from_config(config).expect("Failed to create queue");
 
     let registry_addr = grpc_registry_addr(config);
     let registry: Arc<dyn Registry> = Arc::new(
-        GrpcRegistryClient::connect(&registry_addr)
-            .expect("Failed to connect to registry")
+        GrpcRegistryClient::connect(&registry_addr).expect("Failed to connect to registry"),
     );
 
     use vlinder_core::domain::{ObjectStorageType, ServiceBackend};
-    let worker = KvWorker::new(queue, registry, ServiceBackend::Kv(ObjectStorageType::InMemory));
+    let worker = KvWorker::new(
+        queue,
+        registry,
+        ServiceBackend::Kv(ObjectStorageType::InMemory),
+    );
 
     tracing::info!(registry = %registry_addr, "In-memory object storage worker ready");
 
@@ -335,16 +345,20 @@ fn run_storage_vector_sqlite_worker(config: &Config, shutdown: &AtomicBool) {
 
     use vlinder_sql_registry::registry_service::GrpcRegistryClient;
 
-    let queue = crate::queue_factory::recording_from_config(config).expect("Failed to create queue");
+    let queue =
+        crate::queue_factory::recording_from_config(config).expect("Failed to create queue");
 
     let registry_addr = grpc_registry_addr(config);
     let registry: Arc<dyn Registry> = Arc::new(
-        GrpcRegistryClient::connect(&registry_addr)
-            .expect("Failed to connect to registry")
+        GrpcRegistryClient::connect(&registry_addr).expect("Failed to connect to registry"),
     );
 
     use vlinder_core::domain::{ServiceBackend, VectorStorageType};
-    let worker = SqliteVecWorker::new(queue, registry, ServiceBackend::Vec(VectorStorageType::SqliteVec));
+    let worker = SqliteVecWorker::new(
+        queue,
+        registry,
+        ServiceBackend::Vec(VectorStorageType::SqliteVec),
+    );
 
     tracing::info!(registry = %registry_addr, "SQLite-vec vector storage worker ready");
 
@@ -359,16 +373,20 @@ fn run_storage_vector_memory_worker(config: &Config, shutdown: &AtomicBool) {
 
     use vlinder_sql_registry::registry_service::GrpcRegistryClient;
 
-    let queue = crate::queue_factory::recording_from_config(config).expect("Failed to create queue");
+    let queue =
+        crate::queue_factory::recording_from_config(config).expect("Failed to create queue");
 
     let registry_addr = grpc_registry_addr(config);
     let registry: Arc<dyn Registry> = Arc::new(
-        GrpcRegistryClient::connect(&registry_addr)
-            .expect("Failed to connect to registry")
+        GrpcRegistryClient::connect(&registry_addr).expect("Failed to connect to registry"),
     );
 
     use vlinder_core::domain::{ServiceBackend, VectorStorageType};
-    let worker = SqliteVecWorker::new(queue, registry, ServiceBackend::Vec(VectorStorageType::InMemory));
+    let worker = SqliteVecWorker::new(
+        queue,
+        registry,
+        ServiceBackend::Vec(VectorStorageType::InMemory),
+    );
 
     tracing::info!(registry = %registry_addr, "In-memory vector storage worker ready");
 
@@ -379,11 +397,11 @@ fn run_storage_vector_memory_worker(config: &Config, shutdown: &AtomicBool) {
 }
 
 fn run_state_worker(config: &Config, shutdown: &AtomicBool) {
-    use tonic::transport::Server;
     use crate::config::dag_db_path;
+    use tonic::transport::Server;
     use vlinder_core::domain::DagStore;
-    use vlinder_sql_state::SqliteDagStore;
     use vlinder_sql_state::state_service::StateServiceServer;
+    use vlinder_sql_state::SqliteDagStore;
 
     let db_path = dag_db_path();
     let store = SqliteDagStore::open(&db_path)
@@ -392,11 +410,12 @@ fn run_state_worker(config: &Config, shutdown: &AtomicBool) {
     let store: Arc<dyn DagStore> = Arc::new(store);
 
     // Parse address, stripping http:// prefix if present
-    let addr_str = config.distributed.state_addr
+    let addr_str = config
+        .distributed
+        .state_addr
         .strip_prefix("http://")
         .unwrap_or(&config.distributed.state_addr);
-    let addr: std::net::SocketAddr = addr_str.parse()
-        .expect("Invalid state service address");
+    let addr: std::net::SocketAddr = addr_str.parse().expect("Invalid state service address");
 
     tracing::info!(?addr, db = %db_path.display(), "Starting state gRPC server");
 
@@ -420,10 +439,10 @@ fn run_state_worker(config: &Config, shutdown: &AtomicBool) {
 
 fn run_catalog_worker(config: &Config, shutdown: &AtomicBool) {
     use tonic::transport::Server;
-    use vlinder_ollama::OllamaCatalog;
-    use vlinder_infer_openrouter::OpenRouterCatalog;
     use vlinder_catalog::catalog_service::CatalogServiceServer;
     use vlinder_core::domain::{CatalogService, CompositeCatalog};
+    use vlinder_infer_openrouter::OpenRouterCatalog;
+    use vlinder_ollama::OllamaCatalog;
 
     let mut composite = CompositeCatalog::new();
     composite.add(
@@ -440,11 +459,12 @@ fn run_catalog_worker(config: &Config, shutdown: &AtomicBool) {
         );
     }
 
-    let addr_str = config.distributed.catalog_addr
+    let addr_str = config
+        .distributed
+        .catalog_addr
         .strip_prefix("http://")
         .unwrap_or(&config.distributed.catalog_addr);
-    let addr: std::net::SocketAddr = addr_str.parse()
-        .expect("Invalid catalog service address");
+    let addr: std::net::SocketAddr = addr_str.parse().expect("Invalid catalog service address");
 
     let catalog_names = composite.catalogs();
     tracing::info!(?addr, catalogs = ?catalog_names, "Starting catalog gRPC server");
@@ -468,14 +488,13 @@ fn run_catalog_worker(config: &Config, shutdown: &AtomicBool) {
 }
 
 fn run_dag_git_worker(_config: &Config, shutdown: &AtomicBool) {
-    use std::collections::HashMap;
     use crate::config::conversations_dir;
-    use vlinder_git_dag::GitDagWorker;
+    use std::collections::HashMap;
     use vlinder_core::domain::DagWorker;
-    use vlinder_nats::{NatsQueue, subject_to_routing_key, from_nats_headers};
+    use vlinder_git_dag::GitDagWorker;
+    use vlinder_nats::{from_nats_headers, subject_to_routing_key, NatsQueue};
 
-    let nats = NatsQueue::localhost()
-        .expect("Failed to connect to NATS");
+    let nats = NatsQueue::localhost().expect("Failed to connect to NATS");
 
     let repo_path = conversations_dir();
     let mut git_worker = GitDagWorker::open(&repo_path, "localhost:9000", None)
@@ -487,22 +506,28 @@ fn run_dag_git_worker(_config: &Config, shutdown: &AtomicBool) {
     let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
 
     let consumer = rt.block_on(async {
-        let stream = js.get_stream("VLINDER").await
+        let stream = js
+            .get_stream("VLINDER")
+            .await
             .expect("Failed to get VLINDER stream");
 
-        stream.create_consumer(async_nats::jetstream::consumer::pull::Config {
-            name: Some("dag-git".to_string()),
-            filter_subject: "vlinder.>".to_string(),
-            ack_wait: std::time::Duration::from_secs(300),
-            inactive_threshold: std::time::Duration::from_secs(300),
-            ..Default::default()
-        }).await.expect("Failed to create dag-git consumer")
+        stream
+            .create_consumer(async_nats::jetstream::consumer::pull::Config {
+                name: Some("dag-git".to_string()),
+                filter_subject: "vlinder.>".to_string(),
+                ack_wait: std::time::Duration::from_secs(300),
+                inactive_threshold: std::time::Duration::from_secs(300),
+                ..Default::default()
+            })
+            .await
+            .expect("Failed to create dag-git consumer")
     });
 
     while !shutdown.load(Ordering::Relaxed) {
         let msg_result = rt.block_on(async {
             use futures::StreamExt;
-            let mut messages = consumer.fetch()
+            let mut messages = consumer
+                .fetch()
                 .max_messages(1)
                 .expires(std::time::Duration::from_millis(100))
                 .messages()
@@ -523,10 +548,7 @@ fn run_dag_git_worker(_config: &Config, shutdown: &AtomicBool) {
                 if let Some(h) = &msg.headers {
                     for (key, values) in h.iter() {
                         if let Some(first) = values.first() {
-                            headers.insert(
-                                key.to_string().to_lowercase(),
-                                first.to_string(),
-                            );
+                            headers.insert(key.to_string().to_lowercase(), first.to_string());
                         }
                     }
                 }
@@ -551,7 +573,10 @@ fn run_dag_git_worker(_config: &Config, shutdown: &AtomicBool) {
                     let created_at = chrono::Utc::now();
                     git_worker.on_observable_message(&observable, created_at);
                 } else {
-                    tracing::warn!(subject = subject.as_str(), "DAG git could not reconstruct message");
+                    tracing::warn!(
+                        subject = subject.as_str(),
+                        "DAG git could not reconstruct message"
+                    );
                 }
 
                 let _ = rt.block_on(async { msg.ack().await });
@@ -576,12 +601,16 @@ fn run_session_viewer_worker(_config: &Config, shutdown: &AtomicBool) {
         .and_then(|v| v.parse().ok())
         .unwrap_or(7777u16);
 
-    let store = SqliteDagStore::open(&dag_db_path())
-        .expect("Failed to open DAG store for session viewer");
-    let server = SessionServer::start(Arc::new(store), port)
-        .expect("Failed to start session viewer");
+    let store =
+        SqliteDagStore::open(&dag_db_path()).expect("Failed to open DAG store for session viewer");
+    let server =
+        SessionServer::start(Arc::new(store), port).expect("Failed to start session viewer");
 
-    tracing::info!(port = server.port(), "Session viewer started: http://127.0.0.1:{}", server.port());
+    tracing::info!(
+        port = server.port(),
+        "Session viewer started: http://127.0.0.1:{}",
+        server.port()
+    );
 
     while !shutdown.load(Ordering::Relaxed) {
         std::thread::sleep(std::time::Duration::from_millis(100));

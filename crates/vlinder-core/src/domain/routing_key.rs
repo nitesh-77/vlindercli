@@ -4,6 +4,8 @@
 //! message should be delivered. Collision-freedom is structural — derived
 //! from equality over all dimensions.
 
+use std::str::FromStr;
+
 use super::{
     HarnessType, ObjectStorageType, Operation, RuntimeType, Sequence, ServiceType, SubmissionId,
     TimelineId, VectorStorageType,
@@ -47,12 +49,16 @@ impl InferenceBackendType {
             InferenceBackendType::OpenRouter => "openrouter",
         }
     }
+}
 
-    pub fn from_str(s: &str) -> Option<Self> {
+impl std::str::FromStr for InferenceBackendType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "ollama" => Some(Self::Ollama),
-            "openrouter" => Some(Self::OpenRouter),
-            _ => None,
+            "ollama" => Ok(Self::Ollama),
+            "openrouter" => Ok(Self::OpenRouter),
+            _ => Err(format!("unknown inference backend: {}", s)),
         }
     }
 }
@@ -69,11 +75,15 @@ impl EmbeddingBackendType {
             EmbeddingBackendType::Ollama => "ollama",
         }
     }
+}
 
-    pub fn from_str(s: &str) -> Option<Self> {
+impl std::str::FromStr for EmbeddingBackendType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "ollama" => Some(Self::Ollama),
-            _ => None,
+            "ollama" => Ok(Self::Ollama),
+            _ => Err(format!("unknown embedding backend: {}", s)),
         }
     }
 }
@@ -124,8 +134,8 @@ impl ServiceBackend {
                 "memory" => Some(Self::Vec(VectorStorageType::InMemory)),
                 _ => None,
             },
-            ServiceType::Infer => InferenceBackendType::from_str(backend).map(Self::Infer),
-            ServiceType::Embed => EmbeddingBackendType::from_str(backend).map(Self::Embed),
+            ServiceType::Infer => InferenceBackendType::from_str(backend).ok().map(Self::Infer),
+            ServiceType::Embed => EmbeddingBackendType::from_str(backend).ok().map(Self::Embed),
         }
     }
 }
@@ -326,7 +336,10 @@ mod tests {
     #[test]
     fn invoke_differs_by_timeline() {
         let mut key = base_invoke();
-        if let RoutingKey::Invoke { ref mut timeline, .. } = key {
+        if let RoutingKey::Invoke {
+            ref mut timeline, ..
+        } = key
+        {
             *timeline = timeline_alt();
         }
         assert_ne!(base_invoke(), key);
@@ -335,7 +348,10 @@ mod tests {
     #[test]
     fn invoke_differs_by_submission() {
         let mut key = base_invoke();
-        if let RoutingKey::Invoke { ref mut submission, .. } = key {
+        if let RoutingKey::Invoke {
+            ref mut submission, ..
+        } = key
+        {
             *submission = submission_alt();
         }
         assert_ne!(base_invoke(), key);
@@ -344,7 +360,10 @@ mod tests {
     #[test]
     fn invoke_differs_by_harness() {
         let mut key = base_invoke();
-        if let RoutingKey::Invoke { ref mut harness, .. } = key {
+        if let RoutingKey::Invoke {
+            ref mut harness, ..
+        } = key
+        {
             *harness = HarnessType::Web;
         }
         assert_ne!(base_invoke(), key);
@@ -389,7 +408,10 @@ mod tests {
     #[test]
     fn complete_differs_by_harness() {
         let mut key = base_complete();
-        if let RoutingKey::Complete { ref mut harness, .. } = key {
+        if let RoutingKey::Complete {
+            ref mut harness, ..
+        } = key
+        {
             *harness = HarnessType::Web;
         }
         assert_ne!(base_complete(), key);
@@ -418,7 +440,10 @@ mod tests {
     #[test]
     fn request_differs_by_service_type() {
         let mut key = base_request();
-        if let RoutingKey::Request { ref mut service, .. } = key {
+        if let RoutingKey::Request {
+            ref mut service, ..
+        } = key
+        {
             *service = ServiceBackend::Vec(VectorStorageType::SqliteVec);
         }
         assert_ne!(base_request(), key);
@@ -427,7 +452,10 @@ mod tests {
     #[test]
     fn request_differs_by_backend_within_service() {
         let mut key = base_request();
-        if let RoutingKey::Request { ref mut service, .. } = key {
+        if let RoutingKey::Request {
+            ref mut service, ..
+        } = key
+        {
             *service = ServiceBackend::Kv(ObjectStorageType::InMemory);
         }
         assert_ne!(base_request(), key);
@@ -436,7 +464,10 @@ mod tests {
     #[test]
     fn request_differs_by_operation() {
         let mut key = base_request();
-        if let RoutingKey::Request { ref mut operation, .. } = key {
+        if let RoutingKey::Request {
+            ref mut operation, ..
+        } = key
+        {
             *operation = Operation::Put;
         }
         assert_ne!(base_request(), key);
@@ -445,7 +476,10 @@ mod tests {
     #[test]
     fn request_differs_by_sequence() {
         let mut key = base_request();
-        if let RoutingKey::Request { ref mut sequence, .. } = key {
+        if let RoutingKey::Request {
+            ref mut sequence, ..
+        } = key
+        {
             *sequence = Sequence::from(2);
         }
         assert_ne!(base_request(), key);
@@ -492,7 +526,10 @@ mod tests {
     #[test]
     fn response_differs_by_service() {
         let mut key = base_response();
-        if let RoutingKey::Response { ref mut service, .. } = key {
+        if let RoutingKey::Response {
+            ref mut service, ..
+        } = key
+        {
             *service = ServiceBackend::Infer(InferenceBackendType::Ollama);
         }
         assert_ne!(base_response(), key);
@@ -593,7 +630,9 @@ mod tests {
 
     #[test]
     fn invoke_reply_ignores_nonce() {
-        let with = base_invoke().reply_key(Some(Nonce::new("ignored"))).unwrap();
+        let with = base_invoke()
+            .reply_key(Some(Nonce::new("ignored")))
+            .unwrap();
         let without = base_invoke().reply_key(None).unwrap();
         assert_eq!(with, without);
     }
@@ -659,8 +698,12 @@ mod tests {
 
     #[test]
     fn different_nonces_produce_different_delegate_replies() {
-        let reply_a = base_delegate().reply_key(Some(Nonce::new("nonce-1"))).unwrap();
-        let reply_b = base_delegate().reply_key(Some(Nonce::new("nonce-2"))).unwrap();
+        let reply_a = base_delegate()
+            .reply_key(Some(Nonce::new("nonce-1")))
+            .unwrap();
+        let reply_b = base_delegate()
+            .reply_key(Some(Nonce::new("nonce-2")))
+            .unwrap();
         assert_ne!(reply_a, reply_b);
     }
 
@@ -685,6 +728,8 @@ mod tests {
 
     #[test]
     fn delegate_reply_has_no_reply_even_with_nonce() {
-        assert!(base_delegate_reply().reply_key(Some(Nonce::new("wont-help"))).is_none());
+        assert!(base_delegate_reply()
+            .reply_key(Some(Nonce::new("wont-help")))
+            .is_none());
     }
 }

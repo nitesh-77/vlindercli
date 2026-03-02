@@ -50,9 +50,9 @@ impl ResourceId {
 
         // Split on first "/" to separate authority from path
         let authority = match after_scheme.find('/') {
-            Some(0) => return None,  // Empty authority (e.g., file:///)
+            Some(0) => return None, // Empty authority (e.g., file:///)
             Some(idx) => &after_scheme[..idx],
-            None => after_scheme,     // No path, entire rest is authority
+            None => after_scheme, // No path, entire rest is authority
         };
 
         if authority.is_empty() {

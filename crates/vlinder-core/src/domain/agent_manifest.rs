@@ -437,8 +437,14 @@ mod tests {
         "#;
 
         let manifest: AgentManifest = toml::from_str(toml).unwrap();
-        assert_eq!(manifest.requirements.models.get("inference_model").unwrap(), "claude-sonnet");
-        assert_eq!(manifest.requirements.models.get("embedding_model").unwrap(), "nomic-embed");
+        assert_eq!(
+            manifest.requirements.models.get("inference_model").unwrap(),
+            "claude-sonnet"
+        );
+        assert_eq!(
+            manifest.requirements.models.get("embedding_model").unwrap(),
+            "nomic-embed"
+        );
     }
 
     #[test]
@@ -455,8 +461,14 @@ mod tests {
 
         let manifest: AgentManifest = toml::from_str(toml).unwrap();
         // Array form: alias == name
-        assert_eq!(manifest.requirements.models.get("claude-sonnet").unwrap(), "claude-sonnet");
-        assert_eq!(manifest.requirements.models.get("nomic-embed").unwrap(), "nomic-embed");
+        assert_eq!(
+            manifest.requirements.models.get("claude-sonnet").unwrap(),
+            "claude-sonnet"
+        );
+        assert_eq!(
+            manifest.requirements.models.get("nomic-embed").unwrap(),
+            "nomic-embed"
+        );
     }
 
     #[test]
@@ -562,7 +574,10 @@ mod tests {
 
         let manifest: AgentManifest = toml::from_str(toml).unwrap();
         let mount = &manifest.requirements.mounts["knowledge"];
-        assert_eq!(mount.endpoint.as_deref(), Some("http://host.containers.internal:4566"));
+        assert_eq!(
+            mount.endpoint.as_deref(),
+            Some("http://host.containers.internal:4566")
+        );
     }
 
     #[test]

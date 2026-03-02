@@ -37,16 +37,21 @@ impl MessageType {
         }
     }
 
+}
+
+impl std::str::FromStr for MessageType {
+    type Err = String;
+
     /// Parse from string. Accepts both canonical names and NATS subject
-    /// abbreviations (`req` → Request, `res` → Response).
-    pub fn from_str(s: &str) -> Option<Self> {
+    /// abbreviations (`req` -> Request, `res` -> Response).
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "invoke" => Some(MessageType::Invoke),
-            "req" | "request" => Some(MessageType::Request),
-            "res" | "response" => Some(MessageType::Response),
-            "complete" => Some(MessageType::Complete),
-            "delegate" => Some(MessageType::Delegate),
-            _ => None,
+            "invoke" => Ok(MessageType::Invoke),
+            "req" | "request" => Ok(MessageType::Request),
+            "res" | "response" => Ok(MessageType::Response),
+            "complete" => Ok(MessageType::Complete),
+            "delegate" => Ok(MessageType::Delegate),
+            _ => Err(format!("unknown message type: {}", s)),
         }
     }
 }
@@ -87,7 +92,13 @@ pub struct DagNode {
 /// invalidates all descendants. The session_id ensures that identical
 /// messages in different sessions produce different hashes (prevents
 /// INSERT OR IGNORE from silently dropping cross-session duplicates).
-pub fn hash_dag_node(payload: &[u8], parent_hash: &str, message_type: &MessageType, diagnostics: &[u8], session_id: &str) -> String {
+pub fn hash_dag_node(
+    payload: &[u8],
+    parent_hash: &str,
+    message_type: &MessageType,
+    diagnostics: &[u8],
+    session_id: &str,
+) -> String {
     let mut hasher = Sha256::new();
     hasher.update(payload);
     hasher.update(parent_hash.as_bytes());
@@ -243,7 +254,8 @@ impl DagStore for InMemoryDagStore {
 
     fn get_session_nodes(&self, session_id: &str) -> Result<Vec<DagNode>, String> {
         let nodes = self.nodes.lock().unwrap();
-        let mut result: Vec<DagNode> = nodes.iter()
+        let mut result: Vec<DagNode> = nodes
+            .iter()
             .filter(|n| n.session_id == session_id)
             .cloned()
             .collect();
@@ -253,7 +265,11 @@ impl DagStore for InMemoryDagStore {
 
     fn get_children(&self, parent_hash: &str) -> Result<Vec<DagNode>, String> {
         let nodes = self.nodes.lock().unwrap();
-        Ok(nodes.iter().filter(|n| n.parent_hash == parent_hash).cloned().collect())
+        Ok(nodes
+            .iter()
+            .filter(|n| n.parent_hash == parent_hash)
+            .cloned()
+            .collect())
     }
 
     fn latest_state(&self, agent_name: &str) -> Result<Option<String>, String> {
@@ -265,7 +281,8 @@ impl DagStore for InMemoryDagStore {
         drop(overrides);
 
         let nodes = self.nodes.lock().unwrap();
-        Ok(nodes.iter()
+        Ok(nodes
+            .iter()
             .rev()
             .filter(|n| n.from == agent_name || n.to == agent_name)
             .find_map(|n| n.state.clone()))
@@ -273,14 +290,17 @@ impl DagStore for InMemoryDagStore {
 
     fn latest_node_hash(&self, session_id: &str) -> Result<Option<String>, String> {
         let nodes = self.nodes.lock().unwrap();
-        Ok(nodes.iter()
+        Ok(nodes
+            .iter()
             .rev()
             .find(|n| n.session_id == session_id)
             .map(|n| n.hash.clone()))
     }
 
     fn set_checkout_state(&self, agent_name: &str, state: &str) -> Result<(), String> {
-        self.checkout_states.lock().unwrap()
+        self.checkout_states
+            .lock()
+            .unwrap()
             .insert(agent_name.to_string(), state.to_string());
         Ok(())
     }
@@ -321,7 +341,10 @@ impl DagStore for InMemoryDagStore {
 
     fn get_timeline_by_branch(&self, branch_name: &str) -> Result<Option<Timeline>, String> {
         let timelines = self.timelines.lock().unwrap();
-        Ok(timelines.iter().find(|t| t.branch_name == branch_name).cloned())
+        Ok(timelines
+            .iter()
+            .find(|t| t.branch_name == branch_name)
+            .cloned())
     }
 
     fn get_timeline(&self, id: i64) -> Result<Option<Timeline>, String> {
@@ -347,31 +370,54 @@ impl DagStore for InMemoryDagStore {
 
     fn is_timeline_sealed(&self, id: i64) -> Result<bool, String> {
         let timelines = self.timelines.lock().unwrap();
-        Ok(timelines.iter().find(|t| t.id == id).map(|t| t.broken_at.is_some()).unwrap_or(false))
+        Ok(timelines
+            .iter()
+            .find(|t| t.id == id)
+            .map(|t| t.broken_at.is_some())
+            .unwrap_or(false))
     }
 
     fn list_sessions(&self) -> Result<Vec<SessionSummary>, String> {
         let nodes = self.nodes.lock().unwrap();
-        let mut sessions: std::collections::HashMap<String, Vec<&DagNode>> = std::collections::HashMap::new();
+        let mut sessions: std::collections::HashMap<String, Vec<&DagNode>> =
+            std::collections::HashMap::new();
         for node in nodes.iter() {
-            sessions.entry(node.session_id.clone()).or_default().push(node);
+            sessions
+                .entry(node.session_id.clone())
+                .or_default()
+                .push(node);
         }
 
-        let mut summaries: Vec<SessionSummary> = sessions.into_iter().map(|(session_id, mut nodes)| {
-            nodes.sort_by(|a, b| a.created_at.cmp(&b.created_at));
-            let agent_name = nodes.iter()
-                .find(|n| n.message_type == MessageType::Invoke)
-                .map(|n| n.to.clone())
-                .unwrap_or_default();
-            let started_at = nodes.first().map(|n| n.created_at).unwrap_or_default();
-            let message_count = nodes.iter()
-                .filter(|n| n.message_type == MessageType::Invoke || n.message_type == MessageType::Complete)
-                .count();
-            let is_open = nodes.last()
-                .map(|n| n.message_type != MessageType::Complete)
-                .unwrap_or(false);
-            SessionSummary { session_id, agent_name, started_at, message_count, is_open }
-        }).collect();
+        let mut summaries: Vec<SessionSummary> = sessions
+            .into_iter()
+            .map(|(session_id, mut nodes)| {
+                nodes.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+                let agent_name = nodes
+                    .iter()
+                    .find(|n| n.message_type == MessageType::Invoke)
+                    .map(|n| n.to.clone())
+                    .unwrap_or_default();
+                let started_at = nodes.first().map(|n| n.created_at).unwrap_or_default();
+                let message_count = nodes
+                    .iter()
+                    .filter(|n| {
+                        n.message_type == MessageType::Invoke
+                            || n.message_type == MessageType::Complete
+                    })
+                    .count();
+                let is_open = nodes
+                    .last()
+                    .map(|n| n.message_type != MessageType::Complete)
+                    .unwrap_or(false);
+                SessionSummary {
+                    session_id,
+                    agent_name,
+                    started_at,
+                    message_count,
+                    is_open,
+                }
+            })
+            .collect();
 
         summaries.sort_by(|a, b| b.started_at.cmp(&a.started_at));
         Ok(summaries)
@@ -381,6 +427,7 @@ impl DagStore for InMemoryDagStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::str::FromStr;
 
     // --- MessageType tests ---
 
@@ -393,13 +440,13 @@ mod tests {
             MessageType::Complete,
             MessageType::Delegate,
         ] {
-            assert_eq!(MessageType::from_str(mt.as_str()), Some(mt));
+            assert_eq!(MessageType::from_str(mt.as_str()), Ok(mt));
         }
     }
 
     #[test]
     fn message_type_from_unknown_returns_none() {
-        assert_eq!(MessageType::from_str("unknown"), None);
+        assert!(MessageType::from_str("unknown").is_err());
     }
 
     // --- hash_dag_node tests ---
@@ -414,7 +461,13 @@ mod tests {
     #[test]
     fn hash_changes_with_parent() {
         let h1 = hash_dag_node(b"payload", "", &MessageType::Invoke, b"", "sess-1");
-        let h2 = hash_dag_node(b"payload", "parent-abc", &MessageType::Invoke, b"", "sess-1");
+        let h2 = hash_dag_node(
+            b"payload",
+            "parent-abc",
+            &MessageType::Invoke,
+            b"",
+            "sess-1",
+        );
         assert_ne!(h1, h2, "Merkle property: different parent → different hash");
     }
 
@@ -435,7 +488,13 @@ mod tests {
     #[test]
     fn hash_changes_with_diagnostics() {
         let h1 = hash_dag_node(b"payload", "", &MessageType::Invoke, b"", "sess-1");
-        let h2 = hash_dag_node(b"payload", "", &MessageType::Invoke, b"{\"duration_ms\":100}", "sess-1");
+        let h2 = hash_dag_node(
+            b"payload",
+            "",
+            &MessageType::Invoke,
+            b"{\"duration_ms\":100}",
+            "sess-1",
+        );
         assert_ne!(h1, h2, "different diagnostics → different hash");
     }
 
@@ -443,7 +502,10 @@ mod tests {
     fn hash_changes_with_session_id() {
         let h1 = hash_dag_node(b"payload", "", &MessageType::Invoke, b"", "sess-1");
         let h2 = hash_dag_node(b"payload", "", &MessageType::Invoke, b"", "sess-2");
-        assert_ne!(h1, h2, "same payload in different sessions → different hash");
+        assert_ne!(
+            h1, h2,
+            "same payload in different sessions → different hash"
+        );
     }
 
     #[test]

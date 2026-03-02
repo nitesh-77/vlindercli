@@ -12,12 +12,15 @@ fn parse_model_manifest(toml: &str) -> Result<ModelManifest, toml::de::Error> {
 
 #[test]
 fn model_manifest_parses_inference_type() {
-    let manifest: ModelManifest = parse_model_manifest(r#"
+    let manifest: ModelManifest = parse_model_manifest(
+        r#"
         name = "phi3"
         type = "inference"
         provider = "ollama"
         model_path = "ollama://localhost:11434/phi3"
-    "#).unwrap();
+    "#,
+    )
+    .unwrap();
 
     assert_eq!(manifest.name, Some("phi3".to_string()));
     assert_eq!(manifest.model_type, ModelTypeConfig::Inference);
@@ -27,12 +30,15 @@ fn model_manifest_parses_inference_type() {
 
 #[test]
 fn model_manifest_parses_embedding_type() {
-    let manifest: ModelManifest = parse_model_manifest(r#"
+    let manifest: ModelManifest = parse_model_manifest(
+        r#"
         name = "nomic-embed"
         type = "embedding"
         provider = "ollama"
         model_path = "ollama://localhost:11434/nomic-embed-text"
-    "#).unwrap();
+    "#,
+    )
+    .unwrap();
 
     assert_eq!(manifest.name, Some("nomic-embed".to_string()));
     assert_eq!(manifest.model_type, ModelTypeConfig::Embedding);
@@ -41,17 +47,23 @@ fn model_manifest_parses_embedding_type() {
 
 #[test]
 fn model_manifest_parses_openrouter_engine() {
-    let manifest: ModelManifest = parse_model_manifest(r#"
+    let manifest: ModelManifest = parse_model_manifest(
+        r#"
         name = "claude-sonnet"
         type = "inference"
         provider = "openrouter"
         model_path = "openrouter://anthropic/claude-sonnet-4-20250514"
-    "#).unwrap();
+    "#,
+    )
+    .unwrap();
 
     assert_eq!(manifest.name, Some("claude-sonnet".to_string()));
     assert_eq!(manifest.model_type, ModelTypeConfig::Inference);
     assert_eq!(manifest.provider, Provider::OpenRouter);
-    assert_eq!(manifest.model_path, "openrouter://anthropic/claude-sonnet-4-20250514");
+    assert_eq!(
+        manifest.model_path,
+        "openrouter://anthropic/claude-sonnet-4-20250514"
+    );
 }
 
 #[test]
@@ -73,29 +85,36 @@ fn openrouter_model_loads_with_correct_engine_type() {
     assert_eq!(model.pfname(), "anthropic/claude-sonnet-4-20250514");
     assert_eq!(model.provider, Provider::OpenRouter);
     assert_eq!(model.model_type, ModelType::Inference);
-    assert_eq!(model.model_path.as_str(), "openrouter://anthropic/claude-sonnet-4-20250514");
+    assert_eq!(
+        model.model_path.as_str(),
+        "openrouter://anthropic/claude-sonnet-4-20250514"
+    );
 
     let _ = std::fs::remove_dir_all(&temp_dir);
 }
 
 #[test]
 fn model_manifest_fails_for_invalmodel_type() {
-    let result = parse_model_manifest(r#"
+    let result = parse_model_manifest(
+        r#"
         name = "bad"
         type = "unknown"
         provider = "ollama"
         model_path = "ollama://localhost:11434/bad"
-    "#);
+    "#,
+    );
     assert!(result.is_err());
 }
 
 #[test]
 fn model_manifest_fails_for_missing_field() {
-    let result = parse_model_manifest(r#"
+    let result = parse_model_manifest(
+        r#"
         name = "incomplete"
         type = "inference"
         provider = "ollama"
-    "#);
+    "#,
+    );
     assert!(result.is_err());
 }
 
@@ -274,11 +293,14 @@ fn name_and_pfname_when_manifest_name_matches_path() {
 
 #[test]
 fn manifest_without_name_field_parses() {
-    let manifest: ModelManifest = toml::from_str(r#"
+    let manifest: ModelManifest = toml::from_str(
+        r#"
         type = "inference"
         provider = "ollama"
         model_path = "ollama://localhost:11434/phi3"
-    "#).unwrap();
+    "#,
+    )
+    .unwrap();
 
     assert_eq!(manifest.name, None);
     assert_eq!(manifest.model_path, "ollama://localhost:11434/phi3");

@@ -4,11 +4,11 @@
 //! - `HarnessServiceServer`: Wraps a CoreHarness, serves gRPC requests
 //! - `GrpcHarnessClient`: Implements Harness trait via gRPC calls
 
-mod server;
 mod client;
+mod server;
 
+pub use client::{ping_harness, GrpcHarnessClient};
 pub use server::HarnessServiceServer;
-pub use client::{GrpcHarnessClient, ping_harness};
 
 /// Generated protobuf types.
 pub mod proto {

@@ -10,12 +10,11 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use crate::domain::{
-    CompleteMessage, DagStore, DelegateMessage, InvokeMessage,
-    MessageQueue, ObservableMessage, QueueError, RequestMessage, ResponseMessage,
-    SubmissionId,
-};
 use crate::domain::workers::dag::build_dag_node;
+use crate::domain::{
+    CompleteMessage, DagStore, DelegateMessage, InvokeMessage, MessageQueue, ObservableMessage,
+    QueueError, RequestMessage, ResponseMessage, SubmissionId,
+};
 
 /// A `MessageQueue` decorator that synchronously records DAG nodes on send.
 ///
@@ -101,7 +100,11 @@ impl MessageQueue for RecordingQueue {
         self.inner.send_delegate(msg)
     }
 
-    fn send_delegate_reply(&self, msg: CompleteMessage, reply_key: &crate::domain::RoutingKey) -> Result<(), QueueError> {
+    fn send_delegate_reply(
+        &self,
+        msg: CompleteMessage,
+        reply_key: &crate::domain::RoutingKey,
+    ) -> Result<(), QueueError> {
         self.record(&msg.clone().into());
         self.inner.send_delegate_reply(msg, reply_key)
     }
@@ -110,19 +113,57 @@ impl MessageQueue for RecordingQueue {
     // Receive methods — delegate straight through
     // -------------------------------------------------------------------------
 
-    fn receive_invoke(&self, agent: &crate::domain::AgentId) -> Result<(InvokeMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+    fn receive_invoke(
+        &self,
+        agent: &crate::domain::AgentId,
+    ) -> Result<
+        (
+            InvokeMessage,
+            Box<dyn FnOnce() -> Result<(), QueueError> + Send>,
+        ),
+        QueueError,
+    > {
         self.inner.receive_invoke(agent)
     }
 
-    fn receive_request(&self, service: crate::domain::ServiceBackend, operation: crate::domain::Operation) -> Result<(RequestMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+    fn receive_request(
+        &self,
+        service: crate::domain::ServiceBackend,
+        operation: crate::domain::Operation,
+    ) -> Result<
+        (
+            RequestMessage,
+            Box<dyn FnOnce() -> Result<(), QueueError> + Send>,
+        ),
+        QueueError,
+    > {
         self.inner.receive_request(service, operation)
     }
 
-    fn receive_response(&self, request: &RequestMessage) -> Result<(ResponseMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+    fn receive_response(
+        &self,
+        request: &RequestMessage,
+    ) -> Result<
+        (
+            ResponseMessage,
+            Box<dyn FnOnce() -> Result<(), QueueError> + Send>,
+        ),
+        QueueError,
+    > {
         self.inner.receive_response(request)
     }
 
-    fn receive_complete(&self, submission: &SubmissionId, harness: crate::domain::HarnessType) -> Result<(CompleteMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+    fn receive_complete(
+        &self,
+        submission: &SubmissionId,
+        harness: crate::domain::HarnessType,
+    ) -> Result<
+        (
+            CompleteMessage,
+            Box<dyn FnOnce() -> Result<(), QueueError> + Send>,
+        ),
+        QueueError,
+    > {
         self.inner.receive_complete(submission, harness)
     }
 
@@ -130,11 +171,29 @@ impl MessageQueue for RecordingQueue {
     // Delegation methods — delegate straight through
     // -------------------------------------------------------------------------
 
-    fn receive_delegate(&self, target: &crate::domain::AgentId) -> Result<(DelegateMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+    fn receive_delegate(
+        &self,
+        target: &crate::domain::AgentId,
+    ) -> Result<
+        (
+            DelegateMessage,
+            Box<dyn FnOnce() -> Result<(), QueueError> + Send>,
+        ),
+        QueueError,
+    > {
         self.inner.receive_delegate(target)
     }
 
-    fn receive_delegate_reply(&self, reply_key: &crate::domain::RoutingKey) -> Result<(CompleteMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+    fn receive_delegate_reply(
+        &self,
+        reply_key: &crate::domain::RoutingKey,
+    ) -> Result<
+        (
+            CompleteMessage,
+            Box<dyn FnOnce() -> Result<(), QueueError> + Send>,
+        ),
+        QueueError,
+    > {
         self.inner.receive_delegate_reply(reply_key)
     }
 }
@@ -143,10 +202,10 @@ impl MessageQueue for RecordingQueue {
 mod tests {
     use super::*;
     use crate::domain::{
-        AgentId, RuntimeDiagnostics, DagNode, DelegateDiagnostics, HarnessType,
-        InMemoryDagStore, InferenceBackendType, InvokeDiagnostics, MessageType, Nonce, Operation,
-        RequestDiagnostics, RuntimeType, Sequence, ServiceBackend,
-        ServiceDiagnostics, SessionId, SubmissionId, TimelineId,
+        AgentId, DagNode, DelegateDiagnostics, HarnessType, InMemoryDagStore, InferenceBackendType,
+        InvokeDiagnostics, MessageType, Nonce, Operation, RequestDiagnostics, RuntimeDiagnostics,
+        RuntimeType, Sequence, ServiceBackend, ServiceDiagnostics, SessionId, SubmissionId,
+        TimelineId,
     };
     use crate::queue::InMemoryQueue;
 
@@ -239,7 +298,9 @@ mod tests {
             b"delegate this".to_vec(),
             Nonce::new("test-nonce"),
             None,
-            DelegateDiagnostics { runtime: RuntimeDiagnostics::placeholder(0) },
+            DelegateDiagnostics {
+                runtime: RuntimeDiagnostics::placeholder(0),
+            },
         )
     }
 
@@ -376,7 +437,10 @@ mod tests {
     fn receive_methods_delegate_through() {
         let store = test_store();
         let inner = Arc::new(InMemoryQueue::new());
-        let queue = RecordingQueue::new(Arc::clone(&inner) as Arc<dyn MessageQueue + Send + Sync>, store);
+        let queue = RecordingQueue::new(
+            Arc::clone(&inner) as Arc<dyn MessageQueue + Send + Sync>,
+            store,
+        );
 
         // Send a message through the inner queue's trait method
         let msg = test_invoke();
@@ -395,20 +459,56 @@ mod tests {
             fn insert_node(&self, _: &DagNode) -> Result<(), String> {
                 Err("simulated failure".to_string())
             }
-            fn get_node(&self, _: &str) -> Result<Option<DagNode>, String> { Ok(None) }
-            fn get_session_nodes(&self, _: &str) -> Result<Vec<DagNode>, String> { Ok(vec![]) }
-            fn get_children(&self, _: &str) -> Result<Vec<DagNode>, String> { Ok(vec![]) }
-            fn latest_state(&self, _: &str) -> Result<Option<String>, String> { Ok(None) }
-            fn latest_node_hash(&self, _: &str) -> Result<Option<String>, String> { Ok(None) }
-            fn set_checkout_state(&self, _: &str, _: &str) -> Result<(), String> { Ok(()) }
-            fn ensure_main_timeline(&self) -> Result<i64, String> { Ok(1) }
-            fn create_timeline(&self, _: &str, _: Option<i64>, _: Option<&str>) -> Result<i64, String> { Ok(0) }
-            fn get_timeline_by_branch(&self, _: &str) -> Result<Option<crate::domain::Timeline>, String> { Ok(None) }
-            fn get_timeline(&self, _: i64) -> Result<Option<crate::domain::Timeline>, String> { Ok(None) }
-            fn seal_timeline(&self, _: i64) -> Result<(), String> { Ok(()) }
-            fn rename_timeline(&self, _: i64, _: &str) -> Result<(), String> { Ok(()) }
-            fn is_timeline_sealed(&self, _: i64) -> Result<bool, String> { Ok(false) }
-            fn list_sessions(&self) -> Result<Vec<crate::domain::SessionSummary>, String> { Ok(vec![]) }
+            fn get_node(&self, _: &str) -> Result<Option<DagNode>, String> {
+                Ok(None)
+            }
+            fn get_session_nodes(&self, _: &str) -> Result<Vec<DagNode>, String> {
+                Ok(vec![])
+            }
+            fn get_children(&self, _: &str) -> Result<Vec<DagNode>, String> {
+                Ok(vec![])
+            }
+            fn latest_state(&self, _: &str) -> Result<Option<String>, String> {
+                Ok(None)
+            }
+            fn latest_node_hash(&self, _: &str) -> Result<Option<String>, String> {
+                Ok(None)
+            }
+            fn set_checkout_state(&self, _: &str, _: &str) -> Result<(), String> {
+                Ok(())
+            }
+            fn ensure_main_timeline(&self) -> Result<i64, String> {
+                Ok(1)
+            }
+            fn create_timeline(
+                &self,
+                _: &str,
+                _: Option<i64>,
+                _: Option<&str>,
+            ) -> Result<i64, String> {
+                Ok(0)
+            }
+            fn get_timeline_by_branch(
+                &self,
+                _: &str,
+            ) -> Result<Option<crate::domain::Timeline>, String> {
+                Ok(None)
+            }
+            fn get_timeline(&self, _: i64) -> Result<Option<crate::domain::Timeline>, String> {
+                Ok(None)
+            }
+            fn seal_timeline(&self, _: i64) -> Result<(), String> {
+                Ok(())
+            }
+            fn rename_timeline(&self, _: i64, _: &str) -> Result<(), String> {
+                Ok(())
+            }
+            fn is_timeline_sealed(&self, _: i64) -> Result<bool, String> {
+                Ok(false)
+            }
+            fn list_sessions(&self) -> Result<Vec<crate::domain::SessionSummary>, String> {
+                Ok(vec![])
+            }
         }
 
         let store: Arc<dyn DagStore> = Arc::new(FailStore);

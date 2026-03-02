@@ -31,7 +31,11 @@ impl SessionServer {
         let server = tiny_http::Server::http(format!("127.0.0.1:{}", port))
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::AddrInUse, e.to_string()))?;
 
-        let port = server.server_addr().to_ip().map(|a| a.port()).unwrap_or(port);
+        let port = server
+            .server_addr()
+            .to_ip()
+            .map(|a| a.port())
+            .unwrap_or(port);
 
         let stop_flag = Arc::new(AtomicBool::new(false));
         let stop = Arc::clone(&stop_flag);
@@ -80,7 +84,7 @@ fn run_server(server: tiny_http::Server, store: &dyn DagStore, stop: Arc<AtomicB
 
         match server.recv_timeout(timeout) {
             Ok(Some(request)) => handle_request(request, store),
-            Ok(None) => continue,  // timeout — check stop flag
+            Ok(None) => continue, // timeout — check stop flag
             Err(_) => break,
         }
     }
@@ -98,7 +102,10 @@ fn handle_request(request: tiny_http::Request, store: &dyn DagStore) {
                 let _ = request.respond(html_response(200, &body));
             }
             Err(_) => {
-                let body = html_page("Not Found", "<h1>Session not found</h1><p><a href=\"/\">&larr; Back</a></p>");
+                let body = html_page(
+                    "Not Found",
+                    "<h1>Session not found</h1><p><a href=\"/\">&larr; Back</a></p>",
+                );
                 let _ = request.respond(html_response(404, &body));
             }
         }
@@ -115,17 +122,29 @@ fn handle_request(request: tiny_http::Request, store: &dyn DagStore) {
 fn render_index(store: &dyn DagStore) -> String {
     let sessions = match store.list_sessions() {
         Ok(s) => s,
-        Err(_) => return html_page("Vlinder Sessions", "<h1>Sessions</h1><p>Error loading sessions.</p>"),
+        Err(_) => {
+            return html_page(
+                "Vlinder Sessions",
+                "<h1>Sessions</h1><p>Error loading sessions.</p>",
+            )
+        }
     };
 
     if sessions.is_empty() {
-        return html_page("Vlinder Sessions", "<h1>Sessions</h1><p>No conversations yet.</p>");
+        return html_page(
+            "Vlinder Sessions",
+            "<h1>Sessions</h1><p>No conversations yet.</p>",
+        );
     }
 
     let mut items = String::new();
     for s in &sessions {
         let datetime = s.started_at.format("%Y-%m-%d %H:%M:%S").to_string();
-        let status = if s.is_open { "<span class=\"badge\">pending</span>" } else { "" };
+        let status = if s.is_open {
+            "<span class=\"badge\">pending</span>"
+        } else {
+            ""
+        };
 
         items.push_str(&format!(
             "<li><a href=\"/session/{session_id}\">\
@@ -140,9 +159,13 @@ fn render_index(store: &dyn DagStore) -> String {
         ));
     }
 
-    html_page("Vlinder Sessions", &format!(
-        "<h1>Sessions</h1>\n<ul class=\"session-list\">\n{}</ul>", items
-    ))
+    html_page(
+        "Vlinder Sessions",
+        &format!(
+            "<h1>Sessions</h1>\n<ul class=\"session-list\">\n{}</ul>",
+            items
+        ),
+    )
 }
 
 fn render_session(store: &dyn DagStore, session_id: &str) -> Result<String, String> {
@@ -156,12 +179,14 @@ fn render_session(store: &dyn DagStore, session_id: &str) -> Result<String, Stri
         return Err("session not found".to_string());
     }
 
-    let agent_name = nodes.iter()
+    let agent_name = nodes
+        .iter()
         .find(|n| n.message_type == MessageType::Invoke)
         .map(|n| n.to.clone())
         .unwrap_or_default();
 
-    let is_open = nodes.last()
+    let is_open = nodes
+        .last()
         .map(|n| n.message_type != MessageType::Complete)
         .unwrap_or(false);
 
@@ -170,7 +195,11 @@ fn render_session(store: &dyn DagStore, session_id: &str) -> Result<String, Stri
     // Show pending indicator if the last message is not a Complete
     if is_open {
         // Show the last invoke payload as the pending question
-        if let Some(last_invoke) = nodes.iter().rev().find(|n| n.message_type == MessageType::Invoke) {
+        if let Some(last_invoke) = nodes
+            .iter()
+            .rev()
+            .find(|n| n.message_type == MessageType::Invoke)
+        {
             let payload = String::from_utf8_lossy(&last_invoke.payload);
             messages.push_str(&format!(
                 "<div class=\"open-indicator\">Pending: {}</div>\n",
@@ -209,16 +238,23 @@ fn render_session(store: &dyn DagStore, session_id: &str) -> Result<String, Stri
         }
     }
 
-    let short_id = if session_id.len() > 12 { &session_id[..12] } else { session_id };
+    let short_id = if session_id.len() > 12 {
+        &session_id[..12]
+    } else {
+        session_id
+    };
     let title = format!("{} / {}", agent_name, short_id);
 
-    Ok(html_page(&title, &format!(
-        "<p><a href=\"/\">&larr; All sessions</a></p>\n\
+    Ok(html_page(
+        &title,
+        &format!(
+            "<p><a href=\"/\">&larr; All sessions</a></p>\n\
          <h1>{}</h1>\n\
          {}",
-        html_escape(&title),
-        messages,
-    )))
+            html_escape(&title),
+            messages,
+        ),
+    ))
 }
 
 // =============================================================================
@@ -289,17 +325,16 @@ fn html_page(title: &str, body: &str) -> String {
 
 fn html_escape(s: &str) -> String {
     s.replace('&', "&amp;")
-     .replace('<', "&lt;")
-     .replace('>', "&gt;")
-     .replace('"', "&quot;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
 }
 
 fn html_response(status: u16, body: &str) -> tiny_http::Response<std::io::Cursor<Vec<u8>>> {
     let status_code = tiny_http::StatusCode(status);
     let content_type = tiny_http::Header::from_bytes("Content-Type", "text/html; charset=utf-8")
         .expect("valid header");
-    let connection = tiny_http::Header::from_bytes("Connection", "close")
-        .expect("valid header");
+    let connection = tiny_http::Header::from_bytes("Connection", "close").expect("valid header");
     tiny_http::Response::from_data(body.as_bytes().to_vec())
         .with_status_code(status_code)
         .with_header(content_type)
@@ -310,7 +345,7 @@ fn html_response(status: u16, body: &str) -> tiny_http::Response<std::io::Cursor
 mod tests {
     use super::*;
     use chrono::{TimeZone, Utc};
-    use vlinder_core::domain::{DagNode, InMemoryDagStore, hash_dag_node};
+    use vlinder_core::domain::{hash_dag_node, DagNode, InMemoryDagStore};
 
     fn make_node(
         payload: &[u8],
@@ -368,7 +403,8 @@ mod tests {
             .http_status_as_error(false)
             .build()
             .into();
-        let mut resp = agent.get(&format!("http://127.0.0.1:{}{}", port, path))
+        let mut resp = agent
+            .get(&format!("http://127.0.0.1:{}{}", port, path))
             .call()
             .unwrap();
         let status = resp.status().as_u16();

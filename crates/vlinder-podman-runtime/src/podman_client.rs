@@ -197,7 +197,11 @@ pub(crate) fn resolve_socket(configured: &str) -> Option<std::path::PathBuf> {
         "auto" => probe_socket_paths(),
         path => {
             let p = std::path::PathBuf::from(path);
-            if p.exists() { Some(p) } else { None }
+            if p.exists() {
+                Some(p)
+            } else {
+                None
+            }
         }
     }
 }

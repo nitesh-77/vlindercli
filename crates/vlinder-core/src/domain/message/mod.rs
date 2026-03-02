@@ -7,25 +7,24 @@
 //! - `CompleteMessage`: Runtime → Harness (submission finished)
 //! - `DelegateMessage`: Agent → Agent (via runtime)
 
-pub mod identity;
-pub mod invoke;
-pub mod request;
-pub mod response;
 pub mod complete;
 pub mod delegate;
+pub mod identity;
+pub mod invoke;
 pub mod observable;
+pub mod request;
+pub mod response;
 
 // Re-export everything at the module level for backwards compatibility.
-pub use identity::{
-    MessageId, SubmissionId, SessionId, TimelineId,
-    Sequence, SequenceCounter, HarnessType,
-};
-pub use invoke::InvokeMessage;
-pub use request::RequestMessage;
-pub use response::ResponseMessage;
 pub use complete::CompleteMessage;
 pub use delegate::DelegateMessage;
+pub use identity::{
+    HarnessType, MessageId, Sequence, SequenceCounter, SessionId, SubmissionId, TimelineId,
+};
+pub use invoke::InvokeMessage;
 pub use observable::{ObservableMessage, ObservableMessageHeaders};
+pub use request::RequestMessage;
+pub use response::ResponseMessage;
 
 /// Protocol version stamped on every message at construction time.
 pub const PROTOCOL_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -44,14 +43,16 @@ pub trait ExpectsReply {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use super::super::RuntimeType;
-    use super::super::routing_key::{AgentId, Nonce, RoutingKey, ServiceBackend, InferenceBackendType};
-    use super::super::storage::ObjectStorageType;
     use super::super::diagnostics::{
-        InvokeDiagnostics, RequestDiagnostics, RuntimeDiagnostics, DelegateDiagnostics,
+        DelegateDiagnostics, InvokeDiagnostics, RequestDiagnostics, RuntimeDiagnostics,
     };
     use super::super::operation::Operation;
+    use super::super::routing_key::{
+        AgentId, InferenceBackendType, Nonce, RoutingKey, ServiceBackend,
+    };
+    use super::super::storage::ObjectStorageType;
+    use super::super::RuntimeType;
+    use super::*;
 
     fn test_submission() -> SubmissionId {
         SubmissionId::from("a1b2c3d".to_string())
@@ -62,11 +63,19 @@ mod tests {
     }
 
     fn test_invoke_diag() -> InvokeDiagnostics {
-        InvokeDiagnostics { harness_version: "0.1.0".to_string(), history_turns: 0 }
+        InvokeDiagnostics {
+            harness_version: "0.1.0".to_string(),
+            history_turns: 0,
+        }
     }
 
     fn test_request_diag() -> RequestDiagnostics {
-        RequestDiagnostics { sequence: 1, endpoint: "/test".to_string(), request_bytes: 0, received_at_ms: 0 }
+        RequestDiagnostics {
+            sequence: 1,
+            endpoint: "/test".to_string(),
+            request_bytes: 0,
+            received_at_ms: 0,
+        }
     }
 
     // --- Typed message tests ---
@@ -77,9 +86,15 @@ mod tests {
         let session = SessionId::new();
         let agent_id = test_agent_id();
         let msg = InvokeMessage::new(
-            TimelineId::main(), submission.clone(), session.clone(),
-            HarnessType::Cli, RuntimeType::Container, agent_id.clone(),
-            b"hello".to_vec(), None, test_invoke_diag(),
+            TimelineId::main(),
+            submission.clone(),
+            session.clone(),
+            HarnessType::Cli,
+            RuntimeType::Container,
+            agent_id.clone(),
+            b"hello".to_vec(),
+            None,
+            test_invoke_diag(),
         );
 
         assert_eq!(msg.submission, submission);
@@ -97,9 +112,16 @@ mod tests {
         let session = SessionId::new();
         let agent_id = test_agent_id();
         let msg = RequestMessage::new(
-            TimelineId::main(), submission.clone(), session.clone(), agent_id.clone(),
-            ServiceBackend::Kv(ObjectStorageType::Sqlite), Operation::Get,
-            Sequence::first(), b"key".to_vec(), None, test_request_diag(),
+            TimelineId::main(),
+            submission.clone(),
+            session.clone(),
+            agent_id.clone(),
+            ServiceBackend::Kv(ObjectStorageType::Sqlite),
+            Operation::Get,
+            Sequence::first(),
+            b"key".to_vec(),
+            None,
+            test_request_diag(),
         );
 
         assert_eq!(msg.submission, submission);
@@ -114,9 +136,16 @@ mod tests {
     #[test]
     fn response_from_request_echoes_dimensions() {
         let request = RequestMessage::new(
-            TimelineId::main(), test_submission(), SessionId::new(), test_agent_id(),
-            ServiceBackend::Kv(ObjectStorageType::Sqlite), Operation::Get,
-            Sequence::from(3), b"key".to_vec(), None, test_request_diag(),
+            TimelineId::main(),
+            test_submission(),
+            SessionId::new(),
+            test_agent_id(),
+            ServiceBackend::Kv(ObjectStorageType::Sqlite),
+            Operation::Get,
+            Sequence::from(3),
+            b"key".to_vec(),
+            None,
+            test_request_diag(),
         );
 
         let response = ResponseMessage::from_request(&request, b"value".to_vec());
@@ -138,8 +167,14 @@ mod tests {
         let session = SessionId::new();
         let agent_id = test_agent_id();
         let msg = CompleteMessage::new(
-            TimelineId::main(), submission.clone(), session.clone(), agent_id.clone(),
-            HarnessType::Cli, b"result".to_vec(), None, RuntimeDiagnostics::placeholder(0),
+            TimelineId::main(),
+            submission.clone(),
+            session.clone(),
+            agent_id.clone(),
+            HarnessType::Cli,
+            b"result".to_vec(),
+            None,
+            RuntimeDiagnostics::placeholder(0),
         );
 
         assert_eq!(msg.submission, submission);
@@ -155,9 +190,15 @@ mod tests {
     #[test]
     fn invoke_create_reply_returns_complete() {
         let invoke = InvokeMessage::new(
-            TimelineId::main(), test_submission(), SessionId::new(),
-            HarnessType::Cli, RuntimeType::Container, test_agent_id(),
-            b"input".to_vec(), None, test_invoke_diag(),
+            TimelineId::main(),
+            test_submission(),
+            SessionId::new(),
+            HarnessType::Cli,
+            RuntimeType::Container,
+            test_agent_id(),
+            b"input".to_vec(),
+            None,
+            test_invoke_diag(),
         );
 
         let complete: CompleteMessage = invoke.create_reply(b"output".to_vec());
@@ -172,9 +213,16 @@ mod tests {
     #[test]
     fn request_create_reply_returns_response() {
         let request = RequestMessage::new(
-            TimelineId::main(), test_submission(), SessionId::new(), test_agent_id(),
-            ServiceBackend::Kv(ObjectStorageType::Sqlite), Operation::Get,
-            Sequence::first(), b"key".to_vec(), None, test_request_diag(),
+            TimelineId::main(),
+            test_submission(),
+            SessionId::new(),
+            test_agent_id(),
+            ServiceBackend::Kv(ObjectStorageType::Sqlite),
+            Operation::Get,
+            Sequence::first(),
+            b"key".to_vec(),
+            None,
+            test_request_diag(),
         );
 
         let response: ResponseMessage = request.create_reply(b"value".to_vec());
@@ -194,9 +242,15 @@ mod tests {
     #[test]
     fn observable_message_from_invoke() {
         let invoke = InvokeMessage::new(
-            TimelineId::main(), test_submission(), SessionId::new(),
-            HarnessType::Cli, RuntimeType::Container, test_agent_id(),
-            b"test".to_vec(), None, test_invoke_diag(),
+            TimelineId::main(),
+            test_submission(),
+            SessionId::new(),
+            HarnessType::Cli,
+            RuntimeType::Container,
+            test_agent_id(),
+            b"test".to_vec(),
+            None,
+            test_invoke_diag(),
         );
         let id = invoke.id.clone();
         let submission = invoke.submission.clone();
@@ -211,9 +265,16 @@ mod tests {
     #[test]
     fn observable_message_from_request() {
         let request = RequestMessage::new(
-            TimelineId::main(), test_submission(), SessionId::new(), test_agent_id(),
-            ServiceBackend::Kv(ObjectStorageType::Sqlite), Operation::Get,
-            Sequence::first(), b"test".to_vec(), None, test_request_diag(),
+            TimelineId::main(),
+            test_submission(),
+            SessionId::new(),
+            test_agent_id(),
+            ServiceBackend::Kv(ObjectStorageType::Sqlite),
+            Operation::Get,
+            Sequence::first(),
+            b"test".to_vec(),
+            None,
+            test_request_diag(),
         );
         let id = request.id.clone();
 
@@ -228,9 +289,15 @@ mod tests {
         let submission = test_submission();
         let session = SessionId::new();
         let invoke = InvokeMessage::new(
-            TimelineId::main(), submission.clone(), session.clone(),
-            HarnessType::Cli, RuntimeType::Container, test_agent_id(),
-            b"payload".to_vec(), None, test_invoke_diag(),
+            TimelineId::main(),
+            submission.clone(),
+            session.clone(),
+            HarnessType::Cli,
+            RuntimeType::Container,
+            test_agent_id(),
+            b"payload".to_vec(),
+            None,
+            test_invoke_diag(),
         );
 
         let observable: ObservableMessage = invoke.into();
@@ -245,96 +312,169 @@ mod tests {
     #[test]
     fn invoke_routing_key() {
         let msg = InvokeMessage::new(
-            TimelineId::main(), test_submission(), SessionId::new(),
-            HarnessType::Cli, RuntimeType::Container, test_agent_id(),
-            b"test".to_vec(), None, test_invoke_diag(),
+            TimelineId::main(),
+            test_submission(),
+            SessionId::new(),
+            HarnessType::Cli,
+            RuntimeType::Container,
+            test_agent_id(),
+            b"test".to_vec(),
+            None,
+            test_invoke_diag(),
         );
 
         let key = msg.routing_key();
-        assert_eq!(key, RoutingKey::Invoke {
-            timeline: msg.timeline.clone(), submission: msg.submission.clone(),
-            harness: msg.harness, runtime: msg.runtime, agent: msg.agent_id.clone(),
-        });
+        assert_eq!(
+            key,
+            RoutingKey::Invoke {
+                timeline: msg.timeline.clone(),
+                submission: msg.submission.clone(),
+                harness: msg.harness,
+                runtime: msg.runtime,
+                agent: msg.agent_id.clone(),
+            }
+        );
     }
 
     #[test]
     fn request_routing_key() {
         let msg = RequestMessage::new(
-            TimelineId::main(), test_submission(), SessionId::new(), test_agent_id(),
-            ServiceBackend::Kv(ObjectStorageType::Sqlite), Operation::Get,
-            Sequence::first(), b"key".to_vec(), None, test_request_diag(),
+            TimelineId::main(),
+            test_submission(),
+            SessionId::new(),
+            test_agent_id(),
+            ServiceBackend::Kv(ObjectStorageType::Sqlite),
+            Operation::Get,
+            Sequence::first(),
+            b"key".to_vec(),
+            None,
+            test_request_diag(),
         );
 
         let key = msg.routing_key();
-        assert_eq!(key, RoutingKey::Request {
-            timeline: msg.timeline.clone(), submission: msg.submission.clone(),
-            agent: msg.agent_id.clone(), service: msg.service,
-            operation: msg.operation, sequence: msg.sequence,
-        });
+        assert_eq!(
+            key,
+            RoutingKey::Request {
+                timeline: msg.timeline.clone(),
+                submission: msg.submission.clone(),
+                agent: msg.agent_id.clone(),
+                service: msg.service,
+                operation: msg.operation,
+                sequence: msg.sequence,
+            }
+        );
     }
 
     #[test]
     fn response_routing_key() {
         let request = RequestMessage::new(
-            TimelineId::main(), test_submission(), SessionId::new(), test_agent_id(),
-            ServiceBackend::Infer(InferenceBackendType::Ollama), Operation::Run,
-            Sequence::from(3), b"prompt".to_vec(), None, test_request_diag(),
+            TimelineId::main(),
+            test_submission(),
+            SessionId::new(),
+            test_agent_id(),
+            ServiceBackend::Infer(InferenceBackendType::Ollama),
+            Operation::Run,
+            Sequence::from(3),
+            b"prompt".to_vec(),
+            None,
+            test_request_diag(),
         );
         let response = ResponseMessage::from_request(&request, b"reply".to_vec());
 
         let key = response.routing_key();
-        assert_eq!(key, RoutingKey::Response {
-            timeline: response.timeline.clone(), submission: response.submission.clone(),
-            service: response.service, agent: response.agent_id.clone(),
-            operation: response.operation, sequence: response.sequence,
-        });
+        assert_eq!(
+            key,
+            RoutingKey::Response {
+                timeline: response.timeline.clone(),
+                submission: response.submission.clone(),
+                service: response.service,
+                agent: response.agent_id.clone(),
+                operation: response.operation,
+                sequence: response.sequence,
+            }
+        );
     }
 
     #[test]
     fn complete_routing_key() {
         let msg = CompleteMessage::new(
-            TimelineId::main(), test_submission(), SessionId::new(), test_agent_id(),
-            HarnessType::Web, b"done".to_vec(), None, RuntimeDiagnostics::placeholder(0),
+            TimelineId::main(),
+            test_submission(),
+            SessionId::new(),
+            test_agent_id(),
+            HarnessType::Web,
+            b"done".to_vec(),
+            None,
+            RuntimeDiagnostics::placeholder(0),
         );
 
         let key = msg.routing_key();
-        assert_eq!(key, RoutingKey::Complete {
-            timeline: msg.timeline.clone(), submission: msg.submission.clone(),
-            agent: msg.agent_id.clone(), harness: msg.harness,
-        });
+        assert_eq!(
+            key,
+            RoutingKey::Complete {
+                timeline: msg.timeline.clone(),
+                submission: msg.submission.clone(),
+                agent: msg.agent_id.clone(),
+                harness: msg.harness,
+            }
+        );
     }
 
     #[test]
     fn delegate_routing_key() {
         let msg = DelegateMessage::new(
-            TimelineId::main(), test_submission(), SessionId::new(),
-            AgentId::new("coordinator"), AgentId::new("summarizer"),
-            b"task".to_vec(), Nonce::new("test-nonce"), None,
-            DelegateDiagnostics { runtime: RuntimeDiagnostics::placeholder(0) },
+            TimelineId::main(),
+            test_submission(),
+            SessionId::new(),
+            AgentId::new("coordinator"),
+            AgentId::new("summarizer"),
+            b"task".to_vec(),
+            Nonce::new("test-nonce"),
+            None,
+            DelegateDiagnostics {
+                runtime: RuntimeDiagnostics::placeholder(0),
+            },
         );
 
         let key = msg.routing_key();
-        assert_eq!(key, RoutingKey::Delegate {
-            timeline: msg.timeline.clone(), submission: msg.submission.clone(),
-            caller: msg.caller.clone(), target: msg.target.clone(),
-        });
+        assert_eq!(
+            key,
+            RoutingKey::Delegate {
+                timeline: msg.timeline.clone(),
+                submission: msg.submission.clone(),
+                caller: msg.caller.clone(),
+                target: msg.target.clone(),
+            }
+        );
     }
 
     #[test]
     fn delegate_reply_routing_key() {
         let msg = DelegateMessage::new(
-            TimelineId::main(), test_submission(), SessionId::new(),
-            AgentId::new("coordinator"), AgentId::new("summarizer"),
-            b"task".to_vec(), Nonce::new("abc123"), None,
-            DelegateDiagnostics { runtime: RuntimeDiagnostics::placeholder(0) },
+            TimelineId::main(),
+            test_submission(),
+            SessionId::new(),
+            AgentId::new("coordinator"),
+            AgentId::new("summarizer"),
+            b"task".to_vec(),
+            Nonce::new("abc123"),
+            None,
+            DelegateDiagnostics {
+                runtime: RuntimeDiagnostics::placeholder(0),
+            },
         );
 
         let reply_key = msg.reply_routing_key();
-        assert_eq!(reply_key, RoutingKey::DelegateReply {
-            timeline: msg.timeline.clone(), submission: msg.submission.clone(),
-            caller: msg.caller.clone(), target: msg.target.clone(),
-            nonce: Nonce::new("abc123"),
-        });
+        assert_eq!(
+            reply_key,
+            RoutingKey::DelegateReply {
+                timeline: msg.timeline.clone(),
+                submission: msg.submission.clone(),
+                caller: msg.caller.clone(),
+                target: msg.target.clone(),
+                nonce: Nonce::new("abc123"),
+            }
+        );
     }
 
     #[test]
@@ -343,10 +483,17 @@ mod tests {
         let session = SessionId::new();
         let nonce = Nonce::new("abc123");
         let msg = DelegateMessage::new(
-            TimelineId::main(), submission.clone(), session.clone(),
-            AgentId::new("coordinator"), AgentId::new("summarizer"),
-            b"summarize this".to_vec(), nonce.clone(), None,
-            DelegateDiagnostics { runtime: RuntimeDiagnostics::placeholder(0) },
+            TimelineId::main(),
+            submission.clone(),
+            session.clone(),
+            AgentId::new("coordinator"),
+            AgentId::new("summarizer"),
+            b"summarize this".to_vec(),
+            nonce.clone(),
+            None,
+            DelegateDiagnostics {
+                runtime: RuntimeDiagnostics::placeholder(0),
+            },
         );
 
         assert_eq!(msg.submission, submission);
@@ -361,10 +508,17 @@ mod tests {
     fn observable_message_from_delegate() {
         let submission = test_submission();
         let delegate = DelegateMessage::new(
-            TimelineId::main(), submission.clone(), SessionId::new(),
-            AgentId::new("coordinator"), AgentId::new("summarizer"),
-            b"test".to_vec(), Nonce::generate(), None,
-            DelegateDiagnostics { runtime: RuntimeDiagnostics::placeholder(0) },
+            TimelineId::main(),
+            submission.clone(),
+            SessionId::new(),
+            AgentId::new("coordinator"),
+            AgentId::new("summarizer"),
+            b"test".to_vec(),
+            Nonce::generate(),
+            None,
+            DelegateDiagnostics {
+                runtime: RuntimeDiagnostics::placeholder(0),
+            },
         );
         let id = delegate.id.clone();
 
@@ -379,9 +533,15 @@ mod tests {
     #[test]
     fn routing_key_reply_key_round_trip() {
         let invoke = InvokeMessage::new(
-            TimelineId::main(), test_submission(), SessionId::new(),
-            HarnessType::Cli, RuntimeType::Container, test_agent_id(),
-            b"input".to_vec(), None, test_invoke_diag(),
+            TimelineId::main(),
+            test_submission(),
+            SessionId::new(),
+            HarnessType::Cli,
+            RuntimeType::Container,
+            test_agent_id(),
+            b"input".to_vec(),
+            None,
+            test_invoke_diag(),
         );
         let complete = invoke.create_reply(b"output".to_vec());
 
@@ -392,9 +552,16 @@ mod tests {
     #[test]
     fn request_reply_key_matches_response_routing_key() {
         let request = RequestMessage::new(
-            TimelineId::main(), test_submission(), SessionId::new(), test_agent_id(),
-            ServiceBackend::Kv(ObjectStorageType::Sqlite), Operation::Get,
-            Sequence::first(), b"key".to_vec(), None, test_request_diag(),
+            TimelineId::main(),
+            test_submission(),
+            SessionId::new(),
+            test_agent_id(),
+            ServiceBackend::Kv(ObjectStorageType::Sqlite),
+            Operation::Get,
+            Sequence::first(),
+            b"key".to_vec(),
+            None,
+            test_request_diag(),
         );
         let response = ResponseMessage::from_request(&request, b"value".to_vec());
 

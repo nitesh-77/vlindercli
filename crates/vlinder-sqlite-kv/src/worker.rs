@@ -14,11 +14,13 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use vlinder_core::domain::Registry;
-use vlinder_core::domain::{MessageQueue, Operation, RequestMessage, ResponseMessage, ServiceBackend, ServiceDiagnostics};
+use vlinder_core::domain::{
+    MessageQueue, Operation, RequestMessage, ResponseMessage, ServiceBackend, ServiceDiagnostics,
+};
 
+use crate::state_store::{hash_snapshot, hash_state_commit, hash_value, SqliteStateStore};
 use crate::storage::SqliteObjectStorage;
-use crate::state_store::{SqliteStateStore, hash_value, hash_snapshot, hash_state_commit};
-use crate::types::{KvGetRequest, KvPutRequest, KvListRequest, KvDeleteRequest};
+use crate::types::{KvDeleteRequest, KvGetRequest, KvListRequest, KvPutRequest};
 
 // ============================================================================
 // Worker
@@ -53,15 +55,22 @@ impl KvWorker {
             return Ok(storage.clone());
         }
 
-        let agent = self.registry.get_agent_by_name(agent_id)
+        let agent = self
+            .registry
+            .get_agent_by_name(agent_id)
             .ok_or_else(|| format!("unknown agent: {}", agent_id))?;
-        let uri = agent.object_storage
+        let uri = agent
+            .object_storage
             .ok_or_else(|| format!("agent has no object_storage declared: {}", agent_id))?;
-        let path = uri.path()
+        let path = uri
+            .path()
             .ok_or_else(|| format!("object_storage URI has no path: {}", uri.as_str()))?;
 
         let storage = Arc::new(SqliteObjectStorage::open_at(std::path::Path::new(path))?);
-        self.stores.write().unwrap().insert(agent_id.to_string(), storage.clone());
+        self.stores
+            .write()
+            .unwrap()
+            .insert(agent_id.to_string(), storage.clone());
         Ok(storage)
     }
 
@@ -74,16 +83,21 @@ impl KvWorker {
             return Ok(store.clone());
         }
 
-        let agent = self.registry.get_agent_by_name(agent_id)
+        let agent = self
+            .registry
+            .get_agent_by_name(agent_id)
             .ok_or_else(|| format!("unknown agent: {}", agent_id))?;
-        let uri = agent.object_storage
+        let uri = agent
+            .object_storage
             .ok_or_else(|| format!("agent has no object_storage declared: {}", agent_id))?;
 
         let path = match uri.scheme() {
             Some("sqlite") => {
-                let db_path = uri.path()
+                let db_path = uri
+                    .path()
                     .ok_or_else(|| "sqlite URI has no path".to_string())?;
-                let parent = std::path::Path::new(db_path).parent()
+                let parent = std::path::Path::new(db_path)
+                    .parent()
                     .ok_or_else(|| "sqlite path has no parent".to_string())?;
                 parent.join("state.db")
             }
@@ -96,16 +110,27 @@ impl KvWorker {
         };
 
         let store = Arc::new(SqliteStateStore::open(&path)?);
-        self.state_stores.write().unwrap().insert(agent_id.to_string(), store.clone());
+        self.state_stores
+            .write()
+            .unwrap()
+            .insert(agent_id.to_string(), store.clone());
         Ok(store)
     }
 
     /// Process one message if available. Returns true if processed.
     pub fn tick(&self) -> bool {
-        if self.try_get() { return true; }
-        if self.try_put() { return true; }
-        if self.try_list() { return true; }
-        if self.try_delete() { return true; }
+        if self.try_get() {
+            return true;
+        }
+        if self.try_put() {
+            return true;
+        }
+        if self.try_list() {
+            return true;
+        }
+        if self.try_delete() {
+            return true;
+        }
         false
     }
 
@@ -116,10 +141,16 @@ impl KvWorker {
                 let response_payload = self.handle_get(&request);
                 let duration_ms = start.elapsed().as_millis() as u64;
                 let diag = ServiceDiagnostics::storage(
-                    self.service.service_type(), self.service.backend_str(), Operation::Get, response_payload.len() as u64, duration_ms,
+                    self.service.service_type(),
+                    self.service.backend_str(),
+                    Operation::Get,
+                    response_payload.len() as u64,
+                    duration_ms,
                 );
                 let mut response = ResponseMessage::from_request_with_diagnostics(
-                    &request, response_payload, diag,
+                    &request,
+                    response_payload,
+                    diag,
                 );
                 response.state = request.state.clone();
                 let _ = self.queue.send_response(response);
@@ -137,10 +168,16 @@ impl KvWorker {
                 let (response_payload, new_state) = self.handle_put(&request);
                 let duration_ms = start.elapsed().as_millis() as u64;
                 let diag = ServiceDiagnostics::storage(
-                    self.service.service_type(), self.service.backend_str(), Operation::Put, response_payload.len() as u64, duration_ms,
+                    self.service.service_type(),
+                    self.service.backend_str(),
+                    Operation::Put,
+                    response_payload.len() as u64,
+                    duration_ms,
                 );
                 let mut response = ResponseMessage::from_request_with_diagnostics(
-                    &request, response_payload, diag,
+                    &request,
+                    response_payload,
+                    diag,
                 );
                 // For put: use the new state hash from versioned_put, or echo request.state
                 response.state = new_state.or_else(|| request.state.clone());
@@ -159,10 +196,16 @@ impl KvWorker {
                 let response_payload = self.handle_list(&request);
                 let duration_ms = start.elapsed().as_millis() as u64;
                 let diag = ServiceDiagnostics::storage(
-                    self.service.service_type(), self.service.backend_str(), Operation::List, response_payload.len() as u64, duration_ms,
+                    self.service.service_type(),
+                    self.service.backend_str(),
+                    Operation::List,
+                    response_payload.len() as u64,
+                    duration_ms,
                 );
                 let mut response = ResponseMessage::from_request_with_diagnostics(
-                    &request, response_payload, diag,
+                    &request,
+                    response_payload,
+                    diag,
                 );
                 response.state = request.state.clone();
                 let _ = self.queue.send_response(response);
@@ -180,10 +223,16 @@ impl KvWorker {
                 let response_payload = self.handle_delete(&request);
                 let duration_ms = start.elapsed().as_millis() as u64;
                 let diag = ServiceDiagnostics::storage(
-                    self.service.service_type(), self.service.backend_str(), Operation::Delete, response_payload.len() as u64, duration_ms,
+                    self.service.service_type(),
+                    self.service.backend_str(),
+                    Operation::Delete,
+                    response_payload.len() as u64,
+                    duration_ms,
                 );
                 let mut response = ResponseMessage::from_request_with_diagnostics(
-                    &request, response_payload, diag,
+                    &request,
+                    response_payload,
+                    diag,
                 );
                 response.state = request.state.clone();
                 let _ = self.queue.send_response(response);
@@ -247,7 +296,12 @@ impl KvWorker {
 
         // Versioned put (ADR 055): state comes from the envelope
         if let Some(ref parent_state) = request.state {
-            return match self.versioned_put(request.agent_id.as_str(), parent_state, &req.path, content) {
+            return match self.versioned_put(
+                request.agent_id.as_str(),
+                parent_state,
+                &req.path,
+                content,
+            ) {
                 Ok(new_state) => {
                     let response = serde_json::json!({"state": new_state});
                     (serde_json::to_vec(&response).unwrap(), Some(new_state))
@@ -270,11 +324,9 @@ impl KvWorker {
         if let Some(ref state_hash) = request.state {
             if !state_hash.is_empty() {
                 return match self.versioned_list(request.agent_id.as_str(), state_hash, &req.path) {
-                    Ok(files) => {
-                        serde_json::to_string(&files)
-                            .map(|s| s.into_bytes())
-                            .unwrap_or_else(|e| format!("[error] {}", e).into_bytes())
-                    }
+                    Ok(files) => serde_json::to_string(&files)
+                        .map(|s| s.into_bytes())
+                        .unwrap_or_else(|e| format!("[error] {}", e).into_bytes()),
                     Err(e) => format!("[error] {}", e).into_bytes(),
                 };
             }
@@ -287,11 +339,9 @@ impl KvWorker {
         };
 
         match store.list_files(&req.path) {
-            Ok(files) => {
-                serde_json::to_string(&files)
-                    .map(|s| s.into_bytes())
-                    .unwrap_or_else(|e| format!("[error] {}", e).into_bytes())
-            }
+            Ok(files) => serde_json::to_string(&files)
+                .map(|s| s.into_bytes())
+                .unwrap_or_else(|e| format!("[error] {}", e).into_bytes()),
             Err(e) => format!("[error] {}", e).into_bytes(),
         }
     }
@@ -334,9 +384,11 @@ impl KvWorker {
         let parent_entries = if parent_state.is_empty() {
             HashMap::new()
         } else {
-            let commit = state_store.get_state_commit(parent_state)?
+            let commit = state_store
+                .get_state_commit(parent_state)?
                 .ok_or_else(|| format!("unknown parent state: {}", parent_state))?;
-            state_store.get_snapshot(&commit.snapshot_hash)?
+            state_store
+                .get_snapshot(&commit.snapshot_hash)?
                 .unwrap_or_default()
         };
 
@@ -365,11 +417,13 @@ impl KvWorker {
         let state_store = self.get_or_open_state_store(agent_id)?;
 
         // Load state commit
-        let commit = state_store.get_state_commit(state_hash)?
+        let commit = state_store
+            .get_state_commit(state_hash)?
             .ok_or_else(|| format!("unknown state: {}", state_hash))?;
 
         // Load snapshot
-        let entries = state_store.get_snapshot(&commit.snapshot_hash)?
+        let entries = state_store
+            .get_snapshot(&commit.snapshot_hash)?
             .unwrap_or_default();
 
         // Look up path
@@ -391,13 +445,16 @@ impl KvWorker {
     ) -> Result<Vec<String>, String> {
         let state_store = self.get_or_open_state_store(agent_id)?;
 
-        let commit = state_store.get_state_commit(state_hash)?
+        let commit = state_store
+            .get_state_commit(state_hash)?
             .ok_or_else(|| format!("unknown state: {}", state_hash))?;
 
-        let entries = state_store.get_snapshot(&commit.snapshot_hash)?
+        let entries = state_store
+            .get_snapshot(&commit.snapshot_hash)?
             .unwrap_or_default();
 
-        let mut files: Vec<String> = entries.keys()
+        let mut files: Vec<String> = entries
+            .keys()
             .filter(|k| k.starts_with(prefix))
             .cloned()
             .collect();
@@ -409,11 +466,14 @@ impl KvWorker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vlinder_core::domain::{Agent, AgentId, Registry};
     use vlinder_core::domain::InMemoryRegistry;
-    use vlinder_core::domain::{ObjectStorageType, Operation, RequestDiagnostics, Sequence, ServiceBackend, SessionId, SubmissionId, TimelineId};
-    use vlinder_core::domain::SecretStore;
     use vlinder_core::domain::InMemorySecretStore;
+    use vlinder_core::domain::SecretStore;
+    use vlinder_core::domain::{Agent, AgentId, Registry};
+    use vlinder_core::domain::{
+        ObjectStorageType, Operation, RequestDiagnostics, Sequence, ServiceBackend, SessionId,
+        SubmissionId, TimelineId,
+    };
     use vlinder_core::queue::InMemoryQueue;
 
     fn test_secret_store() -> Arc<dyn SecretStore> {
@@ -421,7 +481,12 @@ mod tests {
     }
 
     fn test_request_diag() -> RequestDiagnostics {
-        RequestDiagnostics { sequence: 0, endpoint: String::new(), request_bytes: 0, received_at_ms: 0 }
+        RequestDiagnostics {
+            sequence: 0,
+            endpoint: String::new(),
+            request_bytes: 0,
+            received_at_ms: 0,
+        }
     }
 
     fn test_agent_id() -> AgentId {
@@ -460,7 +525,11 @@ mod tests {
         let agent = test_agent_with_object_storage(&db_path);
         registry.register_agent(agent).unwrap();
         let registry: Arc<dyn Registry> = Arc::new(registry);
-        let handler = KvWorker::new(Arc::clone(&queue), Arc::clone(&registry), ServiceBackend::Kv(ObjectStorageType::Sqlite));
+        let handler = KvWorker::new(
+            Arc::clone(&queue),
+            Arc::clone(&registry),
+            ServiceBackend::Kv(ObjectStorageType::Sqlite),
+        );
 
         // Put request — no base64, plain string
         let put_payload = serde_json::json!({
@@ -469,8 +538,12 @@ mod tests {
         });
         let put_request = RequestMessage::new(
             TimelineId::main(),
-            test_submission(), SessionId::new(), test_agent_id(),
-            ServiceBackend::Kv(ObjectStorageType::Sqlite), Operation::Put, Sequence::first(),
+            test_submission(),
+            SessionId::new(),
+            test_agent_id(),
+            ServiceBackend::Kv(ObjectStorageType::Sqlite),
+            Operation::Put,
+            Sequence::first(),
             serde_json::to_vec(&put_payload).unwrap(),
             None,
             test_request_diag(),
@@ -486,8 +559,12 @@ mod tests {
         let get_payload = serde_json::json!({"path": "/hello.txt"});
         let get_request = RequestMessage::new(
             TimelineId::main(),
-            test_submission(), SessionId::new(), test_agent_id(),
-            ServiceBackend::Kv(ObjectStorageType::Sqlite), Operation::Get, Sequence::from(2),
+            test_submission(),
+            SessionId::new(),
+            test_agent_id(),
+            ServiceBackend::Kv(ObjectStorageType::Sqlite),
+            Operation::Get,
+            Sequence::from(2),
             serde_json::to_vec(&get_payload).unwrap(),
             None,
             test_request_diag(),
@@ -512,7 +589,11 @@ mod tests {
         let agent = test_agent_with_object_storage(&db_path);
         registry.register_agent(agent).unwrap();
         let registry: Arc<dyn Registry> = Arc::new(registry);
-        let handler = KvWorker::new(Arc::clone(&queue), Arc::clone(&registry), ServiceBackend::Kv(ObjectStorageType::Sqlite));
+        let handler = KvWorker::new(
+            Arc::clone(&queue),
+            Arc::clone(&registry),
+            ServiceBackend::Kv(ObjectStorageType::Sqlite),
+        );
 
         let put_payload = serde_json::json!({
             "path": "/todos.json",
@@ -521,10 +602,14 @@ mod tests {
         // State comes from the envelope (empty string = root state)
         let put_request = RequestMessage::new(
             TimelineId::main(),
-            test_submission(), SessionId::new(), test_agent_id(),
-            ServiceBackend::Kv(ObjectStorageType::Sqlite), Operation::Put, Sequence::first(),
+            test_submission(),
+            SessionId::new(),
+            test_agent_id(),
+            ServiceBackend::Kv(ObjectStorageType::Sqlite),
+            Operation::Put,
+            Sequence::first(),
             serde_json::to_vec(&put_payload).unwrap(),
-            Some("".to_string()),  // root state via envelope
+            Some("".to_string()), // root state via envelope
             test_request_diag(),
         );
 
@@ -539,7 +624,7 @@ mod tests {
         let state = resp["state"].as_str().unwrap();
         assert!(!state.is_empty());
         assert_eq!(state.len(), 64); // SHA-256 hex
-        // response.state should also have the new hash
+                                     // response.state should also have the new hash
         assert_eq!(response.state, Some(state.to_string()));
     }
 
@@ -555,14 +640,22 @@ mod tests {
         let agent = test_agent_with_object_storage(&db_path);
         registry.register_agent(agent).unwrap();
         let registry: Arc<dyn Registry> = Arc::new(registry);
-        let handler = KvWorker::new(Arc::clone(&queue), Arc::clone(&registry), ServiceBackend::Kv(ObjectStorageType::Sqlite));
+        let handler = KvWorker::new(
+            Arc::clone(&queue),
+            Arc::clone(&registry),
+            ServiceBackend::Kv(ObjectStorageType::Sqlite),
+        );
 
         // First put
         let put1 = serde_json::json!({"path": "/a.txt", "content": "aaa"});
         let req1 = RequestMessage::new(
             TimelineId::main(),
-            test_submission(), SessionId::new(), test_agent_id(),
-            ServiceBackend::Kv(ObjectStorageType::Sqlite), Operation::Put, Sequence::first(),
+            test_submission(),
+            SessionId::new(),
+            test_agent_id(),
+            ServiceBackend::Kv(ObjectStorageType::Sqlite),
+            Operation::Put,
+            Sequence::first(),
             serde_json::to_vec(&put1).unwrap(),
             Some("".to_string()),
             test_request_diag(),
@@ -578,10 +671,14 @@ mod tests {
         let put2 = serde_json::json!({"path": "/b.txt", "content": "bbb"});
         let req2 = RequestMessage::new(
             TimelineId::main(),
-            test_submission(), SessionId::new(), test_agent_id(),
-            ServiceBackend::Kv(ObjectStorageType::Sqlite), Operation::Put, Sequence::from(2),
+            test_submission(),
+            SessionId::new(),
+            test_agent_id(),
+            ServiceBackend::Kv(ObjectStorageType::Sqlite),
+            Operation::Put,
+            Sequence::from(2),
             serde_json::to_vec(&put2).unwrap(),
-            Some(hash1.clone()),  // chain from previous state via envelope
+            Some(hash1.clone()), // chain from previous state via envelope
             test_request_diag(),
         );
         queue.send_request(req2.clone()).unwrap();
@@ -598,10 +695,14 @@ mod tests {
         let get = serde_json::json!({"path": "/a.txt"});
         let get_req = RequestMessage::new(
             TimelineId::main(),
-            test_submission(), SessionId::new(), test_agent_id(),
-            ServiceBackend::Kv(ObjectStorageType::Sqlite), Operation::Get, Sequence::from(3),
+            test_submission(),
+            SessionId::new(),
+            test_agent_id(),
+            ServiceBackend::Kv(ObjectStorageType::Sqlite),
+            Operation::Get,
+            Sequence::from(3),
             serde_json::to_vec(&get).unwrap(),
-            Some(hash2.clone()),  // state via envelope
+            Some(hash2.clone()), // state via envelope
             test_request_diag(),
         );
         queue.send_request(get_req.clone()).unwrap();
@@ -623,14 +724,22 @@ mod tests {
         let agent = test_agent_with_object_storage(&db_path);
         registry.register_agent(agent).unwrap();
         let registry: Arc<dyn Registry> = Arc::new(registry);
-        let handler = KvWorker::new(Arc::clone(&queue), Arc::clone(&registry), ServiceBackend::Kv(ObjectStorageType::Sqlite));
+        let handler = KvWorker::new(
+            Arc::clone(&queue),
+            Arc::clone(&registry),
+            ServiceBackend::Kv(ObjectStorageType::Sqlite),
+        );
         let session = SessionId::new();
 
         // Put /a.txt → state1
         let req1 = RequestMessage::new(
             TimelineId::main(),
-            test_submission(), session.clone(), test_agent_id(),
-            ServiceBackend::Kv(ObjectStorageType::Sqlite), Operation::Put, Sequence::first(),
+            test_submission(),
+            session.clone(),
+            test_agent_id(),
+            ServiceBackend::Kv(ObjectStorageType::Sqlite),
+            Operation::Put,
+            Sequence::first(),
             serde_json::to_vec(&serde_json::json!({"path": "/a.txt", "content": "aaa"})).unwrap(),
             Some("".to_string()),
             test_request_diag(),
@@ -645,8 +754,12 @@ mod tests {
         // Put /b.txt → state2
         let req2 = RequestMessage::new(
             TimelineId::main(),
-            test_submission(), session.clone(), test_agent_id(),
-            ServiceBackend::Kv(ObjectStorageType::Sqlite), Operation::Put, Sequence::from(2),
+            test_submission(),
+            session.clone(),
+            test_agent_id(),
+            ServiceBackend::Kv(ObjectStorageType::Sqlite),
+            Operation::Put,
+            Sequence::from(2),
             serde_json::to_vec(&serde_json::json!({"path": "/b.txt", "content": "bbb"})).unwrap(),
             Some(hash1.clone()),
             test_request_diag(),
@@ -661,8 +774,12 @@ mod tests {
         // List from state2 — should see both files
         let list_req2 = RequestMessage::new(
             TimelineId::main(),
-            test_submission(), session.clone(), test_agent_id(),
-            ServiceBackend::Kv(ObjectStorageType::Sqlite), Operation::List, Sequence::from(3),
+            test_submission(),
+            session.clone(),
+            test_agent_id(),
+            ServiceBackend::Kv(ObjectStorageType::Sqlite),
+            Operation::List,
+            Sequence::from(3),
             serde_json::to_vec(&serde_json::json!({"path": "/"})).unwrap(),
             Some(hash2),
             test_request_diag(),
@@ -677,8 +794,12 @@ mod tests {
         // List from state1 (time travel) — should only see /a.txt
         let list_req1 = RequestMessage::new(
             TimelineId::main(),
-            test_submission(), session.clone(), test_agent_id(),
-            ServiceBackend::Kv(ObjectStorageType::Sqlite), Operation::List, Sequence::from(4),
+            test_submission(),
+            session.clone(),
+            test_agent_id(),
+            ServiceBackend::Kv(ObjectStorageType::Sqlite),
+            Operation::List,
+            Sequence::from(4),
             serde_json::to_vec(&serde_json::json!({"path": "/"})).unwrap(),
             Some(hash1),
             test_request_diag(),
@@ -703,14 +824,22 @@ mod tests {
         let agent = test_agent_with_object_storage(&db_path);
         registry.register_agent(agent).unwrap();
         let registry: Arc<dyn Registry> = Arc::new(registry);
-        let handler = KvWorker::new(Arc::clone(&queue), Arc::clone(&registry), ServiceBackend::Kv(ObjectStorageType::Sqlite));
+        let handler = KvWorker::new(
+            Arc::clone(&queue),
+            Arc::clone(&registry),
+            ServiceBackend::Kv(ObjectStorageType::Sqlite),
+        );
 
         // Put a file first (unversioned)
         let put_payload = serde_json::json!({"path": "/hello.txt", "content": "hello"});
         let put_request = RequestMessage::new(
             TimelineId::main(),
-            test_submission(), SessionId::new(), test_agent_id(),
-            ServiceBackend::Kv(ObjectStorageType::Sqlite), Operation::Put, Sequence::first(),
+            test_submission(),
+            SessionId::new(),
+            test_agent_id(),
+            ServiceBackend::Kv(ObjectStorageType::Sqlite),
+            Operation::Put,
+            Sequence::first(),
             serde_json::to_vec(&put_payload).unwrap(),
             None,
             test_request_diag(),
@@ -724,8 +853,12 @@ mod tests {
         let get_payload = serde_json::json!({"path": "/hello.txt"});
         let get_request = RequestMessage::new(
             TimelineId::main(),
-            test_submission(), SessionId::new(), test_agent_id(),
-            ServiceBackend::Kv(ObjectStorageType::Sqlite), Operation::Get, Sequence::from(2),
+            test_submission(),
+            SessionId::new(),
+            test_agent_id(),
+            ServiceBackend::Kv(ObjectStorageType::Sqlite),
+            Operation::Get,
+            Sequence::from(2),
             serde_json::to_vec(&get_payload).unwrap(),
             Some("hash123".to_string()),
             test_request_diag(),
@@ -735,6 +868,10 @@ mod tests {
         let (response, ack) = queue.receive_response(&get_request).unwrap();
         ack().unwrap();
 
-        assert_eq!(response.state, Some("hash123".to_string()), "get should echo request.state");
+        assert_eq!(
+            response.state,
+            Some("hash123".to_string()),
+            "get should echo request.state"
+        );
     }
 }

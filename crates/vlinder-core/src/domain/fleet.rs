@@ -27,17 +27,18 @@ impl Fleet {
         manifest: FleetManifest,
         registry: &dyn Registry,
     ) -> Result<Fleet, LoadError> {
-        let entry_id = registry.agent_id(&manifest.entry)
-            .ok_or_else(|| LoadError::Validation(format!(
-                "entry agent '{}' is not registered", manifest.entry
-            )))?;
+        let entry_id = registry.agent_id(&manifest.entry).ok_or_else(|| {
+            LoadError::Validation(format!(
+                "entry agent '{}' is not registered",
+                manifest.entry
+            ))
+        })?;
 
         let mut agents = HashSet::with_capacity(manifest.agents.len());
         for name in manifest.agents.keys() {
-            let id = registry.agent_id(name)
-                .ok_or_else(|| LoadError::Validation(format!(
-                    "agent '{}' is not registered", name
-                )))?;
+            let id = registry.agent_id(name).ok_or_else(|| {
+                LoadError::Validation(format!("agent '{}' is not registered", name))
+            })?;
             agents.insert(id);
         }
 

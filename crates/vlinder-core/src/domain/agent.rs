@@ -1,13 +1,16 @@
 use std::collections::HashMap;
 use std::path::Path;
+use std::str::FromStr;
 
 use serde::Serialize;
 
-use super::agent_manifest::{AgentManifest, MountConfig, ParseError, PromptsConfig, RequirementsConfig, ServiceConfig};
-use super::service_type::ServiceType;
+use super::agent_manifest::{
+    AgentManifest, MountConfig, ParseError, PromptsConfig, RequirementsConfig, ServiceConfig,
+};
 use super::image_digest::ImageDigest;
 use super::resource_id::ResourceId;
 use super::runtime::RuntimeType;
+use super::service_type::ServiceType;
 
 /// An agent with resolved paths, ready for execution.
 ///
@@ -56,8 +59,8 @@ impl Agent {
     /// The TOML should contain resolved absolute URIs for `executable` and model paths.
     /// No path resolution is performed - caller is responsible for pre-resolving.
     pub fn from_toml(toml_content: &str) -> Result<Agent, LoadError> {
-        let manifest: AgentManifest = toml::from_str(toml_content)
-            .map_err(|e| LoadError::Parse(e.to_string()))?;
+        let manifest: AgentManifest =
+            toml::from_str(toml_content).map_err(|e| LoadError::Parse(e.to_string()))?;
         Self::from_manifest(manifest)
     }
 
@@ -68,7 +71,7 @@ impl Agent {
     /// id (`<registry_id>/agents/<name>`) during registration.
     pub fn from_manifest(manifest: AgentManifest) -> Result<Agent, LoadError> {
         let runtime = RuntimeType::from_str(&manifest.runtime)
-            .ok_or_else(|| LoadError::Parse(format!("unknown runtime: {}", manifest.runtime)))?;
+            .map_err(|_| LoadError::Parse(format!("unknown runtime: {}", manifest.runtime)))?;
 
         Ok(Agent {
             name: manifest.name.clone(),
@@ -226,7 +229,8 @@ mod tests {
 
     #[test]
     fn from_toml_minimal_container_agent() {
-        let agent = make_agent(r#"
+        let agent = make_agent(
+            r#"
             name = "echo"
             description = "Echoes input"
             runtime = "container"
@@ -234,7 +238,9 @@ mod tests {
 
             [requirements]
 
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
 
         assert_eq!(agent.name, "echo");
         assert_eq!(agent.description, "Echoes input");
@@ -248,7 +254,8 @@ mod tests {
 
     #[test]
     fn from_toml_with_models() {
-        let agent = make_agent(r#"
+        let agent = make_agent(
+            r#"
             name = "thinker"
             description = "Thinks"
             runtime = "container"
@@ -257,7 +264,9 @@ mod tests {
             [requirements.models]
             inference_model = "claude-sonnet"
             embedding_model = "nomic-embed"
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
 
         assert!(agent.has_model("inference_model"));
         assert!(agent.has_model("embedding_model"));
@@ -267,7 +276,8 @@ mod tests {
 
     #[test]
     fn from_toml_with_storage() {
-        let agent = make_agent(r#"
+        let agent = make_agent(
+            r#"
             name = "noter"
             description = "Takes notes"
             runtime = "container"
@@ -277,7 +287,9 @@ mod tests {
 
             [requirements]
 
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
 
         assert_eq!(
             agent.object_storage.as_ref().map(|r| r.as_str()),
@@ -291,7 +303,8 @@ mod tests {
 
     #[test]
     fn from_toml_unknown_runtime_fails() {
-        let result = make_agent(r#"
+        let result = make_agent(
+            r#"
             name = "bad"
             description = "Bad runtime"
             runtime = "wasm"
@@ -299,7 +312,8 @@ mod tests {
 
             [requirements]
 
-        "#);
+        "#,
+        );
 
         assert!(result.is_err());
     }
@@ -318,7 +332,8 @@ mod tests {
 
     #[test]
     fn model_name_returns_none_for_undeclared() {
-        let agent = make_agent(r#"
+        let agent = make_agent(
+            r#"
             name = "simple"
             description = "No models"
             runtime = "container"
@@ -326,7 +341,9 @@ mod tests {
 
             [requirements]
 
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
 
         assert!(agent.model_name("nonexistent").is_none());
     }
@@ -337,34 +354,43 @@ mod tests {
 
     #[test]
     fn config_equal_for_same_declaration() {
-        let a = make_agent(r#"
+        let a = make_agent(
+            r#"
             name = "echo"
             description = "Echoes"
             runtime = "container"
             executable = "localhost/echo:latest"
             [requirements]
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
 
-        let b = make_agent(r#"
+        let b = make_agent(
+            r#"
             name = "echo"
             description = "Echoes"
             runtime = "container"
             executable = "localhost/echo:latest"
             [requirements]
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
 
         assert_eq!(a.config(), b.config());
     }
 
     #[test]
     fn config_ignores_registry_assigned_fields() {
-        let mut a = make_agent(r#"
+        let mut a = make_agent(
+            r#"
             name = "echo"
             description = "Echoes"
             runtime = "container"
             executable = "localhost/echo:latest"
             [requirements]
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
 
         let b = a.clone();
 
@@ -378,21 +404,27 @@ mod tests {
 
     #[test]
     fn config_differs_on_executable() {
-        let a = make_agent(r#"
+        let a = make_agent(
+            r#"
             name = "echo"
             description = "Echoes"
             runtime = "container"
             executable = "localhost/echo:v1"
             [requirements]
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
 
-        let b = make_agent(r#"
+        let b = make_agent(
+            r#"
             name = "echo"
             description = "Echoes"
             runtime = "container"
             executable = "localhost/echo:v2"
             [requirements]
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
 
         assert_ne!(a.config(), b.config());
     }
@@ -403,7 +435,8 @@ mod tests {
 
     #[test]
     fn from_toml_with_mounts() {
-        let agent = make_agent(r#"
+        let agent = make_agent(
+            r#"
             name = "support"
             description = "Support agent"
             runtime = "container"
@@ -413,40 +446,52 @@ mod tests {
             s3 = "vlinder-support/v0.1.0/"
             path = "/knowledge"
             endpoint = "http://host.containers.internal:4566"
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
 
         assert_eq!(agent.requirements.mounts.len(), 1);
         let mount = &agent.requirements.mounts["knowledge"];
         assert_eq!(mount.s3, "vlinder-support/v0.1.0/");
         assert_eq!(mount.path, "/knowledge");
-        assert_eq!(mount.endpoint.as_deref(), Some("http://host.containers.internal:4566"));
+        assert_eq!(
+            mount.endpoint.as_deref(),
+            Some("http://host.containers.internal:4566")
+        );
     }
 
     #[test]
     fn from_toml_without_mounts_has_empty_map() {
-        let agent = make_agent(r#"
+        let agent = make_agent(
+            r#"
             name = "echo"
             description = "Echoes"
             runtime = "container"
             executable = "localhost/echo:latest"
 
             [requirements]
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
 
         assert!(agent.requirements.mounts.is_empty());
     }
 
     #[test]
     fn config_differs_on_mounts() {
-        let a = make_agent(r#"
+        let a = make_agent(
+            r#"
             name = "echo"
             description = "Echoes"
             runtime = "container"
             executable = "localhost/echo:latest"
             [requirements]
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
 
-        let b = make_agent(r#"
+        let b = make_agent(
+            r#"
             name = "echo"
             description = "Echoes"
             runtime = "container"
@@ -454,7 +499,9 @@ mod tests {
             [requirements.mounts.knowledge]
             s3 = "vlinder-support/v0.1.0/"
             path = "/knowledge"
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
 
         assert_ne!(a.config(), b.config());
     }

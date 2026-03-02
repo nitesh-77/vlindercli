@@ -1,6 +1,6 @@
+pub mod persistent;
 pub mod registry_service;
 pub mod storage;
-pub mod persistent;
 
 pub use persistent::PersistentRegistry;
 pub use storage::SqliteRegistryRepository;

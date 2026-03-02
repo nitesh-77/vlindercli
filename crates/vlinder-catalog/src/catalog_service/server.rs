@@ -3,15 +3,12 @@
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
 
-use vlinder_core::domain::CatalogService;
 use super::proto::{
-    catalog_service_server::CatalogService as GrpcCatalogService,
-    PingRequest, SemVer,
-    ListCatalogsRequest, ListCatalogsResponse,
-    ResolveRequest, ResolveResponse,
-    ListRequest, ListResponse,
-    AvailableRequest, AvailableResponse,
+    catalog_service_server::CatalogService as GrpcCatalogService, AvailableRequest,
+    AvailableResponse, ListCatalogsRequest, ListCatalogsResponse, ListRequest, ListResponse,
+    PingRequest, ResolveRequest, ResolveResponse, SemVer,
 };
+use vlinder_core::domain::CatalogService;
 
 /// gRPC server that delegates catalog requests to a `CatalogService`.
 ///
@@ -34,10 +31,7 @@ impl CatalogServiceServer {
 
 #[tonic::async_trait]
 impl GrpcCatalogService for CatalogServiceServer {
-    async fn ping(
-        &self,
-        _request: Request<PingRequest>,
-    ) -> Result<Response<SemVer>, Status> {
+    async fn ping(&self, _request: Request<PingRequest>) -> Result<Response<SemVer>, Status> {
         Ok(Response::new(SemVer {
             major: 0,
             minor: 0,
@@ -62,9 +56,9 @@ impl GrpcCatalogService for CatalogServiceServer {
         let catalog = req.catalog;
         let name = req.name;
 
-        let result = tokio::task::spawn_blocking(move || {
-            service.resolve(&catalog, &name)
-        }).await.map_err(|e| Status::internal(e.to_string()))?;
+        let result = tokio::task::spawn_blocking(move || service.resolve(&catalog, &name))
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
 
         match result {
             Ok(model) => Ok(Response::new(ResolveResponse {
@@ -78,17 +72,14 @@ impl GrpcCatalogService for CatalogServiceServer {
         }
     }
 
-    async fn list(
-        &self,
-        request: Request<ListRequest>,
-    ) -> Result<Response<ListResponse>, Status> {
+    async fn list(&self, request: Request<ListRequest>) -> Result<Response<ListResponse>, Status> {
         let req = request.into_inner();
         let service = self.service.clone();
         let catalog = req.catalog;
 
-        let result = tokio::task::spawn_blocking(move || {
-            service.list(&catalog)
-        }).await.map_err(|e| Status::internal(e.to_string()))?;
+        let result = tokio::task::spawn_blocking(move || service.list(&catalog))
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
 
         match result {
             Ok(models) => Ok(Response::new(ListResponse {
@@ -111,9 +102,9 @@ impl GrpcCatalogService for CatalogServiceServer {
         let catalog = req.catalog;
         let name = req.name;
 
-        let result = tokio::task::spawn_blocking(move || {
-            service.available(&catalog, &name)
-        }).await.map_err(|e| Status::internal(e.to_string()))?;
+        let result = tokio::task::spawn_blocking(move || service.available(&catalog, &name))
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
 
         Ok(Response::new(AvailableResponse {
             available: result,

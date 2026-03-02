@@ -9,16 +9,15 @@
 //! The only input is the `InvokeMessage`.
 
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use tiny_http::{Method, StatusCode};
 use vlinder_core::domain::{
-    AgentId, RuntimeDiagnostics, DelegateDiagnostics, DelegateMessage,
-    HttpMethod, InvokeMessage, MessageQueue, Nonce, ObjectStorageType,
-    Provider, ProviderHost, ProviderRoute, Registry, RequestDiagnostics,
-    RequestMessage, RoutingKey, SequenceCounter, ServiceType,
+    AgentId, DelegateDiagnostics, DelegateMessage, HttpMethod, InvokeMessage, MessageQueue, Nonce,
+    ObjectStorageType, Provider, ProviderHost, ProviderRoute, Registry, RequestDiagnostics,
+    RequestMessage, RoutingKey, RuntimeDiagnostics, SequenceCounter, ServiceType,
     VectorStorageType,
 };
 
@@ -56,9 +55,20 @@ impl ProviderServer {
 
         let server = tiny_http::Server::http("0.0.0.0:80")
             .expect("failed to bind provider server on port 80");
-        tracing::info!(event = "provider_server.listening", port = 80, "Provider server started");
+        tracing::info!(
+            event = "provider_server.listening",
+            port = 80,
+            "Provider server started"
+        );
 
-        Some(Self::start_request_loop(server, hosts, queue, registry, invoke, initial_state))
+        Some(Self::start_request_loop(
+            server,
+            hosts,
+            queue,
+            registry,
+            invoke,
+            initial_state,
+        ))
     }
 
     /// Read the final state hash after an invocation completes.
@@ -87,10 +97,22 @@ impl ProviderServer {
         let state_clone = Arc::clone(&state);
 
         let thread = std::thread::spawn(move || {
-            request_loop(should_stop, server, hosts, queue, registry, invoke, state_clone);
+            request_loop(
+                should_stop,
+                server,
+                hosts,
+                queue,
+                registry,
+                invoke,
+                state_clone,
+            );
         });
 
-        Self { shutdown_signal, thread: Some(thread), state }
+        Self {
+            shutdown_signal,
+            thread: Some(thread),
+            state,
+        }
     }
 }
 
@@ -131,25 +153,36 @@ fn request_loop(
                 let _ = request.as_reader().read_to_end(&mut body);
 
                 let (status, response_body) = if host == "runtime.vlinder.local" {
-                    handle_runtime_request(&*queue, &*registry, &invoke, &mut pending_replies, &method, &path, &body)
+                    handle_runtime_request(
+                        &*queue,
+                        &*registry,
+                        &invoke,
+                        &mut pending_replies,
+                        &method,
+                        &path,
+                        &body,
+                    )
                 } else {
                     match match_route(&hosts, &method, &host, &path, &body) {
-                        Ok(route) => forward_to_queue(&*queue, &invoke, &sequence, &state, route, body),
+                        Ok(route) => {
+                            forward_to_queue(&*queue, &invoke, &sequence, &state, route, body)
+                        }
                         Err(err) => err,
                     }
                 };
 
                 tracing::info!(
                     event = "provider_server.request_done",
-                    status = status, response_bytes = response_body.len(),
+                    status = status,
+                    response_bytes = response_body.len(),
                     "Provider server sending response"
                 );
                 let response = tiny_http::Response::from_data(response_body)
                     .with_status_code(StatusCode(status));
                 let _ = request.respond(response);
             }
-            Ok(None) => continue,   // timeout, check shutdown flag
-            Err(_) => break,         // server error, exit
+            Ok(None) => continue, // timeout, check shutdown flag
+            Err(_) => break,      // server error, exit
         }
     }
     tracing::info!(event = "provider_server.stopped", "Provider server stopped");
@@ -161,13 +194,21 @@ fn request_loop(
 /// checks its service requirements, and connects to the message queue.
 /// Always returns a context — even agents with no provider services need
 /// the server for delegation endpoints on `runtime.vlinder.local`.
-fn build_context(invoke: &InvokeMessage) -> (Vec<ProviderHost>, Arc<dyn MessageQueue + Send + Sync>, Arc<dyn Registry>, InvokeMessage, Option<String>) {
-    let config = SidecarConfig::from_env()
-        .expect("failed to parse sidecar config from env");
+fn build_context(
+    invoke: &InvokeMessage,
+) -> (
+    Vec<ProviderHost>,
+    Arc<dyn MessageQueue + Send + Sync>,
+    Arc<dyn Registry>,
+    InvokeMessage,
+    Option<String>,
+) {
+    let config = SidecarConfig::from_env().expect("failed to parse sidecar config from env");
     let registry = factory::connect_registry(&config.registry_url)
         .expect("failed to connect to registry from provider server");
 
-    let agent = registry.get_agent_by_name(invoke.agent_id.as_str())
+    let agent = registry
+        .get_agent_by_name(invoke.agent_id.as_str())
         .expect("agent not found in registry");
 
     let mut hosts = Vec::new();
@@ -199,10 +240,15 @@ fn build_context(invoke: &InvokeMessage) -> (Vec<ProviderHost>, Arc<dyn MessageQ
         .unwrap_or(false);
 
     if needs_ollama_infer || needs_ollama_embed {
-        hosts.push(vlinder_ollama::provider_host(needs_ollama_infer, needs_ollama_embed));
+        hosts.push(vlinder_ollama::provider_host(
+            needs_ollama_infer,
+            needs_ollama_embed,
+        ));
     }
 
-    let needs_sqlite_vec = agent.vector_storage.as_ref()
+    let needs_sqlite_vec = agent
+        .vector_storage
+        .as_ref()
         .and_then(|uri| VectorStorageType::from_scheme(uri.scheme()))
         .map(|t| t == VectorStorageType::SqliteVec)
         .unwrap_or(false);
@@ -212,7 +258,9 @@ fn build_context(invoke: &InvokeMessage) -> (Vec<ProviderHost>, Arc<dyn MessageQ
     }
 
     // KV storage: any agent with object_storage gets the sqlite-kv provider
-    let has_object_storage = agent.object_storage.as_ref()
+    let has_object_storage = agent
+        .object_storage
+        .as_ref()
         .and_then(|uri| ObjectStorageType::from_scheme(uri.scheme()))
         .is_some();
 
@@ -293,7 +341,10 @@ fn handle_delegate(
 
     // Fast-fail: target must be a registered agent.
     if registry.get_agent_by_name(target_name).is_none() {
-        return (404, format!("target agent '{}' not found", target_name).into_bytes());
+        return (
+            404,
+            format!("target agent '{}' not found", target_name).into_bytes(),
+        );
     }
 
     let caller = invoke.agent_id.clone();
@@ -309,7 +360,9 @@ fn handle_delegate(
         input.as_bytes().to_vec(),
         nonce.clone(),
         None,
-        DelegateDiagnostics { runtime: RuntimeDiagnostics::placeholder(0) },
+        DelegateDiagnostics {
+            runtime: RuntimeDiagnostics::placeholder(0),
+        },
     );
 
     let reply_key = delegate.reply_routing_key();
@@ -355,7 +408,12 @@ fn handle_wait(
 
     let reply_key = match pending_replies.get(&handle) {
         Some(k) => k.clone(),
-        None => return (404, format!("unknown delegation handle '{}'", handle).into_bytes()),
+        None => {
+            return (
+                404,
+                format!("unknown delegation handle '{}'", handle).into_bytes(),
+            )
+        }
     };
 
     tracing::debug!(handle = %handle, "wait: polling for delegation result");
@@ -492,54 +550,90 @@ mod tests {
 
     fn test_hosts() -> Vec<ProviderHost> {
         use vlinder_core::domain::{InferenceBackendType, Operation, ServiceBackend};
-        vec![ProviderHost::new("test.vlinder.local", vec![
-            ProviderRoute::new::<String, String>(
+        vec![ProviderHost::new(
+            "test.vlinder.local",
+            vec![ProviderRoute::new::<String, String>(
                 HttpMethod::Post,
                 "/test",
                 ServiceBackend::Infer(InferenceBackendType::Ollama),
                 Operation::Run,
-            ),
-        ])]
+            )],
+        )]
     }
 
     #[test]
     fn matching_route_returns_ok() {
         let hosts = test_hosts();
-        assert!(match_route(&hosts, &Method::Post, "test.vlinder.local", "/test", b"\"hello\"").is_ok());
+        assert!(match_route(
+            &hosts,
+            &Method::Post,
+            "test.vlinder.local",
+            "/test",
+            b"\"hello\""
+        )
+        .is_ok());
     }
 
     #[test]
     fn invalid_payload_returns_400() {
         let hosts = test_hosts();
-        let err = match_route(&hosts, &Method::Post, "test.vlinder.local", "/test", b"not json").err().unwrap();
+        let err = match_route(
+            &hosts,
+            &Method::Post,
+            "test.vlinder.local",
+            "/test",
+            b"not json",
+        )
+        .err()
+        .unwrap();
         assert_eq!(err.0, 400);
     }
 
     #[test]
     fn missing_host_returns_404() {
         let hosts = test_hosts();
-        let err = match_route(&hosts, &Method::Post, "", "/test", b"\"hello\"").err().unwrap();
+        let err = match_route(&hosts, &Method::Post, "", "/test", b"\"hello\"")
+            .err()
+            .unwrap();
         assert_eq!(err.0, 404);
     }
 
     #[test]
     fn wrong_host_returns_404() {
         let hosts = test_hosts();
-        let err = match_route(&hosts, &Method::Post, "other.vlinder.local", "/test", b"\"hello\"").err().unwrap();
+        let err = match_route(
+            &hosts,
+            &Method::Post,
+            "other.vlinder.local",
+            "/test",
+            b"\"hello\"",
+        )
+        .err()
+        .unwrap();
         assert_eq!(err.0, 404);
     }
 
     #[test]
     fn wrong_method_returns_404() {
         let hosts = test_hosts();
-        let err = match_route(&hosts, &Method::Get, "test.vlinder.local", "/test", b"").err().unwrap();
+        let err = match_route(&hosts, &Method::Get, "test.vlinder.local", "/test", b"")
+            .err()
+            .unwrap();
         assert_eq!(err.0, 404);
     }
 
     #[test]
     fn wrong_path_returns_404() {
         let hosts = test_hosts();
-        let err = match_route(&hosts, &Method::Post, "test.vlinder.local", "/other", b"\"hello\"").err().unwrap();
+        let err = match_route(
+            &hosts,
+            &Method::Post,
+            "test.vlinder.local",
+            "/other",
+            b"\"hello\"",
+        )
+        .err()
+        .unwrap();
         assert_eq!(err.0, 404);
     }
 }

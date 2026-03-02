@@ -6,10 +6,9 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
 
 use super::{
-    Agent, AgentManifest, Fleet, Job, JobId, JobStatus, Model, ModelType,
-    ObjectStorageType, Provider, RegistrationError, Registry, ResourceId, RuntimeType,
-    SecretStore, ServiceType, SubmissionId, VectorStorageType,
-    ensure_agent_identity,
+    ensure_agent_identity, Agent, AgentManifest, Fleet, Job, JobId, JobStatus, Model, ModelType,
+    ObjectStorageType, Provider, RegistrationError, Registry, ResourceId, RuntimeType, SecretStore,
+    ServiceType, SubmissionId, VectorStorageType,
 };
 
 /// Internal state for InMemoryRegistry.
@@ -128,9 +127,10 @@ impl Registry for InMemoryRegistry {
 
         // Validate runtime is available
         if self.select_runtime_internal(&agent, &state).is_none() {
-            return Err(RegistrationError::NoRuntime(
-                ResourceId::new(format!("runtime:{}", agent.runtime.as_str()))
-            ));
+            return Err(RegistrationError::NoRuntime(ResourceId::new(format!(
+                "runtime:{}",
+                agent.runtime.as_str()
+            ))));
         }
 
         // Validate object storage if declared
@@ -155,48 +155,78 @@ impl Registry for InMemoryRegistry {
 
         // Validate all declared models are registered and their engines are available (ADR 094)
         for (model_alias, model_name) in &agent.requirements.models {
-            let model = state.models.values()
-                .find(|m| m.name == *model_name);
+            let model = state.models.values().find(|m| m.name == *model_name);
             let Some(model) = model else {
-                return Err(RegistrationError::ModelNotRegistered(model_alias.clone(), model_name.clone()));
+                return Err(RegistrationError::ModelNotRegistered(
+                    model_alias.clone(),
+                    model_name.clone(),
+                ));
             };
 
             match model.model_type {
                 ModelType::Inference => {
                     if !state.available_inference_engines.contains(&model.provider) {
                         return Err(RegistrationError::InferenceEngineUnavailable(
-                            model.provider, model.name.clone(),
+                            model.provider,
+                            model.name.clone(),
                         ));
                     }
-                    if !agent.requirements.services.contains_key(&ServiceType::Infer) {
-                        return Err(RegistrationError::InferenceServiceNotDeclared(model_alias.clone()));
+                    if !agent
+                        .requirements
+                        .services
+                        .contains_key(&ServiceType::Infer)
+                    {
+                        return Err(RegistrationError::InferenceServiceNotDeclared(
+                            model_alias.clone(),
+                        ));
                     }
                 }
                 ModelType::Embedding => {
                     if !state.available_embedding_engines.contains(&model.provider) {
                         return Err(RegistrationError::EmbeddingEngineUnavailable(
-                            model.provider, model.name.clone(),
+                            model.provider,
+                            model.name.clone(),
                         ));
                     }
-                    if !agent.requirements.services.contains_key(&ServiceType::Embed) {
-                        return Err(RegistrationError::EmbeddingServiceNotDeclared(model_alias.clone()));
+                    if !agent
+                        .requirements
+                        .services
+                        .contains_key(&ServiceType::Embed)
+                    {
+                        return Err(RegistrationError::EmbeddingServiceNotDeclared(
+                            model_alias.clone(),
+                        ));
                     }
                 }
             }
         }
 
         // Validate services have corresponding models
-        if agent.requirements.services.contains_key(&ServiceType::Infer) {
+        if agent
+            .requirements
+            .services
+            .contains_key(&ServiceType::Infer)
+        {
             let has_inference_model = agent.requirements.models.values().any(|name| {
-                state.models.values().any(|m| m.name == *name && m.model_type == ModelType::Inference)
+                state
+                    .models
+                    .values()
+                    .any(|m| m.name == *name && m.model_type == ModelType::Inference)
             });
             if !has_inference_model {
                 return Err(RegistrationError::InferenceServiceWithoutModel);
             }
         }
-        if agent.requirements.services.contains_key(&ServiceType::Embed) {
+        if agent
+            .requirements
+            .services
+            .contains_key(&ServiceType::Embed)
+        {
             let has_embedding_model = agent.requirements.models.values().any(|name| {
-                state.models.values().any(|m| m.name == *name && m.model_type == ModelType::Embedding)
+                state
+                    .models
+                    .values()
+                    .any(|m| m.name == *name && m.model_type == ModelType::Embedding)
             });
             if !has_embedding_model {
                 return Err(RegistrationError::EmbeddingServiceWithoutModel);
@@ -268,14 +298,16 @@ impl Registry for InMemoryRegistry {
             ModelType::Inference => {
                 if !state.available_inference_engines.contains(&model.provider) {
                     return Err(RegistrationError::InferenceEngineUnavailable(
-                        model.provider, model.name,
+                        model.provider,
+                        model.name,
                     ));
                 }
             }
             ModelType::Embedding => {
                 if !state.available_embedding_engines.contains(&model.provider) {
                     return Err(RegistrationError::EmbeddingEngineUnavailable(
-                        model.provider, model.name,
+                        model.provider,
+                        model.name,
                     ));
                 }
             }
@@ -298,7 +330,9 @@ impl Registry for InMemoryRegistry {
 
     fn get_model_by_path(&self, path: &ResourceId) -> Option<Model> {
         let state = self.state.read().unwrap();
-        state.models.values()
+        state
+            .models
+            .values()
             .find(|m| &m.model_path == path)
             .cloned()
     }
@@ -325,7 +359,9 @@ impl Registry for InMemoryRegistry {
             return Ok(false);
         };
 
-        let dependent: Vec<String> = state.agents.values()
+        let dependent: Vec<String> = state
+            .agents
+            .values()
             .filter(|a| a.requirements.models.values().any(|n| n == &model.name))
             .map(|a| a.name.clone())
             .collect();
@@ -347,7 +383,9 @@ impl Registry for InMemoryRegistry {
         }
 
         // Check if any fleet references this agent
-        let dependent: Vec<String> = state.fleets.values()
+        let dependent: Vec<String> = state
+            .fleets
+            .values()
             .filter(|f| f.agents.contains(&agent_id))
             .map(|f| f.name.clone())
             .collect();
@@ -393,7 +431,11 @@ impl Registry for InMemoryRegistry {
         }
 
         // Assign registry identity
-        fleet.id = ResourceId::new(format!("{}/fleets/{}", self.registry_id.as_str(), fleet.name));
+        fleet.id = ResourceId::new(format!(
+            "{}/fleets/{}",
+            self.registry_id.as_str(),
+            fleet.name
+        ));
         state.fleets.insert(fleet.name.clone(), fleet);
         Ok(())
     }
@@ -410,7 +452,12 @@ impl Registry for InMemoryRegistry {
 
     // --- Job operations ---
 
-    fn create_job(&self, submission_id: SubmissionId, agent_id: ResourceId, input: String) -> JobId {
+    fn create_job(
+        &self,
+        submission_id: SubmissionId,
+        agent_id: ResourceId,
+        input: String,
+    ) -> JobId {
         let id = JobId::new(&self.registry_id);
         let job = Job {
             id: id.clone(),
@@ -438,7 +485,8 @@ impl Registry for InMemoryRegistry {
 
     fn pending_jobs(&self) -> Vec<Job> {
         let state = self.state.read().unwrap();
-        state.jobs
+        state
+            .jobs
             .values()
             .filter(|j| j.status == JobStatus::Pending)
             .cloned()
@@ -497,8 +545,8 @@ impl Registry for InMemoryRegistry {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::secret_store::InMemorySecretStore;
+    use super::*;
 
     fn test_secret_store() -> Arc<dyn SecretStore> {
         Arc::new(InMemorySecretStore::new())
@@ -536,7 +584,8 @@ mod tests {
         let agent_id = test_agent_id();
 
         // Create job
-        let job_id = registry.create_job(SubmissionId::new(), agent_id.clone(), "hello".to_string());
+        let job_id =
+            registry.create_job(SubmissionId::new(), agent_id.clone(), "hello".to_string());
 
         // Initial state is Pending
         let job = registry.get_job(&job_id).unwrap();
@@ -546,7 +595,10 @@ mod tests {
 
         // Update to Running
         registry.update_job_status(&job_id, JobStatus::Running);
-        assert_eq!(registry.get_job(&job_id).unwrap().status, JobStatus::Running);
+        assert_eq!(
+            registry.get_job(&job_id).unwrap().status,
+            JobStatus::Running
+        );
 
         // Update to Completed
         registry.update_job_status(&job_id, JobStatus::Completed("result".to_string()));
@@ -663,8 +715,8 @@ mod tests {
     // --- restore_agent tests ---
 
     fn minimal_agent(name: &str) -> Agent {
-        use std::collections::HashMap;
         use super::super::{Requirements, RuntimeType};
+        use std::collections::HashMap;
 
         Agent {
             id: Agent::placeholder_id(name),
@@ -808,9 +860,15 @@ mod tests {
 
     // --- Fleet registration tests ---
 
-    fn make_fleet(registry: &InMemoryRegistry, name: &str, entry: &str, agent_names: &[&str]) -> Fleet {
+    fn make_fleet(
+        registry: &InMemoryRegistry,
+        name: &str,
+        entry: &str,
+        agent_names: &[&str],
+    ) -> Fleet {
         let entry_id = registry.agent_id(entry).unwrap();
-        let agents: HashSet<ResourceId> = agent_names.iter()
+        let agents: HashSet<ResourceId> = agent_names
+            .iter()
             .map(|n| registry.agent_id(n).unwrap())
             .collect();
         Fleet {
@@ -939,7 +997,10 @@ mod tests {
         // Same name and agents, different entry
         let fleet2 = make_fleet(&registry, "mismatch", "b", &["a", "b"]);
         let result = registry.register_fleet(fleet2);
-        assert!(matches!(result, Err(RegistrationError::FleetConfigMismatch(_))));
+        assert!(matches!(
+            result,
+            Err(RegistrationError::FleetConfigMismatch(_))
+        ));
     }
 
     #[test]
@@ -955,7 +1016,10 @@ mod tests {
         // Same name and entry, different agent set
         let fleet2 = make_fleet(&registry, "mismatch", "a", &["a", "c"]);
         let result = registry.register_fleet(fleet2);
-        assert!(matches!(result, Err(RegistrationError::FleetConfigMismatch(_))));
+        assert!(matches!(
+            result,
+            Err(RegistrationError::FleetConfigMismatch(_))
+        ));
     }
 
     #[test]

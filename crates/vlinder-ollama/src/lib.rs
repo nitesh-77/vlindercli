@@ -19,14 +19,16 @@ mod worker;
 pub use catalog::OllamaCatalog;
 
 pub use types::{
-    OllamaChatRequest, OllamaChatResponse,
-    OllamaEmbedRequest, OllamaEmbedResponse,
+    OllamaChatRequest, OllamaChatResponse, OllamaEmbedRequest, OllamaEmbedResponse,
     OllamaGenerateRequest, OllamaGenerateResponse,
 };
 pub use worker::OllamaWorker;
 
 use async_openai::types::chat::{CreateChatCompletionRequest, CreateChatCompletionResponse};
-use vlinder_core::domain::{EmbeddingBackendType, HttpMethod, InferenceBackendType, Operation, ProviderHost, ProviderRoute, ServiceBackend};
+use vlinder_core::domain::{
+    EmbeddingBackendType, HttpMethod, InferenceBackendType, Operation, ProviderHost, ProviderRoute,
+    ServiceBackend,
+};
 
 /// The virtual hostname the sidecar will serve for Ollama.
 pub const HOSTNAME: &str = "ollama.vlinder.local";
@@ -37,13 +39,19 @@ pub const HOSTNAME: &str = "ollama.vlinder.local";
 /// Panics if both `infer` and `embed` are false (caller should not
 /// create a host with zero routes).
 pub fn provider_host(infer: bool, embed: bool) -> ProviderHost {
-    assert!(infer || embed, "provider_host() called with no capabilities");
+    assert!(
+        infer || embed,
+        "provider_host() called with no capabilities"
+    );
 
     let mut routes = Vec::new();
 
     if infer {
         let backend = ServiceBackend::Infer(InferenceBackendType::Ollama);
-        routes.push(ProviderRoute::new::<CreateChatCompletionRequest, CreateChatCompletionResponse>(
+        routes.push(ProviderRoute::new::<
+            CreateChatCompletionRequest,
+            CreateChatCompletionResponse,
+        >(
             HttpMethod::Post,
             "/v1/chat/completions",
             backend,
@@ -55,7 +63,10 @@ pub fn provider_host(infer: bool, embed: bool) -> ProviderHost {
             backend,
             Operation::Chat,
         ));
-        routes.push(ProviderRoute::new::<OllamaGenerateRequest, OllamaGenerateResponse>(
+        routes.push(ProviderRoute::new::<
+            OllamaGenerateRequest,
+            OllamaGenerateResponse,
+        >(
             HttpMethod::Post,
             "/api/generate",
             backend,
@@ -65,12 +76,14 @@ pub fn provider_host(infer: bool, embed: bool) -> ProviderHost {
 
     if embed {
         let backend = ServiceBackend::Embed(EmbeddingBackendType::Ollama);
-        routes.push(ProviderRoute::new::<OllamaEmbedRequest, OllamaEmbedResponse>(
-            HttpMethod::Post,
-            "/api/embed",
-            backend,
-            Operation::Run,
-        ));
+        routes.push(
+            ProviderRoute::new::<OllamaEmbedRequest, OllamaEmbedResponse>(
+                HttpMethod::Post,
+                "/api/embed",
+                backend,
+                Operation::Run,
+            ),
+        );
     }
 
     ProviderHost::new(HOSTNAME, routes)
@@ -149,7 +162,10 @@ mod tests {
     fn openai_route_has_correct_backend_and_operation() {
         let host = provider_host(true, false);
         let route = &host.routes[0];
-        assert_eq!(route.service_backend, ServiceBackend::Infer(InferenceBackendType::Ollama));
+        assert_eq!(
+            route.service_backend,
+            ServiceBackend::Infer(InferenceBackendType::Ollama)
+        );
         assert_eq!(route.operation, Operation::Run);
     }
 
@@ -185,7 +201,10 @@ mod tests {
     fn chat_route_has_correct_backend_and_operation() {
         let host = provider_host(true, false);
         let route = &host.routes[1];
-        assert_eq!(route.service_backend, ServiceBackend::Infer(InferenceBackendType::Ollama));
+        assert_eq!(
+            route.service_backend,
+            ServiceBackend::Infer(InferenceBackendType::Ollama)
+        );
         assert_eq!(route.operation, Operation::Chat);
     }
 
@@ -221,7 +240,10 @@ mod tests {
     fn generate_route_has_correct_backend_and_operation() {
         let host = provider_host(true, false);
         let route = &host.routes[2];
-        assert_eq!(route.service_backend, ServiceBackend::Infer(InferenceBackendType::Ollama));
+        assert_eq!(
+            route.service_backend,
+            ServiceBackend::Infer(InferenceBackendType::Ollama)
+        );
         assert_eq!(route.operation, Operation::Generate);
     }
 
@@ -269,7 +291,10 @@ mod tests {
     fn embed_route_has_correct_backend_and_operation() {
         let host = provider_host(false, true);
         let route = &host.routes[0];
-        assert_eq!(route.service_backend, ServiceBackend::Embed(EmbeddingBackendType::Ollama));
+        assert_eq!(
+            route.service_backend,
+            ServiceBackend::Embed(EmbeddingBackendType::Ollama)
+        );
         assert_eq!(route.operation, Operation::Run);
     }
 

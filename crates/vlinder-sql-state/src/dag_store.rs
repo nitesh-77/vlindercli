@@ -9,6 +9,8 @@ use std::sync::{Arc, Mutex};
 use chrono::{DateTime, Utc};
 use rusqlite::Connection;
 
+use std::str::FromStr;
+
 use vlinder_core::domain::{DagNode, DagStore, MessageType, SessionSummary, Timeline};
 
 /// SQLite-backed DagStore.
@@ -24,8 +26,8 @@ impl SqliteDagStore {
                 .map_err(|e| format!("failed to create dag store directory: {}", e))?;
         }
 
-        let conn = Connection::open(path)
-            .map_err(|e| format!("failed to open dag store: {}", e))?;
+        let conn =
+            Connection::open(path).map_err(|e| format!("failed to open dag store: {}", e))?;
 
         conn.execute_batch(
             "PRAGMA journal_mode=WAL;
@@ -60,8 +62,9 @@ impl SqliteDagStore {
                  created_at TEXT NOT NULL,
                  broken_at TEXT,
                  FOREIGN KEY (parent_timeline_id) REFERENCES timelines(id)
-             );"
-        ).map_err(|e| format!("failed to initialize dag store: {}", e))?;
+             );",
+        )
+        .map_err(|e| format!("failed to initialize dag store: {}", e))?;
 
         // Migrate existing databases: add diagnostics and stderr columns (ADR 071).
         // ALTER TABLE ADD COLUMN is idempotent-safe: we check PRAGMA table_info first.
@@ -96,8 +99,9 @@ impl SqliteDagStore {
         if !has_diagnostics {
             conn.execute_batch(
                 "ALTER TABLE dag_nodes ADD COLUMN diagnostics BLOB NOT NULL DEFAULT x'';
-                 ALTER TABLE dag_nodes ADD COLUMN stderr BLOB NOT NULL DEFAULT x'';"
-            ).map_err(|e| format!("ADR 071 migration failed: {}", e))?;
+                 ALTER TABLE dag_nodes ADD COLUMN stderr BLOB NOT NULL DEFAULT x'';",
+            )
+            .map_err(|e| format!("ADR 071 migration failed: {}", e))?;
         }
 
         Ok(())
@@ -122,9 +126,8 @@ impl SqliteDagStore {
             .map_err(|e| format!("migration check failed: {}", e))?;
 
         if !has_state {
-            conn.execute_batch(
-                "ALTER TABLE dag_nodes ADD COLUMN state TEXT;"
-            ).map_err(|e| format!("state migration failed: {}", e))?;
+            conn.execute_batch("ALTER TABLE dag_nodes ADD COLUMN state TEXT;")
+                .map_err(|e| format!("state migration failed: {}", e))?;
         }
 
         Ok(())
@@ -149,8 +152,9 @@ impl SqliteDagStore {
                      created_at TEXT NOT NULL,
                      broken_at TEXT,
                      FOREIGN KEY (parent_timeline_id) REFERENCES timelines(id)
-                 );"
-            ).map_err(|e| format!("timelines migration failed: {}", e))?;
+                 );",
+            )
+            .map_err(|e| format!("timelines migration failed: {}", e))?;
         }
 
         Ok(())
@@ -176,8 +180,9 @@ impl SqliteDagStore {
 
         if !has_col {
             conn.execute_batch(
-                "ALTER TABLE dag_nodes ADD COLUMN protocol_version TEXT NOT NULL DEFAULT '';"
-            ).map_err(|e| format!("protocol_version migration failed: {}", e))?;
+                "ALTER TABLE dag_nodes ADD COLUMN protocol_version TEXT NOT NULL DEFAULT '';",
+            )
+            .map_err(|e| format!("protocol_version migration failed: {}", e))?;
         }
 
         Ok(())
@@ -216,12 +221,13 @@ fn row_to_timeline(row: &rusqlite::Row) -> Result<Timeline, rusqlite::Error> {
 /// protocol_version.
 fn row_to_dag_node(row: &rusqlite::Row) -> Result<DagNode, rusqlite::Error> {
     let mt_str: String = row.get(2)?;
-    let message_type = MessageType::from_str(&mt_str)
-        .ok_or_else(|| rusqlite::Error::FromSqlConversionFailure(
+    let message_type = MessageType::from_str(&mt_str).map_err(|_| {
+        rusqlite::Error::FromSqlConversionFailure(
             2,
             rusqlite::types::Type::Text,
             format!("unknown message type: {}", mt_str).into(),
-        ))?;
+        )
+    })?;
     let created_at_str: String = row.get(10)?;
     let created_at = DateTime::parse_from_rfc3339(&created_at_str)
         .map(|dt| dt.with_timezone(&Utc))
@@ -272,7 +278,8 @@ impl DagStore for SqliteDagStore {
             conn.execute(
                 "DELETE FROM checkout_state WHERE agent_name = ?1",
                 rusqlite::params![node.from],
-            ).map_err(|e| format!("clear checkout_state failed: {}", e))?;
+            )
+            .map_err(|e| format!("clear checkout_state failed: {}", e))?;
         }
 
         Ok(())
@@ -285,11 +292,10 @@ impl DagStore for SqliteDagStore {
              FROM dag_nodes WHERE hash = ?1"
         ).map_err(|e| format!("get_node prepare failed: {}", e))?;
 
-        let result = stmt.query_row(rusqlite::params![hash], |row| {
-            row_to_dag_node(row)
-        })
-        .optional()
-        .map_err(|e| format!("get_node query failed: {}", e))?;
+        let result = stmt
+            .query_row(rusqlite::params![hash], |row| row_to_dag_node(row))
+            .optional()
+            .map_err(|e| format!("get_node query failed: {}", e))?;
 
         Ok(result)
     }
@@ -301,9 +307,9 @@ impl DagStore for SqliteDagStore {
              FROM dag_nodes WHERE session_id = ?1 ORDER BY created_at"
         ).map_err(|e| format!("get_session_nodes prepare failed: {}", e))?;
 
-        let rows = stmt.query_map(rusqlite::params![session_id], |row| {
-            row_to_dag_node(row)
-        }).map_err(|e| format!("get_session_nodes query failed: {}", e))?;
+        let rows = stmt
+            .query_map(rusqlite::params![session_id], |row| row_to_dag_node(row))
+            .map_err(|e| format!("get_session_nodes query failed: {}", e))?;
 
         let mut nodes = Vec::new();
         for row in rows {
@@ -319,9 +325,9 @@ impl DagStore for SqliteDagStore {
              FROM dag_nodes WHERE parent_hash = ?1"
         ).map_err(|e| format!("get_children prepare failed: {}", e))?;
 
-        let rows = stmt.query_map(rusqlite::params![parent_hash], |row| {
-            row_to_dag_node(row)
-        }).map_err(|e| format!("get_children query failed: {}", e))?;
+        let rows = stmt
+            .query_map(rusqlite::params![parent_hash], |row| row_to_dag_node(row))
+            .map_err(|e| format!("get_children query failed: {}", e))?;
 
         let mut nodes = Vec::new();
         for row in rows {
@@ -332,18 +338,19 @@ impl DagStore for SqliteDagStore {
 
     fn latest_node_hash(&self, session_id: &str) -> Result<Option<String>, String> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT hash FROM dag_nodes
+        let mut stmt = conn
+            .prepare(
+                "SELECT hash FROM dag_nodes
              WHERE session_id = ?1
              ORDER BY created_at DESC
-             LIMIT 1"
-        ).map_err(|e| format!("latest_node_hash prepare failed: {}", e))?;
+             LIMIT 1",
+            )
+            .map_err(|e| format!("latest_node_hash prepare failed: {}", e))?;
 
-        let result: Option<String> = stmt.query_row(rusqlite::params![session_id], |row| {
-            row.get(0)
-        })
-        .optional()
-        .map_err(|e| format!("latest_node_hash query failed: {}", e))?;
+        let result: Option<String> = stmt
+            .query_row(rusqlite::params![session_id], |row| row.get(0))
+            .optional()
+            .map_err(|e| format!("latest_node_hash query failed: {}", e))?;
 
         Ok(result)
     }
@@ -352,34 +359,34 @@ impl DagStore for SqliteDagStore {
         let conn = self.conn.lock().unwrap();
 
         // Check checkout override first (ADR 081).
-        let mut stmt = conn.prepare(
-            "SELECT state_hash FROM checkout_state WHERE agent_name = ?1"
-        ).map_err(|e| format!("checkout_state prepare failed: {}", e))?;
+        let mut stmt = conn
+            .prepare("SELECT state_hash FROM checkout_state WHERE agent_name = ?1")
+            .map_err(|e| format!("checkout_state prepare failed: {}", e))?;
 
-        let override_state: Option<String> = stmt.query_row(rusqlite::params![agent_name], |row| {
-            row.get(0)
-        })
-        .optional()
-        .map_err(|e| format!("checkout_state query failed: {}", e))?;
+        let override_state: Option<String> = stmt
+            .query_row(rusqlite::params![agent_name], |row| row.get(0))
+            .optional()
+            .map_err(|e| format!("checkout_state query failed: {}", e))?;
 
         if override_state.is_some() {
             return Ok(override_state);
         }
 
         // Fall back to latest state from dag_nodes.
-        let mut stmt = conn.prepare(
-            "SELECT state FROM dag_nodes
+        let mut stmt = conn
+            .prepare(
+                "SELECT state FROM dag_nodes
              WHERE state IS NOT NULL AND state != ''
                AND (sender = ?1 OR receiver = ?1)
              ORDER BY created_at DESC
-             LIMIT 1"
-        ).map_err(|e| format!("latest_state prepare failed: {}", e))?;
+             LIMIT 1",
+            )
+            .map_err(|e| format!("latest_state prepare failed: {}", e))?;
 
-        let result: Option<String> = stmt.query_row(rusqlite::params![agent_name], |row| {
-            row.get(0)
-        })
-        .optional()
-        .map_err(|e| format!("latest_state query failed: {}", e))?;
+        let result: Option<String> = stmt
+            .query_row(rusqlite::params![agent_name], |row| row.get(0))
+            .optional()
+            .map_err(|e| format!("latest_state query failed: {}", e))?;
 
         Ok(result)
     }
@@ -389,7 +396,8 @@ impl DagStore for SqliteDagStore {
         conn.execute(
             "INSERT OR REPLACE INTO checkout_state (agent_name, state_hash) VALUES (?1, ?2)",
             rusqlite::params![agent_name, state],
-        ).map_err(|e| format!("set_checkout_state failed: {}", e))?;
+        )
+        .map_err(|e| format!("set_checkout_state failed: {}", e))?;
         Ok(())
     }
 
@@ -402,7 +410,8 @@ impl DagStore for SqliteDagStore {
         conn.execute(
             "INSERT OR IGNORE INTO timelines (id, branch_name, created_at) VALUES (1, 'main', ?1)",
             rusqlite::params![Utc::now().to_rfc3339()],
-        ).map_err(|e| format!("ensure_main_timeline failed: {}", e))?;
+        )
+        .map_err(|e| format!("ensure_main_timeline failed: {}", e))?;
         Ok(1)
     }
 
@@ -416,22 +425,20 @@ impl DagStore for SqliteDagStore {
         conn.execute(
             "INSERT INTO timelines (branch_name, parent_timeline_id, fork_point, created_at)
              VALUES (?1, ?2, ?3, ?4)",
-            rusqlite::params![
-                branch_name,
-                parent_id,
-                fork_point,
-                Utc::now().to_rfc3339(),
-            ],
-        ).map_err(|e| format!("create_timeline failed: {}", e))?;
+            rusqlite::params![branch_name, parent_id, fork_point, Utc::now().to_rfc3339(),],
+        )
+        .map_err(|e| format!("create_timeline failed: {}", e))?;
         Ok(conn.last_insert_rowid())
     }
 
     fn get_timeline_by_branch(&self, branch_name: &str) -> Result<Option<Timeline>, String> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, branch_name, parent_timeline_id, fork_point, created_at, broken_at
-             FROM timelines WHERE branch_name = ?1"
-        ).map_err(|e| format!("get_timeline_by_branch prepare failed: {}", e))?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, branch_name, parent_timeline_id, fork_point, created_at, broken_at
+             FROM timelines WHERE branch_name = ?1",
+            )
+            .map_err(|e| format!("get_timeline_by_branch prepare failed: {}", e))?;
 
         stmt.query_row(rusqlite::params![branch_name], |row| row_to_timeline(row))
             .optional()
@@ -440,10 +447,12 @@ impl DagStore for SqliteDagStore {
 
     fn get_timeline(&self, id: i64) -> Result<Option<Timeline>, String> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, branch_name, parent_timeline_id, fork_point, created_at, broken_at
-             FROM timelines WHERE id = ?1"
-        ).map_err(|e| format!("get_timeline prepare failed: {}", e))?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, branch_name, parent_timeline_id, fork_point, created_at, broken_at
+             FROM timelines WHERE id = ?1",
+            )
+            .map_err(|e| format!("get_timeline prepare failed: {}", e))?;
 
         stmt.query_row(rusqlite::params![id], |row| row_to_timeline(row))
             .optional()
@@ -455,7 +464,8 @@ impl DagStore for SqliteDagStore {
         conn.execute(
             "UPDATE timelines SET broken_at = ?1 WHERE id = ?2",
             rusqlite::params![Utc::now().to_rfc3339(), id],
-        ).map_err(|e| format!("seal_timeline failed: {}", e))?;
+        )
+        .map_err(|e| format!("seal_timeline failed: {}", e))?;
         Ok(())
     }
 
@@ -464,30 +474,31 @@ impl DagStore for SqliteDagStore {
         conn.execute(
             "UPDATE timelines SET branch_name = ?1 WHERE id = ?2",
             rusqlite::params![new_name, id],
-        ).map_err(|e| format!("rename_timeline failed: {}", e))?;
+        )
+        .map_err(|e| format!("rename_timeline failed: {}", e))?;
         Ok(())
     }
 
     fn is_timeline_sealed(&self, id: i64) -> Result<bool, String> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT broken_at FROM timelines WHERE id = ?1"
-        ).map_err(|e| format!("is_timeline_sealed prepare failed: {}", e))?;
+        let mut stmt = conn
+            .prepare("SELECT broken_at FROM timelines WHERE id = ?1")
+            .map_err(|e| format!("is_timeline_sealed prepare failed: {}", e))?;
 
-        let broken_at: Option<String> = stmt.query_row(rusqlite::params![id], |row| {
-            row.get(0)
-        })
-        .optional()
-        .map_err(|e| format!("is_timeline_sealed query failed: {}", e))?
-        .flatten();
+        let broken_at: Option<String> = stmt
+            .query_row(rusqlite::params![id], |row| row.get(0))
+            .optional()
+            .map_err(|e| format!("is_timeline_sealed query failed: {}", e))?
+            .flatten();
 
         Ok(broken_at.is_some())
     }
 
     fn list_sessions(&self) -> Result<Vec<SessionSummary>, String> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT
+        let mut stmt = conn
+            .prepare(
+                "SELECT
                 session_id,
                 MIN(CASE WHEN message_type = 'invoke' THEN receiver END) AS agent_name,
                 MIN(created_at) AS started_at,
@@ -497,29 +508,32 @@ impl DagStore for SqliteDagStore {
                  ORDER BY created_at DESC LIMIT 1) AS last_type
             FROM dag_nodes
             GROUP BY session_id
-            ORDER BY started_at DESC"
-        ).map_err(|e| format!("list_sessions prepare failed: {}", e))?;
+            ORDER BY started_at DESC",
+            )
+            .map_err(|e| format!("list_sessions prepare failed: {}", e))?;
 
-        let rows = stmt.query_map([], |row| {
-            let session_id: String = row.get(0)?;
-            let agent_name: Option<String> = row.get(1)?;
-            let started_at_str: String = row.get(2)?;
-            let message_count: usize = row.get(3)?;
-            let last_type: Option<String> = row.get(4)?;
+        let rows = stmt
+            .query_map([], |row| {
+                let session_id: String = row.get(0)?;
+                let agent_name: Option<String> = row.get(1)?;
+                let started_at_str: String = row.get(2)?;
+                let message_count: usize = row.get(3)?;
+                let last_type: Option<String> = row.get(4)?;
 
-            let started_at = DateTime::parse_from_rfc3339(&started_at_str)
-                .map(|dt| dt.with_timezone(&Utc))
-                .unwrap_or_default();
-            let is_open = last_type.as_deref() != Some("complete");
+                let started_at = DateTime::parse_from_rfc3339(&started_at_str)
+                    .map(|dt| dt.with_timezone(&Utc))
+                    .unwrap_or_default();
+                let is_open = last_type.as_deref() != Some("complete");
 
-            Ok(SessionSummary {
-                session_id,
-                agent_name: agent_name.unwrap_or_default(),
-                started_at,
-                message_count,
-                is_open,
+                Ok(SessionSummary {
+                    session_id,
+                    agent_name: agent_name.unwrap_or_default(),
+                    started_at,
+                    message_count,
+                    is_open,
+                })
             })
-        }).map_err(|e| format!("list_sessions query failed: {}", e))?;
+            .map_err(|e| format!("list_sessions query failed: {}", e))?;
 
         let mut summaries = Vec::new();
         for row in rows {
@@ -752,8 +766,14 @@ mod tests {
         store.insert_node(&node_a).unwrap();
         store.insert_node(&node_b).unwrap();
 
-        assert_eq!(store.latest_state("agent-a").unwrap(), Some("state-a".to_string()));
-        assert_eq!(store.latest_state("agent-b").unwrap(), Some("state-b".to_string()));
+        assert_eq!(
+            store.latest_state("agent-a").unwrap(),
+            Some("state-a".to_string())
+        );
+        assert_eq!(
+            store.latest_state("agent-b").unwrap(),
+            Some("state-b".to_string())
+        );
         assert_eq!(store.latest_state("agent-c").unwrap(), None);
     }
 
@@ -822,11 +842,19 @@ mod tests {
         node.state = Some("real-state".to_string());
         store.insert_node(&node).unwrap();
 
-        assert_eq!(store.latest_state("todoapp").unwrap(), Some("real-state".to_string()));
+        assert_eq!(
+            store.latest_state("todoapp").unwrap(),
+            Some("real-state".to_string())
+        );
 
         // Set checkout override
-        store.set_checkout_state("todoapp", "checked-out-state").unwrap();
-        assert_eq!(store.latest_state("todoapp").unwrap(), Some("checked-out-state".to_string()));
+        store
+            .set_checkout_state("todoapp", "checked-out-state")
+            .unwrap();
+        assert_eq!(
+            store.latest_state("todoapp").unwrap(),
+            Some("checked-out-state".to_string())
+        );
     }
 
     #[test]
@@ -835,7 +863,10 @@ mod tests {
 
         // Set checkout override
         store.set_checkout_state("todoapp", "old-state").unwrap();
-        assert_eq!(store.latest_state("todoapp").unwrap(), Some("old-state".to_string()));
+        assert_eq!(
+            store.latest_state("todoapp").unwrap(),
+            Some("old-state".to_string())
+        );
 
         // Insert a Complete with new state — should clear override
         let mut node = test_node(b"new-complete", "", MessageType::Complete);
@@ -846,21 +877,29 @@ mod tests {
         store.insert_node(&node).unwrap();
 
         // Override cleared — latest_state returns the real state
-        assert_eq!(store.latest_state("todoapp").unwrap(), Some("new-state".to_string()));
+        assert_eq!(
+            store.latest_state("todoapp").unwrap(),
+            Some("new-state".to_string())
+        );
     }
 
     #[test]
     fn insert_non_complete_does_not_clear_checkout_state() {
         let store = test_store();
 
-        store.set_checkout_state("agent-a", "checkout-state").unwrap();
+        store
+            .set_checkout_state("agent-a", "checkout-state")
+            .unwrap();
 
         // Insert a Response with state — should NOT clear override
         let mut node = test_node(b"response", "", MessageType::Response);
         node.state = Some("response-state".to_string());
         store.insert_node(&node).unwrap();
 
-        assert_eq!(store.latest_state("agent-a").unwrap(), Some("checkout-state".to_string()));
+        assert_eq!(
+            store.latest_state("agent-a").unwrap(),
+            Some("checkout-state".to_string())
+        );
     }
 
     // ========================================================================
@@ -895,7 +934,9 @@ mod tests {
         let store = test_store();
         store.ensure_main_timeline().unwrap();
 
-        let id = store.create_timeline("repair-2026-01-01-1", Some(1), Some("abc123")).unwrap();
+        let id = store
+            .create_timeline("repair-2026-01-01-1", Some(1), Some("abc123"))
+            .unwrap();
         assert!(id > 1);
 
         let tl = store.get_timeline(id).unwrap().unwrap();
@@ -913,7 +954,10 @@ mod tests {
         let tl = store.get_timeline_by_branch("main").unwrap().unwrap();
         assert_eq!(tl.id, 1);
 
-        assert!(store.get_timeline_by_branch("nonexistent").unwrap().is_none());
+        assert!(store
+            .get_timeline_by_branch("nonexistent")
+            .unwrap()
+            .is_none());
     }
 
     #[test]
@@ -938,7 +982,10 @@ mod tests {
         store.rename_timeline(1, "broken-main-2026-01-01").unwrap();
 
         assert!(store.get_timeline_by_branch("main").unwrap().is_none());
-        let tl = store.get_timeline_by_branch("broken-main-2026-01-01").unwrap().unwrap();
+        let tl = store
+            .get_timeline_by_branch("broken-main-2026-01-01")
+            .unwrap()
+            .unwrap();
         assert_eq!(tl.id, 1);
     }
 
@@ -961,8 +1008,15 @@ mod tests {
         drop(conn);
 
         let result = store.get_node("h1");
-        assert!(result.is_err(), "unknown message type should error, not silently default");
+        assert!(
+            result.is_err(),
+            "unknown message type should error, not silently default"
+        );
         let err = result.unwrap_err();
-        assert!(err.contains("unknown message type: bogus"), "error should name the bad value, got: {}", err);
+        assert!(
+            err.contains("unknown message type: bogus"),
+            "error should name the bad value, got: {}",
+            err
+        );
     }
 }

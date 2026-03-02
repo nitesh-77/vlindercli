@@ -4,16 +4,12 @@ use std::sync::{Arc, Mutex};
 
 use tonic::{Request, Response, Status};
 
-use vlinder_core::domain::{Harness, ResourceId, TimelineId};
 use super::proto::{
-    self,
-    harness_server::Harness as HarnessService,
-    PingRequest, SemVer,
-    SetTimelineRequest, SetTimelineResponse,
-    StartSessionRequest, StartSessionResponse,
-    SetInitialStateRequest, SetInitialStateResponse,
-    RunAgentRequest, RunAgentResponse,
+    self, harness_server::Harness as HarnessService, PingRequest, RunAgentRequest,
+    RunAgentResponse, SemVer, SetInitialStateRequest, SetInitialStateResponse, SetTimelineRequest,
+    SetTimelineResponse, StartSessionRequest, StartSessionResponse,
 };
+use vlinder_core::domain::{Harness, ResourceId, TimelineId};
 
 /// gRPC server that wraps a Harness implementation.
 ///
@@ -38,10 +34,7 @@ impl HarnessServiceServer {
 
 #[tonic::async_trait]
 impl HarnessService for HarnessServiceServer {
-    async fn ping(
-        &self,
-        _request: Request<PingRequest>,
-    ) -> Result<Response<SemVer>, Status> {
+    async fn ping(&self, _request: Request<PingRequest>) -> Result<Response<SemVer>, Status> {
         Ok(Response::new(SemVer {
             major: 0,
             minor: 0,
@@ -55,7 +48,10 @@ impl HarnessService for HarnessServiceServer {
     ) -> Result<Response<SetTimelineResponse>, Status> {
         let req = request.into_inner();
         let timeline = TimelineId::from(req.timeline_id);
-        self.harness.lock().unwrap().set_timeline(timeline, req.sealed);
+        self.harness
+            .lock()
+            .unwrap()
+            .set_timeline(timeline, req.sealed);
         Ok(Response::new(SetTimelineResponse {}))
     }
 

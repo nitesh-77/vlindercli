@@ -2,12 +2,12 @@
 
 use crate::domain::{
     AgentId, CompleteMessage, DelegateMessage, HarnessType, InvokeMessage, MessageQueue,
-    ObservableMessage, Operation, QueueError, RequestMessage, ResponseMessage,
-    RoutingKey, ServiceBackend, SubmissionId,
+    ObservableMessage, Operation, QueueError, RequestMessage, ResponseMessage, RoutingKey,
+    ServiceBackend, SubmissionId,
 };
 #[cfg(test)]
 use crate::domain::{
-    RuntimeDiagnostics, DelegateDiagnostics, InvokeDiagnostics, RequestDiagnostics,
+    DelegateDiagnostics, InvokeDiagnostics, RequestDiagnostics, RuntimeDiagnostics,
 };
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
@@ -42,32 +42,53 @@ impl MessageQueue for InMemoryQueue {
     fn send_invoke(&self, msg: InvokeMessage) -> Result<(), QueueError> {
         let key = msg.routing_key();
         let mut typed = self.typed_queues.lock().unwrap();
-        typed.entry(key).or_default().push_back(ObservableMessage::Invoke(msg));
+        typed
+            .entry(key)
+            .or_default()
+            .push_back(ObservableMessage::Invoke(msg));
         Ok(())
     }
 
     fn send_request(&self, msg: RequestMessage) -> Result<(), QueueError> {
         let key = msg.routing_key();
         let mut typed = self.typed_queues.lock().unwrap();
-        typed.entry(key).or_default().push_back(ObservableMessage::Request(msg));
+        typed
+            .entry(key)
+            .or_default()
+            .push_back(ObservableMessage::Request(msg));
         Ok(())
     }
 
     fn send_response(&self, msg: ResponseMessage) -> Result<(), QueueError> {
         let key = msg.routing_key();
         let mut typed = self.typed_queues.lock().unwrap();
-        typed.entry(key).or_default().push_back(ObservableMessage::Response(msg));
+        typed
+            .entry(key)
+            .or_default()
+            .push_back(ObservableMessage::Response(msg));
         Ok(())
     }
 
     fn send_complete(&self, msg: CompleteMessage) -> Result<(), QueueError> {
         let key = msg.routing_key();
         let mut typed = self.typed_queues.lock().unwrap();
-        typed.entry(key).or_default().push_back(ObservableMessage::Complete(msg));
+        typed
+            .entry(key)
+            .or_default()
+            .push_back(ObservableMessage::Complete(msg));
         Ok(())
     }
 
-    fn receive_invoke(&self, agent: &AgentId) -> Result<(InvokeMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+    fn receive_invoke(
+        &self,
+        agent: &AgentId,
+    ) -> Result<
+        (
+            InvokeMessage,
+            Box<dyn FnOnce() -> Result<(), QueueError> + Send>,
+        ),
+        QueueError,
+    > {
         let mut typed = self.typed_queues.lock().unwrap();
 
         for (key, queue) in typed.iter_mut() {
@@ -87,14 +108,26 @@ impl MessageQueue for InMemoryQueue {
         Err(QueueError::Timeout)
     }
 
-    fn receive_request(&self, service: ServiceBackend, operation: Operation) -> Result<(RequestMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+    fn receive_request(
+        &self,
+        service: ServiceBackend,
+        operation: Operation,
+    ) -> Result<
+        (
+            RequestMessage,
+            Box<dyn FnOnce() -> Result<(), QueueError> + Send>,
+        ),
+        QueueError,
+    > {
         let mut typed = self.typed_queues.lock().unwrap();
 
         for (key, queue) in typed.iter_mut() {
             let matches = match key {
-                RoutingKey::Request { service: svc, operation: op, .. } => {
-                    *svc == service && *op == operation
-                }
+                RoutingKey::Request {
+                    service: svc,
+                    operation: op,
+                    ..
+                } => *svc == service && *op == operation,
                 _ => false,
             };
             if matches {
@@ -109,7 +142,16 @@ impl MessageQueue for InMemoryQueue {
         Err(QueueError::Timeout)
     }
 
-    fn receive_response(&self, request: &RequestMessage) -> Result<(ResponseMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+    fn receive_response(
+        &self,
+        request: &RequestMessage,
+    ) -> Result<
+        (
+            ResponseMessage,
+            Box<dyn FnOnce() -> Result<(), QueueError> + Send>,
+        ),
+        QueueError,
+    > {
         // Exact lookup via reply_key (ADR 096 §6).
         let reply_key = request.routing_key().reply_key(None).unwrap();
         let mut typed = self.typed_queues.lock().unwrap();
@@ -125,14 +167,26 @@ impl MessageQueue for InMemoryQueue {
         Err(QueueError::Timeout)
     }
 
-    fn receive_complete(&self, submission: &SubmissionId, harness: HarnessType) -> Result<(CompleteMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+    fn receive_complete(
+        &self,
+        submission: &SubmissionId,
+        harness: HarnessType,
+    ) -> Result<
+        (
+            CompleteMessage,
+            Box<dyn FnOnce() -> Result<(), QueueError> + Send>,
+        ),
+        QueueError,
+    > {
         let mut typed = self.typed_queues.lock().unwrap();
 
         for (key, queue) in typed.iter_mut() {
             let matches = match key {
-                RoutingKey::Complete { submission: sub, harness: h, .. } => {
-                    sub == submission && *h == harness
-                }
+                RoutingKey::Complete {
+                    submission: sub,
+                    harness: h,
+                    ..
+                } => sub == submission && *h == harness,
                 _ => false,
             };
             if matches {
@@ -150,11 +204,23 @@ impl MessageQueue for InMemoryQueue {
     fn send_delegate(&self, msg: DelegateMessage) -> Result<(), QueueError> {
         let key = msg.routing_key();
         let mut typed = self.typed_queues.lock().unwrap();
-        typed.entry(key).or_default().push_back(ObservableMessage::Delegate(msg));
+        typed
+            .entry(key)
+            .or_default()
+            .push_back(ObservableMessage::Delegate(msg));
         Ok(())
     }
 
-    fn receive_delegate(&self, target: &AgentId) -> Result<(DelegateMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+    fn receive_delegate(
+        &self,
+        target: &AgentId,
+    ) -> Result<
+        (
+            DelegateMessage,
+            Box<dyn FnOnce() -> Result<(), QueueError> + Send>,
+        ),
+        QueueError,
+    > {
         let mut typed = self.typed_queues.lock().unwrap();
 
         for (key, queue) in typed.iter_mut() {
@@ -174,13 +240,29 @@ impl MessageQueue for InMemoryQueue {
         Err(QueueError::Timeout)
     }
 
-    fn send_delegate_reply(&self, msg: CompleteMessage, reply_key: &RoutingKey) -> Result<(), QueueError> {
+    fn send_delegate_reply(
+        &self,
+        msg: CompleteMessage,
+        reply_key: &RoutingKey,
+    ) -> Result<(), QueueError> {
         let mut typed = self.typed_queues.lock().unwrap();
-        typed.entry(reply_key.clone()).or_default().push_back(ObservableMessage::Complete(msg));
+        typed
+            .entry(reply_key.clone())
+            .or_default()
+            .push_back(ObservableMessage::Complete(msg));
         Ok(())
     }
 
-    fn receive_delegate_reply(&self, reply_key: &RoutingKey) -> Result<(CompleteMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+    fn receive_delegate_reply(
+        &self,
+        reply_key: &RoutingKey,
+    ) -> Result<
+        (
+            CompleteMessage,
+            Box<dyn FnOnce() -> Result<(), QueueError> + Send>,
+        ),
+        QueueError,
+    > {
         let mut typed = self.typed_queues.lock().unwrap();
 
         if let Some(queue) = typed.get_mut(reply_key) {
@@ -202,7 +284,9 @@ impl MessageQueue for InMemoryQueue {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{InferenceBackendType, Nonce, ObjectStorageType, Operation, RuntimeType, VectorStorageType};
+    use crate::domain::{
+        InferenceBackendType, Nonce, ObjectStorageType, Operation, RuntimeType, VectorStorageType,
+    };
     use crate::domain::{Sequence, SessionId, SubmissionId, TimelineId};
 
     fn test_agent_id() -> AgentId {
@@ -230,7 +314,10 @@ mod tests {
             test_agent_id(),
             b"hello".to_vec(),
             None,
-            InvokeDiagnostics { harness_version: String::new(), history_turns: 0 },
+            InvokeDiagnostics {
+                harness_version: String::new(),
+                history_turns: 0,
+            },
         );
         let original_id = invoke.id.clone();
 
@@ -263,7 +350,10 @@ mod tests {
             agent_id.clone(),
             b"input".to_vec(),
             None,
-            InvokeDiagnostics { harness_version: String::new(), history_turns: 0 },
+            InvokeDiagnostics {
+                harness_version: String::new(),
+                history_turns: 0,
+            },
         );
 
         queue.send_invoke(invoke).unwrap();
@@ -290,17 +380,30 @@ mod tests {
             Sequence::first(),
             b"key".to_vec(),
             None,
-            RequestDiagnostics { sequence: 0, endpoint: String::new(), request_bytes: 0, received_at_ms: 0 },
+            RequestDiagnostics {
+                sequence: 0,
+                endpoint: String::new(),
+                request_bytes: 0,
+                received_at_ms: 0,
+            },
         );
         let original_id = request.id.clone();
 
         queue.send_request(request).unwrap();
 
         // Receive by service/backend/operation
-        let (received, ack) = queue.receive_request(ServiceBackend::Kv(ObjectStorageType::Sqlite), Operation::Get).unwrap();
+        let (received, ack) = queue
+            .receive_request(
+                ServiceBackend::Kv(ObjectStorageType::Sqlite),
+                Operation::Get,
+            )
+            .unwrap();
 
         assert_eq!(received.id, original_id);
-        assert_eq!(received.service, ServiceBackend::Kv(ObjectStorageType::Sqlite));
+        assert_eq!(
+            received.service,
+            ServiceBackend::Kv(ObjectStorageType::Sqlite)
+        );
         assert_eq!(received.operation, Operation::Get);
         assert_eq!(received.payload.as_slice(), b"key");
 
@@ -324,12 +427,22 @@ mod tests {
             Sequence::from(3),
             b"query".to_vec(),
             None,
-            RequestDiagnostics { sequence: 0, endpoint: String::new(), request_bytes: 0, received_at_ms: 0 },
+            RequestDiagnostics {
+                sequence: 0,
+                endpoint: String::new(),
+                request_bytes: 0,
+                received_at_ms: 0,
+            },
         );
 
         queue.send_request(request).unwrap();
 
-        let (received, _) = queue.receive_request(ServiceBackend::Vec(VectorStorageType::SqliteVec), Operation::Search).unwrap();
+        let (received, _) = queue
+            .receive_request(
+                ServiceBackend::Vec(VectorStorageType::SqliteVec),
+                Operation::Search,
+            )
+            .unwrap();
 
         // All dimensions preserved for reply construction
         assert_eq!(received.submission, submission);
@@ -351,14 +464,27 @@ mod tests {
             Sequence::first(),
             b"prompt".to_vec(),
             None,
-            RequestDiagnostics { sequence: 0, endpoint: String::new(), request_bytes: 0, received_at_ms: 0 },
+            RequestDiagnostics {
+                sequence: 0,
+                endpoint: String::new(),
+                request_bytes: 0,
+                received_at_ms: 0,
+            },
         );
 
         queue.send_request(request).unwrap();
 
-        let (received, _) = queue.receive_request(ServiceBackend::Infer(InferenceBackendType::Ollama), Operation::Run).unwrap();
+        let (received, _) = queue
+            .receive_request(
+                ServiceBackend::Infer(InferenceBackendType::Ollama),
+                Operation::Run,
+            )
+            .unwrap();
 
-        assert_eq!(received.service, ServiceBackend::Infer(InferenceBackendType::Ollama));
+        assert_eq!(
+            received.service,
+            ServiceBackend::Infer(InferenceBackendType::Ollama)
+        );
         assert_eq!(received.operation, Operation::Run);
     }
 
@@ -380,7 +506,9 @@ mod tests {
             b"payload".to_vec(),
             nonce.clone(),
             None,
-            DelegateDiagnostics { runtime: RuntimeDiagnostics::placeholder(0) },
+            DelegateDiagnostics {
+                runtime: RuntimeDiagnostics::placeholder(0),
+            },
         );
         let original_id = delegate.id.clone();
 
@@ -410,7 +538,9 @@ mod tests {
             b"payload".to_vec(),
             Nonce::generate(),
             None,
-            DelegateDiagnostics { runtime: RuntimeDiagnostics::placeholder(0) },
+            DelegateDiagnostics {
+                runtime: RuntimeDiagnostics::placeholder(0),
+            },
         );
 
         queue.send_delegate(delegate).unwrap();

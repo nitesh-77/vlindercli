@@ -1,9 +1,11 @@
 //! Conversions between domain DagNode and protobuf DagNode.
 
+use std::str::FromStr;
+
 use chrono::{DateTime, Utc};
 
-use vlinder_core::domain::{DagNode, MessageType, Timeline};
 use super::proto;
+use vlinder_core::domain::{DagNode, MessageType, Timeline};
 
 // =============================================================================
 // DagNode → proto::DagNode
@@ -58,9 +60,11 @@ impl TryFrom<proto::DagNode> for DagNode {
 
     fn try_from(node: proto::DagNode) -> Result<Self, Self::Error> {
         let message_type = MessageType::from_str(&node.message_type)
-            .ok_or_else(|| format!("unknown message type: {}", node.message_type))?;
+            .map_err(|_| format!("unknown message type: {}", node.message_type))?;
 
-        let created_at: DateTime<Utc> = node.created_at.parse()
+        let created_at: DateTime<Utc> = node
+            .created_at
+            .parse()
             .map_err(|e| format!("invalid created_at: {}", e))?;
 
         Ok(Self {
@@ -106,9 +110,12 @@ impl TryFrom<proto::Timeline> for Timeline {
     type Error = String;
 
     fn try_from(tl: proto::Timeline) -> Result<Self, Self::Error> {
-        let created_at: DateTime<Utc> = tl.created_at.parse()
+        let created_at: DateTime<Utc> = tl
+            .created_at
+            .parse()
             .map_err(|e| format!("invalid created_at: {}", e))?;
-        let broken_at = tl.broken_at
+        let broken_at = tl
+            .broken_at
             .map(|s| s.parse::<DateTime<Utc>>())
             .transpose()
             .map_err(|e| format!("invalid broken_at: {}", e))?;

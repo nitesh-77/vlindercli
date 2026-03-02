@@ -1,7 +1,7 @@
 //! Conversions between proto types and domain types for the catalog service.
 
-use vlinder_core::domain::{self, ResourceId};
 use super::proto;
+use vlinder_core::domain::{self, ResourceId};
 
 // ============================================================================
 // Model: domain → proto

@@ -1,13 +1,13 @@
 //! Conversions between domain types and protobuf types.
 
 use std::collections::HashMap;
+use std::str::FromStr;
 
-use vlinder_core::domain::{
-    Agent, Fleet, Job, JobId, JobStatus, Model, ModelType, MountConfig,
-    Protocol, Provider, Requirements, ResourceId, RuntimeType, ServiceConfig, ServiceType,
-    SubmissionId,
-};
 use super::proto;
+use vlinder_core::domain::{
+    Agent, Fleet, Job, JobId, JobStatus, Model, ModelType, MountConfig, Protocol, Provider,
+    Requirements, ResourceId, RuntimeType, ServiceConfig, ServiceType, SubmissionId,
+};
 
 // =============================================================================
 // ResourceId
@@ -15,7 +15,9 @@ use super::proto;
 
 impl From<ResourceId> for proto::ResourceId {
     fn from(id: ResourceId) -> Self {
-        Self { uri: id.to_string() }
+        Self {
+            uri: id.to_string(),
+        }
     }
 }
 
@@ -27,7 +29,9 @@ impl From<proto::ResourceId> for ResourceId {
 
 impl From<&ResourceId> for proto::ResourceId {
     fn from(id: &ResourceId) -> Self {
-        Self { uri: id.to_string() }
+        Self {
+            uri: id.to_string(),
+        }
     }
 }
 
@@ -37,7 +41,9 @@ impl From<&ResourceId> for proto::ResourceId {
 
 impl From<JobId> for proto::JobId {
     fn from(id: JobId) -> Self {
-        Self { id: id.as_str().to_string() }
+        Self {
+            id: id.as_str().to_string(),
+        }
     }
 }
 
@@ -49,7 +55,9 @@ impl From<proto::JobId> for JobId {
 
 impl From<&JobId> for proto::JobId {
     fn from(id: &JobId) -> Self {
-        Self { id: id.as_str().to_string() }
+        Self {
+            id: id.as_str().to_string(),
+        }
     }
 }
 
@@ -59,7 +67,9 @@ impl From<&JobId> for proto::JobId {
 
 impl From<SubmissionId> for proto::SubmissionId {
     fn from(id: SubmissionId) -> Self {
-        Self { id: id.as_str().to_string() }
+        Self {
+            id: id.as_str().to_string(),
+        }
     }
 }
 
@@ -71,7 +81,9 @@ impl From<proto::SubmissionId> for SubmissionId {
 
 impl From<&SubmissionId> for proto::SubmissionId {
     fn from(id: &SubmissionId) -> Self {
-        Self { id: id.as_str().to_string() }
+        Self {
+            id: id.as_str().to_string(),
+        }
     }
 }
 
@@ -85,7 +97,10 @@ impl From<Agent> for proto::Agent {
             name: agent.name,
             description: agent.description,
             id: Some(agent.id.into()),
-            services: agent.requirements.services.into_iter()
+            services: agent
+                .requirements
+                .services
+                .into_iter()
                 .map(|(st, cfg)| proto::ServiceEntry {
                     service_type: proto::ServiceType::from(st).into(),
                     provider: proto::Provider::from(cfg.provider).into(),
@@ -102,13 +117,16 @@ impl From<Agent> for proto::Agent {
             }),
             runtime: agent.runtime.as_str().to_string(),
             executable: agent.executable,
-            models: agent.requirements.models.into_iter()
-                .map(|(alias, name)| proto::ModelAlias {
-                    alias,
-                    uri: name,
-                })
+            models: agent
+                .requirements
+                .models
+                .into_iter()
+                .map(|(alias, name)| proto::ModelAlias { alias, uri: name })
                 .collect(),
-            mounts: agent.requirements.mounts.into_iter()
+            mounts: agent
+                .requirements
+                .mounts
+                .into_iter()
                 .map(|(name, cfg)| proto::MountEntry {
                     name,
                     s3: cfg.s3,
@@ -136,11 +154,18 @@ impl TryFrom<proto::Agent> for Agent {
             let protocol: Protocol = proto::Protocol::try_from(entry.protocol)
                 .map_err(|_| "invalid protocol")?
                 .try_into()?;
-            services.insert(st, ServiceConfig { provider, protocol, models: entry.models });
+            services.insert(
+                st,
+                ServiceConfig {
+                    provider,
+                    protocol,
+                    models: entry.models,
+                },
+            );
         }
 
         let runtime = RuntimeType::from_str(&agent.runtime)
-            .ok_or_else(|| format!("unknown runtime: {}", agent.runtime))?;
+            .map_err(|_| format!("unknown runtime: {}", agent.runtime))?;
 
         Ok(Self {
             name: agent.name,
@@ -149,23 +174,30 @@ impl TryFrom<proto::Agent> for Agent {
             runtime,
             executable: agent.executable,
             requirements: Requirements {
-                models: agent.models.into_iter()
-                    .map(|m| (m.alias, m.uri))
-                    .collect(),
+                models: agent.models.into_iter().map(|m| (m.alias, m.uri)).collect(),
                 services,
-                mounts: agent.mounts.into_iter()
-                    .map(|m| (m.name, MountConfig {
-                        s3: m.s3,
-                        path: m.path,
-                        endpoint: m.endpoint,
-                        secret: m.secret,
-                    }))
+                mounts: agent
+                    .mounts
+                    .into_iter()
+                    .map(|m| {
+                        (
+                            m.name,
+                            MountConfig {
+                                s3: m.s3,
+                                path: m.path,
+                                endpoint: m.endpoint,
+                                secret: m.secret,
+                            },
+                        )
+                    })
                     .collect(),
             },
-            object_storage: agent.object_storage
+            object_storage: agent
+                .object_storage
                 .and_then(|cfg| cfg.resource_id)
                 .map(|r| r.into()),
-            vector_storage: agent.vector_storage
+            vector_storage: agent
+                .vector_storage
                 .and_then(|cfg| cfg.resource_id)
                 .map(|r| r.into()),
             source: None,
@@ -287,8 +319,8 @@ impl TryFrom<proto::Job> for Job {
     type Error = String;
 
     fn try_from(job: proto::Job) -> Result<Self, Self::Error> {
-        let proto_status = proto::JobStatus::try_from(job.status)
-            .map_err(|_| "invalid job status")?;
+        let proto_status =
+            proto::JobStatus::try_from(job.status).map_err(|_| "invalid job status")?;
 
         let status = match proto_status {
             proto::JobStatus::Pending => JobStatus::Pending,

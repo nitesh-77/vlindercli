@@ -3,25 +3,17 @@
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
 
-use vlinder_core::domain::DagStore;
 use super::proto::{
-    self,
-    state_service_server::StateService,
-    PingRequest, SemVer,
-    InsertNodeRequest, InsertNodeResponse,
-    GetNodeRequest, GetNodeResponse,
-    GetSessionNodesRequest, GetSessionNodesResponse,
-    GetChildrenRequest, GetChildrenResponse,
-    LatestStateRequest, LatestStateResponse,
-    LatestNodeHashRequest, LatestNodeHashResponse,
-    SetCheckoutStateRequest, SetCheckoutStateResponse,
-    EnsureMainTimelineRequest, EnsureMainTimelineResponse,
-    CreateTimelineRequest, CreateTimelineResponse,
-    GetTimelineByBranchRequest, GetTimelineByIdRequest, GetTimelineResponse,
-    SealTimelineRequest, SealTimelineResponse,
-    RenameTimelineRequest, RenameTimelineResponse,
-    IsTimelineSealedRequest, IsTimelineSealedResponse,
+    self, state_service_server::StateService, CreateTimelineRequest, CreateTimelineResponse,
+    EnsureMainTimelineRequest, EnsureMainTimelineResponse, GetChildrenRequest, GetChildrenResponse,
+    GetNodeRequest, GetNodeResponse, GetSessionNodesRequest, GetSessionNodesResponse,
+    GetTimelineByBranchRequest, GetTimelineByIdRequest, GetTimelineResponse, InsertNodeRequest,
+    InsertNodeResponse, IsTimelineSealedRequest, IsTimelineSealedResponse, LatestNodeHashRequest,
+    LatestNodeHashResponse, LatestStateRequest, LatestStateResponse, PingRequest,
+    RenameTimelineRequest, RenameTimelineResponse, SealTimelineRequest, SealTimelineResponse,
+    SemVer, SetCheckoutStateRequest, SetCheckoutStateResponse,
 };
+use vlinder_core::domain::DagStore;
 
 /// gRPC server that wraps a DagStore implementation.
 pub struct StateServiceServer {
@@ -41,10 +33,7 @@ impl StateServiceServer {
 
 #[tonic::async_trait]
 impl StateService for StateServiceServer {
-    async fn ping(
-        &self,
-        _request: Request<PingRequest>,
-    ) -> Result<Response<SemVer>, Status> {
+    async fn ping(&self, _request: Request<PingRequest>) -> Result<Response<SemVer>, Status> {
         Ok(Response::new(SemVer {
             major: 0,
             minor: 0,
@@ -57,10 +46,12 @@ impl StateService for StateServiceServer {
         request: Request<InsertNodeRequest>,
     ) -> Result<Response<InsertNodeResponse>, Status> {
         let req = request.into_inner();
-        let proto_node = req.node
+        let proto_node = req
+            .node
             .ok_or_else(|| Status::invalid_argument("missing node"))?;
 
-        let node = proto_node.try_into()
+        let node = proto_node
+            .try_into()
             .map_err(|e: String| Status::invalid_argument(e))?;
 
         match self.store.insert_node(&node) {
@@ -81,7 +72,9 @@ impl StateService for StateServiceServer {
     ) -> Result<Response<GetNodeResponse>, Status> {
         let req = request.into_inner();
 
-        let node = self.store.get_node(&req.hash)
+        let node = self
+            .store
+            .get_node(&req.hash)
             .map_err(Status::internal)?
             .map(|n| n.into());
 
@@ -94,7 +87,9 @@ impl StateService for StateServiceServer {
     ) -> Result<Response<GetSessionNodesResponse>, Status> {
         let req = request.into_inner();
 
-        let nodes = self.store.get_session_nodes(&req.session_id)
+        let nodes = self
+            .store
+            .get_session_nodes(&req.session_id)
             .map_err(Status::internal)?
             .into_iter()
             .map(|n| n.into())
@@ -109,7 +104,9 @@ impl StateService for StateServiceServer {
     ) -> Result<Response<GetChildrenResponse>, Status> {
         let req = request.into_inner();
 
-        let nodes = self.store.get_children(&req.parent_hash)
+        let nodes = self
+            .store
+            .get_children(&req.parent_hash)
             .map_err(Status::internal)?
             .into_iter()
             .map(|n| n.into())
@@ -124,7 +121,9 @@ impl StateService for StateServiceServer {
     ) -> Result<Response<LatestStateResponse>, Status> {
         let req = request.into_inner();
 
-        let state = self.store.latest_state(&req.agent_name)
+        let state = self
+            .store
+            .latest_state(&req.agent_name)
             .map_err(Status::internal)?;
 
         Ok(Response::new(LatestStateResponse { state }))
@@ -136,7 +135,9 @@ impl StateService for StateServiceServer {
     ) -> Result<Response<LatestNodeHashResponse>, Status> {
         let req = request.into_inner();
 
-        let hash = self.store.latest_node_hash(&req.session_id)
+        let hash = self
+            .store
+            .latest_node_hash(&req.session_id)
             .map_err(Status::internal)?;
 
         Ok(Response::new(LatestNodeHashResponse { hash }))
@@ -168,7 +169,9 @@ impl StateService for StateServiceServer {
         &self,
         _request: Request<EnsureMainTimelineRequest>,
     ) -> Result<Response<EnsureMainTimelineResponse>, Status> {
-        let id = self.store.ensure_main_timeline()
+        let id = self
+            .store
+            .ensure_main_timeline()
             .map_err(Status::internal)?;
         Ok(Response::new(EnsureMainTimelineResponse { id }))
     }
@@ -178,11 +181,10 @@ impl StateService for StateServiceServer {
         request: Request<CreateTimelineRequest>,
     ) -> Result<Response<CreateTimelineResponse>, Status> {
         let req = request.into_inner();
-        let id = self.store.create_timeline(
-            &req.branch_name,
-            req.parent_id,
-            req.fork_point.as_deref(),
-        ).map_err(Status::internal)?;
+        let id = self
+            .store
+            .create_timeline(&req.branch_name, req.parent_id, req.fork_point.as_deref())
+            .map_err(Status::internal)?;
         Ok(Response::new(CreateTimelineResponse { id }))
     }
 
@@ -191,7 +193,9 @@ impl StateService for StateServiceServer {
         request: Request<GetTimelineByBranchRequest>,
     ) -> Result<Response<GetTimelineResponse>, Status> {
         let req = request.into_inner();
-        let timeline = self.store.get_timeline_by_branch(&req.branch_name)
+        let timeline = self
+            .store
+            .get_timeline_by_branch(&req.branch_name)
             .map_err(Status::internal)?
             .map(|t| t.into());
         Ok(Response::new(GetTimelineResponse { timeline }))
@@ -202,7 +206,9 @@ impl StateService for StateServiceServer {
         request: Request<GetTimelineByIdRequest>,
     ) -> Result<Response<GetTimelineResponse>, Status> {
         let req = request.into_inner();
-        let timeline = self.store.get_timeline(req.id)
+        let timeline = self
+            .store
+            .get_timeline(req.id)
             .map_err(Status::internal)?
             .map(|t| t.into());
         Ok(Response::new(GetTimelineResponse { timeline }))
@@ -247,7 +253,9 @@ impl StateService for StateServiceServer {
         request: Request<IsTimelineSealedRequest>,
     ) -> Result<Response<IsTimelineSealedResponse>, Status> {
         let req = request.into_inner();
-        let sealed = self.store.is_timeline_sealed(req.id)
+        let sealed = self
+            .store
+            .is_timeline_sealed(req.id)
             .map_err(Status::internal)?;
         Ok(Response::new(IsTimelineSealedResponse { sealed }))
     }

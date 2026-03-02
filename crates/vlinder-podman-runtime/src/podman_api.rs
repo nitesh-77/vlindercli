@@ -59,23 +59,33 @@ impl PodmanClient for PodmanApiClient {
 
     fn pod_create(&self, name: &str, host_aliases: &[String]) -> Result<PodId, PodmanError> {
         let url = format!("{}/pods/create", API_BASE);
-        let hostadd = if host_aliases.is_empty() { None } else { Some(host_aliases.to_vec()) };
+        let hostadd = if host_aliases.is_empty() {
+            None
+        } else {
+            Some(host_aliases.to_vec())
+        };
         let spec = PodCreateSpec {
             name: name.to_string(),
             hostadd,
         };
 
-        let mut resp = self.agent.post(&url)
+        let mut resp = self
+            .agent
+            .post(&url)
             .send_json(&spec)
             .map_err(|e| PodmanError::Run(format!("pod create failed: {}", e)))?;
 
         let status = resp.status().as_u16();
         if status != 200 && status != 201 {
             let body = resp.body_mut().read_to_string().unwrap_or_default();
-            return Err(PodmanError::Run(format!("pod create HTTP {}: {}", status, body)));
+            return Err(PodmanError::Run(format!(
+                "pod create HTTP {}: {}",
+                status, body
+            )));
         }
 
-        let created: PodCreateResponse = resp.body_mut()
+        let created: PodCreateResponse = resp
+            .body_mut()
             .read_json()
             .map_err(|e| PodmanError::Run(format!("failed to parse pod create response: {}", e)))?;
 
@@ -89,11 +99,13 @@ impl PodmanClient for PodmanApiClient {
         env_vars: &[(&str, &str)],
         volumes: &[(&str, &str)],
     ) -> Result<ContainerId, PodmanError> {
-        let env: HashMap<String, String> = env_vars.iter()
+        let env: HashMap<String, String> = env_vars
+            .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect();
 
-        let mounts: Vec<MountSpec> = volumes.iter()
+        let mounts: Vec<MountSpec> = volumes
+            .iter()
             .map(|(vol_name, container_path)| MountSpec {
                 name: vol_name.to_string(),
                 mount_type: "volume".to_string(),
@@ -107,23 +119,32 @@ impl PodmanClient for PodmanApiClient {
             image: image.as_str().to_string(),
             pod: pod_id.as_str().to_string(),
             env: if env.is_empty() { None } else { Some(env) },
-            mounts: if mounts.is_empty() { None } else { Some(mounts) },
+            mounts: if mounts.is_empty() {
+                None
+            } else {
+                Some(mounts)
+            },
         };
 
         let url = format!("{}/containers/create", API_BASE);
-        let mut resp = self.agent.post(&url)
+        let mut resp = self
+            .agent
+            .post(&url)
             .send_json(&spec)
             .map_err(|e| PodmanError::Run(format!("container create in pod failed: {}", e)))?;
 
         let status = resp.status().as_u16();
         if status != 201 {
             let body = resp.body_mut().read_to_string().unwrap_or_default();
-            return Err(PodmanError::Run(format!("container create in pod HTTP {}: {}", status, body)));
+            return Err(PodmanError::Run(format!(
+                "container create in pod HTTP {}: {}",
+                status, body
+            )));
         }
 
-        let created: ContainerCreateResponse = resp.body_mut()
-            .read_json()
-            .map_err(|e| PodmanError::Run(format!("failed to parse container create response: {}", e)))?;
+        let created: ContainerCreateResponse = resp.body_mut().read_json().map_err(|e| {
+            PodmanError::Run(format!("failed to parse container create response: {}", e))
+        })?;
 
         Ok(ContainerId::new(created.id))
     }
@@ -134,25 +155,35 @@ impl PodmanClient for PodmanApiClient {
         driver: &str,
         options: &[(&str, &str)],
     ) -> Result<(), PodmanError> {
-        let driver_opts: HashMap<String, String> = options.iter()
+        let driver_opts: HashMap<String, String> = options
+            .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect();
 
         let spec = VolumeCreateSpec {
             name: name.to_string(),
             driver: driver.to_string(),
-            options: if driver_opts.is_empty() { None } else { Some(driver_opts) },
+            options: if driver_opts.is_empty() {
+                None
+            } else {
+                Some(driver_opts)
+            },
         };
 
         let url = format!("{}/volumes/create", API_BASE);
-        let mut resp = self.agent.post(&url)
+        let mut resp = self
+            .agent
+            .post(&url)
             .send_json(&spec)
             .map_err(|e| PodmanError::Run(format!("volume create failed: {}", e)))?;
 
         let status = resp.status().as_u16();
         if status != 201 {
             let body = resp.body_mut().read_to_string().unwrap_or_default();
-            return Err(PodmanError::Run(format!("volume create HTTP {}: {}", status, body)));
+            return Err(PodmanError::Run(format!(
+                "volume create HTTP {}: {}",
+                status, body
+            )));
         }
 
         Ok(())
@@ -165,7 +196,9 @@ impl PodmanClient for PodmanApiClient {
 
     fn pod_start(&self, pod_id: &PodId) -> Result<(), PodmanError> {
         let url = format!("{}/pods/{}/start", API_BASE, pod_id.as_str());
-        let resp = self.agent.post(&url)
+        let resp = self
+            .agent
+            .post(&url)
             .send("")
             .map_err(|e| PodmanError::Run(format!("pod start failed: {}", e)))?;
 
@@ -275,12 +308,18 @@ mod tests {
 
     #[test]
     fn url_encode_image_ref() {
-        assert_eq!(url_encode("docker.io/library/nginx"), "docker.io%2Flibrary%2Fnginx");
+        assert_eq!(
+            url_encode("docker.io/library/nginx"),
+            "docker.io%2Flibrary%2Fnginx"
+        );
     }
 
     #[test]
     fn url_encode_with_tag() {
-        assert_eq!(url_encode("localhost/myapp:latest"), "localhost%2Fmyapp%3Alatest");
+        assert_eq!(
+            url_encode("localhost/myapp:latest"),
+            "localhost%2Fmyapp%3Alatest"
+        );
     }
 
     #[test]
@@ -319,7 +358,10 @@ mod tests {
 
     #[test]
     fn pod_create_spec_serialization() {
-        let spec = PodCreateSpec { name: "vlinder-echo".to_string(), hostadd: None };
+        let spec = PodCreateSpec {
+            name: "vlinder-echo".to_string(),
+            hostadd: None,
+        };
         let json = serde_json::to_string(&spec).unwrap();
         assert!(json.contains("vlinder-echo"));
         assert!(!json.contains("hostadd"));

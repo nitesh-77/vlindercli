@@ -143,17 +143,41 @@ mod tests {
 
     #[test]
     fn parse_valid_roles() {
-        assert_eq!("registry".parse::<WorkerRole>().unwrap(), WorkerRole::Registry);
-        assert_eq!("harness".parse::<WorkerRole>().unwrap(), WorkerRole::Harness);
-        assert_eq!("agent-container".parse::<WorkerRole>().unwrap(), WorkerRole::AgentContainer);
-        assert_eq!("inference-ollama".parse::<WorkerRole>().unwrap(), WorkerRole::InferenceOllama);
-        assert_eq!("storage-object-sqlite".parse::<WorkerRole>().unwrap(), WorkerRole::StorageObjectSqlite);
-        assert_eq!("storage-vector-sqlite".parse::<WorkerRole>().unwrap(), WorkerRole::StorageVectorSqlite);
+        assert_eq!(
+            "registry".parse::<WorkerRole>().unwrap(),
+            WorkerRole::Registry
+        );
+        assert_eq!(
+            "harness".parse::<WorkerRole>().unwrap(),
+            WorkerRole::Harness
+        );
+        assert_eq!(
+            "agent-container".parse::<WorkerRole>().unwrap(),
+            WorkerRole::AgentContainer
+        );
+        assert_eq!(
+            "inference-ollama".parse::<WorkerRole>().unwrap(),
+            WorkerRole::InferenceOllama
+        );
+        assert_eq!(
+            "storage-object-sqlite".parse::<WorkerRole>().unwrap(),
+            WorkerRole::StorageObjectSqlite
+        );
+        assert_eq!(
+            "storage-vector-sqlite".parse::<WorkerRole>().unwrap(),
+            WorkerRole::StorageVectorSqlite
+        );
         assert_eq!("secret".parse::<WorkerRole>().unwrap(), WorkerRole::Secret);
         assert_eq!("state".parse::<WorkerRole>().unwrap(), WorkerRole::State);
-        assert_eq!("catalog".parse::<WorkerRole>().unwrap(), WorkerRole::Catalog);
+        assert_eq!(
+            "catalog".parse::<WorkerRole>().unwrap(),
+            WorkerRole::Catalog
+        );
         assert_eq!("dag-git".parse::<WorkerRole>().unwrap(), WorkerRole::DagGit);
-        assert_eq!("session-viewer".parse::<WorkerRole>().unwrap(), WorkerRole::SessionViewer);
+        assert_eq!(
+            "session-viewer".parse::<WorkerRole>().unwrap(),
+            WorkerRole::SessionViewer
+        );
     }
 
     #[test]

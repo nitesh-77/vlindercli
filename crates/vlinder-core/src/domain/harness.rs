@@ -9,12 +9,11 @@
 
 use std::sync::Arc;
 
-use crate::domain::{
-    HarnessType, InvokeDiagnostics, InvokeMessage,
-    JobId, JobStatus, MessageQueue, Registry, ResourceId,
-    SessionId, SubmissionId, TimelineId,
-};
 use crate::domain::Session;
+use crate::domain::{
+    HarnessType, InvokeDiagnostics, InvokeMessage, JobId, JobStatus, MessageQueue, Registry,
+    ResourceId, SessionId, SubmissionId, TimelineId,
+};
 
 /// Common harness operations shared across all harness types.
 pub trait Harness {
@@ -117,17 +116,26 @@ impl CoreHarness {
     /// Build an InvokeMessage from session state and register a job.
     ///
     /// Returns the message and the job ID.
-    fn build_invoke(&mut self, agent_id: &ResourceId, input: &str) -> Result<(InvokeMessage, JobId), String> {
+    fn build_invoke(
+        &mut self,
+        agent_id: &ResourceId,
+        input: &str,
+    ) -> Result<(InvokeMessage, JobId), String> {
         // Reject invocations on sealed timelines (ADR 093)
         if self.timeline_sealed {
             return Err(
-                "Timeline is sealed. Use `vlinder timeline repair` to fork a new timeline.".to_string()
+                "Timeline is sealed. Use `vlinder timeline repair` to fork a new timeline."
+                    .to_string(),
             );
         }
 
-        let agent = self.registry.get_agent(agent_id)
+        let agent = self
+            .registry
+            .get_agent(agent_id)
             .ok_or_else(|| format!("agent not deployed: {}", agent_id))?;
-        let runtime = self.registry.select_runtime(&agent)
+        let runtime = self
+            .registry
+            .select_runtime(&agent)
             .ok_or_else(|| format!("no runtime available for agent: {}", agent_id))?;
 
         let (submission, session_id, payload) = if let Some(session) = self.session.as_mut() {
@@ -145,9 +153,13 @@ impl CoreHarness {
             (SubmissionId::new(), SessionId::new(), input.to_string())
         };
 
-        let job_id = self.registry.create_job(submission.clone(), agent_id.clone(), input.to_string());
+        let job_id =
+            self.registry
+                .create_job(submission.clone(), agent_id.clone(), input.to_string());
 
-        let history_turns = self.session.as_ref()
+        let history_turns = self
+            .session
+            .as_ref()
             .map(|s| s.history.len() as u32)
             .unwrap_or(0);
         let invoke_diag = InvokeDiagnostics {
@@ -196,11 +208,14 @@ impl Harness for CoreHarness {
         let (invoke_msg, job_id) = self.build_invoke(agent_id, input)?;
         self.registry.update_job_status(&job_id, JobStatus::Running);
 
-        let complete = self.queue.run_agent(invoke_msg)
+        let complete = self
+            .queue
+            .run_agent(invoke_msg)
             .map_err(|e| format!("queue error: {}", e))?;
 
         let result = String::from_utf8_lossy(&complete.payload).to_string();
-        self.registry.update_job_status(&job_id, JobStatus::Completed(result.clone()));
+        self.registry
+            .update_job_status(&job_id, JobStatus::Completed(result.clone()));
         if complete.state.is_some() {
             self.pending_state = complete.state;
         }
@@ -212,8 +227,8 @@ impl Harness for CoreHarness {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::queue::InMemoryQueue;
     use crate::domain::{InMemoryRegistry, InMemorySecretStore, RuntimeType, SecretStore};
+    use crate::queue::InMemoryQueue;
 
     #[test]
     fn harness_type_is_cli() {

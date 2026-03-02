@@ -19,7 +19,8 @@ fn parse_manifest(toml: &str) -> Result<AgentManifest, toml::de::Error> {
 
 #[test]
 fn manifest_parses_required_fields() {
-    let manifest: AgentManifest = parse_manifest(r#"
+    let manifest: AgentManifest = parse_manifest(
+        r#"
         name = "test-agent"
         description = "A test agent"
         runtime = "container"
@@ -27,7 +28,9 @@ fn manifest_parses_required_fields() {
 
         [requirements]
 
-    "#).unwrap();
+    "#,
+    )
+    .unwrap();
 
     assert_eq!(manifest.name, "test-agent");
     assert_eq!(manifest.description, "A test agent");
@@ -37,7 +40,8 @@ fn manifest_parses_required_fields() {
 
 #[test]
 fn manifest_parses_optional_source() {
-    let manifest: AgentManifest = parse_manifest(r#"
+    let manifest: AgentManifest = parse_manifest(
+        r#"
         name = "test-agent"
         description = "A test agent"
         runtime = "container"
@@ -46,16 +50,22 @@ fn manifest_parses_optional_source() {
 
         [requirements]
 
-    "#).unwrap();
+    "#,
+    )
+    .unwrap();
 
-    assert_eq!(manifest.source, Some("https://github.com/example/agent".to_string()));
+    assert_eq!(
+        manifest.source,
+        Some("https://github.com/example/agent".to_string())
+    );
 }
 
 #[test]
 fn manifest_parses_requirements() {
-    use vlinder_core::domain::{ServiceType, Provider, Protocol};
+    use vlinder_core::domain::{Protocol, Provider, ServiceType};
 
-    let manifest: AgentManifest = parse_manifest(r#"
+    let manifest: AgentManifest = parse_manifest(
+        r#"
         name = "test-agent"
         description = "A test agent"
         runtime = "container"
@@ -74,18 +84,30 @@ fn manifest_parses_requirements() {
         provider = "ollama"
         protocol = "openai"
         models = ["nomic-embed"]
-    "#).unwrap();
+    "#,
+    )
+    .unwrap();
 
     assert!(manifest.requirements.models.contains_key("phi3"));
     assert!(manifest.requirements.models.contains_key("nomic-embed"));
-    assert!(manifest.requirements.services.contains_key(&ServiceType::Infer));
-    assert_eq!(manifest.requirements.services[&ServiceType::Infer].provider, Provider::OpenRouter);
-    assert_eq!(manifest.requirements.services[&ServiceType::Embed].protocol, Protocol::OpenAi);
+    assert!(manifest
+        .requirements
+        .services
+        .contains_key(&ServiceType::Infer));
+    assert_eq!(
+        manifest.requirements.services[&ServiceType::Infer].provider,
+        Provider::OpenRouter
+    );
+    assert_eq!(
+        manifest.requirements.services[&ServiceType::Embed].protocol,
+        Protocol::OpenAi
+    );
 }
 
 #[test]
 fn manifest_defaults_empty_optional_fields() {
-    let manifest: AgentManifest = parse_manifest(r#"
+    let manifest: AgentManifest = parse_manifest(
+        r#"
         name = "minimal"
         description = "Minimal valid manifest"
         runtime = "container"
@@ -93,7 +115,9 @@ fn manifest_defaults_empty_optional_fields() {
 
         [requirements]
 
-    "#).unwrap();
+    "#,
+    )
+    .unwrap();
 
     assert!(manifest.source.is_none());
     assert!(manifest.prompts.is_none());
@@ -108,13 +132,15 @@ fn manifest_fails_for_invalid_toml() {
 
 #[test]
 fn manifest_fails_for_missing_required_field() {
-    let result = parse_manifest(r#"
+    let result = parse_manifest(
+        r#"
         name = "incomplete"
         description = "Missing runtime and executable"
 
         [requirements]
 
-    "#);
+    "#,
+    );
     assert!(result.is_err());
 }
 
@@ -159,7 +185,8 @@ fn agent_id_is_placeholder_before_registration() {
 #[test]
 fn manifest_executable_passes_through_for_containers() {
     // Container executables should pass through without file resolution
-    let manifest: AgentManifest = parse_manifest(r#"
+    let manifest: AgentManifest = parse_manifest(
+        r#"
         name = "remote-agent"
         description = "Agent with remote registry image"
         runtime = "container"
@@ -167,7 +194,9 @@ fn manifest_executable_passes_through_for_containers() {
 
         [requirements]
 
-    "#).unwrap();
+    "#,
+    )
+    .unwrap();
 
     assert_eq!(manifest.executable, "ghcr.io/user/my-agent:v1.2.3");
 }
@@ -191,7 +220,10 @@ fn agent_load_fails_for_missing_executable() {
     std::fs::write(temp_dir.join("agent.toml"), manifest).unwrap();
 
     let result = Agent::load(&temp_dir);
-    assert!(result.is_err(), "Should fail when executable file doesn't exist");
+    assert!(
+        result.is_err(),
+        "Should fail when executable file doesn't exist"
+    );
 
     // Cleanup
     let _ = std::fs::remove_dir_all(&temp_dir);
@@ -206,7 +238,7 @@ fn agent_with_empty_models_list() {
 
 #[test]
 fn agent_services_from_fixture() {
-    use vlinder_core::domain::{ServiceType, Provider, Protocol};
+    use vlinder_core::domain::{Protocol, Provider, ServiceType};
 
     let agent = Agent::load(&agent_fixture("pensieve")).unwrap();
 

@@ -3,7 +3,7 @@
 use serde::Deserialize;
 
 use vlinder_core::domain::{
-    CatalogError, Provider, Model, ModelCatalog, ModelInfo, ModelType, ResourceId,
+    CatalogError, Model, ModelCatalog, ModelInfo, ModelType, Provider, ResourceId,
 };
 
 /// Catalog that queries OpenRouter's API for available models.
@@ -101,10 +101,7 @@ mod tests {
 
     #[test]
     fn creates_catalog_with_endpoint() {
-        let catalog = OpenRouterCatalog::new(
-            "https://openrouter.ai/api/v1",
-            "test-key",
-        );
+        let catalog = OpenRouterCatalog::new("https://openrouter.ai/api/v1", "test-key");
         assert_eq!(catalog.endpoint, "https://openrouter.ai/api/v1");
         assert_eq!(catalog.api_key, "test-key");
     }

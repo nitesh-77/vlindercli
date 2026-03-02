@@ -47,6 +47,10 @@ fn model_values_are_plain_strings() {
 
     for (_alias, name) in &agent.requirements.models {
         // Values are registry names, not URIs
-        assert!(!name.contains("://"), "model value should be a name, not a URI: {}", name);
+        assert!(
+            !name.contains("://"),
+            "model value should be a name, not a URI: {}",
+            name
+        );
     }
 }

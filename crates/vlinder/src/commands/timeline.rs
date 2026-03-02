@@ -14,8 +14,8 @@ use std::process::Command;
 
 use clap::Subcommand;
 
-use crate::config::{CliConfig, conversations_dir};
-use vlinder_core::domain::{AgentManifest, TimelineId, agent_routing_key};
+use crate::config::{conversations_dir, CliConfig};
+use vlinder_core::domain::{agent_routing_key, AgentManifest, TimelineId};
 
 use super::connect::{connect_harness, connect_registry, open_dag_store};
 
@@ -83,7 +83,11 @@ fn read_trailer(dir: &Path, commit: &str, key: &str) -> Option<String> {
     }
 
     let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if value.is_empty() { None } else { Some(value) }
+    if value.is_empty() {
+        None
+    } else {
+        Some(value)
+    }
 }
 
 /// Get the current HEAD commit SHA.
@@ -200,7 +204,11 @@ fn parse_agent_from_subject(subject: &str) -> Option<String> {
     let rest = subject.strip_prefix("complete: ")?;
     let agent = rest.split(" →").next()?;
     let agent = agent.trim();
-    if agent.is_empty() { None } else { Some(agent.to_string()) }
+    if agent.is_empty() {
+        None
+    } else {
+        Some(agent.to_string())
+    }
 }
 
 /// Repair from current position — create a branch and re-execute (ADR 081).
@@ -244,7 +252,8 @@ fn repair(dir: &Path, path: Option<PathBuf>) {
     let dag_store = open_dag_store(&config);
 
     // Count existing repair branches for today to generate unique suffix
-    let counter = dag_store.as_ref()
+    let counter = dag_store
+        .as_ref()
         .and_then(|store| {
             // Count timelines with branch_name like repair-{date}-%
             // We don't have a count method, so iterate by trying names
@@ -299,7 +308,11 @@ fn repair(dir: &Path, path: Option<PathBuf>) {
         None
     };
 
-    println!("Created branch '{}' from {}", branch_name, &head_sha[..8.min(head_sha.len())]);
+    println!(
+        "Created branch '{}' from {}",
+        branch_name,
+        &head_sha[..8.min(head_sha.len())]
+    );
 
     if let Some(ref session) = session_trailer {
         println!("Session:    {}", session);
@@ -312,9 +325,8 @@ fn repair(dir: &Path, path: Option<PathBuf>) {
     }
 
     // 5-8. Deploy agent via registry, connect harness via gRPC, enter REPL
-    let agent_path = path.unwrap_or_else(|| {
-        std::env::current_dir().expect("Failed to get current directory")
-    });
+    let agent_path =
+        path.unwrap_or_else(|| std::env::current_dir().expect("Failed to get current directory"));
 
     let absolute_path = match agent_path.canonicalize() {
         Ok(p) => p,
@@ -363,11 +375,9 @@ fn repair(dir: &Path, path: Option<PathBuf>) {
     println!();
 
     // Enter REPL with synchronous run_agent (ADR 092)
-    super::repl::run(|input| {
-        match harness.run_agent(&agent_id, input) {
-            Ok(result) => result,
-            Err(e) => format!("[error] {}", e),
-        }
+    super::repl::run(|input| match harness.run_agent(&agent_id, input) {
+        Ok(result) => result,
+        Err(e) => format!("[error] {}", e),
     });
 }
 
@@ -384,9 +394,7 @@ fn promote(dir: &Path) {
         .output();
 
     let current_branch = match output {
-        Ok(ref o) if o.status.success() => {
-            String::from_utf8_lossy(&o.stdout).trim().to_string()
-        }
+        Ok(ref o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
         _ => {
             eprintln!("Cannot determine current branch. Are you on a branch?");
             return;
@@ -485,11 +493,7 @@ fn promote(dir: &Path) {
 
 /// Pass arguments directly to git operating on the conversations repo.
 fn passthrough(dir: &Path, args: &[String]) {
-    let status = Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        .args(args)
-        .status();
+    let status = Command::new("git").arg("-C").arg(dir).args(args).status();
 
     match status {
         Ok(s) if !s.success() => {
@@ -515,8 +519,12 @@ mod tests {
             .args(args)
             .output()
             .unwrap();
-        assert!(status.status.success(), "git {:?} failed: {}",
-            args, String::from_utf8_lossy(&status.stderr));
+        assert!(
+            status.status.success(),
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&status.stderr)
+        );
     }
 
     /// Create a test repo with an invoke+complete commit pair.
@@ -542,7 +550,8 @@ mod tests {
         // Complete commit
         std::fs::write(dir.join("complete"), "payload").unwrap();
         git(dir, &["add", "complete"]);
-        let complete_msg = "complete: agent-a → cli\n\nSession: sess-1\nSubmission: sub-1\nState: state-abc123";
+        let complete_msg =
+            "complete: agent-a → cli\n\nSession: sess-1\nSubmission: sub-1\nState: state-abc123";
         std::fs::write(dir.join(".commit_msg"), complete_msg).unwrap();
         git(dir, &["commit", "-F", ".commit_msg"]);
 
@@ -717,7 +726,10 @@ mod tests {
     #[test]
     fn parse_agent_ignores_non_complete_subjects() {
         assert_eq!(parse_agent_from_subject("invoke: cli → todoapp"), None);
-        assert_eq!(parse_agent_from_subject("request: todoapp → kv.sqlite"), None);
+        assert_eq!(
+            parse_agent_from_subject("request: todoapp → kv.sqlite"),
+            None
+        );
     }
 
     #[test]

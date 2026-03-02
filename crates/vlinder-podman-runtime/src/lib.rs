@@ -4,9 +4,9 @@
 //! to implement the same `Runtime` trait.
 
 mod config;
-mod podman_client;
 mod podman_api;
 mod podman_cli;
+mod podman_client;
 mod pool;
 mod unix_transport;
 

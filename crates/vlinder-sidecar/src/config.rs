@@ -70,6 +70,8 @@ mod tests {
     fn required_env_missing() {
         let result = required_env("VLINDER_NONEXISTENT_TEST_VAR_12345");
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("VLINDER_NONEXISTENT_TEST_VAR_12345"));
+        assert!(result
+            .unwrap_err()
+            .contains("VLINDER_NONEXISTENT_TEST_VAR_12345"));
     }
 }

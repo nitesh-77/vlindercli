@@ -336,7 +336,10 @@ impl Default for AgentWorkerCounts {
 
 impl Default for InferenceWorkerCounts {
     fn default() -> Self {
-        Self { ollama: 1, openrouter: 0 }
+        Self {
+            ollama: 1,
+            openrouter: 0,
+        }
     }
 }
 
@@ -351,13 +354,19 @@ impl Default for StorageWorkerCounts {
 
 impl Default for ObjectStorageWorkerCounts {
     fn default() -> Self {
-        Self { sqlite: 1, memory: 0 }
+        Self {
+            sqlite: 1,
+            memory: 0,
+        }
     }
 }
 
 impl Default for VectorStorageWorkerCounts {
     fn default() -> Self {
-        Self { sqlite: 1, memory: 0 }
+        Self {
+            sqlite: 1,
+            memory: 0,
+        }
     }
 }
 
@@ -524,10 +533,7 @@ impl Config {
     /// (async_nats, tonic, hyper, etc.) are suppressed to warn so they
     /// don't pollute the user's terminal.
     pub fn tracing_filter(&self) -> String {
-        format!(
-            "warn,vlinderd={}",
-            self.logging.level
-        )
+        format!("warn,vlinderd={}", self.logging.level)
     }
 }
 

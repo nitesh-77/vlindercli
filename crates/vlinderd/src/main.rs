@@ -32,7 +32,8 @@ fn run_as_worker(role: WorkerRole) {
     ctrlc::set_handler(move || {
         tracing::info!("Received shutdown signal");
         shutdown_clone.store(true, Ordering::Relaxed);
-    }).expect("Failed to set signal handler");
+    })
+    .expect("Failed to set signal handler");
 
     run_worker_loop(role, shutdown);
 }
@@ -48,7 +49,8 @@ fn run_as_supervisor(config: &Config) {
     ctrlc::set_handler(move || {
         tracing::info!("Received shutdown signal");
         shutdown_clone.store(true, Ordering::Relaxed);
-    }).expect("Failed to set signal handler");
+    })
+    .expect("Failed to set signal handler");
 
     // Wait for shutdown signal
     while !shutdown.load(Ordering::Relaxed) {

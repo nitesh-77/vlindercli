@@ -79,7 +79,7 @@ impl SubmissionId {
     /// * `session_id` — groups the submission into a conversation
     /// * `parent_submission` — previous SubmissionId in this session (empty for first turn)
     pub fn content_addressed(payload: &[u8], session_id: &str, parent_submission: &str) -> Self {
-        use sha2::{Sha256, Digest};
+        use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
         hasher.update(payload);
         hasher.update(b"\0");
@@ -283,15 +283,19 @@ impl HarnessType {
         }
     }
 
-    /// Parse from string representation.
-    pub fn from_str(s: &str) -> Option<Self> {
+}
+
+impl std::str::FromStr for HarnessType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "cli" => Some(HarnessType::Cli),
-            "web" => Some(HarnessType::Web),
-            "api" => Some(HarnessType::Api),
-            "whatsapp" => Some(HarnessType::Whatsapp),
-            "grpc" => Some(HarnessType::Grpc),
-            _ => None,
+            "cli" => Ok(HarnessType::Cli),
+            "web" => Ok(HarnessType::Web),
+            "api" => Ok(HarnessType::Api),
+            "whatsapp" => Ok(HarnessType::Whatsapp),
+            "grpc" => Ok(HarnessType::Grpc),
+            _ => Err(format!("unknown harness type: {}", s)),
         }
     }
 }
@@ -306,6 +310,7 @@ impl fmt::Display for HarnessType {
 mod tests {
     use super::*;
     use std::collections::HashSet;
+    use std::str::FromStr;
 
     // --- SubmissionId tests ---
 
@@ -369,9 +374,17 @@ mod tests {
     #[test]
     fn content_addressed_is_64_char_hex() {
         let id = SubmissionId::content_addressed(b"test", "ses-1", "");
-        assert_eq!(id.as_str().len(), 64, "SHA-256 produces 64 hex chars: {}", id);
-        assert!(id.as_str().chars().all(|c| c.is_ascii_hexdigit()),
-            "should be hex: {}", id);
+        assert_eq!(
+            id.as_str().len(),
+            64,
+            "SHA-256 produces 64 hex chars: {}",
+            id
+        );
+        assert!(
+            id.as_str().chars().all(|c| c.is_ascii_hexdigit()),
+            "should be hex: {}",
+            id
+        );
     }
 
     // --- SessionId tests ---
@@ -513,18 +526,21 @@ mod tests {
     #[test]
     fn harness_type_from_str_round_trips() {
         let types = [
-            HarnessType::Cli, HarnessType::Web, HarnessType::Api,
-            HarnessType::Whatsapp, HarnessType::Grpc,
+            HarnessType::Cli,
+            HarnessType::Web,
+            HarnessType::Api,
+            HarnessType::Whatsapp,
+            HarnessType::Grpc,
         ];
         for ht in types {
-            assert_eq!(HarnessType::from_str(ht.as_str()), Some(ht));
+            assert_eq!(HarnessType::from_str(ht.as_str()), Ok(ht));
         }
     }
 
     #[test]
     fn harness_type_from_str_unknown_returns_none() {
-        assert_eq!(HarnessType::from_str("unknown"), None);
-        assert_eq!(HarnessType::from_str(""), None);
+        assert!(HarnessType::from_str("unknown").is_err());
+        assert!(HarnessType::from_str("").is_err());
     }
 
     #[test]

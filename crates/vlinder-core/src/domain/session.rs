@@ -138,13 +138,17 @@ fn format_unix_timestamp(secs: u64) -> String {
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = if m <= 2 { y + 1 } else { y };
 
-    format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", y, m, d, hours, minutes, seconds)
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+        y, m, d, hours, minutes, seconds
+    )
 }
 
 /// Compute the filename for a session. Called once at creation time.
 fn make_filename(session: &SessionId, agent: &str) -> String {
     let datetime = format_utc_datetime_filesafe();
-    let short_id = session.as_str()
+    let short_id = session
+        .as_str()
         .strip_prefix("ses-")
         .unwrap_or(session.as_str());
     let short_id = if short_id.len() > 8 {
@@ -171,10 +175,7 @@ mod tests {
     use super::*;
 
     fn test_session() -> Session {
-        Session::new(
-            SessionId::from("ses-abc12345".to_string()),
-            "pensieve",
-        )
+        Session::new(SessionId::from("ses-abc12345".to_string()), "pensieve")
     }
 
     #[test]
@@ -249,7 +250,10 @@ mod tests {
         session.record_agent_response("Here's the summary...");
 
         // Turn 2
-        session.record_user_input("what about point 3?", SubmissionId::from("sha2".to_string()));
+        session.record_user_input(
+            "what about point 3?",
+            SubmissionId::from("sha2".to_string()),
+        );
         session.record_agent_response("Point 3 discusses...");
 
         assert!(session.open.is_none());

@@ -6,10 +6,12 @@ mod types;
 mod worker;
 
 pub use storage::SqliteVectorStorage;
-pub use types::{SqliteVecStoreRequest, SqliteVecSearchRequest, SqliteVecDeleteRequest};
+pub use types::{SqliteVecDeleteRequest, SqliteVecSearchRequest, SqliteVecStoreRequest};
 pub use worker::SqliteVecWorker;
 
-use vlinder_core::domain::{HttpMethod, Operation, ProviderHost, ProviderRoute, ServiceBackend, VectorStorageType};
+use vlinder_core::domain::{
+    HttpMethod, Operation, ProviderHost, ProviderRoute, ServiceBackend, VectorStorageType,
+};
 
 /// The virtual hostname the sidecar will serve for sqlite-vec.
 pub const HOSTNAME: &str = "sqlite-vec.vlinder.local";
@@ -18,26 +20,29 @@ pub const HOSTNAME: &str = "sqlite-vec.vlinder.local";
 pub fn provider_host() -> ProviderHost {
     let backend = ServiceBackend::Vec(VectorStorageType::SqliteVec);
 
-    ProviderHost::new(HOSTNAME, vec![
-        ProviderRoute::new::<SqliteVecStoreRequest, serde_json::Value>(
-            HttpMethod::Post,
-            "/store",
-            backend,
-            Operation::Store,
-        ),
-        ProviderRoute::new::<SqliteVecSearchRequest, serde_json::Value>(
-            HttpMethod::Post,
-            "/search",
-            backend,
-            Operation::Search,
-        ),
-        ProviderRoute::new::<SqliteVecDeleteRequest, serde_json::Value>(
-            HttpMethod::Post,
-            "/delete",
-            backend,
-            Operation::Delete,
-        ),
-    ])
+    ProviderHost::new(
+        HOSTNAME,
+        vec![
+            ProviderRoute::new::<SqliteVecStoreRequest, serde_json::Value>(
+                HttpMethod::Post,
+                "/store",
+                backend,
+                Operation::Store,
+            ),
+            ProviderRoute::new::<SqliteVecSearchRequest, serde_json::Value>(
+                HttpMethod::Post,
+                "/search",
+                backend,
+                Operation::Search,
+            ),
+            ProviderRoute::new::<SqliteVecDeleteRequest, serde_json::Value>(
+                HttpMethod::Post,
+                "/delete",
+                backend,
+                Operation::Delete,
+            ),
+        ],
+    )
 }
 
 #[cfg(test)]

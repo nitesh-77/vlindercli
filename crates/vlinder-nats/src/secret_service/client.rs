@@ -3,8 +3,8 @@
 use std::sync::Mutex;
 use tonic::transport::Channel;
 
-use vlinder_core::domain::{SecretStore, SecretStoreError};
 use super::proto::{self, secret_store_service_client::SecretStoreServiceClient};
+use vlinder_core::domain::{SecretStore, SecretStoreError};
 
 /// SecretStore implementation that makes gRPC calls to a remote Secret Service.
 pub struct GrpcSecretClient {
@@ -16,9 +16,8 @@ impl GrpcSecretClient {
     /// Connect to a secret service server.
     pub fn connect(addr: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let runtime = tokio::runtime::Runtime::new()?;
-        let client = runtime.block_on(async {
-            SecretStoreServiceClient::connect(addr.to_string()).await
-        })?;
+        let client = runtime
+            .block_on(async { SecretStoreServiceClient::connect(addr.to_string()).await })?;
 
         Ok(Self {
             client: Mutex::new(client),
@@ -54,11 +53,10 @@ impl SecretStore for GrpcSecretClient {
             value: value.to_vec(),
         };
 
-        let response = self.runtime.block_on(async {
-            self.client.lock().unwrap()
-                .put(request)
-                .await
-        }).map_err(|e| SecretStoreError::StoreFailed(e.to_string()))?;
+        let response = self
+            .runtime
+            .block_on(async { self.client.lock().unwrap().put(request).await })
+            .map_err(|e| SecretStoreError::StoreFailed(e.to_string()))?;
 
         let resp = response.into_inner();
         if resp.success {
@@ -75,11 +73,10 @@ impl SecretStore for GrpcSecretClient {
             name: name.to_string(),
         };
 
-        let response = self.runtime.block_on(async {
-            self.client.lock().unwrap()
-                .get(request)
-                .await
-        }).map_err(|e| SecretStoreError::StoreFailed(e.to_string()))?;
+        let response = self
+            .runtime
+            .block_on(async { self.client.lock().unwrap().get(request).await })
+            .map_err(|e| SecretStoreError::StoreFailed(e.to_string()))?;
 
         let resp = response.into_inner();
         if let Some(err) = resp.error {
@@ -97,11 +94,10 @@ impl SecretStore for GrpcSecretClient {
             name: name.to_string(),
         };
 
-        let response = self.runtime.block_on(async {
-            self.client.lock().unwrap()
-                .exists(request)
-                .await
-        }).map_err(|e| SecretStoreError::StoreFailed(e.to_string()))?;
+        let response = self
+            .runtime
+            .block_on(async { self.client.lock().unwrap().exists(request).await })
+            .map_err(|e| SecretStoreError::StoreFailed(e.to_string()))?;
 
         let resp = response.into_inner();
         if let Some(err) = resp.error {
@@ -115,11 +111,10 @@ impl SecretStore for GrpcSecretClient {
             name: name.to_string(),
         };
 
-        let response = self.runtime.block_on(async {
-            self.client.lock().unwrap()
-                .delete(request)
-                .await
-        }).map_err(|e| SecretStoreError::DeleteFailed(e.to_string()))?;
+        let response = self
+            .runtime
+            .block_on(async { self.client.lock().unwrap().delete(request).await })
+            .map_err(|e| SecretStoreError::DeleteFailed(e.to_string()))?;
 
         let resp = response.into_inner();
         if resp.success {

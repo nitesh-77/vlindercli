@@ -73,7 +73,9 @@ mod tests {
         assert_eq!(
             cli.command,
             Command::Agent {
-                cmd: agent::AgentCommand::Run { name: "todoapp".to_string() }
+                cmd: agent::AgentCommand::Run {
+                    name: "todoapp".to_string()
+                }
             }
         );
     }
@@ -355,7 +357,8 @@ mod tests {
 
     #[test]
     fn cli_timeline_repair_with_path() {
-        let cli = Cli::try_parse_from(["vlinder", "timeline", "repair", "-p", "/tmp/agent"]).unwrap();
+        let cli =
+            Cli::try_parse_from(["vlinder", "timeline", "repair", "-p", "/tmp/agent"]).unwrap();
         assert_eq!(
             cli.command,
             Command::Timeline {
@@ -419,9 +422,8 @@ mod tests {
 
     #[test]
     fn cli_secret_delete() {
-        let cli =
-            Cli::try_parse_from(["vlinder", "secret", "delete", "agents/echo/private-key"])
-                .unwrap();
+        let cli = Cli::try_parse_from(["vlinder", "secret", "delete", "agents/echo/private-key"])
+            .unwrap();
         assert_eq!(
             cli.command,
             Command::Secret {
@@ -434,9 +436,8 @@ mod tests {
 
     #[test]
     fn cli_secret_exists() {
-        let cli =
-            Cli::try_parse_from(["vlinder", "secret", "exists", "agents/echo/private-key"])
-                .unwrap();
+        let cli = Cli::try_parse_from(["vlinder", "secret", "exists", "agents/echo/private-key"])
+            .unwrap();
         assert_eq!(
             cli.command,
             Command::Secret {

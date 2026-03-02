@@ -2,8 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use vlinder_core::domain::{
-    Fleet, FleetManifest, InMemoryRegistry, Registry,
-    RuntimeType, InMemorySecretStore, SecretStore,
+    Fleet, FleetManifest, InMemoryRegistry, InMemorySecretStore, Registry, RuntimeType, SecretStore,
 };
 
 // ============================================================================
@@ -16,13 +15,16 @@ fn parse_fleet_manifest(toml: &str) -> Result<FleetManifest, toml::de::Error> {
 
 #[test]
 fn manifest_parses_required_fields() {
-    let manifest: FleetManifest = parse_fleet_manifest(r#"
+    let manifest: FleetManifest = parse_fleet_manifest(
+        r#"
         name = "test-fleet"
         entry = "main"
 
         [agents.main]
         path = "agents/main"
-    "#).unwrap();
+    "#,
+    )
+    .unwrap();
 
     assert_eq!(manifest.name, "test-fleet");
     assert_eq!(manifest.entry, "main");
@@ -31,7 +33,8 @@ fn manifest_parses_required_fields() {
 
 #[test]
 fn manifest_parses_agent_paths() {
-    let manifest: FleetManifest = parse_fleet_manifest(r#"
+    let manifest: FleetManifest = parse_fleet_manifest(
+        r#"
         name = "test-fleet"
         entry = "orchestrator"
 
@@ -40,9 +43,14 @@ fn manifest_parses_agent_paths() {
 
         [agents.worker]
         path = "agents/worker"
-    "#).unwrap();
+    "#,
+    )
+    .unwrap();
 
-    assert_eq!(manifest.agents.get("orchestrator").unwrap().path, "agents/orchestrator");
+    assert_eq!(
+        manifest.agents.get("orchestrator").unwrap().path,
+        "agents/orchestrator"
+    );
     assert_eq!(manifest.agents.get("worker").unwrap().path, "agents/worker");
 }
 
@@ -55,12 +63,14 @@ fn manifest_fails_for_invalid_toml() {
 #[test]
 fn manifest_fails_for_missing_required_field() {
     // Missing entry field
-    let result = parse_fleet_manifest(r#"
+    let result = parse_fleet_manifest(
+        r#"
         name = "incomplete"
 
         [agents.main]
         path = "agents/main"
-    "#);
+    "#,
+    );
     assert!(result.is_err());
 }
 
@@ -107,7 +117,8 @@ fn minimal_agent(name: &str) -> vlinder_core::domain::Agent {
 }
 
 fn test_manifest() -> FleetManifest {
-    parse_fleet_manifest(r#"
+    parse_fleet_manifest(
+        r#"
         name = "test-fleet"
         entry = "echo"
 
@@ -116,7 +127,9 @@ fn test_manifest() -> FleetManifest {
 
         [agents.upper]
         path = "agents/upper"
-    "#).unwrap()
+    "#,
+    )
+    .unwrap()
 }
 
 #[test]
@@ -140,7 +153,11 @@ fn fleet_from_manifest_fails_when_agent_not_registered() {
     let result = Fleet::from_manifest(manifest, &*registry);
     assert!(result.is_err());
     let err = format!("{}", result.unwrap_err());
-    assert!(err.contains("upper"), "error should mention missing agent: {}", err);
+    assert!(
+        err.contains("upper"),
+        "error should mention missing agent: {}",
+        err
+    );
 }
 
 #[test]
@@ -151,7 +168,11 @@ fn fleet_from_manifest_fails_when_entry_not_registered() {
     let result = Fleet::from_manifest(manifest, &*registry);
     assert!(result.is_err());
     let err = format!("{}", result.unwrap_err());
-    assert!(err.contains("echo"), "error should mention missing entry agent: {}", err);
+    assert!(
+        err.contains("echo"),
+        "error should mention missing entry agent: {}",
+        err
+    );
 }
 
 #[test]
@@ -173,7 +194,10 @@ fn fleet_has_placeholder_id_before_registration() {
     let manifest = test_manifest();
     let fleet = Fleet::from_manifest(manifest, &*registry).unwrap();
 
-    assert!(fleet.id.as_str().contains("pending-registration://fleets/test-fleet"));
+    assert!(fleet
+        .id
+        .as_str()
+        .contains("pending-registration://fleets/test-fleet"));
 }
 
 // ============================================================================
@@ -239,13 +263,16 @@ fn fleet_from_manifest_entry_is_in_agents_set() {
 #[test]
 fn fleet_from_manifest_single_agent_fleet() {
     let registry = test_registry_with_agents(&["solo"]);
-    let manifest: FleetManifest = parse_fleet_manifest(r#"
+    let manifest: FleetManifest = parse_fleet_manifest(
+        r#"
         name = "solo-fleet"
         entry = "solo"
 
         [agents.solo]
         path = "agents/solo"
-    "#).unwrap();
+    "#,
+    )
+    .unwrap();
 
     let fleet = Fleet::from_manifest(manifest, &*registry).unwrap();
     assert_eq!(fleet.agents.len(), 1);
@@ -254,9 +281,16 @@ fn fleet_from_manifest_single_agent_fleet() {
 
 #[test]
 fn fleet_from_manifest_many_agents() {
-    let names = &["coordinator", "researcher", "writer", "reviewer", "publisher"];
+    let names = &[
+        "coordinator",
+        "researcher",
+        "writer",
+        "reviewer",
+        "publisher",
+    ];
     let registry = test_registry_with_agents(names);
-    let manifest: FleetManifest = parse_fleet_manifest(r#"
+    let manifest: FleetManifest = parse_fleet_manifest(
+        r#"
         name = "big-fleet"
         entry = "coordinator"
 
@@ -274,13 +308,19 @@ fn fleet_from_manifest_many_agents() {
 
         [agents.publisher]
         path = "agents/publisher"
-    "#).unwrap();
+    "#,
+    )
+    .unwrap();
 
     let fleet = Fleet::from_manifest(manifest, &*registry).unwrap();
     assert_eq!(fleet.agents.len(), 5);
     for name in names {
         let id = registry.agent_id(name).unwrap();
-        assert!(fleet.agents.contains(&id), "fleet should contain agent '{}'", name);
+        assert!(
+            fleet.agents.contains(&id),
+            "fleet should contain agent '{}'",
+            name
+        );
     }
 }
 
@@ -288,24 +328,32 @@ fn fleet_from_manifest_many_agents() {
 fn fleet_from_manifest_all_agents_missing() {
     // Registry has no agents at all
     let registry = test_registry_with_agents(&[]);
-    let manifest: FleetManifest = parse_fleet_manifest(r#"
+    let manifest: FleetManifest = parse_fleet_manifest(
+        r#"
         name = "ghost-fleet"
         entry = "missing"
 
         [agents.missing]
         path = "agents/missing"
-    "#).unwrap();
+    "#,
+    )
+    .unwrap();
 
     let result = Fleet::from_manifest(manifest, &*registry);
     assert!(result.is_err());
     let err = format!("{}", result.unwrap_err());
-    assert!(err.contains("missing"), "error should mention missing agent: {}", err);
+    assert!(
+        err.contains("missing"),
+        "error should mention missing agent: {}",
+        err
+    );
 }
 
 #[test]
 fn fleet_agents_count_matches_manifest() {
     let registry = test_registry_with_agents(&["a", "b", "c"]);
-    let manifest: FleetManifest = parse_fleet_manifest(r#"
+    let manifest: FleetManifest = parse_fleet_manifest(
+        r#"
         name = "counted"
         entry = "a"
 
@@ -317,7 +365,9 @@ fn fleet_agents_count_matches_manifest() {
 
         [agents.c]
         path = "agents/c"
-    "#).unwrap();
+    "#,
+    )
+    .unwrap();
 
     let expected_count = manifest.agents.len();
     let fleet = Fleet::from_manifest(manifest, &*registry).unwrap();
@@ -336,7 +386,8 @@ fn register_fleet_rejects_config_mismatch_different_entry() {
     registry.register_fleet(fleet1).unwrap();
 
     // Build a fleet with same agents but different entry
-    let manifest2: FleetManifest = parse_fleet_manifest(r#"
+    let manifest2: FleetManifest = parse_fleet_manifest(
+        r#"
         name = "test-fleet"
         entry = "upper"
 
@@ -345,7 +396,9 @@ fn register_fleet_rejects_config_mismatch_different_entry() {
 
         [agents.upper]
         path = "agents/upper"
-    "#).unwrap();
+    "#,
+    )
+    .unwrap();
     let fleet2 = Fleet::from_manifest(manifest2, &*registry).unwrap();
 
     let result = registry.register_fleet(fleet2);
@@ -366,7 +419,8 @@ fn register_fleet_rejects_config_mismatch_different_agents() {
     registry.register_fleet(fleet1).unwrap();
 
     // Build a fleet with same name and entry, but a different agent set
-    let manifest2: FleetManifest = parse_fleet_manifest(r#"
+    let manifest2: FleetManifest = parse_fleet_manifest(
+        r#"
         name = "test-fleet"
         entry = "echo"
 
@@ -375,7 +429,9 @@ fn register_fleet_rejects_config_mismatch_different_agents() {
 
         [agents.third]
         path = "agents/third"
-    "#).unwrap();
+    "#,
+    )
+    .unwrap();
     let fleet2 = Fleet::from_manifest(manifest2, &*registry).unwrap();
 
     let result = registry.register_fleet(fleet2);
@@ -404,7 +460,8 @@ fn fleet_name_preserved_through_registration() {
 fn multiple_fleets_can_share_agents() {
     let registry = test_registry_with_agents(&["shared", "only-a", "only-b"]);
 
-    let manifest_a: FleetManifest = parse_fleet_manifest(r#"
+    let manifest_a: FleetManifest = parse_fleet_manifest(
+        r#"
         name = "fleet-a"
         entry = "shared"
 
@@ -413,9 +470,12 @@ fn multiple_fleets_can_share_agents() {
 
         [agents.only-a]
         path = "agents/only-a"
-    "#).unwrap();
+    "#,
+    )
+    .unwrap();
 
-    let manifest_b: FleetManifest = parse_fleet_manifest(r#"
+    let manifest_b: FleetManifest = parse_fleet_manifest(
+        r#"
         name = "fleet-b"
         entry = "shared"
 
@@ -424,7 +484,9 @@ fn multiple_fleets_can_share_agents() {
 
         [agents.only-b]
         path = "agents/only-b"
-    "#).unwrap();
+    "#,
+    )
+    .unwrap();
 
     let fleet_a = Fleet::from_manifest(manifest_a, &*registry).unwrap();
     let fleet_b = Fleet::from_manifest(manifest_b, &*registry).unwrap();
@@ -436,8 +498,16 @@ fn multiple_fleets_can_share_agents() {
 
     // Both fleets contain the shared agent
     let shared_id = registry.agent_id("shared").unwrap();
-    assert!(registry.get_fleet("fleet-a").unwrap().agents.contains(&shared_id));
-    assert!(registry.get_fleet("fleet-b").unwrap().agents.contains(&shared_id));
+    assert!(registry
+        .get_fleet("fleet-a")
+        .unwrap()
+        .agents
+        .contains(&shared_id));
+    assert!(registry
+        .get_fleet("fleet-b")
+        .unwrap()
+        .agents
+        .contains(&shared_id));
 }
 
 // ============================================================================

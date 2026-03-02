@@ -44,8 +44,7 @@ impl Connector for UnixConnector {
         details: &ConnectionDetails,
         _chained: Option<()>,
     ) -> Result<Option<Self::Out>, ureq::Error> {
-        let stream = UnixStream::connect(&self.path)
-            .map_err(ureq::Error::Io)?;
+        let stream = UnixStream::connect(&self.path).map_err(ureq::Error::Io)?;
 
         let buffers = LazyBuffers::new(
             details.config.input_buffer_size(),
@@ -92,8 +91,8 @@ impl Transport for UnixTransport {
         let output = &self.buffers.output()[..amount];
         match self.stream.write_all(output) {
             Ok(()) => Ok(()),
-            Err(e) if e.kind() == io::ErrorKind::WouldBlock
-                || e.kind() == io::ErrorKind::TimedOut =>
+            Err(e)
+                if e.kind() == io::ErrorKind::WouldBlock || e.kind() == io::ErrorKind::TimedOut =>
             {
                 Err(ureq::Error::Timeout(timeout.reason))
             }
@@ -111,8 +110,8 @@ impl Transport for UnixTransport {
         let input = self.buffers.input_append_buf();
         let amount = match self.stream.read(input) {
             Ok(n) => n,
-            Err(e) if e.kind() == io::ErrorKind::WouldBlock
-                || e.kind() == io::ErrorKind::TimedOut =>
+            Err(e)
+                if e.kind() == io::ErrorKind::WouldBlock || e.kind() == io::ErrorKind::TimedOut =>
             {
                 return Err(ureq::Error::Timeout(timeout.reason));
             }

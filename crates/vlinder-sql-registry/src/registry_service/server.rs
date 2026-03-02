@@ -3,27 +3,18 @@
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
 
-use vlinder_core::domain::{Registry, JobStatus as DomainJobStatus, ResourceId, SubmissionId};
 use super::proto::{
-    self,
-    registry_server::Registry as RegistryService,
-    PingRequest, SemVer,
-    GetAgentRequest, GetAgentResponse, GetAgentByNameRequest,
-    RegisterAgentRequest, RegisterAgentResponse,
-    DeleteAgentRequest, DeleteAgentResponse,
-    ListAgentsRequest, ListAgentsResponse,
-    RegisterFleetRequest, RegisterFleetResponse,
-    GetFleetRequest, GetFleetResponse,
-    ListFleetsRequest, ListFleetsResponse,
-    GetModelRequest, GetModelResponse,
-    ListModelsRequest, ListModelsResponse,
-    RegisterModelRequest, RegisterModelResponse,
-    DeleteModelRequest, DeleteModelResponse,
-    CreateJobRequest, CreateJobResponse,
-    GetJobRequest, GetJobResponse,
-    UpdateJobStatusRequest, UpdateJobStatusResponse,
-    ListPendingJobsRequest, ListPendingJobsResponse,
+    self, registry_server::Registry as RegistryService, CreateJobRequest, CreateJobResponse,
+    DeleteAgentRequest, DeleteAgentResponse, DeleteModelRequest, DeleteModelResponse,
+    GetAgentByNameRequest, GetAgentRequest, GetAgentResponse, GetFleetRequest, GetFleetResponse,
+    GetJobRequest, GetJobResponse, GetModelRequest, GetModelResponse, ListAgentsRequest,
+    ListAgentsResponse, ListFleetsRequest, ListFleetsResponse, ListModelsRequest,
+    ListModelsResponse, ListPendingJobsRequest, ListPendingJobsResponse, PingRequest,
+    RegisterAgentRequest, RegisterAgentResponse, RegisterFleetRequest, RegisterFleetResponse,
+    RegisterModelRequest, RegisterModelResponse, SemVer, UpdateJobStatusRequest,
+    UpdateJobStatusResponse,
 };
+use vlinder_core::domain::{JobStatus as DomainJobStatus, Registry, ResourceId, SubmissionId};
 
 /// gRPC server that wraps a Registry implementation.
 pub struct RegistryServiceServer {
@@ -43,10 +34,7 @@ impl RegistryServiceServer {
 
 #[tonic::async_trait]
 impl RegistryService for RegistryServiceServer {
-    async fn ping(
-        &self,
-        _request: Request<PingRequest>,
-    ) -> Result<Response<SemVer>, Status> {
+    async fn ping(&self, _request: Request<PingRequest>) -> Result<Response<SemVer>, Status> {
         Ok(Response::new(SemVer {
             major: 0,
             minor: 0,
@@ -59,7 +47,8 @@ impl RegistryService for RegistryServiceServer {
         request: Request<GetAgentRequest>,
     ) -> Result<Response<GetAgentResponse>, Status> {
         let req = request.into_inner();
-        let id: ResourceId = req.id
+        let id: ResourceId = req
+            .id
             .ok_or_else(|| Status::invalid_argument("missing agent id"))?
             .into();
 
@@ -74,8 +63,7 @@ impl RegistryService for RegistryServiceServer {
     ) -> Result<Response<GetAgentResponse>, Status> {
         let req = request.into_inner();
 
-        let agent = self.registry.get_agent_by_name(&req.name)
-            .map(|a| a.into());
+        let agent = self.registry.get_agent_by_name(&req.name).map(|a| a.into());
 
         Ok(Response::new(GetAgentResponse { agent }))
     }
@@ -85,10 +73,12 @@ impl RegistryService for RegistryServiceServer {
         request: Request<RegisterAgentRequest>,
     ) -> Result<Response<RegisterAgentResponse>, Status> {
         let req = request.into_inner();
-        let agent = req.agent
+        let agent = req
+            .agent
             .ok_or_else(|| Status::invalid_argument("missing agent"))?;
 
-        let domain_agent = agent.try_into()
+        let domain_agent = agent
+            .try_into()
             .map_err(|e: String| Status::invalid_argument(e))?;
 
         // TECH DEBT: spawn_blocking works around nested tokio runtime panic.
@@ -97,9 +87,9 @@ impl RegistryService for RegistryServiceServer {
         // Real fix: secret store should be a separate process, and/or the
         // Registry trait should be async. See TODO.md.
         let registry = Arc::clone(&self.registry);
-        let result = tokio::task::spawn_blocking(move || {
-            registry.register_agent(domain_agent)
-        }).await.map_err(|e| Status::internal(format!("task join error: {}", e)))?;
+        let result = tokio::task::spawn_blocking(move || registry.register_agent(domain_agent))
+            .await
+            .map_err(|e| Status::internal(format!("task join error: {}", e)))?;
 
         match result {
             Ok(()) => Ok(Response::new(RegisterAgentResponse {
@@ -135,7 +125,9 @@ impl RegistryService for RegistryServiceServer {
         &self,
         _request: Request<ListAgentsRequest>,
     ) -> Result<Response<ListAgentsResponse>, Status> {
-        let agents = self.registry.get_agents()
+        let agents = self
+            .registry
+            .get_agents()
             .into_iter()
             .map(|a| a.into())
             .collect();
@@ -148,10 +140,12 @@ impl RegistryService for RegistryServiceServer {
         request: Request<RegisterFleetRequest>,
     ) -> Result<Response<RegisterFleetResponse>, Status> {
         let req = request.into_inner();
-        let fleet = req.fleet
+        let fleet = req
+            .fleet
             .ok_or_else(|| Status::invalid_argument("missing fleet"))?;
 
-        let domain_fleet = fleet.try_into()
+        let domain_fleet = fleet
+            .try_into()
             .map_err(|e: String| Status::invalid_argument(e))?;
 
         match self.registry.register_fleet(domain_fleet) {
@@ -180,7 +174,9 @@ impl RegistryService for RegistryServiceServer {
         &self,
         _request: Request<ListFleetsRequest>,
     ) -> Result<Response<ListFleetsResponse>, Status> {
-        let fleets = self.registry.get_fleets()
+        let fleets = self
+            .registry
+            .get_fleets()
             .into_iter()
             .map(|f| f.into())
             .collect();
@@ -202,7 +198,9 @@ impl RegistryService for RegistryServiceServer {
         &self,
         _request: Request<ListModelsRequest>,
     ) -> Result<Response<ListModelsResponse>, Status> {
-        let models = self.registry.get_models()
+        let models = self
+            .registry
+            .get_models()
             .into_iter()
             .map(|m| m.into())
             .collect();
@@ -215,10 +213,12 @@ impl RegistryService for RegistryServiceServer {
         request: Request<RegisterModelRequest>,
     ) -> Result<Response<RegisterModelResponse>, Status> {
         let req = request.into_inner();
-        let model = req.model
+        let model = req
+            .model
             .ok_or_else(|| Status::invalid_argument("missing model"))?;
 
-        let domain_model = model.try_into()
+        let domain_model = model
+            .try_into()
             .map_err(|e: String| Status::invalid_argument(e))?;
 
         match self.registry.register_model(domain_model) {
@@ -256,14 +256,18 @@ impl RegistryService for RegistryServiceServer {
         request: Request<CreateJobRequest>,
     ) -> Result<Response<CreateJobResponse>, Status> {
         let req = request.into_inner();
-        let submission_id: SubmissionId = req.submission_id
+        let submission_id: SubmissionId = req
+            .submission_id
             .ok_or_else(|| Status::invalid_argument("missing submission_id"))?
             .into();
-        let agent_id: ResourceId = req.agent_id
+        let agent_id: ResourceId = req
+            .agent_id
             .ok_or_else(|| Status::invalid_argument("missing agent_id"))?
             .into();
 
-        let job_id = self.registry.create_job(submission_id.clone(), agent_id, req.input);
+        let job_id = self
+            .registry
+            .create_job(submission_id.clone(), agent_id, req.input);
 
         Ok(Response::new(CreateJobResponse {
             job_id: Some(job_id.into()),
@@ -276,7 +280,8 @@ impl RegistryService for RegistryServiceServer {
         request: Request<GetJobRequest>,
     ) -> Result<Response<GetJobResponse>, Status> {
         let req = request.into_inner();
-        let job_id = req.id
+        let job_id = req
+            .id
             .ok_or_else(|| Status::invalid_argument("missing job id"))?
             .into();
 
@@ -290,7 +295,8 @@ impl RegistryService for RegistryServiceServer {
         request: Request<UpdateJobStatusRequest>,
     ) -> Result<Response<UpdateJobStatusResponse>, Status> {
         let req = request.into_inner();
-        let job_id = req.id
+        let job_id = req
+            .id
             .ok_or_else(|| Status::invalid_argument("missing job id"))?
             .into();
 
@@ -311,7 +317,9 @@ impl RegistryService for RegistryServiceServer {
         &self,
         _request: Request<ListPendingJobsRequest>,
     ) -> Result<Response<ListPendingJobsResponse>, Status> {
-        let jobs = self.registry.pending_jobs()
+        let jobs = self
+            .registry
+            .pending_jobs()
             .into_iter()
             .map(|j| j.into())
             .collect();

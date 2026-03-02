@@ -11,12 +11,17 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use vlinder_core::domain::{Agent, ImageRef, ObjectStorageType, PodId, Provider, Registry, ResourceId, Runtime, RuntimeType, VectorStorageType};
+use vlinder_core::domain::{
+    Agent, ImageRef, ObjectStorageType, PodId, Provider, Registry, ResourceId, Runtime,
+    RuntimeType, VectorStorageType,
+};
 
 use crate::config::PodmanRuntimeConfig;
-use crate::podman_client::{PodmanClient, RunTarget, resolve_socket, write_s3_credentials, remove_s3_credentials};
 use crate::podman_api::PodmanApiClient;
 use crate::podman_cli::PodmanCliClient;
+use crate::podman_client::{
+    remove_s3_credentials, resolve_socket, write_s3_credentials, PodmanClient, RunTarget,
+};
 
 /// Image resolution policy for container agents (ADR 073).
 ///
@@ -91,7 +96,10 @@ impl ContainerRuntime {
         if let Some(ref v) = engine_version {
             tracing::info!(event = "podman.detected", version = %v, "Podman engine detected");
         } else {
-            tracing::warn!(event = "podman.not_found", "Podman not detected — container runtime degraded");
+            tracing::warn!(
+                event = "podman.not_found",
+                "Podman not detected — container runtime degraded"
+            );
         }
         tracing::info!(event = "runtime.image_policy", policy = ?image_policy, "Container image policy");
         Ok(Self {
@@ -128,34 +136,51 @@ impl ContainerRuntime {
         // Select what to pass to `podman run` based on policy (ADR 073)
         let run_target = match self.image_policy {
             ImagePolicy::Mutable => RunTarget::Ref(&image_ref),
-            ImagePolicy::Pinned => agent.image_digest.as_ref()
+            ImagePolicy::Pinned => agent
+                .image_digest
+                .as_ref()
                 .map(RunTarget::Digest)
                 .unwrap_or(RunTarget::Ref(&image_ref)),
         };
 
         // 1. Provision S3 mount volumes (ADR 107)
         let mount_volumes = self.provision_mount_volumes(name, agent)?;
-        let volume_pairs: Vec<(String, String)> = mount_volumes.iter()
+        let volume_pairs: Vec<(String, String)> = mount_volumes
+            .iter()
             .zip(agent.requirements.mounts.values())
             .map(|(vol_name, mount)| (vol_name.clone(), mount.path.clone()))
             .collect();
 
         // 2. Create pod (with host aliases for provider hostnames)
         let mut host_aliases = vec!["runtime.vlinder.local:127.0.0.1".to_string()];
-        if agent.requirements.services.values().any(|svc| svc.provider == Provider::OpenRouter) {
+        if agent
+            .requirements
+            .services
+            .values()
+            .any(|svc| svc.provider == Provider::OpenRouter)
+        {
             host_aliases.push(format!("{}:127.0.0.1", vlinder_infer_openrouter::HOSTNAME));
         }
-        if agent.requirements.services.values().any(|svc| svc.provider == Provider::Ollama) {
+        if agent
+            .requirements
+            .services
+            .values()
+            .any(|svc| svc.provider == Provider::Ollama)
+        {
             host_aliases.push(format!("{}:127.0.0.1", vlinder_ollama::HOSTNAME));
         }
-        let needs_sqlite_vec = agent.vector_storage.as_ref()
+        let needs_sqlite_vec = agent
+            .vector_storage
+            .as_ref()
             .and_then(|uri| VectorStorageType::from_scheme(uri.scheme()))
             .map(|t| t == VectorStorageType::SqliteVec)
             .unwrap_or(false);
         if needs_sqlite_vec {
             host_aliases.push(format!("{}:127.0.0.1", vlinder_sqlite_vec::HOSTNAME));
         }
-        let needs_sqlite_kv = agent.object_storage.as_ref()
+        let needs_sqlite_kv = agent
+            .object_storage
+            .as_ref()
             .and_then(|uri| ObjectStorageType::from_scheme(uri.scheme()))
             .is_some();
         if needs_sqlite_kv {
@@ -163,7 +188,9 @@ impl ContainerRuntime {
         }
 
         let pod_name = format!("vlinder-{}", name);
-        let pod_id = self.podman.pod_create(&pod_name, &host_aliases)
+        let pod_id = self
+            .podman
+            .pod_create(&pod_name, &host_aliases)
             .map_err(|e| e.to_string())?;
 
         // From here on, if anything fails we must remove the orphaned pod
@@ -189,7 +216,13 @@ impl ContainerRuntime {
             "Pod started (agent + sidecar)"
         );
 
-        self.pods.insert(name.to_string(), Pod { pod_id, mount_volumes });
+        self.pods.insert(
+            name.to_string(),
+            Pod {
+                pod_id,
+                mount_volumes,
+            },
+        );
         Ok(())
     }
 
@@ -207,12 +240,14 @@ impl ContainerRuntime {
         volumes: &[(String, String)],
     ) -> Result<(), String> {
         // Build volume refs for the agent container
-        let volume_refs: Vec<(&str, &str)> = volumes.iter()
+        let volume_refs: Vec<(&str, &str)> = volumes
+            .iter()
             .map(|(vol, path)| (vol.as_str(), path.as_str()))
             .collect();
 
         // 3. Add agent container (with mount volumes, no env vars)
-        self.podman.container_in_pod(run_target, pod_id, &[], &volume_refs)
+        self.podman
+            .container_in_pod(run_target, pod_id, &[], &volume_refs)
             .map_err(|e| e.to_string())?;
 
         // 4. Build sidecar env vars
@@ -233,7 +268,9 @@ impl ContainerRuntime {
             extract_port(&self.config.state_addr, 9092)
         );
 
-        let image_digest_str = self.podman.image_digest(image_ref)
+        let image_digest_str = self
+            .podman
+            .image_digest(image_ref)
             .map(|d| String::from(d))
             .unwrap_or_default();
 
@@ -246,17 +283,15 @@ impl ContainerRuntime {
             ("VLINDER_IMAGE_REF", image_ref.as_str().to_string()),
             ("VLINDER_IMAGE_DIGEST", image_digest_str),
         ];
-        let env_refs: Vec<(&str, &str)> = env_vars.iter()
-            .map(|(k, v)| (*k, v.as_str()))
-            .collect();
+        let env_refs: Vec<(&str, &str)> = env_vars.iter().map(|(k, v)| (*k, v.as_str())).collect();
 
         // 5. Add sidecar container (no volumes — sidecar doesn't need file mounts)
-        self.podman.container_in_pod(sidecar_target, pod_id, &env_refs, &[])
+        self.podman
+            .container_in_pod(sidecar_target, pod_id, &env_refs, &[])
             .map_err(|e| e.to_string())?;
 
         // 6. Start the pod (all containers start together)
-        self.podman.pod_start(pod_id)
-            .map_err(|e| e.to_string())?;
+        self.podman.pod_start(pod_id).map_err(|e| e.to_string())?;
 
         Ok(())
     }
@@ -329,7 +364,11 @@ impl ContainerRuntime {
     ///   (`ACCESS_KEY:SECRET_KEY`). The file must exist in the Podman VM
     ///   filesystem (not the Mac), so we write it via `podman machine ssh`.
     ///   See `write_s3_credentials` in `podman.rs`.
-    fn provision_mount_volumes(&self, agent_name: &str, agent: &Agent) -> Result<Vec<String>, String> {
+    fn provision_mount_volumes(
+        &self,
+        agent_name: &str,
+        agent: &Agent,
+    ) -> Result<Vec<String>, String> {
         let mut volume_names = Vec::new();
 
         for (mount_name, mount) in &agent.requirements.mounts {
@@ -343,7 +382,10 @@ impl ContainerRuntime {
             };
 
             let device = format!("{}:{}", bucket, prefix);
-            let raw_endpoint = mount.endpoint.as_deref().unwrap_or("https://s3.amazonaws.com");
+            let raw_endpoint = mount
+                .endpoint
+                .as_deref()
+                .unwrap_or("https://s3.amazonaws.com");
 
             // Rewrite host.containers.internal → localhost for the VM context.
             // See architecture comment above for why this is necessary.
@@ -380,7 +422,8 @@ impl ContainerRuntime {
                 ("o", &mount_opts),
             ];
 
-            self.podman.volume_create(&vol_name, "local", &options)
+            self.podman
+                .volume_create(&vol_name, "local", &options)
                 .map_err(|e| format!("failed to create volume {}: {}", vol_name, e))?;
 
             tracing::info!(
@@ -418,12 +461,13 @@ impl ContainerRuntime {
         let agents = self.registry.get_agents_by_runtime(RuntimeType::Container);
 
         // Collect agent names from registry
-        let agent_names: std::collections::HashSet<&str> = agents.iter()
-            .map(|a| a.name.as_str())
-            .collect();
+        let agent_names: std::collections::HashSet<&str> =
+            agents.iter().map(|a| a.name.as_str()).collect();
 
         // Stop pods for agents no longer in registry (orphan cleanup)
-        let orphaned: Vec<String> = self.pods.keys()
+        let orphaned: Vec<String> = self
+            .pods
+            .keys()
             .filter(|name| !agent_names.contains(name.as_str()))
             .cloned()
             .collect();

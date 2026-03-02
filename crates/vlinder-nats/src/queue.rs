@@ -15,12 +15,13 @@ use async_nats::jetstream::message::Message as JetStreamMessage;
 use futures::StreamExt;
 use tokio::runtime::Runtime;
 
+use std::str::FromStr;
+
 use vlinder_core::domain::{
-    AgentId, CompleteMessage, RuntimeDiagnostics, DelegateMessage, DelegateDiagnostics,
-    HarnessType, InvokeDiagnostics, InvokeMessage, MessageId, MessageQueue, Nonce,
-    Operation, QueueError, RequestDiagnostics, RequestMessage,
-    ResponseMessage, RoutingKey, RuntimeType, Sequence, ServiceBackend,
-    ServiceDiagnostics, ServiceType, SessionId, SubmissionId, TimelineId,
+    AgentId, CompleteMessage, DelegateDiagnostics, DelegateMessage, HarnessType, InvokeDiagnostics,
+    InvokeMessage, MessageId, MessageQueue, Nonce, Operation, QueueError, RequestDiagnostics,
+    RequestMessage, ResponseMessage, RoutingKey, RuntimeDiagnostics, RuntimeType, Sequence,
+    ServiceBackend, ServiceDiagnostics, ServiceType, SessionId, SubmissionId, TimelineId,
 };
 
 /// NATS queue with JetStream durability.
@@ -119,7 +120,9 @@ impl NatsQueue {
 
         // Create a named consumer — name derived from filter for uniqueness
         let name = filter_to_consumer_name(filter);
-        let stream = self.inner.jetstream
+        let stream = self
+            .inner
+            .jetstream
             .get_stream("VLINDER")
             .await
             .map_err(|e| QueueError::ReceiveFailed(e.to_string()))?;
@@ -149,7 +152,16 @@ impl NatsQueue {
     ///
     /// If the fetch fails with a 503 (consumer GC'd by server), evicts the
     /// stale consumer from cache, recreates it, and retries once.
-    async fn fetch_one(&self, filter: &str) -> Result<(JetStreamMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+    async fn fetch_one(
+        &self,
+        filter: &str,
+    ) -> Result<
+        (
+            JetStreamMessage,
+            Box<dyn FnOnce() -> Result<(), QueueError> + Send>,
+        ),
+        QueueError,
+    > {
         match self.try_fetch_one(filter).await {
             Ok(result) => Ok(result),
             Err(QueueError::ReceiveFailed(ref msg)) if msg.contains("503") => {
@@ -162,7 +174,16 @@ impl NatsQueue {
     }
 
     /// Attempt a single fetch from the consumer for this filter.
-    async fn try_fetch_one(&self, filter: &str) -> Result<(JetStreamMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+    async fn try_fetch_one(
+        &self,
+        filter: &str,
+    ) -> Result<
+        (
+            JetStreamMessage,
+            Box<dyn FnOnce() -> Result<(), QueueError> + Send>,
+        ),
+        QueueError,
+    > {
         let consumer = self.get_or_create_consumer(filter).await?;
 
         let mut messages = consumer
@@ -180,7 +201,8 @@ impl NatsQueue {
             .map_err(|e| QueueError::ReceiveFailed(e.to_string()))?;
 
         // Wrap message for ack closure
-        let js_msg_for_ack: Arc<Mutex<Option<JetStreamMessage>>> = Arc::new(Mutex::new(Some(js_msg.clone())));
+        let js_msg_for_ack: Arc<Mutex<Option<JetStreamMessage>>> =
+            Arc::new(Mutex::new(Some(js_msg.clone())));
         let handle = self.inner.runtime.handle().clone();
 
         let ack_fn: Box<dyn FnOnce() -> Result<(), QueueError> + Send> = Box::new(move || {
@@ -339,7 +361,16 @@ impl MessageQueue for NatsQueue {
         })
     }
 
-    fn receive_invoke(&self, agent: &AgentId) -> Result<(InvokeMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+    fn receive_invoke(
+        &self,
+        agent: &AgentId,
+    ) -> Result<
+        (
+            InvokeMessage,
+            Box<dyn FnOnce() -> Result<(), QueueError> + Send>,
+        ),
+        QueueError,
+    > {
         // Build filter: vlinder.{timeline}.{submission}.invoke.{harness}.{runtime}.{agent}
         let filter = format!("vlinder.*.*.invoke.*.*.{}", agent.as_str());
 
@@ -347,23 +378,31 @@ impl MessageQueue for NatsQueue {
             let (js_msg, ack_fn) = self.fetch_one(&filter).await?;
 
             // Extract typed message from headers
-            let headers = js_msg.headers.as_ref()
+            let headers = js_msg
+                .headers
+                .as_ref()
                 .ok_or_else(|| QueueError::ReceiveFailed("missing headers".to_string()))?;
 
-            let diagnostics = get_header(headers, "diagnostics").ok()
+            let diagnostics = get_header(headers, "diagnostics")
+                .ok()
                 .and_then(|s| serde_json::from_str(&s).ok())
-                .unwrap_or_else(|| InvokeDiagnostics { harness_version: String::new(), history_turns: 0 });
+                .unwrap_or_else(|| InvokeDiagnostics {
+                    harness_version: String::new(),
+                    history_turns: 0,
+                });
 
             let msg = InvokeMessage {
                 id: MessageId::from(get_header(headers, "msg-id")?),
                 protocol_version: get_header(headers, "protocol-version").unwrap_or_default(),
-                timeline: get_header(headers, "timeline-id").map(TimelineId::from).unwrap_or_else(|_| TimelineId::main()),
+                timeline: get_header(headers, "timeline-id")
+                    .map(TimelineId::from)
+                    .unwrap_or_else(|_| TimelineId::main()),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
                 session: SessionId::from(get_header(headers, "session-id")?),
                 harness: HarnessType::from_str(&get_header(headers, "harness")?)
-                    .ok_or_else(|| QueueError::ReceiveFailed("unknown harness type".to_string()))?,
+                    .map_err(|_| QueueError::ReceiveFailed("unknown harness type".to_string()))?,
                 runtime: RuntimeType::from_str(&get_header(headers, "runtime")?)
-                    .ok_or_else(|| QueueError::ReceiveFailed("unknown runtime type".to_string()))?,
+                    .map_err(|_| QueueError::ReceiveFailed("unknown runtime type".to_string()))?,
                 agent_id: AgentId::new(get_header(headers, "agent-id")?),
                 payload: js_msg.payload.to_vec(),
                 state: get_header(headers, "state").ok(),
@@ -374,35 +413,64 @@ impl MessageQueue for NatsQueue {
         })
     }
 
-    fn receive_request(&self, service: ServiceBackend, operation: Operation) -> Result<(RequestMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+    fn receive_request(
+        &self,
+        service: ServiceBackend,
+        operation: Operation,
+    ) -> Result<
+        (
+            RequestMessage,
+            Box<dyn FnOnce() -> Result<(), QueueError> + Send>,
+        ),
+        QueueError,
+    > {
         // Build filter: vlinder.{timeline}.{submission}.req.{agent}.{service}.{backend}.{op}.{seq}
-        let filter = format!("vlinder.*.*.req.*.{}.{}.{}.*", service.service_type(), service.backend_str(), operation);
+        let filter = format!(
+            "vlinder.*.*.req.*.{}.{}.{}.*",
+            service.service_type(),
+            service.backend_str(),
+            operation
+        );
 
         self.inner.runtime.block_on(async {
             let (js_msg, ack_fn) = self.fetch_one(&filter).await?;
 
-            let headers = js_msg.headers.as_ref()
+            let headers = js_msg
+                .headers
+                .as_ref()
                 .ok_or_else(|| QueueError::ReceiveFailed("missing headers".to_string()))?;
 
-            let diagnostics = get_header(headers, "diagnostics").ok()
+            let diagnostics = get_header(headers, "diagnostics")
+                .ok()
                 .and_then(|s| serde_json::from_str(&s).ok())
-                .unwrap_or_else(|| RequestDiagnostics { sequence: 0, endpoint: String::new(), request_bytes: 0, received_at_ms: 0 });
+                .unwrap_or_else(|| RequestDiagnostics {
+                    sequence: 0,
+                    endpoint: String::new(),
+                    request_bytes: 0,
+                    received_at_ms: 0,
+                });
 
             let msg = RequestMessage {
                 id: MessageId::from(get_header(headers, "msg-id")?),
                 protocol_version: get_header(headers, "protocol-version").unwrap_or_default(),
-                timeline: get_header(headers, "timeline-id").map(TimelineId::from).unwrap_or_else(|_| TimelineId::main()),
+                timeline: get_header(headers, "timeline-id")
+                    .map(TimelineId::from)
+                    .unwrap_or_else(|_| TimelineId::main()),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
                 session: SessionId::from(get_header(headers, "session-id")?),
                 agent_id: AgentId::new(get_header(headers, "agent-id")?),
                 service: ServiceBackend::from_parts(
-                    ServiceType::from_str(&get_header(headers, "service")?)
-                        .ok_or_else(|| QueueError::ReceiveFailed("unknown service type".to_string()))?,
+                    ServiceType::from_str(&get_header(headers, "service")?).map_err(|_| {
+                        QueueError::ReceiveFailed("unknown service type".to_string())
+                    })?,
                     &get_header(headers, "backend")?,
-                ).ok_or_else(|| QueueError::ReceiveFailed("invalid service/backend".to_string()))?,
+                )
+                .ok_or_else(|| QueueError::ReceiveFailed("invalid service/backend".to_string()))?,
                 operation: Operation::from_str(&get_header(headers, "operation")?)
-                    .ok_or_else(|| QueueError::ReceiveFailed("unknown operation".to_string()))?,
-                sequence: Sequence::from(get_header(headers, "sequence")?.parse::<u32>().unwrap_or(1)),
+                    .map_err(|_| QueueError::ReceiveFailed("unknown operation".to_string()))?,
+                sequence: Sequence::from(
+                    get_header(headers, "sequence")?.parse::<u32>().unwrap_or(1),
+                ),
                 payload: js_msg.payload.to_vec(),
                 state: get_header(headers, "state").ok(),
                 diagnostics,
@@ -412,40 +480,64 @@ impl MessageQueue for NatsQueue {
         })
     }
 
-    fn receive_response(&self, request: &RequestMessage) -> Result<(ResponseMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+    fn receive_response(
+        &self,
+        request: &RequestMessage,
+    ) -> Result<
+        (
+            ResponseMessage,
+            Box<dyn FnOnce() -> Result<(), QueueError> + Send>,
+        ),
+        QueueError,
+    > {
         // Build filter from request dimensions
         // Wildcards match: {timeline}, {agent}.{operation}.{sequence}
-        let filter = format!("vlinder.*.{}.res.{}.{}.*.*.*", request.submission, request.service.service_type(), request.service.backend_str());
+        let filter = format!(
+            "vlinder.*.{}.res.{}.{}.*.*.*",
+            request.submission,
+            request.service.service_type(),
+            request.service.backend_str()
+        );
 
         self.inner.runtime.block_on(async {
             let (js_msg, ack_fn) = self.fetch_one(&filter).await?;
 
-            let headers = js_msg.headers.as_ref()
+            let headers = js_msg
+                .headers
+                .as_ref()
                 .ok_or_else(|| QueueError::ReceiveFailed("missing headers".to_string()))?;
 
-            let diagnostics = get_header(headers, "diagnostics").ok()
+            let diagnostics = get_header(headers, "diagnostics")
+                .ok()
                 .and_then(|s| serde_json::from_str(&s).ok())
                 .unwrap_or_else(ServiceDiagnostics::placeholder);
 
-            let status_code = get_header(headers, "status-code").ok()
+            let status_code = get_header(headers, "status-code")
+                .ok()
                 .and_then(|s| s.parse::<u16>().ok())
                 .unwrap_or(200);
 
             let msg = ResponseMessage {
                 id: MessageId::from(get_header(headers, "msg-id")?),
                 protocol_version: get_header(headers, "protocol-version").unwrap_or_default(),
-                timeline: get_header(headers, "timeline-id").map(TimelineId::from).unwrap_or_else(|_| TimelineId::main()),
+                timeline: get_header(headers, "timeline-id")
+                    .map(TimelineId::from)
+                    .unwrap_or_else(|_| TimelineId::main()),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
                 session: SessionId::from(get_header(headers, "session-id")?),
                 agent_id: AgentId::new(get_header(headers, "agent-id")?),
                 service: ServiceBackend::from_parts(
-                    ServiceType::from_str(&get_header(headers, "service")?)
-                        .ok_or_else(|| QueueError::ReceiveFailed("unknown service type".to_string()))?,
+                    ServiceType::from_str(&get_header(headers, "service")?).map_err(|_| {
+                        QueueError::ReceiveFailed("unknown service type".to_string())
+                    })?,
                     &get_header(headers, "backend")?,
-                ).ok_or_else(|| QueueError::ReceiveFailed("invalid service/backend".to_string()))?,
+                )
+                .ok_or_else(|| QueueError::ReceiveFailed("invalid service/backend".to_string()))?,
                 operation: Operation::from_str(&get_header(headers, "operation")?)
-                    .ok_or_else(|| QueueError::ReceiveFailed("unknown operation".to_string()))?,
-                sequence: Sequence::from(get_header(headers, "sequence")?.parse::<u32>().unwrap_or(1)),
+                    .map_err(|_| QueueError::ReceiveFailed("unknown operation".to_string()))?,
+                sequence: Sequence::from(
+                    get_header(headers, "sequence")?.parse::<u32>().unwrap_or(1),
+                ),
                 payload: js_msg.payload.to_vec(),
                 correlation_id: MessageId::from(get_header(headers, "correlation-id")?),
                 state: get_header(headers, "state").ok(),
@@ -457,29 +549,44 @@ impl MessageQueue for NatsQueue {
         })
     }
 
-    fn receive_complete(&self, submission: &SubmissionId, harness: HarnessType) -> Result<(CompleteMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+    fn receive_complete(
+        &self,
+        submission: &SubmissionId,
+        harness: HarnessType,
+    ) -> Result<
+        (
+            CompleteMessage,
+            Box<dyn FnOnce() -> Result<(), QueueError> + Send>,
+        ),
+        QueueError,
+    > {
         // Build filter: submission-scoped consumer (ADR 052) with timeline wildcard
         let filter = format!("vlinder.*.{}.complete.*.{}", submission, harness.as_str());
 
         self.inner.runtime.block_on(async {
             let (js_msg, ack_fn) = self.fetch_one(&filter).await?;
 
-            let headers = js_msg.headers.as_ref()
+            let headers = js_msg
+                .headers
+                .as_ref()
                 .ok_or_else(|| QueueError::ReceiveFailed("missing headers".to_string()))?;
 
-            let diagnostics = get_header(headers, "diagnostics").ok()
+            let diagnostics = get_header(headers, "diagnostics")
+                .ok()
                 .and_then(|s| serde_json::from_str(&s).ok())
                 .unwrap_or_else(|| RuntimeDiagnostics::placeholder(0));
 
             let msg = CompleteMessage {
                 id: MessageId::from(get_header(headers, "msg-id")?),
                 protocol_version: get_header(headers, "protocol-version").unwrap_or_default(),
-                timeline: get_header(headers, "timeline-id").map(TimelineId::from).unwrap_or_else(|_| TimelineId::main()),
+                timeline: get_header(headers, "timeline-id")
+                    .map(TimelineId::from)
+                    .unwrap_or_else(|_| TimelineId::main()),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
                 session: SessionId::from(get_header(headers, "session-id")?),
                 agent_id: AgentId::new(get_header(headers, "agent-id")?),
                 harness: HarnessType::from_str(&get_header(headers, "harness")?)
-                    .ok_or_else(|| QueueError::ReceiveFailed("unknown harness type".to_string()))?,
+                    .map_err(|_| QueueError::ReceiveFailed("unknown harness type".to_string()))?,
                 payload: js_msg.payload.to_vec(),
                 state: get_header(headers, "state").ok(),
                 diagnostics,
@@ -521,23 +628,39 @@ impl MessageQueue for NatsQueue {
         })
     }
 
-    fn receive_delegate(&self, target: &AgentId) -> Result<(DelegateMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+    fn receive_delegate(
+        &self,
+        target: &AgentId,
+    ) -> Result<
+        (
+            DelegateMessage,
+            Box<dyn FnOnce() -> Result<(), QueueError> + Send>,
+        ),
+        QueueError,
+    > {
         let filter = format!("vlinder.*.*.delegate.*.{}", target.as_str());
 
         self.inner.runtime.block_on(async {
             let (js_msg, ack_fn) = self.fetch_one(&filter).await?;
 
-            let headers = js_msg.headers.as_ref()
+            let headers = js_msg
+                .headers
+                .as_ref()
                 .ok_or_else(|| QueueError::ReceiveFailed("missing headers".to_string()))?;
 
-            let diagnostics = get_header(headers, "diagnostics").ok()
+            let diagnostics = get_header(headers, "diagnostics")
+                .ok()
                 .and_then(|s| serde_json::from_str(&s).ok())
-                .unwrap_or_else(|| DelegateDiagnostics { runtime: RuntimeDiagnostics::placeholder(0) });
+                .unwrap_or_else(|| DelegateDiagnostics {
+                    runtime: RuntimeDiagnostics::placeholder(0),
+                });
 
             let msg = DelegateMessage {
                 id: MessageId::from(get_header(headers, "msg-id")?),
                 protocol_version: get_header(headers, "protocol-version").unwrap_or_default(),
-                timeline: get_header(headers, "timeline-id").map(TimelineId::from).unwrap_or_else(|_| TimelineId::main()),
+                timeline: get_header(headers, "timeline-id")
+                    .map(TimelineId::from)
+                    .unwrap_or_else(|_| TimelineId::main()),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
                 session: SessionId::from(get_header(headers, "session-id")?),
                 caller: AgentId::new(get_header(headers, "caller-agent")?),
@@ -552,7 +675,11 @@ impl MessageQueue for NatsQueue {
         })
     }
 
-    fn send_delegate_reply(&self, msg: CompleteMessage, reply_key: &RoutingKey) -> Result<(), QueueError> {
+    fn send_delegate_reply(
+        &self,
+        msg: CompleteMessage,
+        reply_key: &RoutingKey,
+    ) -> Result<(), QueueError> {
         let subject = routing_key_to_subject(reply_key);
 
         self.inner.runtime.block_on(async {
@@ -583,28 +710,42 @@ impl MessageQueue for NatsQueue {
         })
     }
 
-    fn receive_delegate_reply(&self, reply_key: &RoutingKey) -> Result<(CompleteMessage, Box<dyn FnOnce() -> Result<(), QueueError> + Send>), QueueError> {
+    fn receive_delegate_reply(
+        &self,
+        reply_key: &RoutingKey,
+    ) -> Result<
+        (
+            CompleteMessage,
+            Box<dyn FnOnce() -> Result<(), QueueError> + Send>,
+        ),
+        QueueError,
+    > {
         let filter = routing_key_to_subject(reply_key);
 
         self.inner.runtime.block_on(async {
             let (js_msg, ack_fn) = self.fetch_one(&filter).await?;
 
-            let headers = js_msg.headers.as_ref()
+            let headers = js_msg
+                .headers
+                .as_ref()
                 .ok_or_else(|| QueueError::ReceiveFailed("missing headers".to_string()))?;
 
-            let diagnostics = get_header(headers, "diagnostics").ok()
+            let diagnostics = get_header(headers, "diagnostics")
+                .ok()
                 .and_then(|s| serde_json::from_str(&s).ok())
                 .unwrap_or_else(|| RuntimeDiagnostics::placeholder(0));
 
             let msg = CompleteMessage {
                 id: MessageId::from(get_header(headers, "msg-id")?),
                 protocol_version: get_header(headers, "protocol-version").unwrap_or_default(),
-                timeline: get_header(headers, "timeline-id").map(TimelineId::from).unwrap_or_else(|_| TimelineId::main()),
+                timeline: get_header(headers, "timeline-id")
+                    .map(TimelineId::from)
+                    .unwrap_or_else(|_| TimelineId::main()),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
                 session: SessionId::from(get_header(headers, "session-id")?),
                 agent_id: AgentId::new(get_header(headers, "agent-id")?),
                 harness: HarnessType::from_str(&get_header(headers, "harness")?)
-                    .ok_or_else(|| QueueError::ReceiveFailed("unknown harness type".to_string()))?,
+                    .map_err(|_| QueueError::ReceiveFailed("unknown harness type".to_string()))?,
                 payload: js_msg.payload.to_vec(),
                 state: get_header(headers, "state").ok(),
                 diagnostics,
@@ -622,37 +763,85 @@ impl MessageQueue for NatsQueue {
 /// subjects (verified by tests in routing_key.rs).
 fn routing_key_to_subject(key: &RoutingKey) -> String {
     match key {
-        RoutingKey::Invoke { timeline, submission, harness, runtime, agent } => {
+        RoutingKey::Invoke {
+            timeline,
+            submission,
+            harness,
+            runtime,
+            agent,
+        } => {
             format!(
                 "vlinder.{}.{}.invoke.{}.{}.{}",
                 timeline, submission, harness, runtime, agent,
             )
         }
-        RoutingKey::Complete { timeline, submission, agent, harness } => {
+        RoutingKey::Complete {
+            timeline,
+            submission,
+            agent,
+            harness,
+        } => {
             format!(
                 "vlinder.{}.{}.complete.{}.{}",
                 timeline, submission, agent, harness,
             )
         }
-        RoutingKey::Request { timeline, submission, agent, service, operation, sequence } => {
+        RoutingKey::Request {
+            timeline,
+            submission,
+            agent,
+            service,
+            operation,
+            sequence,
+        } => {
             format!(
                 "vlinder.{}.{}.req.{}.{}.{}.{}.{}",
-                timeline, submission, agent, service.service_type(), service.backend_str(), operation, sequence,
+                timeline,
+                submission,
+                agent,
+                service.service_type(),
+                service.backend_str(),
+                operation,
+                sequence,
             )
         }
-        RoutingKey::Response { timeline, submission, service, agent, operation, sequence } => {
+        RoutingKey::Response {
+            timeline,
+            submission,
+            service,
+            agent,
+            operation,
+            sequence,
+        } => {
             format!(
                 "vlinder.{}.{}.res.{}.{}.{}.{}.{}",
-                timeline, submission, service.service_type(), service.backend_str(), agent, operation, sequence,
+                timeline,
+                submission,
+                service.service_type(),
+                service.backend_str(),
+                agent,
+                operation,
+                sequence,
             )
         }
-        RoutingKey::Delegate { timeline, submission, caller, target } => {
+        RoutingKey::Delegate {
+            timeline,
+            submission,
+            caller,
+            target,
+        } => {
             format!(
                 "vlinder.{}.{}.delegate.{}.{}",
                 timeline, submission, caller, target,
             )
         }
-        RoutingKey::DelegateReply { timeline, submission, caller, target, nonce } => {
+        RoutingKey::DelegateReply {
+            timeline,
+            submission,
+            caller,
+            target,
+            nonce,
+        } => {
             format!(
                 "vlinder.{}.{}.delegate-reply.{}.{}.{}",
                 timeline, submission, caller, target, nonce,
@@ -679,8 +868,8 @@ pub fn subject_to_routing_key(subject: &str) -> Option<RoutingKey> {
         "invoke" if s.len() == 7 => Some(RoutingKey::Invoke {
             timeline,
             submission,
-            harness: HarnessType::from_str(s[4])?,
-            runtime: RuntimeType::from_str(s[5])?,
+            harness: HarnessType::from_str(s[4]).ok()?,
+            runtime: RuntimeType::from_str(s[5]).ok()?,
             agent: AgentId::new(s[6]),
         }),
         // vlinder.{timeline}.{submission}.req.{agent}.{svc}.{backend}.{op}.{seq}
@@ -688,23 +877,17 @@ pub fn subject_to_routing_key(subject: &str) -> Option<RoutingKey> {
             timeline,
             submission,
             agent: AgentId::new(s[4]),
-            service: ServiceBackend::from_parts(
-                ServiceType::from_str(s[5])?,
-                s[6],
-            )?,
-            operation: Operation::from_str(s[7])?,
+            service: ServiceBackend::from_parts(ServiceType::from_str(s[5]).ok()?, s[6])?,
+            operation: Operation::from_str(s[7]).ok()?,
             sequence: Sequence::from(s[8].parse::<u32>().ok()?),
         }),
         // vlinder.{timeline}.{submission}.res.{svc}.{backend}.{agent}.{op}.{seq}
         "res" if s.len() == 9 => Some(RoutingKey::Response {
             timeline,
             submission,
-            service: ServiceBackend::from_parts(
-                ServiceType::from_str(s[4])?,
-                s[5],
-            )?,
+            service: ServiceBackend::from_parts(ServiceType::from_str(s[4]).ok()?, s[5])?,
             agent: AgentId::new(s[6]),
-            operation: Operation::from_str(s[7])?,
+            operation: Operation::from_str(s[7]).ok()?,
             sequence: Sequence::from(s[8].parse::<u32>().ok()?),
         }),
         // vlinder.{timeline}.{submission}.complete.{agent}.{harness}
@@ -712,7 +895,7 @@ pub fn subject_to_routing_key(subject: &str) -> Option<RoutingKey> {
             timeline,
             submission,
             agent: AgentId::new(s[4]),
-            harness: HarnessType::from_str(s[5])?,
+            harness: HarnessType::from_str(s[5]).ok()?,
         }),
         // vlinder.{timeline}.{submission}.delegate.{caller}.{target}
         "delegate" if s.len() == 6 => Some(RoutingKey::Delegate {
@@ -773,7 +956,10 @@ pub fn response_to_nats_headers(msg: &ResponseMessage) -> HashMap<String, String
     h.insert("msg-id".to_string(), msg.id.as_str().to_string());
     h.insert("protocol-version".to_string(), msg.protocol_version.clone());
     h.insert("session-id".to_string(), msg.session.as_str().to_string());
-    h.insert("correlation-id".to_string(), msg.correlation_id.as_str().to_string());
+    h.insert(
+        "correlation-id".to_string(),
+        msg.correlation_id.as_str().to_string(),
+    );
     h.insert("status-code".to_string(), msg.status_code.to_string());
     if let Some(ref state) = msg.state {
         h.insert("state".to_string(), state.clone());
@@ -834,8 +1020,15 @@ pub fn from_nats_headers(
     let state = headers.get("state").cloned();
 
     match key {
-        RoutingKey::Invoke { timeline, submission, harness, runtime, agent } => {
-            let diagnostics = headers.get("diagnostics")
+        RoutingKey::Invoke {
+            timeline,
+            submission,
+            harness,
+            runtime,
+            agent,
+        } => {
+            let diagnostics = headers
+                .get("diagnostics")
                 .and_then(|s| serde_json::from_str(s).ok())
                 .unwrap_or_else(|| InvokeDiagnostics {
                     harness_version: String::new(),
@@ -843,55 +1036,115 @@ pub fn from_nats_headers(
                 });
 
             Some(ObservableMessageHeaders::Invoke {
-                id, protocol_version,
-                timeline: timeline.clone(), submission: submission.clone(), session,
-                harness: *harness, runtime: *runtime, agent_id: agent.clone(),
-                state, diagnostics,
+                id,
+                protocol_version,
+                timeline: timeline.clone(),
+                submission: submission.clone(),
+                session,
+                harness: *harness,
+                runtime: *runtime,
+                agent_id: agent.clone(),
+                state,
+                diagnostics,
             })
         }
-        RoutingKey::Request { timeline, submission, agent, service, operation, sequence } => {
-            let diagnostics = headers.get("diagnostics")
+        RoutingKey::Request {
+            timeline,
+            submission,
+            agent,
+            service,
+            operation,
+            sequence,
+        } => {
+            let diagnostics = headers
+                .get("diagnostics")
                 .and_then(|s| serde_json::from_str(s).ok())
                 .unwrap_or_else(|| RequestDiagnostics {
-                    sequence: 0, endpoint: String::new(), request_bytes: 0, received_at_ms: 0,
+                    sequence: 0,
+                    endpoint: String::new(),
+                    request_bytes: 0,
+                    received_at_ms: 0,
                 });
 
             Some(ObservableMessageHeaders::Request {
-                id, protocol_version,
-                timeline: timeline.clone(), submission: submission.clone(), session,
-                agent_id: agent.clone(), service: *service, operation: *operation,
-                sequence: *sequence, state, diagnostics,
+                id,
+                protocol_version,
+                timeline: timeline.clone(),
+                submission: submission.clone(),
+                session,
+                agent_id: agent.clone(),
+                service: *service,
+                operation: *operation,
+                sequence: *sequence,
+                state,
+                diagnostics,
             })
         }
-        RoutingKey::Response { timeline, submission, service, agent, operation, sequence } => {
-            let diagnostics = headers.get("diagnostics")
+        RoutingKey::Response {
+            timeline,
+            submission,
+            service,
+            agent,
+            operation,
+            sequence,
+        } => {
+            let diagnostics = headers
+                .get("diagnostics")
                 .and_then(|s| serde_json::from_str(s).ok())
                 .unwrap_or_else(ServiceDiagnostics::placeholder);
             let correlation_id = MessageId::from(headers.get("correlation-id")?.clone());
-            let status_code = headers.get("status-code")
+            let status_code = headers
+                .get("status-code")
                 .and_then(|s| s.parse::<u16>().ok())
                 .unwrap_or(200);
 
             Some(ObservableMessageHeaders::Response {
-                id, protocol_version,
-                timeline: timeline.clone(), submission: submission.clone(), session,
-                agent_id: agent.clone(), service: *service, operation: *operation,
-                sequence: *sequence, correlation_id, state, diagnostics, status_code,
+                id,
+                protocol_version,
+                timeline: timeline.clone(),
+                submission: submission.clone(),
+                session,
+                agent_id: agent.clone(),
+                service: *service,
+                operation: *operation,
+                sequence: *sequence,
+                correlation_id,
+                state,
+                diagnostics,
+                status_code,
             })
         }
-        RoutingKey::Complete { timeline, submission, agent, harness } => {
-            let diagnostics = headers.get("diagnostics")
+        RoutingKey::Complete {
+            timeline,
+            submission,
+            agent,
+            harness,
+        } => {
+            let diagnostics = headers
+                .get("diagnostics")
                 .and_then(|s| serde_json::from_str(s).ok())
                 .unwrap_or_else(|| RuntimeDiagnostics::placeholder(0));
 
             Some(ObservableMessageHeaders::Complete {
-                id, protocol_version,
-                timeline: timeline.clone(), submission: submission.clone(), session,
-                agent_id: agent.clone(), harness: *harness, state, diagnostics,
+                id,
+                protocol_version,
+                timeline: timeline.clone(),
+                submission: submission.clone(),
+                session,
+                agent_id: agent.clone(),
+                harness: *harness,
+                state,
+                diagnostics,
             })
         }
-        RoutingKey::Delegate { timeline, submission, caller, target } => {
-            let diagnostics = headers.get("diagnostics")
+        RoutingKey::Delegate {
+            timeline,
+            submission,
+            caller,
+            target,
+        } => {
+            let diagnostics = headers
+                .get("diagnostics")
                 .and_then(|s| serde_json::from_str(s).ok())
                 .unwrap_or_else(|| DelegateDiagnostics {
                     runtime: RuntimeDiagnostics::placeholder(0),
@@ -899,9 +1152,16 @@ pub fn from_nats_headers(
             let nonce = Nonce::new(headers.get("nonce")?.clone());
 
             Some(ObservableMessageHeaders::Delegate {
-                id, protocol_version,
-                timeline: timeline.clone(), submission: submission.clone(), session,
-                caller: caller.clone(), target: target.clone(), nonce, state, diagnostics,
+                id,
+                protocol_version,
+                timeline: timeline.clone(),
+                submission: submission.clone(),
+                session,
+                caller: caller.clone(),
+                target: target.clone(),
+                nonce,
+                state,
+                diagnostics,
             })
         }
         RoutingKey::DelegateReply { .. } => {
@@ -917,10 +1177,7 @@ pub fn from_nats_headers(
 /// NATS consumer names must be alphanumeric + dash/underscore.
 /// We replace dots and wildcards with underscores.
 fn filter_to_consumer_name(filter: &str) -> String {
-    filter
-        .replace('.', "_")
-        .replace('*', "W")
-        .replace('>', "G")
+    filter.replace('.', "_").replace('*', "W").replace('>', "G")
 }
 
 /// Extract a header value from NATS headers.
@@ -938,16 +1195,26 @@ fn get_header(headers: &async_nats::HeaderMap, key: &str) -> Result<String, Queu
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vlinder_core::domain::{
-        InferenceBackendType, ObjectStorageType, VectorStorageType,
-    };
+    use vlinder_core::domain::{InferenceBackendType, ObjectStorageType, VectorStorageType};
 
-    fn timeline() -> TimelineId { TimelineId::main() }
-    fn timeline_alt() -> TimelineId { TimelineId::from(2) }
-    fn submission() -> SubmissionId { SubmissionId::from("sub-1".to_string()) }
-    fn submission_alt() -> SubmissionId { SubmissionId::from("sub-2".to_string()) }
-    fn agent() -> AgentId { AgentId::new("echo") }
-    fn agent_alt() -> AgentId { AgentId::new("pensieve") }
+    fn timeline() -> TimelineId {
+        TimelineId::main()
+    }
+    fn timeline_alt() -> TimelineId {
+        TimelineId::from(2)
+    }
+    fn submission() -> SubmissionId {
+        SubmissionId::from("sub-1".to_string())
+    }
+    fn submission_alt() -> SubmissionId {
+        SubmissionId::from("sub-2".to_string())
+    }
+    fn agent() -> AgentId {
+        AgentId::new("echo")
+    }
+    fn agent_alt() -> AgentId {
+        AgentId::new("pensieve")
+    }
 
     // ========================================================================
     // Format sanity — subjects have the expected shape
@@ -964,7 +1231,11 @@ mod tests {
         };
         assert_eq!(
             routing_key_to_subject(&key),
-            format!("vlinder.{}.{}.invoke.cli.container.echo", timeline(), submission()),
+            format!(
+                "vlinder.{}.{}.invoke.cli.container.echo",
+                timeline(),
+                submission()
+            ),
         );
     }
 
@@ -980,7 +1251,11 @@ mod tests {
         };
         assert_eq!(
             routing_key_to_subject(&key),
-            format!("vlinder.{}.{}.req.echo.kv.sqlite.get.1", timeline(), submission()),
+            format!(
+                "vlinder.{}.{}.req.echo.kv.sqlite.get.1",
+                timeline(),
+                submission()
+            ),
         );
     }
 
@@ -996,7 +1271,11 @@ mod tests {
         };
         assert_eq!(
             routing_key_to_subject(&key),
-            format!("vlinder.{}.{}.res.infer.ollama.echo.run.3", timeline(), submission()),
+            format!(
+                "vlinder.{}.{}.res.infer.ollama.echo.run.3",
+                timeline(),
+                submission()
+            ),
         );
     }
 
@@ -1024,7 +1303,11 @@ mod tests {
         };
         assert_eq!(
             routing_key_to_subject(&key),
-            format!("vlinder.{}.{}.delegate.echo.pensieve", timeline(), submission()),
+            format!(
+                "vlinder.{}.{}.delegate.echo.pensieve",
+                timeline(),
+                submission()
+            ),
         );
     }
 
@@ -1039,7 +1322,11 @@ mod tests {
         };
         assert_eq!(
             routing_key_to_subject(&key),
-            format!("vlinder.{}.{}.delegate-reply.echo.pensieve.abc123", timeline(), submission()),
+            format!(
+                "vlinder.{}.{}.delegate-reply.echo.pensieve.abc123",
+                timeline(),
+                submission()
+            ),
         );
     }
 
@@ -1059,106 +1346,290 @@ mod tests {
 
     #[test]
     fn invoke_injective_by_timeline() {
-        let a = RoutingKey::Invoke { timeline: timeline(), submission: submission(), harness: HarnessType::Cli, runtime: RuntimeType::Container, agent: agent() };
-        let b = RoutingKey::Invoke { timeline: timeline_alt(), submission: submission(), harness: HarnessType::Cli, runtime: RuntimeType::Container, agent: agent() };
+        let a = RoutingKey::Invoke {
+            timeline: timeline(),
+            submission: submission(),
+            harness: HarnessType::Cli,
+            runtime: RuntimeType::Container,
+            agent: agent(),
+        };
+        let b = RoutingKey::Invoke {
+            timeline: timeline_alt(),
+            submission: submission(),
+            harness: HarnessType::Cli,
+            runtime: RuntimeType::Container,
+            agent: agent(),
+        };
         assert_injective(&a, &b);
     }
 
     #[test]
     fn invoke_injective_by_submission() {
-        let a = RoutingKey::Invoke { timeline: timeline(), submission: submission(), harness: HarnessType::Cli, runtime: RuntimeType::Container, agent: agent() };
-        let b = RoutingKey::Invoke { timeline: timeline(), submission: submission_alt(), harness: HarnessType::Cli, runtime: RuntimeType::Container, agent: agent() };
+        let a = RoutingKey::Invoke {
+            timeline: timeline(),
+            submission: submission(),
+            harness: HarnessType::Cli,
+            runtime: RuntimeType::Container,
+            agent: agent(),
+        };
+        let b = RoutingKey::Invoke {
+            timeline: timeline(),
+            submission: submission_alt(),
+            harness: HarnessType::Cli,
+            runtime: RuntimeType::Container,
+            agent: agent(),
+        };
         assert_injective(&a, &b);
     }
 
     #[test]
     fn invoke_injective_by_harness() {
-        let a = RoutingKey::Invoke { timeline: timeline(), submission: submission(), harness: HarnessType::Cli, runtime: RuntimeType::Container, agent: agent() };
-        let b = RoutingKey::Invoke { timeline: timeline(), submission: submission(), harness: HarnessType::Web, runtime: RuntimeType::Container, agent: agent() };
+        let a = RoutingKey::Invoke {
+            timeline: timeline(),
+            submission: submission(),
+            harness: HarnessType::Cli,
+            runtime: RuntimeType::Container,
+            agent: agent(),
+        };
+        let b = RoutingKey::Invoke {
+            timeline: timeline(),
+            submission: submission(),
+            harness: HarnessType::Web,
+            runtime: RuntimeType::Container,
+            agent: agent(),
+        };
         assert_injective(&a, &b);
     }
 
     #[test]
     fn invoke_injective_by_agent() {
-        let a = RoutingKey::Invoke { timeline: timeline(), submission: submission(), harness: HarnessType::Cli, runtime: RuntimeType::Container, agent: agent() };
-        let b = RoutingKey::Invoke { timeline: timeline(), submission: submission(), harness: HarnessType::Cli, runtime: RuntimeType::Container, agent: agent_alt() };
+        let a = RoutingKey::Invoke {
+            timeline: timeline(),
+            submission: submission(),
+            harness: HarnessType::Cli,
+            runtime: RuntimeType::Container,
+            agent: agent(),
+        };
+        let b = RoutingKey::Invoke {
+            timeline: timeline(),
+            submission: submission(),
+            harness: HarnessType::Cli,
+            runtime: RuntimeType::Container,
+            agent: agent_alt(),
+        };
         assert_injective(&a, &b);
     }
 
     #[test]
     fn request_injective_by_service() {
-        let a = RoutingKey::Request { timeline: timeline(), submission: submission(), agent: agent(), service: ServiceBackend::Kv(ObjectStorageType::Sqlite), operation: Operation::Get, sequence: Sequence::first() };
-        let b = RoutingKey::Request { timeline: timeline(), submission: submission(), agent: agent(), service: ServiceBackend::Vec(VectorStorageType::SqliteVec), operation: Operation::Get, sequence: Sequence::first() };
+        let a = RoutingKey::Request {
+            timeline: timeline(),
+            submission: submission(),
+            agent: agent(),
+            service: ServiceBackend::Kv(ObjectStorageType::Sqlite),
+            operation: Operation::Get,
+            sequence: Sequence::first(),
+        };
+        let b = RoutingKey::Request {
+            timeline: timeline(),
+            submission: submission(),
+            agent: agent(),
+            service: ServiceBackend::Vec(VectorStorageType::SqliteVec),
+            operation: Operation::Get,
+            sequence: Sequence::first(),
+        };
         assert_injective(&a, &b);
     }
 
     #[test]
     fn request_injective_by_backend() {
-        let a = RoutingKey::Request { timeline: timeline(), submission: submission(), agent: agent(), service: ServiceBackend::Kv(ObjectStorageType::Sqlite), operation: Operation::Get, sequence: Sequence::first() };
-        let b = RoutingKey::Request { timeline: timeline(), submission: submission(), agent: agent(), service: ServiceBackend::Kv(ObjectStorageType::InMemory), operation: Operation::Get, sequence: Sequence::first() };
+        let a = RoutingKey::Request {
+            timeline: timeline(),
+            submission: submission(),
+            agent: agent(),
+            service: ServiceBackend::Kv(ObjectStorageType::Sqlite),
+            operation: Operation::Get,
+            sequence: Sequence::first(),
+        };
+        let b = RoutingKey::Request {
+            timeline: timeline(),
+            submission: submission(),
+            agent: agent(),
+            service: ServiceBackend::Kv(ObjectStorageType::InMemory),
+            operation: Operation::Get,
+            sequence: Sequence::first(),
+        };
         assert_injective(&a, &b);
     }
 
     #[test]
     fn request_injective_by_operation() {
-        let a = RoutingKey::Request { timeline: timeline(), submission: submission(), agent: agent(), service: ServiceBackend::Kv(ObjectStorageType::Sqlite), operation: Operation::Get, sequence: Sequence::first() };
-        let b = RoutingKey::Request { timeline: timeline(), submission: submission(), agent: agent(), service: ServiceBackend::Kv(ObjectStorageType::Sqlite), operation: Operation::Put, sequence: Sequence::first() };
+        let a = RoutingKey::Request {
+            timeline: timeline(),
+            submission: submission(),
+            agent: agent(),
+            service: ServiceBackend::Kv(ObjectStorageType::Sqlite),
+            operation: Operation::Get,
+            sequence: Sequence::first(),
+        };
+        let b = RoutingKey::Request {
+            timeline: timeline(),
+            submission: submission(),
+            agent: agent(),
+            service: ServiceBackend::Kv(ObjectStorageType::Sqlite),
+            operation: Operation::Put,
+            sequence: Sequence::first(),
+        };
         assert_injective(&a, &b);
     }
 
     #[test]
     fn request_injective_by_sequence() {
-        let a = RoutingKey::Request { timeline: timeline(), submission: submission(), agent: agent(), service: ServiceBackend::Kv(ObjectStorageType::Sqlite), operation: Operation::Get, sequence: Sequence::first() };
-        let b = RoutingKey::Request { timeline: timeline(), submission: submission(), agent: agent(), service: ServiceBackend::Kv(ObjectStorageType::Sqlite), operation: Operation::Get, sequence: Sequence::from(2) };
+        let a = RoutingKey::Request {
+            timeline: timeline(),
+            submission: submission(),
+            agent: agent(),
+            service: ServiceBackend::Kv(ObjectStorageType::Sqlite),
+            operation: Operation::Get,
+            sequence: Sequence::first(),
+        };
+        let b = RoutingKey::Request {
+            timeline: timeline(),
+            submission: submission(),
+            agent: agent(),
+            service: ServiceBackend::Kv(ObjectStorageType::Sqlite),
+            operation: Operation::Get,
+            sequence: Sequence::from(2),
+        };
         assert_injective(&a, &b);
     }
 
     #[test]
     fn response_injective_by_agent() {
-        let a = RoutingKey::Response { timeline: timeline(), submission: submission(), service: ServiceBackend::Infer(InferenceBackendType::Ollama), agent: agent(), operation: Operation::Run, sequence: Sequence::first() };
-        let b = RoutingKey::Response { timeline: timeline(), submission: submission(), service: ServiceBackend::Infer(InferenceBackendType::Ollama), agent: agent_alt(), operation: Operation::Run, sequence: Sequence::first() };
+        let a = RoutingKey::Response {
+            timeline: timeline(),
+            submission: submission(),
+            service: ServiceBackend::Infer(InferenceBackendType::Ollama),
+            agent: agent(),
+            operation: Operation::Run,
+            sequence: Sequence::first(),
+        };
+        let b = RoutingKey::Response {
+            timeline: timeline(),
+            submission: submission(),
+            service: ServiceBackend::Infer(InferenceBackendType::Ollama),
+            agent: agent_alt(),
+            operation: Operation::Run,
+            sequence: Sequence::first(),
+        };
         assert_injective(&a, &b);
     }
 
     #[test]
     fn response_injective_by_backend() {
-        let a = RoutingKey::Response { timeline: timeline(), submission: submission(), service: ServiceBackend::Infer(InferenceBackendType::Ollama), agent: agent(), operation: Operation::Run, sequence: Sequence::first() };
-        let b = RoutingKey::Response { timeline: timeline(), submission: submission(), service: ServiceBackend::Infer(InferenceBackendType::OpenRouter), agent: agent(), operation: Operation::Run, sequence: Sequence::first() };
+        let a = RoutingKey::Response {
+            timeline: timeline(),
+            submission: submission(),
+            service: ServiceBackend::Infer(InferenceBackendType::Ollama),
+            agent: agent(),
+            operation: Operation::Run,
+            sequence: Sequence::first(),
+        };
+        let b = RoutingKey::Response {
+            timeline: timeline(),
+            submission: submission(),
+            service: ServiceBackend::Infer(InferenceBackendType::OpenRouter),
+            agent: agent(),
+            operation: Operation::Run,
+            sequence: Sequence::first(),
+        };
         assert_injective(&a, &b);
     }
 
     #[test]
     fn complete_injective_by_harness() {
-        let a = RoutingKey::Complete { timeline: timeline(), submission: submission(), agent: agent(), harness: HarnessType::Cli };
-        let b = RoutingKey::Complete { timeline: timeline(), submission: submission(), agent: agent(), harness: HarnessType::Web };
+        let a = RoutingKey::Complete {
+            timeline: timeline(),
+            submission: submission(),
+            agent: agent(),
+            harness: HarnessType::Cli,
+        };
+        let b = RoutingKey::Complete {
+            timeline: timeline(),
+            submission: submission(),
+            agent: agent(),
+            harness: HarnessType::Web,
+        };
         assert_injective(&a, &b);
     }
 
     #[test]
     fn complete_injective_by_agent() {
-        let a = RoutingKey::Complete { timeline: timeline(), submission: submission(), agent: agent(), harness: HarnessType::Cli };
-        let b = RoutingKey::Complete { timeline: timeline(), submission: submission(), agent: agent_alt(), harness: HarnessType::Cli };
+        let a = RoutingKey::Complete {
+            timeline: timeline(),
+            submission: submission(),
+            agent: agent(),
+            harness: HarnessType::Cli,
+        };
+        let b = RoutingKey::Complete {
+            timeline: timeline(),
+            submission: submission(),
+            agent: agent_alt(),
+            harness: HarnessType::Cli,
+        };
         assert_injective(&a, &b);
     }
 
     #[test]
     fn delegate_injective_by_caller() {
-        let a = RoutingKey::Delegate { timeline: timeline(), submission: submission(), caller: agent(), target: agent_alt() };
-        let b = RoutingKey::Delegate { timeline: timeline(), submission: submission(), caller: agent_alt(), target: agent_alt() };
+        let a = RoutingKey::Delegate {
+            timeline: timeline(),
+            submission: submission(),
+            caller: agent(),
+            target: agent_alt(),
+        };
+        let b = RoutingKey::Delegate {
+            timeline: timeline(),
+            submission: submission(),
+            caller: agent_alt(),
+            target: agent_alt(),
+        };
         assert_injective(&a, &b);
     }
 
     #[test]
     fn delegate_injective_by_target() {
-        let a = RoutingKey::Delegate { timeline: timeline(), submission: submission(), caller: agent(), target: agent_alt() };
-        let b = RoutingKey::Delegate { timeline: timeline(), submission: submission(), caller: agent(), target: AgentId::new("fact-checker") };
+        let a = RoutingKey::Delegate {
+            timeline: timeline(),
+            submission: submission(),
+            caller: agent(),
+            target: agent_alt(),
+        };
+        let b = RoutingKey::Delegate {
+            timeline: timeline(),
+            submission: submission(),
+            caller: agent(),
+            target: AgentId::new("fact-checker"),
+        };
         assert_injective(&a, &b);
     }
 
     #[test]
     fn delegate_reply_injective_by_nonce() {
-        let a = RoutingKey::DelegateReply { timeline: timeline(), submission: submission(), caller: agent(), target: agent_alt(), nonce: Nonce::new("nonce-1") };
-        let b = RoutingKey::DelegateReply { timeline: timeline(), submission: submission(), caller: agent(), target: agent_alt(), nonce: Nonce::new("nonce-2") };
+        let a = RoutingKey::DelegateReply {
+            timeline: timeline(),
+            submission: submission(),
+            caller: agent(),
+            target: agent_alt(),
+            nonce: Nonce::new("nonce-1"),
+        };
+        let b = RoutingKey::DelegateReply {
+            timeline: timeline(),
+            submission: submission(),
+            caller: agent(),
+            target: agent_alt(),
+            nonce: Nonce::new("nonce-2"),
+        };
         assert_injective(&a, &b);
     }
 
@@ -1168,22 +1639,58 @@ mod tests {
 
     #[test]
     fn invoke_and_complete_subjects_differ() {
-        let invoke = RoutingKey::Invoke { timeline: timeline(), submission: submission(), harness: HarnessType::Cli, runtime: RuntimeType::Container, agent: agent() };
-        let complete = RoutingKey::Complete { timeline: timeline(), submission: submission(), agent: agent(), harness: HarnessType::Cli };
+        let invoke = RoutingKey::Invoke {
+            timeline: timeline(),
+            submission: submission(),
+            harness: HarnessType::Cli,
+            runtime: RuntimeType::Container,
+            agent: agent(),
+        };
+        let complete = RoutingKey::Complete {
+            timeline: timeline(),
+            submission: submission(),
+            agent: agent(),
+            harness: HarnessType::Cli,
+        };
         assert_injective(&invoke, &complete);
     }
 
     #[test]
     fn request_and_response_subjects_differ() {
-        let request = RoutingKey::Request { timeline: timeline(), submission: submission(), agent: agent(), service: ServiceBackend::Kv(ObjectStorageType::Sqlite), operation: Operation::Get, sequence: Sequence::first() };
-        let response = RoutingKey::Response { timeline: timeline(), submission: submission(), service: ServiceBackend::Kv(ObjectStorageType::Sqlite), agent: agent(), operation: Operation::Get, sequence: Sequence::first() };
+        let request = RoutingKey::Request {
+            timeline: timeline(),
+            submission: submission(),
+            agent: agent(),
+            service: ServiceBackend::Kv(ObjectStorageType::Sqlite),
+            operation: Operation::Get,
+            sequence: Sequence::first(),
+        };
+        let response = RoutingKey::Response {
+            timeline: timeline(),
+            submission: submission(),
+            service: ServiceBackend::Kv(ObjectStorageType::Sqlite),
+            agent: agent(),
+            operation: Operation::Get,
+            sequence: Sequence::first(),
+        };
         assert_injective(&request, &response);
     }
 
     #[test]
     fn delegate_and_delegate_reply_subjects_differ() {
-        let delegate = RoutingKey::Delegate { timeline: timeline(), submission: submission(), caller: agent(), target: agent_alt() };
-        let reply = RoutingKey::DelegateReply { timeline: timeline(), submission: submission(), caller: agent(), target: agent_alt(), nonce: Nonce::new("n") };
+        let delegate = RoutingKey::Delegate {
+            timeline: timeline(),
+            submission: submission(),
+            caller: agent(),
+            target: agent_alt(),
+        };
+        let reply = RoutingKey::DelegateReply {
+            timeline: timeline(),
+            submission: submission(),
+            caller: agent(),
+            target: agent_alt(),
+            nonce: Nonce::new("n"),
+        };
         assert_injective(&delegate, &reply);
     }
 
@@ -1195,56 +1702,76 @@ mod tests {
         let subject = routing_key_to_subject(key);
         let recovered = subject_to_routing_key(&subject)
             .unwrap_or_else(|| panic!("failed to parse subject: {}", subject));
-        assert_eq!(&recovered, key, "round-trip failed for subject: {}", subject);
+        assert_eq!(
+            &recovered, key,
+            "round-trip failed for subject: {}",
+            subject
+        );
     }
 
     #[test]
     fn invoke_round_trips() {
         assert_round_trips(&RoutingKey::Invoke {
-            timeline: timeline(), submission: submission(),
-            harness: HarnessType::Cli, runtime: RuntimeType::Container, agent: agent(),
+            timeline: timeline(),
+            submission: submission(),
+            harness: HarnessType::Cli,
+            runtime: RuntimeType::Container,
+            agent: agent(),
         });
     }
 
     #[test]
     fn request_round_trips() {
         assert_round_trips(&RoutingKey::Request {
-            timeline: timeline(), submission: submission(), agent: agent(),
+            timeline: timeline(),
+            submission: submission(),
+            agent: agent(),
             service: ServiceBackend::Kv(ObjectStorageType::Sqlite),
-            operation: Operation::Get, sequence: Sequence::first(),
+            operation: Operation::Get,
+            sequence: Sequence::first(),
         });
     }
 
     #[test]
     fn response_round_trips() {
         assert_round_trips(&RoutingKey::Response {
-            timeline: timeline(), submission: submission(),
+            timeline: timeline(),
+            submission: submission(),
             service: ServiceBackend::Infer(InferenceBackendType::Ollama),
-            agent: agent(), operation: Operation::Run, sequence: Sequence::from(3),
+            agent: agent(),
+            operation: Operation::Run,
+            sequence: Sequence::from(3),
         });
     }
 
     #[test]
     fn complete_round_trips() {
         assert_round_trips(&RoutingKey::Complete {
-            timeline: timeline(), submission: submission(),
-            agent: agent(), harness: HarnessType::Grpc,
+            timeline: timeline(),
+            submission: submission(),
+            agent: agent(),
+            harness: HarnessType::Grpc,
         });
     }
 
     #[test]
     fn delegate_round_trips() {
         assert_round_trips(&RoutingKey::Delegate {
-            timeline: timeline(), submission: submission(),
-            caller: agent(), target: agent_alt(),
+            timeline: timeline(),
+            submission: submission(),
+            caller: agent(),
+            target: agent_alt(),
         });
     }
 
     #[test]
     fn delegate_reply_round_trips() {
         assert_round_trips(&RoutingKey::DelegateReply {
-            timeline: timeline(), submission: submission(),
-            caller: agent(), target: agent_alt(), nonce: Nonce::new("abc123"),
+            timeline: timeline(),
+            submission: submission(),
+            caller: agent(),
+            target: agent_alt(),
+            nonce: Nonce::new("abc123"),
         });
     }
 
@@ -1267,10 +1794,18 @@ mod tests {
     /// Build a test InvokeMessage for header round-trip tests.
     fn test_invoke_message(state: Option<String>) -> InvokeMessage {
         InvokeMessage::new(
-            timeline(), submission(), SessionId::from("ses-test".to_string()),
-            HarnessType::Cli, RuntimeType::Container, agent(),
-            b"hello-payload".to_vec(), state,
-            InvokeDiagnostics { harness_version: "0.1.0".to_string(), history_turns: 0 },
+            timeline(),
+            submission(),
+            SessionId::from("ses-test".to_string()),
+            HarnessType::Cli,
+            RuntimeType::Container,
+            agent(),
+            b"hello-payload".to_vec(),
+            state,
+            InvokeDiagnostics {
+                harness_version: "0.1.0".to_string(),
+                history_turns: 0,
+            },
         )
     }
 
@@ -1335,8 +1870,11 @@ mod tests {
     #[test]
     fn from_nats_headers_delegate_reply_returns_none() {
         let key = RoutingKey::DelegateReply {
-            timeline: timeline(), submission: submission(),
-            caller: agent(), target: agent_alt(), nonce: Nonce::new("n"),
+            timeline: timeline(),
+            submission: submission(),
+            caller: agent(),
+            target: agent_alt(),
+            nonce: Nonce::new("n"),
         };
         assert!(from_nats_headers(&key, &HashMap::new()).is_none());
     }
@@ -1350,10 +1888,21 @@ mod tests {
         use vlinder_core::domain::ObservableMessage;
 
         let original = RequestMessage::new(
-            timeline(), submission(), SessionId::from("ses-test".to_string()), agent(),
-            ServiceBackend::Kv(ObjectStorageType::Sqlite), Operation::Get,
-            Sequence::first(), b"key-data".to_vec(), Some("state-x".to_string()),
-            RequestDiagnostics { sequence: 1, endpoint: "/test".to_string(), request_bytes: 8, received_at_ms: 0 },
+            timeline(),
+            submission(),
+            SessionId::from("ses-test".to_string()),
+            agent(),
+            ServiceBackend::Kv(ObjectStorageType::Sqlite),
+            Operation::Get,
+            Sequence::first(),
+            b"key-data".to_vec(),
+            Some("state-x".to_string()),
+            RequestDiagnostics {
+                sequence: 1,
+                endpoint: "/test".to_string(),
+                request_bytes: 8,
+                received_at_ms: 0,
+            },
         );
         let key = original.routing_key();
         let headers = request_to_nats_headers(&original);
@@ -1386,10 +1935,21 @@ mod tests {
         use vlinder_core::domain::ObservableMessage;
 
         let request = RequestMessage::new(
-            timeline(), submission(), SessionId::from("ses-test".to_string()), agent(),
-            ServiceBackend::Infer(InferenceBackendType::Ollama), Operation::Run,
-            Sequence::from(3), b"prompt".to_vec(), None,
-            RequestDiagnostics { sequence: 3, endpoint: "/infer".to_string(), request_bytes: 6, received_at_ms: 0 },
+            timeline(),
+            submission(),
+            SessionId::from("ses-test".to_string()),
+            agent(),
+            ServiceBackend::Infer(InferenceBackendType::Ollama),
+            Operation::Run,
+            Sequence::from(3),
+            b"prompt".to_vec(),
+            None,
+            RequestDiagnostics {
+                sequence: 3,
+                endpoint: "/infer".to_string(),
+                request_bytes: 6,
+                received_at_ms: 0,
+            },
         );
         let original = ResponseMessage::from_request(&request, b"reply-data".to_vec());
         let key = original.routing_key();
@@ -1424,8 +1984,13 @@ mod tests {
         use vlinder_core::domain::ObservableMessage;
 
         let original = CompleteMessage::new(
-            timeline(), submission(), SessionId::from("ses-test".to_string()), agent(),
-            HarnessType::Grpc, b"done".to_vec(), Some("state-z".to_string()),
+            timeline(),
+            submission(),
+            SessionId::from("ses-test".to_string()),
+            agent(),
+            HarnessType::Grpc,
+            b"done".to_vec(),
+            Some("state-z".to_string()),
             RuntimeDiagnostics::placeholder(0),
         );
         let key = original.routing_key();
@@ -1457,10 +2022,17 @@ mod tests {
         use vlinder_core::domain::ObservableMessage;
 
         let original = DelegateMessage::new(
-            timeline(), submission(), SessionId::from("ses-test".to_string()),
-            agent(), agent_alt(), b"task-data".to_vec(), Nonce::new("nonce-42"),
+            timeline(),
+            submission(),
+            SessionId::from("ses-test".to_string()),
+            agent(),
+            agent_alt(),
+            b"task-data".to_vec(),
+            Nonce::new("nonce-42"),
             None,
-            DelegateDiagnostics { runtime: RuntimeDiagnostics::placeholder(0) },
+            DelegateDiagnostics {
+                runtime: RuntimeDiagnostics::placeholder(0),
+            },
         );
         let key = original.routing_key();
         let headers = delegate_to_nats_headers(&original);
@@ -1483,4 +2055,3 @@ mod tests {
         }
     }
 }
-

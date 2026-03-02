@@ -3,8 +3,8 @@
 use std::sync::Mutex;
 use tonic::transport::Channel;
 
-use vlinder_core::domain::{CatalogError, CatalogService, Model, ModelInfo};
 use super::proto::{self, catalog_service_client::CatalogServiceClient};
+use vlinder_core::domain::{CatalogError, CatalogService, Model, ModelInfo};
 
 /// CatalogService implementation that makes gRPC calls to a remote Catalog Service.
 ///
@@ -19,9 +19,8 @@ impl GrpcCatalogClient {
     /// Connect to a catalog service server.
     pub fn connect(addr: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let runtime = tokio::runtime::Runtime::new()?;
-        let client = runtime.block_on(async {
-            CatalogServiceClient::connect(addr.to_string()).await
-        })?;
+        let client =
+            runtime.block_on(async { CatalogServiceClient::connect(addr.to_string()).await })?;
 
         Ok(Self {
             client: Mutex::new(client),
@@ -50,7 +49,9 @@ pub fn ping_catalog_service(addr: &str) -> Option<(u32, u32, u32)> {
 impl CatalogService for GrpcCatalogClient {
     fn catalogs(&self) -> Vec<String> {
         let result = self.runtime.block_on(async {
-            self.client.lock().unwrap()
+            self.client
+                .lock()
+                .unwrap()
                 .list_catalogs(proto::ListCatalogsRequest {})
                 .await
         });
@@ -67,11 +68,10 @@ impl CatalogService for GrpcCatalogClient {
             name: name.to_string(),
         };
 
-        let response = self.runtime.block_on(async {
-            self.client.lock().unwrap()
-                .resolve(request)
-                .await
-        }).map_err(|e| CatalogError::Network(e.to_string()))?;
+        let response = self
+            .runtime
+            .block_on(async { self.client.lock().unwrap().resolve(request).await })
+            .map_err(|e| CatalogError::Network(e.to_string()))?;
 
         let resp = response.into_inner();
         if let Some(err) = resp.error {
@@ -88,11 +88,10 @@ impl CatalogService for GrpcCatalogClient {
             catalog: catalog.to_string(),
         };
 
-        let response = self.runtime.block_on(async {
-            self.client.lock().unwrap()
-                .list(request)
-                .await
-        }).map_err(|e| CatalogError::Network(e.to_string()))?;
+        let response = self
+            .runtime
+            .block_on(async { self.client.lock().unwrap().list(request).await })
+            .map_err(|e| CatalogError::Network(e.to_string()))?;
 
         let resp = response.into_inner();
         if let Some(err) = resp.error {
@@ -107,11 +106,9 @@ impl CatalogService for GrpcCatalogClient {
             name: name.to_string(),
         };
 
-        let result = self.runtime.block_on(async {
-            self.client.lock().unwrap()
-                .available(request)
-                .await
-        });
+        let result = self
+            .runtime
+            .block_on(async { self.client.lock().unwrap().available(request).await });
 
         match result {
             Ok(resp) => resp.into_inner().available,
