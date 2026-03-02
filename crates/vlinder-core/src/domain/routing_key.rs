@@ -15,7 +15,7 @@ use super::{
 ///
 /// Distinct from ResourceId (registration context). For routing, this is
 /// the unique identifier that distinguishes one agent from another.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(transparent)]
 pub struct AgentId(String);
 

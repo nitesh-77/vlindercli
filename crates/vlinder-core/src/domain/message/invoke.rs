@@ -1,6 +1,6 @@
 //! InvokeMessage: Harness → Runtime (start a submission).
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::super::diagnostics::{InvokeDiagnostics, RuntimeDiagnostics};
 use super::super::routing_key::{AgentId, RoutingKey};
@@ -9,11 +9,26 @@ use super::complete::CompleteMessage;
 use super::identity::{HarnessType, MessageId, SessionId, SubmissionId, TimelineId};
 use super::{ExpectsReply, PROTOCOL_VERSION};
 
+/// Serde helper: encode Vec<u8> as a base64 string for JSON-friendly transport.
+mod base64_serde {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(bytes: &Vec<u8>, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&STANDARD.encode(bytes))
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error> {
+        let encoded = String::deserialize(d)?;
+        STANDARD.decode(&encoded).map_err(serde::de::Error::custom)
+    }
+}
+
 /// Invoke message: Harness → Runtime
 ///
 /// Starts a submission by invoking an agent.
 /// Expects a CompleteMessage in response (enforced by ExpectsReply trait).
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct InvokeMessage {
     pub id: MessageId,
     pub protocol_version: String,
@@ -23,14 +38,13 @@ pub struct InvokeMessage {
     pub harness: HarnessType,
     pub runtime: RuntimeType,
     pub agent_id: AgentId,
-    #[serde(skip)]
+    #[serde(with = "base64_serde")]
     pub payload: Vec<u8>,
     /// Initial state hash from the previous turn's State trailer (ADR 055).
     /// None for the first invocation or when state tracking is not active.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub state: Option<String>,
     /// Diagnostics from the harness (ADR 071).
-    #[serde(skip)]
     pub diagnostics: InvokeDiagnostics,
 }
 
@@ -125,5 +139,73 @@ impl ExpectsReply for InvokeMessage {
             None,
             RuntimeDiagnostics::placeholder(0),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn invoke_message_json_round_trip() {
+        let msg = InvokeMessage::new(
+            TimelineId::main(),
+            SubmissionId::from("sub-1".to_string()),
+            SessionId::from("ses-1".to_string()),
+            HarnessType::Cli,
+            RuntimeType::Container,
+            AgentId::new("echo"),
+            b"hello world".to_vec(),
+            Some("abc123".to_string()),
+            InvokeDiagnostics {
+                harness_version: "0.1.0".to_string(),
+                history_turns: 3,
+            },
+        );
+
+        let json = serde_json::to_string(&msg).unwrap();
+        let back: InvokeMessage = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(back.id.as_str(), msg.id.as_str());
+        assert_eq!(back.protocol_version, msg.protocol_version);
+        assert_eq!(back.timeline, msg.timeline);
+        assert_eq!(back.submission, msg.submission);
+        assert_eq!(back.session, msg.session);
+        assert_eq!(back.harness, msg.harness);
+        assert_eq!(back.runtime, msg.runtime);
+        assert_eq!(back.agent_id, msg.agent_id);
+        assert_eq!(back.payload, b"hello world");
+        assert_eq!(back.state, Some("abc123".to_string()));
+        assert_eq!(back.diagnostics, msg.diagnostics);
+    }
+
+    #[test]
+    fn payload_serializes_as_base64_string() {
+        let msg = InvokeMessage::new(
+            TimelineId::main(),
+            SubmissionId::from("sub-1".to_string()),
+            SessionId::from("ses-1".to_string()),
+            HarnessType::Cli,
+            RuntimeType::Container,
+            AgentId::new("echo"),
+            b"hello world".to_vec(),
+            None,
+            InvokeDiagnostics {
+                harness_version: "0.1.0".to_string(),
+                history_turns: 0,
+            },
+        );
+
+        let json = serde_json::to_string(&msg).unwrap();
+        let raw: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        // payload should be a base64 string, not an array of integers
+        let payload_val = &raw["payload"];
+        assert!(
+            payload_val.is_string(),
+            "payload should be a string, got {:?}",
+            payload_val
+        );
+        assert_eq!(payload_val.as_str().unwrap(), "aGVsbG8gd29ybGQ=");
     }
 }

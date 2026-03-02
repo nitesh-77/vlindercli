@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 // --- MessageId ---
 
 /// Unique identifier for a message.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct MessageId(String);
 
@@ -268,7 +268,7 @@ impl From<u32> for Sequence {
 ///
 /// Each variant represents a concrete harness implementation.
 /// Used to route completion messages back to the correct harness type.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum HarnessType {
     /// Command-line interface harness
