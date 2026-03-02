@@ -158,6 +158,12 @@ pub enum RuntimeInfo {
         /// Container ID for this execution.
         container_id: ContainerId,
     },
+    Lambda {
+        /// Lambda function name (e.g., "vlinder-echo-agent").
+        function_name: String,
+        /// AWS region (e.g., "us-east-1").
+        region: String,
+    },
 }
 
 impl RuntimeDiagnostics {
@@ -366,6 +372,7 @@ mod tests {
             RuntimeInfo::Container { engine_version, .. } => {
                 assert_eq!(engine_version, "unknown");
             }
+            other => panic!("expected Container, got {:?}", other),
         }
     }
 
@@ -387,5 +394,37 @@ mod tests {
         let toml_str = toml::to_string_pretty(&diag).unwrap();
         let back: DelegateDiagnostics = toml::from_str(&toml_str).unwrap();
         assert_eq!(diag, back);
+    }
+
+    #[test]
+    fn lambda_diagnostics_json_round_trip() {
+        let diag = RuntimeDiagnostics {
+            stderr: Vec::new(),
+            runtime: RuntimeInfo::Lambda {
+                function_name: "vlinder-echo-agent".to_string(),
+                region: "us-east-1".to_string(),
+            },
+            duration_ms: 450,
+        };
+        let json = serde_json::to_string(&diag).unwrap();
+        let back: RuntimeDiagnostics = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.runtime, diag.runtime);
+        assert_eq!(back.duration_ms, 450);
+    }
+
+    #[test]
+    fn lambda_diagnostics_toml_round_trip() {
+        let diag = RuntimeDiagnostics {
+            stderr: Vec::new(),
+            runtime: RuntimeInfo::Lambda {
+                function_name: "vlinder-echo-agent".to_string(),
+                region: "us-east-1".to_string(),
+            },
+            duration_ms: 450,
+        };
+        let toml_str = toml::to_string_pretty(&diag).unwrap();
+        let back: RuntimeDiagnostics = toml::from_str(&toml_str).unwrap();
+        assert_eq!(back.runtime, diag.runtime);
+        assert_eq!(back.duration_ms, 450);
     }
 }
