@@ -36,7 +36,6 @@ impl MessageType {
             MessageType::Delegate => "delegate",
         }
     }
-
 }
 
 impl std::str::FromStr for MessageType {

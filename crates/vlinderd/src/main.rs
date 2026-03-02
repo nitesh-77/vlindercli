@@ -13,6 +13,12 @@ use vlinderd::worker::run_worker_loop;
 use vlinderd::worker_role::WorkerRole;
 
 fn main() {
+    // Both async-nats (ring) and AWS SDK (aws-lc-rs) activate rustls crypto
+    // providers. With both present, rustls can't auto-select — pick ring.
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("Failed to install rustls crypto provider");
+
     let config = Config::load();
     vlinderd::tracing_setup::init_tracing(&config);
 

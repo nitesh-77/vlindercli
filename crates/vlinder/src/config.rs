@@ -44,7 +44,6 @@ pub struct DaemonConfig {
 // Defaults
 // ============================================================================
 
-
 impl Default for LoggingConfig {
     fn default() -> Self {
         Self {

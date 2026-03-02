@@ -18,4 +18,6 @@ pub struct PodmanRuntimeConfig {
     pub registry_addr: String,
     /// State service gRPC address for sidecar env vars
     pub state_addr: String,
+    /// Secret store gRPC address for sidecar env vars
+    pub secret_addr: String,
 }

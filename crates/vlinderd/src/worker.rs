@@ -235,6 +235,7 @@ fn run_agent_container_worker(config: &Config, shutdown: &AtomicBool) {
         nats_url: config.queue.nats_url.clone(),
         registry_addr: config.distributed.registry_addr.clone(),
         state_addr: config.distributed.state_addr.clone(),
+        secret_addr: config.distributed.secret_addr.clone(),
     };
 
     let mut runtime = ContainerRuntime::new(&podman_config, registry)
@@ -487,14 +488,14 @@ fn run_catalog_worker(config: &Config, shutdown: &AtomicBool) {
     });
 }
 
-fn run_dag_git_worker(_config: &Config, shutdown: &AtomicBool) {
+fn run_dag_git_worker(config: &Config, shutdown: &AtomicBool) {
     use crate::config::conversations_dir;
     use std::collections::HashMap;
     use vlinder_core::domain::DagWorker;
     use vlinder_git_dag::GitDagWorker;
     use vlinder_nats::{from_nats_headers, subject_to_routing_key, NatsQueue};
 
-    let nats = NatsQueue::localhost().expect("Failed to connect to NATS");
+    let nats = NatsQueue::connect(&config.queue.nats_config()).expect("Failed to connect to NATS");
 
     let repo_path = conversations_dir();
     let mut git_worker = GitDagWorker::open(&repo_path, "localhost:9000", None)

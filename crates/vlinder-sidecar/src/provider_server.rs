@@ -270,8 +270,12 @@ fn build_context(
         initial_state = Some(invoke.state.clone().unwrap_or_default());
     }
 
-    let queue = factory::connect_queue(&config.nats_url, &config.state_url)
-        .expect("failed to connect to queue from provider server");
+    let queue = factory::connect_queue(
+        &config.nats_url,
+        &config.state_url,
+        config.secret_url.as_deref(),
+    )
+    .expect("failed to connect to queue from provider server");
 
     (hosts, queue, registry, invoke.clone(), initial_state)
 }

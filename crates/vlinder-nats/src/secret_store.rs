@@ -25,15 +25,15 @@ struct NatsSecretStoreInner {
 
 impl NatsSecretStore {
     /// Connect to a NATS server and create/open the `vlinder-secrets` KV bucket.
-    pub fn connect(url: &str) -> Result<Self, SecretStoreError> {
+    pub fn connect(config: &crate::NatsConfig) -> Result<Self, SecretStoreError> {
         let runtime = Runtime::new().map_err(|e| {
             SecretStoreError::StoreFailed(format!("failed to create runtime: {}", e))
         })?;
 
         let kv = runtime.block_on(async {
-            let client = async_nats::connect(url)
+            let client = crate::connect::nats_connect(config)
                 .await
-                .map_err(|e| SecretStoreError::StoreFailed(format!("failed to connect: {}", e)))?;
+                .map_err(SecretStoreError::StoreFailed)?;
 
             let jetstream = jetstream::new(client);
 
@@ -41,6 +41,7 @@ impl NatsSecretStore {
                 .create_key_value(kv::Config {
                     bucket: "vlinder-secrets".to_string(),
                     history: 1,
+                    max_bytes: 10 * 1024 * 1024, // 10 MiB — required by NGS
                     ..Default::default()
                 })
                 .await
