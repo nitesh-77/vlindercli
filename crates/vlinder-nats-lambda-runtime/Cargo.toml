@@ -1,5 +1,5 @@
 [package]
-name = "vlinder-lambda-runtime"
+name = "vlinder-nats-lambda-runtime"
 version = "0.1.0"
 edition = "2021"
 publish = false

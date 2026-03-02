@@ -255,7 +255,7 @@ fn run_agent_container_worker(config: &Config, shutdown: &AtomicBool) {
 
 fn run_agent_lambda_worker(config: &Config, shutdown: &AtomicBool) {
     use vlinder_core::domain::Runtime;
-    use vlinder_lambda_runtime::{LambdaRuntime, LambdaRuntimeConfig};
+    use vlinder_nats_lambda_runtime::{LambdaRuntime, LambdaRuntimeConfig};
 
     let registry =
         crate::registry_factory::from_config(config).expect("Failed to connect to registry");
