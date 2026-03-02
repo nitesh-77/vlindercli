@@ -18,10 +18,11 @@ use tokio::runtime::Runtime;
 use std::str::FromStr;
 
 use vlinder_core::domain::{
-    AgentId, CompleteMessage, DelegateDiagnostics, DelegateMessage, HarnessType, InvokeDiagnostics,
-    InvokeMessage, MessageId, MessageQueue, Nonce, Operation, QueueError, RequestDiagnostics,
-    RequestMessage, ResponseMessage, RoutingKey, RuntimeDiagnostics, RuntimeType, Sequence,
-    ServiceBackend, ServiceDiagnostics, ServiceType, SessionId, SubmissionId, TimelineId,
+    Acknowledgement, AgentId, CompleteMessage, DelegateDiagnostics, DelegateMessage, HarnessType,
+    InvokeDiagnostics, InvokeMessage, MessageId, MessageQueue, Nonce, Operation, QueueError,
+    RequestDiagnostics, RequestMessage, ResponseMessage, RoutingKey, RuntimeDiagnostics,
+    RuntimeType, Sequence, ServiceBackend, ServiceDiagnostics, ServiceType, SessionId,
+    SubmissionId, TimelineId,
 };
 
 /// NATS queue with JetStream durability.
@@ -364,13 +365,7 @@ impl MessageQueue for NatsQueue {
     fn receive_invoke(
         &self,
         agent: &AgentId,
-    ) -> Result<
-        (
-            InvokeMessage,
-            Box<dyn FnOnce() -> Result<(), QueueError> + Send>,
-        ),
-        QueueError,
-    > {
+    ) -> Result<(InvokeMessage, Acknowledgement), QueueError> {
         // Build filter: vlinder.{timeline}.{submission}.invoke.{harness}.{runtime}.{agent}
         let filter = format!("vlinder.*.*.invoke.*.*.{}", agent.as_str());
 

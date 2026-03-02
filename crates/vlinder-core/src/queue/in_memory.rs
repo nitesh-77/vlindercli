@@ -1,9 +1,9 @@
 //! In-memory queue implementation.
 
 use crate::domain::{
-    AgentId, CompleteMessage, DelegateMessage, HarnessType, InvokeMessage, MessageQueue,
-    ObservableMessage, Operation, QueueError, RequestMessage, ResponseMessage, RoutingKey,
-    ServiceBackend, SubmissionId,
+    Acknowledgement, AgentId, CompleteMessage, DelegateMessage, HarnessType, InvokeMessage,
+    MessageQueue, ObservableMessage, Operation, QueueError, RequestMessage, ResponseMessage,
+    RoutingKey, ServiceBackend, SubmissionId,
 };
 #[cfg(test)]
 use crate::domain::{
@@ -82,13 +82,7 @@ impl MessageQueue for InMemoryQueue {
     fn receive_invoke(
         &self,
         agent: &AgentId,
-    ) -> Result<
-        (
-            InvokeMessage,
-            Box<dyn FnOnce() -> Result<(), QueueError> + Send>,
-        ),
-        QueueError,
-    > {
+    ) -> Result<(InvokeMessage, Acknowledgement), QueueError> {
         let mut typed = self.typed_queues.lock().unwrap();
 
         for (key, queue) in typed.iter_mut() {

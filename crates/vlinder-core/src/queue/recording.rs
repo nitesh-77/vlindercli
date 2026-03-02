@@ -12,8 +12,8 @@ use std::sync::{Arc, Mutex};
 
 use crate::domain::workers::dag::build_dag_node;
 use crate::domain::{
-    CompleteMessage, DagStore, DelegateMessage, InvokeMessage, MessageQueue, ObservableMessage,
-    QueueError, RequestMessage, ResponseMessage, SubmissionId,
+    Acknowledgement, CompleteMessage, DagStore, DelegateMessage, InvokeMessage, MessageQueue,
+    ObservableMessage, QueueError, RequestMessage, ResponseMessage, SubmissionId,
 };
 
 /// A `MessageQueue` decorator that synchronously records DAG nodes on send.
@@ -116,13 +116,7 @@ impl MessageQueue for RecordingQueue {
     fn receive_invoke(
         &self,
         agent: &crate::domain::AgentId,
-    ) -> Result<
-        (
-            InvokeMessage,
-            Box<dyn FnOnce() -> Result<(), QueueError> + Send>,
-        ),
-        QueueError,
-    > {
+    ) -> Result<(InvokeMessage, Acknowledgement), QueueError> {
         self.inner.receive_invoke(agent)
     }
 

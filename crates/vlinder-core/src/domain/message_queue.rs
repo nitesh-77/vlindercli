@@ -56,13 +56,7 @@ pub trait MessageQueue {
     fn receive_invoke(
         &self,
         agent: &AgentId,
-    ) -> Result<
-        (
-            InvokeMessage,
-            Box<dyn FnOnce() -> Result<(), QueueError> + Send>,
-        ),
-        QueueError,
-    >;
+    ) -> Result<(InvokeMessage, Acknowledgement), QueueError>;
 
     /// Receive a RequestMessage for a service-backend/operation pair.
     ///
