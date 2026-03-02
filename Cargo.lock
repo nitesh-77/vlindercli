@@ -3296,6 +3296,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "vlinder-lambda-runtime"
+version = "0.1.0"
+dependencies = [
+ "tracing",
+ "vlinder-core",
+]
+
+[[package]]
 name = "vlinder-nats"
 version = "0.1.0"
 dependencies = [
@@ -3456,6 +3464,7 @@ dependencies = [
  "vlinder-git-dag",
  "vlinder-harness",
  "vlinder-infer-openrouter",
+ "vlinder-lambda-runtime",
  "vlinder-nats",
  "vlinder-ollama",
  "vlinder-podman-runtime",

@@ -1,0 +1,9 @@
+[package]
+name = "vlinder-lambda-runtime"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+vlinder-core = { path = "../vlinder-core" }
+tracing = "0.1"

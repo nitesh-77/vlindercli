@@ -40,7 +40,6 @@ impl Operation {
             Operation::Generate => "generate",
         }
     }
-
 }
 
 impl FromStr for Operation {

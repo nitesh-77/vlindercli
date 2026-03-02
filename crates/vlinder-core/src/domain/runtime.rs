@@ -15,6 +15,8 @@ use super::ResourceId;
 pub enum RuntimeType {
     /// OCI container runtime (Podman)
     Container,
+    /// AWS Lambda runtime
+    Lambda,
 }
 
 impl std::fmt::Display for RuntimeType {
@@ -28,9 +30,9 @@ impl RuntimeType {
     pub fn as_str(&self) -> &'static str {
         match self {
             RuntimeType::Container => "container",
+            RuntimeType::Lambda => "lambda",
         }
     }
-
 }
 
 impl std::str::FromStr for RuntimeType {
@@ -39,6 +41,7 @@ impl std::str::FromStr for RuntimeType {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "container" => Ok(RuntimeType::Container),
+            "lambda" => Ok(RuntimeType::Lambda),
             _ => Err(format!("unknown runtime type: {}", s)),
         }
     }

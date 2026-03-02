@@ -21,6 +21,8 @@ pub enum WorkerRole {
     Harness,
     /// Container agent runtime - executes OCI container agents via Podman
     AgentContainer,
+    /// Lambda agent runtime - executes agents as AWS Lambda functions
+    AgentLambda,
     /// Ollama inference service
     InferenceOllama,
     /// OpenRouter inference service (cloud LLMs)
@@ -61,6 +63,7 @@ impl WorkerRole {
             WorkerRole::Registry => "registry",
             WorkerRole::Harness => "harness",
             WorkerRole::AgentContainer => "agent-container",
+            WorkerRole::AgentLambda => "agent-lambda",
             WorkerRole::InferenceOllama => "inference-ollama",
             WorkerRole::InferenceOpenRouter => "inference-openrouter",
             WorkerRole::StorageObjectSqlite => "storage-object-sqlite",
@@ -81,6 +84,7 @@ impl WorkerRole {
             WorkerRole::Registry => "Registry service",
             WorkerRole::Harness => "Harness service",
             WorkerRole::AgentContainer => "Container agent runtime",
+            WorkerRole::AgentLambda => "Lambda agent runtime",
             WorkerRole::InferenceOllama => "Ollama inference service",
             WorkerRole::InferenceOpenRouter => "OpenRouter inference service",
             WorkerRole::StorageObjectSqlite => "SQLite object storage",
@@ -110,6 +114,7 @@ impl FromStr for WorkerRole {
             "registry" => Ok(WorkerRole::Registry),
             "harness" => Ok(WorkerRole::Harness),
             "agent-container" => Ok(WorkerRole::AgentContainer),
+            "agent-lambda" => Ok(WorkerRole::AgentLambda),
             "inference-ollama" => Ok(WorkerRole::InferenceOllama),
             "inference-openrouter" => Ok(WorkerRole::InferenceOpenRouter),
             "storage-object-sqlite" => Ok(WorkerRole::StorageObjectSqlite),
@@ -156,6 +161,10 @@ mod tests {
             WorkerRole::AgentContainer
         );
         assert_eq!(
+            "agent-lambda".parse::<WorkerRole>().unwrap(),
+            WorkerRole::AgentLambda
+        );
+        assert_eq!(
             "inference-ollama".parse::<WorkerRole>().unwrap(),
             WorkerRole::InferenceOllama
         );
@@ -196,6 +205,7 @@ mod tests {
             WorkerRole::Registry,
             WorkerRole::Harness,
             WorkerRole::AgentContainer,
+            WorkerRole::AgentLambda,
             WorkerRole::InferenceOllama,
             WorkerRole::StorageObjectSqlite,
             WorkerRole::StorageVectorSqlite,

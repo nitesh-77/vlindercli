@@ -33,7 +33,6 @@ impl ServiceType {
             ServiceType::Embed => "embed",
         }
     }
-
 }
 
 impl FromStr for ServiceType {

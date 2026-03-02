@@ -42,6 +42,7 @@ pub fn run_worker_loop(role: WorkerRole, shutdown: Arc<AtomicBool>) {
         WorkerRole::Registry => run_registry_worker(&config, &shutdown),
         WorkerRole::Harness => run_harness_worker(&config, &shutdown),
         WorkerRole::AgentContainer => run_agent_container_worker(&config, &shutdown),
+        WorkerRole::AgentLambda => run_agent_lambda_worker(&config, &shutdown),
         WorkerRole::InferenceOllama => run_inference_ollama_worker(&config, &shutdown),
         WorkerRole::InferenceOpenRouter => run_inference_openrouter_worker(&config, &shutdown),
         WorkerRole::StorageObjectSqlite => run_storage_object_sqlite_worker(&config, &shutdown),
@@ -106,6 +107,9 @@ fn run_registry_worker(config: &Config, shutdown: &AtomicBool) {
 
     // Register non-engine capabilities (engines are registered by open())
     registry.register_runtime(RuntimeType::Container);
+    if config.distributed.workers.agent.lambda > 0 {
+        registry.register_runtime(RuntimeType::Lambda);
+    }
     registry.register_object_storage(ObjectStorageType::Sqlite);
     registry.register_vector_storage(VectorStorageType::SqliteVec);
 
@@ -241,6 +245,27 @@ fn run_agent_container_worker(config: &Config, shutdown: &AtomicBool) {
         .expect("Failed to create container runtime");
 
     tracing::info!("Container agent worker ready");
+
+    while !shutdown.load(Ordering::Relaxed) {
+        runtime.tick();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+fn run_agent_lambda_worker(config: &Config, shutdown: &AtomicBool) {
+    use vlinder_core::domain::Runtime;
+    use vlinder_lambda_runtime::{LambdaRuntime, LambdaRuntimeConfig};
+
+    let registry =
+        crate::registry_factory::from_config(config).expect("Failed to connect to registry");
+
+    let lambda_config = LambdaRuntimeConfig {
+        registry_addr: config.distributed.registry_addr.clone(),
+    };
+
+    let mut runtime = LambdaRuntime::new(&lambda_config, registry);
+
+    tracing::info!("Lambda agent worker ready");
 
     while !shutdown.load(Ordering::Relaxed) {
         runtime.tick();

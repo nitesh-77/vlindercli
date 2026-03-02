@@ -239,6 +239,11 @@ impl Supervisor {
                 workers.push(child);
             }
         }
+        for _ in 0..counts.agent.lambda {
+            if let Some(child) = spawn_worker(WorkerRole::AgentLambda) {
+                workers.push(child);
+            }
+        }
 
         // Inference workers
         for _ in 0..counts.inference.ollama {

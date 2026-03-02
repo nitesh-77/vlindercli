@@ -32,14 +32,10 @@ impl GrpcRegistryClient {
     pub fn ping(&self) -> Option<(u32, u32, u32)> {
         let mut client = self.client.clone();
         self.runtime.block_on(async {
-            client
-                .ping(proto::PingRequest {})
-                .await
-                .ok()
-                .map(|r| {
-                    let v = r.into_inner();
-                    (v.major, v.minor, v.patch)
-                })
+            client.ping(proto::PingRequest {}).await.ok().map(|r| {
+                let v = r.into_inner();
+                (v.major, v.minor, v.patch)
+            })
         })
     }
 }

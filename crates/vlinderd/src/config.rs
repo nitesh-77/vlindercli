@@ -204,6 +204,8 @@ pub struct WorkerCounts {
 pub struct AgentWorkerCounts {
     /// Container runtime workers (Podman)
     pub container: u32,
+    /// Lambda runtime workers (AWS Lambda)
+    pub lambda: u32,
 }
 
 /// Inference worker counts by engine.
@@ -330,7 +332,10 @@ impl Default for WorkerCounts {
 
 impl Default for AgentWorkerCounts {
     fn default() -> Self {
-        Self { container: 1 }
+        Self {
+            container: 1,
+            lambda: 0,
+        }
     }
 }
 
@@ -342,7 +347,6 @@ impl Default for InferenceWorkerCounts {
         }
     }
 }
-
 
 impl Default for ObjectStorageWorkerCounts {
     fn default() -> Self {
@@ -494,6 +498,9 @@ impl Config {
         }
         if let Ok(v) = std::env::var("VLINDER_WORKERS_AGENT_CONTAINER") {
             self.distributed.workers.agent.container = v.parse().unwrap_or(0);
+        }
+        if let Ok(v) = std::env::var("VLINDER_WORKERS_AGENT_LAMBDA") {
+            self.distributed.workers.agent.lambda = v.parse().unwrap_or(0);
         }
         if let Ok(v) = std::env::var("VLINDER_WORKERS_INFERENCE_OLLAMA") {
             self.distributed.workers.inference.ollama = v.parse().unwrap_or(1);

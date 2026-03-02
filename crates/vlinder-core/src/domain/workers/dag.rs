@@ -113,9 +113,8 @@ mod tests {
     use crate::domain::{
         AgentId, CompleteMessage, DagStore, DelegateDiagnostics, DelegateMessage, HarnessType,
         InMemoryDagStore, InferenceBackendType, InvokeDiagnostics, InvokeMessage, MessageType,
-        Nonce, Operation, RequestDiagnostics, RequestMessage, ResponseMessage,
-        RuntimeDiagnostics, RuntimeType, Sequence, ServiceBackend, SessionId, SubmissionId,
-        TimelineId,
+        Nonce, Operation, RequestDiagnostics, RequestMessage, ResponseMessage, RuntimeDiagnostics,
+        RuntimeType, Sequence, ServiceBackend, SessionId, SubmissionId, TimelineId,
     };
 
     fn session() -> SessionId {

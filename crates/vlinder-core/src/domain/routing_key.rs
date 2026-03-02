@@ -134,8 +134,12 @@ impl ServiceBackend {
                 "memory" => Some(Self::Vec(VectorStorageType::InMemory)),
                 _ => None,
             },
-            ServiceType::Infer => InferenceBackendType::from_str(backend).ok().map(Self::Infer),
-            ServiceType::Embed => EmbeddingBackendType::from_str(backend).ok().map(Self::Embed),
+            ServiceType::Infer => InferenceBackendType::from_str(backend)
+                .ok()
+                .map(Self::Infer),
+            ServiceType::Embed => EmbeddingBackendType::from_str(backend)
+                .ok()
+                .map(Self::Embed),
         }
     }
 }
