@@ -3,6 +3,7 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -66,7 +67,7 @@ jobs:
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
         run: cargo build --release --target aarch64-unknown-linux-gnu
-      - name: Upload to S3
+      - name: Upload binaries to S3
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.CI_AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.CI_AWS_SECRET_ACCESS_KEY }}
@@ -74,3 +75,14 @@ jobs:
         run: |
           aws s3 cp target/aarch64-unknown-linux-gnu/release/vlinderd "s3://${{ secrets.ARTIFACTS_BUCKET }}/${{ github.sha }}/vlinderd"
           aws s3 cp target/aarch64-unknown-linux-gnu/release/vlinderd "s3://${{ secrets.ARTIFACTS_BUCKET }}/latest/vlinderd"
+          aws s3 cp target/aarch64-unknown-linux-gnu/release/vlinder-lambda-adapter "s3://${{ secrets.ARTIFACTS_BUCKET }}/${{ github.sha }}/vlinder-lambda-adapter"
+          aws s3 cp target/aarch64-unknown-linux-gnu/release/vlinder-lambda-adapter "s3://${{ secrets.ARTIFACTS_BUCKET }}/latest/vlinder-lambda-adapter"
+      - name: Build and push Lambda agent images to ECR
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.CI_AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CI_AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: eu-west-1
+        run: |
+          aws ecr get-login-password --region eu-west-1 | docker login --username AWS --password-stdin ${{ secrets.ECR_REPO_URL }}
+          cp target/aarch64-unknown-linux-gnu/release/vlinder-lambda-adapter agents/echo-lambda/
+          docker buildx build --platform linux/arm64 -t "${{ secrets.ECR_REPO_URL }}:echo-lambda-${{ github.sha }}" -t "${{ secrets.ECR_REPO_URL }}:echo-lambda-latest" --push agents/echo-lambda/
