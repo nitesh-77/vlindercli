@@ -62,7 +62,7 @@ jobs:
       - name: Install cross
         run: cargo install cross --git https://github.com/cross-rs/cross
       - name: Build
-        run: cross build --release --target aarch64-unknown-linux-gnu -p vlinderd -p vlinder-lambda-adapter
+        run: cross build --release --target aarch64-unknown-linux-gnu -p vlinderd --features vlinderd/vendored-openssl -p vlinder-lambda-adapter
       - name: Upload binaries to S3
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.CI_AWS_ACCESS_KEY_ID }}
