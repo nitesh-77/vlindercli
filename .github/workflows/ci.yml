@@ -84,3 +84,5 @@ jobs:
           aws ecr get-login-password --region eu-west-1 | docker login --username AWS --password-stdin ${{ secrets.ECR_REPO_URL }}
           cp target/aarch64-unknown-linux-gnu/release/vlinder-lambda-adapter agents/echo-lambda/
           docker buildx build --platform linux/arm64 -t "${{ secrets.ECR_REPO_URL }}:echo-lambda-${{ github.sha }}" -t "${{ secrets.ECR_REPO_URL }}:echo-lambda-latest" --push agents/echo-lambda/
+          cp target/aarch64-unknown-linux-gnu/release/vlinder-lambda-adapter agents/todoapp/
+          docker buildx build --platform linux/arm64 -t "${{ secrets.ECR_REPO_URL }}:todoapp-${{ github.sha }}" -t "${{ secrets.ECR_REPO_URL }}:todoapp-latest" --push agents/todoapp/

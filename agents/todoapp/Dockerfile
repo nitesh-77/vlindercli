@@ -1,6 +1,12 @@
-FROM python:3.12-alpine
+FROM python:3.12-slim
 
 WORKDIR /app
+
+# Resolve *.vlinder.local hostnames to localhost
+RUN echo "127.0.0.1 sqlite-kv.vlinder.local sqlite-vec.vlinder.local openrouter.vlinder.local ollama.vlinder.local runtime.vlinder.local" >> /etc/hosts
+
+# Lambda extension
+COPY vlinder-lambda-adapter /opt/extensions/vlinder-lambda-adapter
 
 # Copy and install dependencies first for better layer caching
 COPY requirements.txt .
