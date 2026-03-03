@@ -11,8 +11,10 @@ path = "src/main.rs"
 [features]
 default = []
 test-support = []
+vendored-openssl = ["openssl/vendored"]
 
 [dependencies]
+openssl = { version = "0.10", optional = true }
 vlinder-core = { path = "../vlinder-core" }
 vlinder-nats = { path = "../vlinder-nats" }
 vlinder-ollama = { path = "../vlinder-ollama" }
