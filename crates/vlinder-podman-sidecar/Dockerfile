@@ -24,6 +24,8 @@ COPY crates/vlinder-nats/Cargo.toml crates/vlinder-nats/
 COPY crates/vlinder-provider-server/Cargo.toml crates/vlinder-provider-server/
 COPY crates/vlinder-podman-sidecar/Cargo.toml crates/vlinder-podman-sidecar/
 COPY crates/vlinder-podman-runtime/Cargo.toml crates/vlinder-podman-runtime/
+COPY crates/vlinder-nats-lambda-runtime/Cargo.toml crates/vlinder-nats-lambda-runtime/
+COPY crates/vlinder-lambda-adapter/Cargo.toml crates/vlinder-lambda-adapter/
 COPY crates/vlinder-catalog/Cargo.toml crates/vlinder-catalog/
 COPY crates/vlinder-sql-state/Cargo.toml crates/vlinder-sql-state/
 COPY crates/vlinder-git-dag/Cargo.toml crates/vlinder-git-dag/
@@ -40,6 +42,8 @@ RUN mkdir -p crates/vlinder-core/src && echo "" > crates/vlinder-core/src/lib.rs
     mkdir -p crates/vlinder-harness/src && echo "" > crates/vlinder-harness/src/lib.rs && \
     mkdir -p crates/vlinder-nats/src && echo "" > crates/vlinder-nats/src/lib.rs && \
     mkdir -p crates/vlinder-podman-runtime/src && echo "" > crates/vlinder-podman-runtime/src/lib.rs && \
+    mkdir -p crates/vlinder-nats-lambda-runtime/src && echo "" > crates/vlinder-nats-lambda-runtime/src/lib.rs && \
+    mkdir -p crates/vlinder-lambda-adapter/src && echo "fn main() {}" > crates/vlinder-lambda-adapter/src/main.rs && \
     mkdir -p crates/vlinder-catalog/src && echo "" > crates/vlinder-catalog/src/lib.rs && \
     mkdir -p crates/vlinder-sql-state/src && echo "" > crates/vlinder-sql-state/src/lib.rs && \
     mkdir -p crates/vlinder-git-dag/src && echo "" > crates/vlinder-git-dag/src/lib.rs && \
@@ -73,6 +77,8 @@ COPY crates/vlinder-sqlite-kv/src crates/vlinder-sqlite-kv/src
 COPY crates/vlinder-harness/src crates/vlinder-harness/src
 COPY crates/vlinder-nats/src crates/vlinder-nats/src
 COPY crates/vlinder-podman-runtime/src crates/vlinder-podman-runtime/src
+COPY crates/vlinder-nats-lambda-runtime/src crates/vlinder-nats-lambda-runtime/src
+COPY crates/vlinder-lambda-adapter/src crates/vlinder-lambda-adapter/src
 COPY crates/vlinder-catalog/src crates/vlinder-catalog/src
 COPY crates/vlinder-sql-state/src crates/vlinder-sql-state/src
 COPY crates/vlinder-git-dag/src crates/vlinder-git-dag/src
@@ -88,6 +94,8 @@ RUN touch crates/vlinder-core/src/lib.rs \
           crates/vlinder-sqlite-kv/src/lib.rs \
           crates/vlinder-nats/src/lib.rs \
           crates/vlinder-podman-runtime/src/lib.rs \
+          crates/vlinder-nats-lambda-runtime/src/lib.rs \
+          crates/vlinder-lambda-adapter/src/main.rs \
           crates/vlinder-harness/src/lib.rs \
           crates/vlinder-catalog/src/lib.rs \
           crates/vlinder-sql-state/src/lib.rs \
