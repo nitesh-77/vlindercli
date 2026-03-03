@@ -55,6 +55,11 @@ fn main() {
         "Lambda adapter configuration loaded"
     );
 
+    // Register as a Lambda extension immediately — must happen before
+    // Lambda's init phase timeout (10s). The registration thread blocks
+    // on event/next forever, keeping the extension alive.
+    register_extension(&config.runtime_api);
+
     let queue = match factory::connect_queue(
         &config.nats_url,
         &config.state_url,
@@ -88,6 +93,49 @@ fn main() {
         tracing::error!(error = %e, "Runtime API loop exited with error");
         std::process::exit(1);
     }
+}
+
+/// Register with the Lambda Extensions API and block on event/next in a
+/// background thread. This tells Lambda the extension is alive so init
+/// doesn't time out. We request no events (`[]`) — the thread just parks.
+fn register_extension(runtime_api: &str) {
+    let runtime_api = runtime_api.to_string();
+    std::thread::spawn(move || {
+        let http = ureq::Agent::new();
+
+        let register_url = format!("http://{}/2020-01-01/extension/register", runtime_api);
+        let resp = http
+            .post(&register_url)
+            .set("Lambda-Extension-Name", "vlinder-lambda-adapter")
+            .send_string(r#"{ "events": [] }"#);
+
+        let resp = match resp {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::error!(error = %e, "Extension registration failed");
+                std::process::exit(1);
+            }
+        };
+
+        let extension_id = resp
+            .header("Lambda-Extension-Identifier")
+            .unwrap_or("")
+            .to_string();
+
+        tracing::info!(
+            event = "extension.registered",
+            extension_id = %extension_id,
+            "Registered as Lambda extension"
+        );
+
+        // Block forever waiting for events (we requested none, so this
+        // just keeps the extension process alive).
+        let next_url = format!("http://{}/2020-01-01/extension/event/next", runtime_api);
+        let _ = http
+            .get(&next_url)
+            .set("Lambda-Extension-Identifier", &extension_id)
+            .call();
+    });
 }
 
 /// Block until the agent's health endpoint responds (up to 60s).
