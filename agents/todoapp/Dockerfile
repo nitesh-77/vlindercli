@@ -2,9 +2,6 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Resolve *.vlinder.local hostnames to localhost
-RUN echo "127.0.0.1 sqlite-kv.vlinder.local sqlite-vec.vlinder.local openrouter.vlinder.local ollama.vlinder.local runtime.vlinder.local" >> /etc/hosts
-
 # Lambda extension
 COPY vlinder-lambda-adapter /opt/extensions/vlinder-lambda-adapter
 
@@ -22,4 +19,4 @@ EXPOSE 8080
 # -w 2: two worker processes
 # -b 0.0.0.0:8080: bind to all interfaces on port 8080
 # todo_server:app: run the 'app' object from the 'todo_server.py' module
-ENTRYPOINT ["gunicorn", "-w", "2", "-b", "0.0.0.0:8080", "todo_server:app"]
+ENTRYPOINT ["/bin/sh", "-c", "echo '127.0.0.1 sqlite-kv.vlinder.local sqlite-vec.vlinder.local openrouter.vlinder.local ollama.vlinder.local runtime.vlinder.local' >> /etc/hosts && exec gunicorn -w 2 -b 0.0.0.0:8080 todo_server:app"]
