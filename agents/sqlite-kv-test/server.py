@@ -12,7 +12,7 @@ import json
 import urllib.request
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
-KV_BASE = "http://sqlite-kv.vlinder.local"
+KV_BASE = "http://sqlite-kv.vlinder.local:3544"
 
 
 def post_json(url, payload):

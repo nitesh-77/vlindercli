@@ -111,7 +111,7 @@ impl Sidecar {
             self.queue.clone(),
             self.registry.clone(),
             initial_state,
-            80,
+            3544,
         );
 
         let agent_url = format!("http://127.0.0.1:{}/invoke", self.container_port);

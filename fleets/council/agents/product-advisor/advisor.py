@@ -9,7 +9,7 @@ import sys
 import urllib.request
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
-OPENROUTER_URL = "http://openrouter.vlinder.local/v1/chat/completions"
+OPENROUTER_URL = "http://openrouter.vlinder.local:3544/v1/chat/completions"
 MODEL = "google/gemini-2.0-flash-001"
 
 

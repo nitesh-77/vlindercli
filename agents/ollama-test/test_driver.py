@@ -19,7 +19,7 @@ import requests
 from openai import OpenAI
 
 
-OLLAMA_BASE = "http://ollama.vlinder.local"
+OLLAMA_BASE = "http://ollama.vlinder.local:3544"
 MODEL = "phi3:latest"
 EMBED_MODEL = "nomic-embed-text"
 

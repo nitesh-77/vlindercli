@@ -8,7 +8,7 @@ from openai import OpenAI
 
 
 client = OpenAI(
-    base_url="http://openrouter.vlinder.local/v1",
+    base_url="http://openrouter.vlinder.local:3544/v1",
     api_key="unused",  # auth is handled by the platform
 )
 

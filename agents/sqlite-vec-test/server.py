@@ -16,7 +16,7 @@ import math
 import urllib.request
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
-VEC_BASE = "http://sqlite-vec.vlinder.local"
+VEC_BASE = "http://sqlite-vec.vlinder.local:3544"
 DIMS = 768
 
 

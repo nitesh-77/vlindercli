@@ -23,35 +23,35 @@ class VlinderClient:
 
     def kv_get(self, path):
         response = requests.post(
-            "http://sqlite-kv.vlinder.local/get",
+            "http://sqlite-kv.vlinder.local:3544/get",
             json={"path": path}, timeout=60)
         response.raise_for_status()
         return response.content
 
     def kv_put(self, path, content):
         requests.post(
-            "http://sqlite-kv.vlinder.local/put",
+            "http://sqlite-kv.vlinder.local:3544/put",
             json={"path": path, "content": content}, timeout=60)
 
     def vector_store(self, key, vector, metadata):
         requests.post(
-            "http://sqlite-vec.vlinder.local/store",
+            "http://sqlite-vec.vlinder.local:3544/store",
             json={"key": key, "vector": vector, "metadata": metadata}, timeout=60)
 
     def vector_search(self, vector, limit=5):
         response = requests.post(
-            "http://sqlite-vec.vlinder.local/search",
+            "http://sqlite-vec.vlinder.local:3544/search",
             json={"vector": vector, "limit": limit}, timeout=60)
         return response.json()
 
     def vector_delete(self, key):
         requests.post(
-            "http://sqlite-vec.vlinder.local/delete",
+            "http://sqlite-vec.vlinder.local:3544/delete",
             json={"key": key}, timeout=60)
 
     def infer(self, model, prompt, max_tokens=256):
         response = requests.post(
-            "http://openrouter.vlinder.local/v1/chat/completions",
+            "http://openrouter.vlinder.local:3544/v1/chat/completions",
             json={
                 "model": model,
                 "messages": [{"role": "user", "content": prompt}],
@@ -64,7 +64,7 @@ class VlinderClient:
 
     def embed(self, model, text):
         response = requests.post(
-            "http://ollama.vlinder.local/api/embed",
+            "http://ollama.vlinder.local:3544/api/embed",
             json={"model": model, "input": text},
             timeout=60,
         )

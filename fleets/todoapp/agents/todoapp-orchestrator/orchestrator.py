@@ -16,7 +16,7 @@ import json
 import urllib.request
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
-RUNTIME_HOST = "http://runtime.vlinder.local"
+RUNTIME_HOST = "http://runtime.vlinder.local:3544"
 
 
 def delegate(agent, input_text):

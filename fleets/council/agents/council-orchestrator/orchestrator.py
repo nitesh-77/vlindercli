@@ -11,8 +11,8 @@ import sys
 import urllib.request
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
-RUNTIME_HOST = "http://runtime.vlinder.local"
-OPENROUTER_URL = "http://openrouter.vlinder.local/v1/chat/completions"
+RUNTIME_HOST = "http://runtime.vlinder.local:3544"
+OPENROUTER_URL = "http://openrouter.vlinder.local:3544/v1/chat/completions"
 MODEL = "google/gemini-2.0-flash-001"
 MAX_ROUNDS = 3
 
