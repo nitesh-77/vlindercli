@@ -213,6 +213,10 @@ pub struct WorkerCounts {
     pub inference: InferenceWorkerCounts,
     /// Storage service workers
     pub storage: StorageWorkerCounts,
+    /// DAG git worker (singleton recommended — see ADR 078)
+    pub dag_git: u32,
+    /// Session viewer worker
+    pub session_viewer: u32,
 }
 
 /// Agent runtime worker counts by backend.
@@ -354,6 +358,8 @@ impl Default for WorkerCounts {
             agent: AgentWorkerCounts::default(),
             inference: InferenceWorkerCounts::default(),
             storage: StorageWorkerCounts::default(),
+            dag_git: 1,
+            session_viewer: 1,
         }
     }
 }
@@ -544,6 +550,12 @@ impl Config {
         }
         if let Ok(v) = std::env::var("VLINDER_WORKERS_STORAGE_VECTOR_SQLITE") {
             self.distributed.workers.storage.vector.sqlite = v.parse().unwrap_or(1);
+        }
+        if let Ok(v) = std::env::var("VLINDER_WORKERS_DAG_GIT") {
+            self.distributed.workers.dag_git = v.parse().unwrap_or(1);
+        }
+        if let Ok(v) = std::env::var("VLINDER_WORKERS_SESSION_VIEWER") {
+            self.distributed.workers.session_viewer = v.parse().unwrap_or(1);
         }
         // Runtime (ADR 073, ADR 077)
         if let Ok(v) = std::env::var("VLINDER_RUNTIME_IMAGE_POLICY") {
@@ -746,6 +758,8 @@ mod tests {
         assert_eq!(config.distributed.workers.inference.ollama, 1);
         assert_eq!(config.distributed.workers.storage.object.sqlite, 1);
         assert_eq!(config.distributed.workers.storage.vector.sqlite, 1);
+        assert_eq!(config.distributed.workers.dag_git, 1);
+        assert_eq!(config.distributed.workers.session_viewer, 1);
     }
 
     #[test]

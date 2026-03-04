@@ -502,7 +502,7 @@ fn run_dag_git_worker(config: &Config, shutdown: &AtomicBool) {
     let nats = NatsQueue::connect(&config.queue.nats_config()).expect("Failed to connect to NATS");
 
     let repo_path = conversations_dir();
-    let mut git_worker = GitDagWorker::open(&repo_path, "localhost:9000", None)
+    let mut git_worker = GitDagWorker::open(&repo_path, &config.distributed.registry_addr, None)
         .expect("Failed to open git DAG repo");
 
     tracing::info!(git = %repo_path.display(), "DAG git worker ready");

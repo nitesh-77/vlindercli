@@ -279,17 +279,20 @@ impl Supervisor {
                 workers.push(child);
             }
         }
-        // DAG git worker — singleton (single branch + HEAD lock, see ADR 078).
-        // The dag-sqlite consumer was removed by ADR 080: the transactional outbox
-        // records nodes synchronously via the State Service on every send.
-        if let Some(child) = spawn_worker(WorkerRole::DagGit) {
-            workers.push(child);
+        // DAG git worker — singleton recommended (single branch + HEAD lock,
+        // see ADR 078). Configurable via [distributed.workers] dag_git.
+        for _ in 0..counts.dag_git {
+            if let Some(child) = spawn_worker(WorkerRole::DagGit) {
+                workers.push(child);
+            }
         }
 
         // Session viewer — local HTTP server for browsing conversation sessions.
         // No health check needed: local-only, no other services depend on it.
-        if let Some(child) = spawn_worker(WorkerRole::SessionViewer) {
-            workers.push(child);
+        for _ in 0..counts.session_viewer {
+            if let Some(child) = spawn_worker(WorkerRole::SessionViewer) {
+                workers.push(child);
+            }
         }
 
         tracing::info!(
