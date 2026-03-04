@@ -61,6 +61,18 @@ impl ProviderServer {
             "Provider server started"
         );
 
+        // Append :{port} to each hostname so they match the Host header
+        // that HTTP clients send (which includes the port).
+        let hosts: Vec<ProviderHost> = hosts
+            .into_iter()
+            .map(|mut h| {
+                h.hostname = format!("{}:{}", h.hostname, port);
+                h
+            })
+            .collect();
+
+        let runtime_host = format!("runtime.vlinder.local:{}", port);
+
         Self::start_request_loop(
             server,
             hosts,
@@ -68,6 +80,7 @@ impl ProviderServer {
             registry,
             invoke.clone(),
             initial_state,
+            runtime_host,
         )
     }
 
@@ -87,6 +100,7 @@ impl ProviderServer {
         registry: Arc<dyn Registry>,
         invoke: InvokeMessage,
         initial_state: Option<String>,
+        runtime_host: String,
     ) -> Self {
         let shutdown_signal = Arc::new(AtomicBool::new(false));
         let state = Arc::new(RwLock::new(initial_state));
@@ -105,6 +119,7 @@ impl ProviderServer {
                 registry,
                 invoke,
                 state_clone,
+                runtime_host,
             );
         });
 
@@ -194,6 +209,7 @@ fn request_loop(
     registry: Arc<dyn Registry>,
     invoke: InvokeMessage,
     state: Arc<RwLock<Option<String>>>,
+    runtime_host: String,
 ) {
     let sequence = SequenceCounter::new();
     let mut pending_replies: HashMap<String, RoutingKey> = HashMap::new();
@@ -213,7 +229,7 @@ fn request_loop(
                 let mut body = Vec::new();
                 let _ = request.as_reader().read_to_end(&mut body);
 
-                let (status, response_body) = if host == "runtime.vlinder.local" {
+                let (status, response_body) = if host == runtime_host {
                     handle_runtime_request(
                         &*queue,
                         &*registry,
@@ -524,7 +540,7 @@ mod tests {
     fn test_hosts() -> Vec<ProviderHost> {
         use vlinder_core::domain::{InferenceBackendType, Operation, ServiceBackend};
         vec![ProviderHost::new(
-            "test.vlinder.local",
+            "test.vlinder.local:3544",
             vec![ProviderRoute::new::<String, String>(
                 HttpMethod::Post,
                 "/test",
@@ -540,7 +556,7 @@ mod tests {
         assert!(match_route(
             &hosts,
             &Method::Post,
-            "test.vlinder.local",
+            "test.vlinder.local:3544",
             "/test",
             b"\"hello\""
         )
@@ -553,7 +569,7 @@ mod tests {
         let err = match_route(
             &hosts,
             &Method::Post,
-            "test.vlinder.local",
+            "test.vlinder.local:3544",
             "/test",
             b"not json",
         )
@@ -577,7 +593,7 @@ mod tests {
         let err = match_route(
             &hosts,
             &Method::Post,
-            "other.vlinder.local",
+            "other.vlinder.local:3544",
             "/test",
             b"\"hello\"",
         )
@@ -589,9 +605,15 @@ mod tests {
     #[test]
     fn wrong_method_returns_404() {
         let hosts = test_hosts();
-        let err = match_route(&hosts, &Method::Get, "test.vlinder.local", "/test", b"")
-            .err()
-            .unwrap();
+        let err = match_route(
+            &hosts,
+            &Method::Get,
+            "test.vlinder.local:3544",
+            "/test",
+            b"",
+        )
+        .err()
+        .unwrap();
         assert_eq!(err.0, 404);
     }
 
@@ -601,7 +623,7 @@ mod tests {
         let err = match_route(
             &hosts,
             &Method::Post,
-            "test.vlinder.local",
+            "test.vlinder.local:3544",
             "/other",
             b"\"hello\"",
         )
