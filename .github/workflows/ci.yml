@@ -50,19 +50,27 @@ jobs:
         run: cargo deny check licenses
 
   build-arm:
-    name: Build ARM Linux
+    name: Build ARM Linux (AL2023)
     needs: [lint, test]
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: arm64
-      - name: Install build dependencies
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
-      - name: Build
-        run: cargo build --release -p vlinder -p vlinderd --features vlinderd/vendored-openssl -p vlinder-lambda-adapter
+      - name: Build in AL2023 container
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/src" \
+            -v cargo-registry:/root/.cargo/registry \
+            -v cargo-git:/root/.cargo/git \
+            -w /src \
+            public.ecr.aws/amazonlinux/amazonlinux:2023 \
+            bash -c '
+              dnf install -y gcc gcc-c++ make perl-FindBin perl-File-Compare perl-IPC-Cmd perl-lib openssl-devel unzip &&
+              curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y &&
+              source "$HOME/.cargo/env" &&
+              curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v28.3/protoc-28.3-linux-aarch_64.zip &&
+              unzip protoc-28.3-linux-aarch_64.zip -d /usr/local &&
+              cargo build --release -p vlinder -p vlinderd --features vlinderd/vendored-openssl -p vlinder-lambda-adapter
+            '
       - name: Upload binaries to S3
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.CI_AWS_ACCESS_KEY_ID }}
