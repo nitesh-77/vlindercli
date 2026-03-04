@@ -64,7 +64,7 @@ jobs:
             -w /src \
             public.ecr.aws/amazonlinux/amazonlinux:2023 \
             bash -c '
-              dnf install -y gcc gcc-c++ make perl-FindBin perl-File-Compare perl-IPC-Cmd perl-lib openssl-devel unzip &&
+              dnf install -y gcc gcc-c++ make perl-core openssl-devel unzip &&
               curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y &&
               source "$HOME/.cargo/env" &&
               curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v28.3/protoc-28.3-linux-aarch_64.zip &&
