@@ -51,7 +51,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use git2::{FileMode, Oid, Repository, Signature, TreeBuilder};
+use git2::{FileMode, Oid, Repository, RepositoryInitOptions, Signature, TreeBuilder};
 
 use vlinder_core::domain::{DagWorker, ObservableMessage, Registry};
 
@@ -77,7 +77,7 @@ impl GitDagWorker {
         } else {
             std::fs::create_dir_all(repo_path)
                 .map_err(|e| format!("failed to create repo directory: {}", e))?;
-            Repository::init(repo_path)
+            Repository::init_opts(repo_path, RepositoryInitOptions::new().initial_head("main"))
         }
         .map_err(|e| format!("git repo open/init failed: {}", e))?;
 
