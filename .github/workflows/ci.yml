@@ -52,29 +52,29 @@ jobs:
   build-arm:
     name: Build ARM Linux
     needs: [lint, test]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          key: cross-aarch64
-      - name: Install cross
-        run: cargo install cross --git https://github.com/cross-rs/cross
+          key: arm64
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - name: Build
-        run: cross build --release --target aarch64-unknown-linux-gnu -p vlinder -p vlinderd --features vlinderd/vendored-openssl -p vlinder-lambda-adapter
+        run: cargo build --release -p vlinder -p vlinderd --features vlinderd/vendored-openssl -p vlinder-lambda-adapter
       - name: Upload binaries to S3
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.CI_AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.CI_AWS_SECRET_ACCESS_KEY }}
           AWS_REGION: eu-west-1
         run: |
-          aws s3 cp target/aarch64-unknown-linux-gnu/release/vlinder "s3://${{ secrets.ARTIFACTS_BUCKET }}/${{ github.sha }}/vlinder"
-          aws s3 cp target/aarch64-unknown-linux-gnu/release/vlinder "s3://${{ secrets.ARTIFACTS_BUCKET }}/latest/vlinder"
-          aws s3 cp target/aarch64-unknown-linux-gnu/release/vlinderd "s3://${{ secrets.ARTIFACTS_BUCKET }}/${{ github.sha }}/vlinderd"
-          aws s3 cp target/aarch64-unknown-linux-gnu/release/vlinderd "s3://${{ secrets.ARTIFACTS_BUCKET }}/latest/vlinderd"
-          aws s3 cp target/aarch64-unknown-linux-gnu/release/vlinder-lambda-adapter "s3://${{ secrets.ARTIFACTS_BUCKET }}/${{ github.sha }}/vlinder-lambda-adapter"
-          aws s3 cp target/aarch64-unknown-linux-gnu/release/vlinder-lambda-adapter "s3://${{ secrets.ARTIFACTS_BUCKET }}/latest/vlinder-lambda-adapter"
+          aws s3 cp target/release/vlinder "s3://${{ secrets.ARTIFACTS_BUCKET }}/${{ github.sha }}/vlinder"
+          aws s3 cp target/release/vlinder "s3://${{ secrets.ARTIFACTS_BUCKET }}/latest/vlinder"
+          aws s3 cp target/release/vlinderd "s3://${{ secrets.ARTIFACTS_BUCKET }}/${{ github.sha }}/vlinderd"
+          aws s3 cp target/release/vlinderd "s3://${{ secrets.ARTIFACTS_BUCKET }}/latest/vlinderd"
+          aws s3 cp target/release/vlinder-lambda-adapter "s3://${{ secrets.ARTIFACTS_BUCKET }}/${{ github.sha }}/vlinder-lambda-adapter"
+          aws s3 cp target/release/vlinder-lambda-adapter "s3://${{ secrets.ARTIFACTS_BUCKET }}/latest/vlinder-lambda-adapter"
       - name: Build and push Lambda agent images to ECR
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.CI_AWS_ACCESS_KEY_ID }}
@@ -82,7 +82,11 @@ jobs:
           AWS_REGION: eu-west-1
         run: |
           aws ecr get-login-password --region eu-west-1 | docker login --username AWS --password-stdin ${{ secrets.ECR_REPO_URL }}
-          cp target/aarch64-unknown-linux-gnu/release/vlinder-lambda-adapter agents/echo-lambda/
-          docker buildx build --platform linux/arm64 -t "${{ secrets.ECR_REPO_URL }}:echo-lambda-${{ github.sha }}" -t "${{ secrets.ECR_REPO_URL }}:echo-lambda-latest" --push agents/echo-lambda/
-          cp target/aarch64-unknown-linux-gnu/release/vlinder-lambda-adapter agents/todoapp/
-          docker buildx build --platform linux/arm64 -t "${{ secrets.ECR_REPO_URL }}:todoapp-${{ github.sha }}" -t "${{ secrets.ECR_REPO_URL }}:todoapp-latest" --push agents/todoapp/
+          cp target/release/vlinder-lambda-adapter agents/echo-lambda/
+          docker build -t "${{ secrets.ECR_REPO_URL }}:echo-lambda-${{ github.sha }}" -t "${{ secrets.ECR_REPO_URL }}:echo-lambda-latest" agents/echo-lambda/
+          docker push "${{ secrets.ECR_REPO_URL }}:echo-lambda-${{ github.sha }}"
+          docker push "${{ secrets.ECR_REPO_URL }}:echo-lambda-latest"
+          cp target/release/vlinder-lambda-adapter agents/todoapp/
+          docker build -t "${{ secrets.ECR_REPO_URL }}:todoapp-${{ github.sha }}" -t "${{ secrets.ECR_REPO_URL }}:todoapp-latest" agents/todoapp/
+          docker push "${{ secrets.ECR_REPO_URL }}:todoapp-${{ github.sha }}"
+          docker push "${{ secrets.ECR_REPO_URL }}:todoapp-latest"
