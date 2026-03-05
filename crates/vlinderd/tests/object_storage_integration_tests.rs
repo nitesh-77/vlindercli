@@ -1,3 +1,4 @@
+#![cfg(feature = "sqlite-kv")]
 //! Integration tests for SqliteObjectStorage.
 //! Tests SQLite-specific behavior: persistence, isolation, security.
 

@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 
 use crate::config::Config;
 use crate::worker_role::WorkerRole;
+#[cfg(any(feature = "ollama", feature = "openrouter"))]
 use vlinder_catalog::catalog_service::ping_catalog_service;
 use vlinder_harness::harness_service::ping_harness;
 use vlinder_nats::secret_service::ping_secret_service;
@@ -152,10 +153,13 @@ impl Supervisor {
         // Catalog service — singleton gRPC server for model catalog queries.
         // Independent of other services (talks only to external APIs).
         // Non-fatal health check: CLI falls back to direct catalog access.
+        // Only spawn if at least one catalog provider is compiled in.
+        #[cfg(any(feature = "ollama", feature = "openrouter"))]
         if let Some(child) = spawn_worker(WorkerRole::Catalog) {
             workers.push(child);
         }
 
+        #[cfg(any(feature = "ollama", feature = "openrouter"))]
         {
             let catalog_addr = if config.distributed.catalog_addr.starts_with("http://") {
                 config.distributed.catalog_addr.clone()
@@ -246,11 +250,13 @@ impl Supervisor {
         }
 
         // Inference workers
+        #[cfg(feature = "ollama")]
         for _ in 0..counts.inference.ollama {
             if let Some(child) = spawn_worker(WorkerRole::InferenceOllama) {
                 workers.push(child);
             }
         }
+        #[cfg(feature = "openrouter")]
         for _ in 0..counts.inference.openrouter {
             if let Some(child) = spawn_worker(WorkerRole::InferenceOpenRouter) {
                 workers.push(child);
@@ -258,12 +264,14 @@ impl Supervisor {
         }
 
         // Object storage workers
+        #[cfg(feature = "sqlite-kv")]
         for _ in 0..counts.storage.object.sqlite {
             if let Some(child) = spawn_worker(WorkerRole::StorageObjectSqlite) {
                 workers.push(child);
             }
         }
         // Vector storage workers
+        #[cfg(feature = "sqlite-vec")]
         for _ in 0..counts.storage.vector.sqlite {
             if let Some(child) = spawn_worker(WorkerRole::StorageVectorSqlite) {
                 workers.push(child);

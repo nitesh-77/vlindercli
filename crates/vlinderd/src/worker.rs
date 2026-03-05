@@ -43,12 +43,17 @@ pub fn run_worker_loop(role: WorkerRole, shutdown: Arc<AtomicBool>) {
         WorkerRole::Harness => run_harness_worker(&config, &shutdown),
         WorkerRole::AgentContainer => run_agent_container_worker(&config, &shutdown),
         WorkerRole::AgentLambda => run_agent_lambda_worker(&config, &shutdown),
+        #[cfg(feature = "ollama")]
         WorkerRole::InferenceOllama => run_inference_ollama_worker(&config, &shutdown),
+        #[cfg(feature = "openrouter")]
         WorkerRole::InferenceOpenRouter => run_inference_openrouter_worker(&config, &shutdown),
+        #[cfg(feature = "sqlite-kv")]
         WorkerRole::StorageObjectSqlite => run_storage_object_sqlite_worker(&config, &shutdown),
+        #[cfg(feature = "sqlite-vec")]
         WorkerRole::StorageVectorSqlite => run_storage_vector_sqlite_worker(&config, &shutdown),
         WorkerRole::Secret => run_secret_worker(&config, &shutdown),
         WorkerRole::State => run_state_worker(&config, &shutdown),
+        #[cfg(any(feature = "ollama", feature = "openrouter"))]
         WorkerRole::Catalog => run_catalog_worker(&config, &shutdown),
         WorkerRole::DagGit => run_dag_git_worker(&config, &shutdown),
         WorkerRole::SessionViewer => run_session_viewer_worker(&config, &shutdown),
@@ -291,6 +296,7 @@ fn run_agent_lambda_worker(config: &Config, shutdown: &AtomicBool) {
     }
 }
 
+#[cfg(feature = "ollama")]
 fn run_inference_ollama_worker(config: &Config, shutdown: &AtomicBool) {
     use vlinder_ollama::OllamaWorker;
 
@@ -307,6 +313,7 @@ fn run_inference_ollama_worker(config: &Config, shutdown: &AtomicBool) {
     }
 }
 
+#[cfg(feature = "openrouter")]
 fn run_inference_openrouter_worker(config: &Config, shutdown: &AtomicBool) {
     use vlinder_infer_openrouter::OpenRouterWorker;
 
@@ -327,6 +334,7 @@ fn run_inference_openrouter_worker(config: &Config, shutdown: &AtomicBool) {
     }
 }
 
+#[cfg(feature = "sqlite-kv")]
 fn run_storage_object_sqlite_worker(config: &Config, shutdown: &AtomicBool) {
     use vlinder_sqlite_kv::KvWorker;
 
@@ -355,6 +363,7 @@ fn run_storage_object_sqlite_worker(config: &Config, shutdown: &AtomicBool) {
     }
 }
 
+#[cfg(feature = "sqlite-vec")]
 fn run_storage_vector_sqlite_worker(config: &Config, shutdown: &AtomicBool) {
     use vlinder_sqlite_vec::SqliteVecWorker;
 
@@ -424,19 +433,24 @@ fn run_state_worker(config: &Config, shutdown: &AtomicBool) {
     });
 }
 
+#[cfg(any(feature = "ollama", feature = "openrouter"))]
 fn run_catalog_worker(config: &Config, shutdown: &AtomicBool) {
     use tonic::transport::Server;
     use vlinder_catalog::catalog_service::CatalogServiceServer;
     use vlinder_core::domain::{CatalogService, CompositeCatalog};
-    use vlinder_infer_openrouter::OpenRouterCatalog;
-    use vlinder_ollama::OllamaCatalog;
 
     let mut composite = CompositeCatalog::new();
-    composite.add(
-        "ollama".to_string(),
-        Arc::new(OllamaCatalog::new(&config.ollama.endpoint)),
-    );
+    #[cfg(feature = "ollama")]
+    {
+        use vlinder_ollama::OllamaCatalog;
+        composite.add(
+            "ollama".to_string(),
+            Arc::new(OllamaCatalog::new(&config.ollama.endpoint)),
+        );
+    }
+    #[cfg(feature = "openrouter")]
     if !config.openrouter.api_key.is_empty() {
+        use vlinder_infer_openrouter::OpenRouterCatalog;
         composite.add(
             "openrouter".to_string(),
             Arc::new(OpenRouterCatalog::new(

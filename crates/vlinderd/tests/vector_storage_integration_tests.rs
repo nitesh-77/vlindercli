@@ -1,3 +1,4 @@
+#![cfg(feature = "sqlite-vec")]
 //! Integration tests for SqliteVectorStorage.
 //! Tests SQLite-specific behavior: persistence, sqlite-vec functionality.
 

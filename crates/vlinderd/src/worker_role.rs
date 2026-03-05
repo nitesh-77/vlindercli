@@ -24,18 +24,23 @@ pub enum WorkerRole {
     /// Lambda agent runtime - executes agents as AWS Lambda functions
     AgentLambda,
     /// Ollama inference service
+    #[cfg(feature = "ollama")]
     InferenceOllama,
     /// OpenRouter inference service (cloud LLMs)
+    #[cfg(feature = "openrouter")]
     InferenceOpenRouter,
     /// SQLite object storage service
+    #[cfg(feature = "sqlite-kv")]
     StorageObjectSqlite,
     /// SQLite-vec vector storage service
+    #[cfg(feature = "sqlite-vec")]
     StorageVectorSqlite,
     /// Secret store service — gRPC interface to the SecretStore
     Secret,
     /// State service — gRPC interface to the DagStore (ADR 079)
     State,
     /// Catalog service — gRPC interface to model catalogs (Ollama, OpenRouter)
+    #[cfg(any(feature = "ollama", feature = "openrouter"))]
     Catalog,
     /// DAG git worker — writes messages as git commits for time-travel
     DagGit,
@@ -60,12 +65,17 @@ impl WorkerRole {
             WorkerRole::Harness => "harness",
             WorkerRole::AgentContainer => "agent-container",
             WorkerRole::AgentLambda => "agent-lambda",
+            #[cfg(feature = "ollama")]
             WorkerRole::InferenceOllama => "inference-ollama",
+            #[cfg(feature = "openrouter")]
             WorkerRole::InferenceOpenRouter => "inference-openrouter",
+            #[cfg(feature = "sqlite-kv")]
             WorkerRole::StorageObjectSqlite => "storage-object-sqlite",
+            #[cfg(feature = "sqlite-vec")]
             WorkerRole::StorageVectorSqlite => "storage-vector-sqlite",
             WorkerRole::Secret => "secret",
             WorkerRole::State => "state",
+            #[cfg(any(feature = "ollama", feature = "openrouter"))]
             WorkerRole::Catalog => "catalog",
             WorkerRole::DagGit => "dag-git",
             WorkerRole::SessionViewer => "session-viewer",
@@ -79,12 +89,17 @@ impl WorkerRole {
             WorkerRole::Harness => "Harness service",
             WorkerRole::AgentContainer => "Container agent runtime",
             WorkerRole::AgentLambda => "Lambda agent runtime",
+            #[cfg(feature = "ollama")]
             WorkerRole::InferenceOllama => "Ollama inference service",
+            #[cfg(feature = "openrouter")]
             WorkerRole::InferenceOpenRouter => "OpenRouter inference service",
+            #[cfg(feature = "sqlite-kv")]
             WorkerRole::StorageObjectSqlite => "SQLite object storage",
+            #[cfg(feature = "sqlite-vec")]
             WorkerRole::StorageVectorSqlite => "SQLite-vec vector storage",
             WorkerRole::Secret => "Secret store service",
             WorkerRole::State => "State service",
+            #[cfg(any(feature = "ollama", feature = "openrouter"))]
             WorkerRole::Catalog => "Catalog service",
             WorkerRole::DagGit => "DAG git worker",
             WorkerRole::SessionViewer => "Session viewer HTTP server",
@@ -107,12 +122,17 @@ impl FromStr for WorkerRole {
             "harness" => Ok(WorkerRole::Harness),
             "agent-container" => Ok(WorkerRole::AgentContainer),
             "agent-lambda" => Ok(WorkerRole::AgentLambda),
+            #[cfg(feature = "ollama")]
             "inference-ollama" => Ok(WorkerRole::InferenceOllama),
+            #[cfg(feature = "openrouter")]
             "inference-openrouter" => Ok(WorkerRole::InferenceOpenRouter),
+            #[cfg(feature = "sqlite-kv")]
             "storage-object-sqlite" => Ok(WorkerRole::StorageObjectSqlite),
+            #[cfg(feature = "sqlite-vec")]
             "storage-vector-sqlite" => Ok(WorkerRole::StorageVectorSqlite),
             "secret" => Ok(WorkerRole::Secret),
             "state" => Ok(WorkerRole::State),
+            #[cfg(any(feature = "ollama", feature = "openrouter"))]
             "catalog" => Ok(WorkerRole::Catalog),
             "dag-git" => Ok(WorkerRole::DagGit),
             "session-viewer" => Ok(WorkerRole::SessionViewer),
@@ -154,20 +174,24 @@ mod tests {
             "agent-lambda".parse::<WorkerRole>().unwrap(),
             WorkerRole::AgentLambda
         );
+        #[cfg(feature = "ollama")]
         assert_eq!(
             "inference-ollama".parse::<WorkerRole>().unwrap(),
             WorkerRole::InferenceOllama
         );
+        #[cfg(feature = "sqlite-kv")]
         assert_eq!(
             "storage-object-sqlite".parse::<WorkerRole>().unwrap(),
             WorkerRole::StorageObjectSqlite
         );
+        #[cfg(feature = "sqlite-vec")]
         assert_eq!(
             "storage-vector-sqlite".parse::<WorkerRole>().unwrap(),
             WorkerRole::StorageVectorSqlite
         );
         assert_eq!("secret".parse::<WorkerRole>().unwrap(), WorkerRole::Secret);
         assert_eq!("state".parse::<WorkerRole>().unwrap(), WorkerRole::State);
+        #[cfg(any(feature = "ollama", feature = "openrouter"))]
         assert_eq!(
             "catalog".parse::<WorkerRole>().unwrap(),
             WorkerRole::Catalog
@@ -198,11 +222,15 @@ mod tests {
             WorkerRole::Harness,
             WorkerRole::AgentContainer,
             WorkerRole::AgentLambda,
+            #[cfg(feature = "ollama")]
             WorkerRole::InferenceOllama,
+            #[cfg(feature = "sqlite-kv")]
             WorkerRole::StorageObjectSqlite,
+            #[cfg(feature = "sqlite-vec")]
             WorkerRole::StorageVectorSqlite,
             WorkerRole::Secret,
             WorkerRole::State,
+            #[cfg(any(feature = "ollama", feature = "openrouter"))]
             WorkerRole::Catalog,
             WorkerRole::DagGit,
             WorkerRole::SessionViewer,
