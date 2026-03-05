@@ -59,8 +59,8 @@ build-fleets:
 # Main Commands
 # =============================================================================
 
-# Build everything: CLI + sidecar + all agent images
-build-everything: build build-sidecar build-agents build-fleets
+# Build what's needed for local testing
+build-everything: build build-sidecar (build-agent "todoapp") (build-agent "ollama-test") (build-agent "openrouter-test") (build-agent "sqlite-kv-test") (build-agent "sqlite-vec-test")
 
 # Run tests
 test:
