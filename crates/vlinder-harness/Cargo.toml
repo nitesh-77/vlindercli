@@ -7,11 +7,11 @@ publish = false
 [features]
 default = ["client", "server"]
 client = []
-server = []
+server = ["tonic/server", "tonic/router"]
 
 [dependencies]
 vlinder-core = { path = "../vlinder-core" }
-tonic = "0.12"
+tonic = { version = "0.12", default-features = false, features = ["channel", "codegen", "prost", "transport"] }
 prost = "0.13"
 tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
 chrono = { version = "0.4", features = ["serde"] }
