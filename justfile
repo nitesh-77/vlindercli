@@ -93,37 +93,6 @@ build-council-fleet: build-council-orchestrator build-sales-advisor build-produc
 # Build everything needed to run agents: CLI + sidecar + agent container images
 build-everything: build build-sidecar build-todoapp build-todoapp-fleet build-council-fleet
 
-# Run a specific agent (usage: just run pensieve-container)
-# Uses ~/.vlinder by default (no VLINDER_DIR override needed)
-run agent:
-    cargo build
-    cd agents/{{agent}} && ../../target/debug/vlinder agent run -p .
-
-# Run the interactive support fleet
-support:
-    cargo build
-    ./target/debug/vlinder support
-
-# =============================================================================
-# Model Catalog Commands
-# =============================================================================
-
-# List models from Ollama catalog
-model-list:
-    cargo run -q -p vlinder -- model list
-
-# Add a model from Ollama (usage: just model-add phi3)
-model-add name:
-    cargo run -q -p vlinder -- model add {{name}}
-
-# Show registered models
-model-registered:
-    cargo run -q -p vlinder -- model registered
-
-# Remove a registered model (usage: just model-remove phi3)
-model-remove name:
-    cargo run -q -p vlinder -- model remove {{name}}
-
 # Run tests
 test:
     cargo test --workspace
@@ -213,8 +182,7 @@ reset:
     echo ""
     echo "Next steps:"
     echo "  1. Rebuild:  just build-everything"
-    echo "  2. Daemon:   cargo run -p vlindercli --bin vlinderd"
-    echo "  3. Run:      just run todoapp"
+    echo "  2. Daemon:   cargo run -p vlinderd -- daemon"
 
 # Check license compliance (fails on GPL/copyleft)
 license-check:
