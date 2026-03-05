@@ -16,7 +16,7 @@ vlinder-core = { path = "../vlinder-core" }
 vlinder-nats = { path = "../vlinder-nats", default-features = false, features = ["queue", "secret-client"] }
 vlinder-sql-registry = { path = "../vlinder-sql-registry", default-features = false, features = ["client"] }
 vlinder-sql-state = { path = "../vlinder-sql-state", default-features = false, features = ["client"] }
-vlinder-ollama = { path = "../vlinder-ollama", optional = true }
+vlinder-ollama = { path = "../vlinder-ollama", optional = true, default-features = false, features = ["routing"] }
 vlinder-infer-openrouter = { path = "../vlinder-infer-openrouter", optional = true }
 vlinder-sqlite-vec = { path = "../vlinder-sqlite-vec", optional = true }
 vlinder-sqlite-kv = { path = "../vlinder-sqlite-kv", optional = true }
