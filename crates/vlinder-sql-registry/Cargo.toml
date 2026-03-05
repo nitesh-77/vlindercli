@@ -4,9 +4,14 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
+[features]
+default = ["client", "server"]
+client = []
+server = ["dep:rusqlite"]
+
 [dependencies]
 vlinder-core = { path = "../vlinder-core" }
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.32", features = ["bundled"], optional = true }
 tonic = "0.12"
 prost = "0.13"
 tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
