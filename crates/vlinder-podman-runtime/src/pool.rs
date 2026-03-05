@@ -153,6 +153,7 @@ impl ContainerRuntime {
         // only binds the ones the agent needs. Extra entries are harmless.
         // See #34 for replacing this with a sidecar DNS resolver.
         let host_aliases = vec![
+            "vlinder.local:127.0.0.1".to_string(),
             "runtime.vlinder.local:127.0.0.1".to_string(),
             "ollama.vlinder.local:127.0.0.1".to_string(),
             "openrouter.vlinder.local:127.0.0.1".to_string(),

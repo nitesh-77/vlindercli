@@ -14,10 +14,16 @@ use std::time::Duration;
 use tiny_http::{Method, StatusCode};
 use vlinder_core::domain::{
     Agent, AgentId, DelegateDiagnostics, DelegateMessage, HttpMethod, InvokeMessage, MessageQueue,
-    Nonce, ObjectStorageType, Provider, ProviderHost, ProviderRoute, Registry, RequestDiagnostics,
-    RequestMessage, RoutingKey, RuntimeDiagnostics, SequenceCounter, ServiceType,
-    VectorStorageType,
+    Nonce, ProviderHost, ProviderRoute, Registry, RequestDiagnostics, RequestMessage, RoutingKey,
+    RuntimeDiagnostics, SequenceCounter,
 };
+
+#[cfg(feature = "sqlite-kv")]
+use vlinder_core::domain::ObjectStorageType;
+#[cfg(feature = "sqlite-vec")]
+use vlinder_core::domain::VectorStorageType;
+#[cfg(any(feature = "openrouter", feature = "ollama"))]
+use vlinder_core::domain::{Provider, ServiceType};
 
 /// A running provider server, scoped to one invoke.
 ///
@@ -134,61 +140,85 @@ impl ProviderServer {
 /// Build the virtual-host table from an agent's service requirements.
 pub fn build_hosts(agent: &Agent) -> Vec<ProviderHost> {
     let mut hosts = Vec::new();
+    // Reserve the root hostname for future metadata endpoint
+    hosts.push(ProviderHost::new("vlinder.local", vec![]));
 
-    let needs_openrouter = agent
-        .requirements
-        .services
-        .get(&ServiceType::Infer)
-        .map(|svc| svc.provider == Provider::OpenRouter)
-        .unwrap_or(false);
+    #[cfg(feature = "openrouter")]
+    {
+        let needs_openrouter = agent
+            .requirements
+            .services
+            .get(&ServiceType::Infer)
+            .map(|svc| svc.provider == Provider::OpenRouter)
+            .unwrap_or(false);
 
-    if needs_openrouter {
-        hosts.push(vlinder_infer_openrouter::provider_host());
+        if needs_openrouter {
+            hosts.push(vlinder_infer_openrouter::provider_host());
+        }
     }
 
-    let needs_ollama_infer = agent
-        .requirements
-        .services
-        .get(&ServiceType::Infer)
-        .map(|svc| svc.provider == Provider::Ollama)
-        .unwrap_or(false);
+    #[cfg(feature = "ollama")]
+    {
+        let needs_ollama_infer = agent
+            .requirements
+            .services
+            .get(&ServiceType::Infer)
+            .map(|svc| svc.provider == Provider::Ollama)
+            .unwrap_or(false);
 
-    let needs_ollama_embed = agent
-        .requirements
-        .services
-        .get(&ServiceType::Embed)
-        .map(|svc| svc.provider == Provider::Ollama)
-        .unwrap_or(false);
+        let needs_ollama_embed = agent
+            .requirements
+            .services
+            .get(&ServiceType::Embed)
+            .map(|svc| svc.provider == Provider::Ollama)
+            .unwrap_or(false);
 
-    if needs_ollama_infer || needs_ollama_embed {
-        hosts.push(vlinder_ollama::provider_host(
-            needs_ollama_infer,
-            needs_ollama_embed,
-        ));
+        if needs_ollama_infer || needs_ollama_embed {
+            hosts.push(vlinder_ollama::provider_host(
+                needs_ollama_infer,
+                needs_ollama_embed,
+            ));
+        }
     }
 
-    let needs_sqlite_vec = agent
-        .vector_storage
-        .as_ref()
-        .and_then(|uri| VectorStorageType::from_scheme(uri.scheme()))
-        .map(|t| t == VectorStorageType::SqliteVec)
-        .unwrap_or(false);
+    #[cfg(feature = "sqlite-vec")]
+    {
+        let needs_sqlite_vec = agent
+            .vector_storage
+            .as_ref()
+            .and_then(|uri| VectorStorageType::from_scheme(uri.scheme()))
+            .map(|t| t == VectorStorageType::SqliteVec)
+            .unwrap_or(false);
 
-    if needs_sqlite_vec {
-        hosts.push(vlinder_sqlite_vec::provider_host());
+        if needs_sqlite_vec {
+            hosts.push(vlinder_sqlite_vec::provider_host());
+        }
     }
 
-    // KV storage: any agent with object_storage gets the sqlite-kv provider
-    let has_object_storage = agent
-        .object_storage
-        .as_ref()
-        .and_then(|uri| ObjectStorageType::from_scheme(uri.scheme()))
-        .is_some();
+    #[cfg(feature = "sqlite-kv")]
+    {
+        // KV storage: any agent with object_storage gets the sqlite-kv provider
+        let has_object_storage = agent
+            .object_storage
+            .as_ref()
+            .and_then(|uri| ObjectStorageType::from_scheme(uri.scheme()))
+            .is_some();
 
-    if has_object_storage {
-        hosts.push(vlinder_sqlite_kv::provider_host());
+        if has_object_storage {
+            hosts.push(vlinder_sqlite_kv::provider_host());
+        }
     }
 
+    let host_names: Vec<&str> = hosts
+        .iter()
+        .map(|h: &ProviderHost| h.hostname.as_str())
+        .collect();
+    tracing::info!(
+        event = "provider_server.hosts_ready",
+        agent = %agent.name,
+        hosts = ?host_names,
+        "Provider hosts built"
+    );
     hosts
 }
 

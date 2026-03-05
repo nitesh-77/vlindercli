@@ -4,15 +4,22 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
+[features]
+default = ["ollama", "openrouter", "sqlite-kv", "sqlite-vec"]
+ollama = ["dep:vlinder-ollama"]
+openrouter = ["dep:vlinder-infer-openrouter"]
+sqlite-kv = ["dep:vlinder-sqlite-kv"]
+sqlite-vec = ["dep:vlinder-sqlite-vec"]
+
 [dependencies]
 vlinder-core = { path = "../vlinder-core" }
 vlinder-nats = { path = "../vlinder-nats", default-features = false, features = ["queue", "secret-client"] }
 vlinder-sql-registry = { path = "../vlinder-sql-registry", default-features = false, features = ["client"] }
 vlinder-sql-state = { path = "../vlinder-sql-state", default-features = false, features = ["client"] }
-vlinder-ollama = { path = "../vlinder-ollama" }
-vlinder-infer-openrouter = { path = "../vlinder-infer-openrouter" }
-vlinder-sqlite-vec = { path = "../vlinder-sqlite-vec" }
-vlinder-sqlite-kv = { path = "../vlinder-sqlite-kv" }
+vlinder-ollama = { path = "../vlinder-ollama", optional = true }
+vlinder-infer-openrouter = { path = "../vlinder-infer-openrouter", optional = true }
+vlinder-sqlite-vec = { path = "../vlinder-sqlite-vec", optional = true }
+vlinder-sqlite-kv = { path = "../vlinder-sqlite-kv", optional = true }
 serde_json = "1"
 tracing = "0.1"
 tiny_http = "0.12"
