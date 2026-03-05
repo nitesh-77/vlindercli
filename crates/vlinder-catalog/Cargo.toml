@@ -4,6 +4,11 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
+[features]
+default = ["client", "server"]
+client = []
+server = []
+
 [dependencies]
 vlinder-core = { path = "../vlinder-core" }
 tonic = "0.12"
