@@ -3,26 +3,38 @@
 //! Contains the SqliteDagStore (Merkle DAG persistence) and the
 //! SessionServer (read-only HTTP viewer for conversation sessions).
 
+#[cfg(feature = "server")]
 pub mod dag_store;
 pub mod state_service;
+#[cfg(feature = "server")]
 pub use dag_store::SqliteDagStore;
 
+// =============================================================================
+// SessionServer — server-only (tiny_http + DagStore)
+// =============================================================================
+
+#[cfg(feature = "server")]
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(feature = "server")]
 use std::sync::Arc;
+#[cfg(feature = "server")]
 use std::thread::JoinHandle;
 
+#[cfg(feature = "server")]
 use vlinder_core::domain::{DagStore, MessageType};
 
 /// A running session viewer server.
 ///
 /// Created by `start()`, runs in a background thread.
 /// Shuts down when dropped or `stop()` is called.
+#[cfg(feature = "server")]
 pub struct SessionServer {
     port: u16,
     stop_flag: Arc<AtomicBool>,
     handle: Option<JoinHandle<()>>,
 }
 
+#[cfg(feature = "server")]
 impl SessionServer {
     /// Start the session viewer in a background thread.
     ///
@@ -65,6 +77,7 @@ impl SessionServer {
     }
 }
 
+#[cfg(feature = "server")]
 impl Drop for SessionServer {
     fn drop(&mut self) {
         self.stop_flag.store(true, Ordering::Relaxed);
@@ -75,6 +88,7 @@ impl Drop for SessionServer {
 // Server loop
 // =============================================================================
 
+#[cfg(feature = "server")]
 fn run_server(server: tiny_http::Server, store: &dyn DagStore, stop: Arc<AtomicBool>) {
     let timeout = std::time::Duration::from_millis(100);
     loop {
@@ -90,6 +104,7 @@ fn run_server(server: tiny_http::Server, store: &dyn DagStore, stop: Arc<AtomicB
     }
 }
 
+#[cfg(feature = "server")]
 fn handle_request(request: tiny_http::Request, store: &dyn DagStore) {
     let url = request.url().to_string();
 
@@ -119,6 +134,7 @@ fn handle_request(request: tiny_http::Request, store: &dyn DagStore) {
 // Rendering
 // =============================================================================
 
+#[cfg(feature = "server")]
 fn render_index(store: &dyn DagStore) -> String {
     let sessions = match store.list_sessions() {
         Ok(s) => s,
@@ -168,6 +184,7 @@ fn render_index(store: &dyn DagStore) -> String {
     )
 }
 
+#[cfg(feature = "server")]
 fn render_session(store: &dyn DagStore, session_id: &str) -> Result<String, String> {
     // Security: reject path traversal attempts
     if session_id.contains("..") || session_id.contains('/') || session_id.contains('\\') {
@@ -261,6 +278,7 @@ fn render_session(store: &dyn DagStore, session_id: &str) -> Result<String, Stri
 // HTML helpers
 // =============================================================================
 
+#[cfg(feature = "server")]
 const CSS: &str = r#"
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
@@ -303,6 +321,7 @@ pre {
 }
 "#;
 
+#[cfg(feature = "server")]
 fn html_page(title: &str, body: &str) -> String {
     format!(
         "<!DOCTYPE html>\n\
@@ -323,6 +342,7 @@ fn html_page(title: &str, body: &str) -> String {
     )
 }
 
+#[cfg(feature = "server")]
 fn html_escape(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -330,6 +350,7 @@ fn html_escape(s: &str) -> String {
         .replace('"', "&quot;")
 }
 
+#[cfg(feature = "server")]
 fn html_response(status: u16, body: &str) -> tiny_http::Response<std::io::Cursor<Vec<u8>>> {
     let status_code = tiny_http::StatusCode(status);
     let content_type = tiny_http::Header::from_bytes("Content-Type", "text/html; charset=utf-8")
@@ -341,7 +362,7 @@ fn html_response(status: u16, body: &str) -> tiny_http::Response<std::io::Cursor
         .with_header(connection)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "server"))]
 mod tests {
     use super::*;
     use chrono::{TimeZone, Utc};
