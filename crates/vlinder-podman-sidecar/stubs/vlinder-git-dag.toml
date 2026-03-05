@@ -1,0 +1,5 @@
+[package]
+name = "vlinder-git-dag"
+version = "0.1.0"
+edition = "2021"
+publish = false
