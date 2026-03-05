@@ -7,7 +7,7 @@ publish = false
 [features]
 default = ["queue", "secret-store", "secret-client"]
 queue = ["dep:async-nats", "dep:serde_json", "dep:futures", "dep:dirs"]
-secret-store = ["queue"]
+secret-store = ["queue", "tonic/server", "tonic/router"]
 secret-client = []
 
 [dependencies]
@@ -18,7 +18,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
 futures = { version = "0.3", optional = true }
 tracing = "0.1"
 dirs = { version = "6", optional = true }
-tonic = "0.12"
+tonic = { version = "0.12", default-features = false, features = ["channel", "codegen", "prost", "transport"] }
 prost = "0.13"
 
 [build-dependencies]
