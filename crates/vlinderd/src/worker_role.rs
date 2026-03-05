@@ -20,8 +20,10 @@ pub enum WorkerRole {
     /// Harness service — gRPC interface for CLI agent invocation
     Harness,
     /// Container agent runtime - executes OCI container agents via Podman
+    #[cfg(feature = "container")]
     AgentContainer,
     /// Lambda agent runtime - executes agents as AWS Lambda functions
+    #[cfg(feature = "lambda")]
     AgentLambda,
     /// Ollama inference service
     #[cfg(feature = "ollama")]
@@ -63,7 +65,9 @@ impl WorkerRole {
         match self {
             WorkerRole::Registry => "registry",
             WorkerRole::Harness => "harness",
+            #[cfg(feature = "container")]
             WorkerRole::AgentContainer => "agent-container",
+            #[cfg(feature = "lambda")]
             WorkerRole::AgentLambda => "agent-lambda",
             #[cfg(feature = "ollama")]
             WorkerRole::InferenceOllama => "inference-ollama",
@@ -87,7 +91,9 @@ impl WorkerRole {
         match self {
             WorkerRole::Registry => "Registry service",
             WorkerRole::Harness => "Harness service",
+            #[cfg(feature = "container")]
             WorkerRole::AgentContainer => "Container agent runtime",
+            #[cfg(feature = "lambda")]
             WorkerRole::AgentLambda => "Lambda agent runtime",
             #[cfg(feature = "ollama")]
             WorkerRole::InferenceOllama => "Ollama inference service",
@@ -120,7 +126,9 @@ impl FromStr for WorkerRole {
         match s {
             "registry" => Ok(WorkerRole::Registry),
             "harness" => Ok(WorkerRole::Harness),
+            #[cfg(feature = "container")]
             "agent-container" => Ok(WorkerRole::AgentContainer),
+            #[cfg(feature = "lambda")]
             "agent-lambda" => Ok(WorkerRole::AgentLambda),
             #[cfg(feature = "ollama")]
             "inference-ollama" => Ok(WorkerRole::InferenceOllama),
@@ -166,10 +174,12 @@ mod tests {
             "harness".parse::<WorkerRole>().unwrap(),
             WorkerRole::Harness
         );
+        #[cfg(feature = "container")]
         assert_eq!(
             "agent-container".parse::<WorkerRole>().unwrap(),
             WorkerRole::AgentContainer
         );
+        #[cfg(feature = "lambda")]
         assert_eq!(
             "agent-lambda".parse::<WorkerRole>().unwrap(),
             WorkerRole::AgentLambda
@@ -220,7 +230,9 @@ mod tests {
         for role in [
             WorkerRole::Registry,
             WorkerRole::Harness,
+            #[cfg(feature = "container")]
             WorkerRole::AgentContainer,
+            #[cfg(feature = "lambda")]
             WorkerRole::AgentLambda,
             #[cfg(feature = "ollama")]
             WorkerRole::InferenceOllama,
@@ -242,6 +254,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "container")]
     fn from_env_parses_valid_role() {
         // Test the parsing logic directly (avoids env var race conditions)
         let result = "agent-container".parse::<WorkerRole>();

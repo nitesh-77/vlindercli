@@ -238,11 +238,13 @@ impl Supervisor {
         }
 
         // Agent runtimes
+        #[cfg(feature = "container")]
         for _ in 0..counts.agent.container {
             if let Some(child) = spawn_worker(WorkerRole::AgentContainer) {
                 workers.push(child);
             }
         }
+        #[cfg(feature = "lambda")]
         for _ in 0..counts.agent.lambda {
             if let Some(child) = spawn_worker(WorkerRole::AgentLambda) {
                 workers.push(child);

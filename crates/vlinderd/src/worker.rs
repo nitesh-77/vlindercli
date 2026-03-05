@@ -41,7 +41,9 @@ pub fn run_worker_loop(role: WorkerRole, shutdown: Arc<AtomicBool>) {
     match role {
         WorkerRole::Registry => run_registry_worker(&config, &shutdown),
         WorkerRole::Harness => run_harness_worker(&config, &shutdown),
+        #[cfg(feature = "container")]
         WorkerRole::AgentContainer => run_agent_container_worker(&config, &shutdown),
+        #[cfg(feature = "lambda")]
         WorkerRole::AgentLambda => run_agent_lambda_worker(&config, &shutdown),
         #[cfg(feature = "ollama")]
         WorkerRole::InferenceOllama => run_inference_ollama_worker(&config, &shutdown),
@@ -228,6 +230,7 @@ fn run_harness_worker(config: &Config, shutdown: &AtomicBool) {
     });
 }
 
+#[cfg(feature = "container")]
 fn run_agent_container_worker(config: &Config, shutdown: &AtomicBool) {
     use vlinder_core::domain::Runtime;
     use vlinder_podman_runtime::{ContainerRuntime, PodmanRuntimeConfig};
@@ -256,6 +259,7 @@ fn run_agent_container_worker(config: &Config, shutdown: &AtomicBool) {
     }
 }
 
+#[cfg(feature = "lambda")]
 fn run_agent_lambda_worker(config: &Config, shutdown: &AtomicBool) {
     use vlinder_core::domain::Runtime;
     use vlinder_nats_lambda_runtime::{LambdaRuntime, LambdaRuntimeConfig};
