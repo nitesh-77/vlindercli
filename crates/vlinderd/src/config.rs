@@ -251,8 +251,6 @@ pub struct StorageWorkerCounts {
 pub struct ObjectStorageWorkerCounts {
     /// SQLite object storage workers
     pub sqlite: u32,
-    /// In-memory object storage workers
-    pub memory: u32,
 }
 
 /// Vector storage worker counts by backend.
@@ -261,8 +259,6 @@ pub struct ObjectStorageWorkerCounts {
 pub struct VectorStorageWorkerCounts {
     /// SQLite-vec vector storage workers
     pub sqlite: u32,
-    /// In-memory vector storage workers
-    pub memory: u32,
 }
 
 // ============================================================================
@@ -382,19 +378,13 @@ impl Default for InferenceWorkerCounts {
 
 impl Default for ObjectStorageWorkerCounts {
     fn default() -> Self {
-        Self {
-            sqlite: 1,
-            memory: 0,
-        }
+        Self { sqlite: 1 }
     }
 }
 
 impl Default for VectorStorageWorkerCounts {
     fn default() -> Self {
-        Self {
-            sqlite: 1,
-            memory: 0,
-        }
+        Self { sqlite: 1 }
     }
 }
 

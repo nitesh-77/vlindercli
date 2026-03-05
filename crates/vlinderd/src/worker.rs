@@ -46,9 +46,7 @@ pub fn run_worker_loop(role: WorkerRole, shutdown: Arc<AtomicBool>) {
         WorkerRole::InferenceOllama => run_inference_ollama_worker(&config, &shutdown),
         WorkerRole::InferenceOpenRouter => run_inference_openrouter_worker(&config, &shutdown),
         WorkerRole::StorageObjectSqlite => run_storage_object_sqlite_worker(&config, &shutdown),
-        WorkerRole::StorageObjectMemory => run_storage_object_memory_worker(&config, &shutdown),
         WorkerRole::StorageVectorSqlite => run_storage_vector_sqlite_worker(&config, &shutdown),
-        WorkerRole::StorageVectorMemory => run_storage_vector_memory_worker(&config, &shutdown),
         WorkerRole::Secret => run_secret_worker(&config, &shutdown),
         WorkerRole::State => run_state_worker(&config, &shutdown),
         WorkerRole::Catalog => run_catalog_worker(&config, &shutdown),
@@ -357,34 +355,6 @@ fn run_storage_object_sqlite_worker(config: &Config, shutdown: &AtomicBool) {
     }
 }
 
-fn run_storage_object_memory_worker(config: &Config, shutdown: &AtomicBool) {
-    use vlinder_sqlite_kv::KvWorker;
-
-    use vlinder_sql_registry::registry_service::GrpcRegistryClient;
-
-    let queue =
-        crate::queue_factory::recording_from_config(config).expect("Failed to create queue");
-
-    let registry_addr = grpc_registry_addr(config);
-    let registry: Arc<dyn Registry> = Arc::new(
-        GrpcRegistryClient::connect(&registry_addr).expect("Failed to connect to registry"),
-    );
-
-    use vlinder_core::domain::{ObjectStorageType, ServiceBackend};
-    let worker = KvWorker::new(
-        queue,
-        registry,
-        ServiceBackend::Kv(ObjectStorageType::InMemory),
-    );
-
-    tracing::info!(registry = %registry_addr, "In-memory object storage worker ready");
-
-    while !shutdown.load(Ordering::Relaxed) {
-        worker.tick();
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    }
-}
-
 fn run_storage_vector_sqlite_worker(config: &Config, shutdown: &AtomicBool) {
     use vlinder_sqlite_vec::SqliteVecWorker;
 
@@ -406,34 +376,6 @@ fn run_storage_vector_sqlite_worker(config: &Config, shutdown: &AtomicBool) {
     );
 
     tracing::info!(registry = %registry_addr, "SQLite-vec vector storage worker ready");
-
-    while !shutdown.load(Ordering::Relaxed) {
-        worker.tick();
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    }
-}
-
-fn run_storage_vector_memory_worker(config: &Config, shutdown: &AtomicBool) {
-    use vlinder_sqlite_vec::SqliteVecWorker;
-
-    use vlinder_sql_registry::registry_service::GrpcRegistryClient;
-
-    let queue =
-        crate::queue_factory::recording_from_config(config).expect("Failed to create queue");
-
-    let registry_addr = grpc_registry_addr(config);
-    let registry: Arc<dyn Registry> = Arc::new(
-        GrpcRegistryClient::connect(&registry_addr).expect("Failed to connect to registry"),
-    );
-
-    use vlinder_core::domain::{ServiceBackend, VectorStorageType};
-    let worker = SqliteVecWorker::new(
-        queue,
-        registry,
-        ServiceBackend::Vec(VectorStorageType::InMemory),
-    );
-
-    tracing::info!(registry = %registry_addr, "In-memory vector storage worker ready");
 
     while !shutdown.load(Ordering::Relaxed) {
         worker.tick();

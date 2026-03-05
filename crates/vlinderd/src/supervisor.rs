@@ -263,24 +263,12 @@ impl Supervisor {
                 workers.push(child);
             }
         }
-        for _ in 0..counts.storage.object.memory {
-            if let Some(child) = spawn_worker(WorkerRole::StorageObjectMemory) {
-                workers.push(child);
-            }
-        }
-
         // Vector storage workers
         for _ in 0..counts.storage.vector.sqlite {
             if let Some(child) = spawn_worker(WorkerRole::StorageVectorSqlite) {
                 workers.push(child);
             }
         }
-        for _ in 0..counts.storage.vector.memory {
-            if let Some(child) = spawn_worker(WorkerRole::StorageVectorMemory) {
-                workers.push(child);
-            }
-        }
-
         // DAG git worker — singleton (single branch + HEAD lock, see ADR 078).
         // The dag-sqlite consumer was removed by ADR 080: the transactional outbox
         // records nodes synchronously via the State Service on every send.

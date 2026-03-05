@@ -29,12 +29,8 @@ pub enum WorkerRole {
     InferenceOpenRouter,
     /// SQLite object storage service
     StorageObjectSqlite,
-    /// In-memory object storage service
-    StorageObjectMemory,
     /// SQLite-vec vector storage service
     StorageVectorSqlite,
-    /// In-memory vector storage service
-    StorageVectorMemory,
     /// Secret store service — gRPC interface to the SecretStore
     Secret,
     /// State service — gRPC interface to the DagStore (ADR 079)
@@ -67,9 +63,7 @@ impl WorkerRole {
             WorkerRole::InferenceOllama => "inference-ollama",
             WorkerRole::InferenceOpenRouter => "inference-openrouter",
             WorkerRole::StorageObjectSqlite => "storage-object-sqlite",
-            WorkerRole::StorageObjectMemory => "storage-object-memory",
             WorkerRole::StorageVectorSqlite => "storage-vector-sqlite",
-            WorkerRole::StorageVectorMemory => "storage-vector-memory",
             WorkerRole::Secret => "secret",
             WorkerRole::State => "state",
             WorkerRole::Catalog => "catalog",
@@ -88,9 +82,7 @@ impl WorkerRole {
             WorkerRole::InferenceOllama => "Ollama inference service",
             WorkerRole::InferenceOpenRouter => "OpenRouter inference service",
             WorkerRole::StorageObjectSqlite => "SQLite object storage",
-            WorkerRole::StorageObjectMemory => "In-memory object storage",
             WorkerRole::StorageVectorSqlite => "SQLite-vec vector storage",
-            WorkerRole::StorageVectorMemory => "In-memory vector storage",
             WorkerRole::Secret => "Secret store service",
             WorkerRole::State => "State service",
             WorkerRole::Catalog => "Catalog service",
@@ -118,9 +110,7 @@ impl FromStr for WorkerRole {
             "inference-ollama" => Ok(WorkerRole::InferenceOllama),
             "inference-openrouter" => Ok(WorkerRole::InferenceOpenRouter),
             "storage-object-sqlite" => Ok(WorkerRole::StorageObjectSqlite),
-            "storage-object-memory" => Ok(WorkerRole::StorageObjectMemory),
             "storage-vector-sqlite" => Ok(WorkerRole::StorageVectorSqlite),
-            "storage-vector-memory" => Ok(WorkerRole::StorageVectorMemory),
             "secret" => Ok(WorkerRole::Secret),
             "state" => Ok(WorkerRole::State),
             "catalog" => Ok(WorkerRole::Catalog),
@@ -193,8 +183,10 @@ mod tests {
     fn parse_invalid_role() {
         assert!("invalid".parse::<WorkerRole>().is_err());
         assert!("".parse::<WorkerRole>().is_err());
-        // Old role names no longer valid
+        // Removed role names
         assert!("embedding-ollama".parse::<WorkerRole>().is_err());
+        assert!("storage-object-memory".parse::<WorkerRole>().is_err());
+        assert!("storage-vector-memory".parse::<WorkerRole>().is_err());
         assert!("dag-capture".parse::<WorkerRole>().is_err());
         assert!("dag-sqlite".parse::<WorkerRole>().is_err());
     }
