@@ -5,9 +5,10 @@ edition = "2021"
 publish = false
 
 [features]
-default = ["client", "server"]
-client = []
-server = ["dep:async-nats", "dep:serde_json", "dep:futures", "dep:dirs"]
+default = ["queue", "secret-store", "secret-client"]
+queue = ["dep:async-nats", "dep:serde_json", "dep:futures", "dep:dirs"]
+secret-store = ["queue"]
+secret-client = []
 
 [dependencies]
 vlinder-core = { path = "../vlinder-core" }

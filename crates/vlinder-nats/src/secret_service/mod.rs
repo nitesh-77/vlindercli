@@ -4,14 +4,14 @@
 //! - `SecretServiceServer`: Wraps a SecretStore impl, serves gRPC requests
 //! - `GrpcSecretClient`: Implements SecretStore trait via gRPC calls
 
-#[cfg(feature = "client")]
+#[cfg(feature = "secret-client")]
 mod client;
-#[cfg(feature = "server")]
+#[cfg(feature = "secret-store")]
 mod server;
 
-#[cfg(feature = "client")]
+#[cfg(feature = "secret-client")]
 pub use client::{ping_secret_service, GrpcSecretClient};
-#[cfg(feature = "server")]
+#[cfg(feature = "secret-store")]
 pub use server::SecretServiceServer;
 
 /// Generated protobuf types.

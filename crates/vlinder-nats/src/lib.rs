@@ -1,13 +1,13 @@
-#[cfg(feature = "server")]
+#[cfg(feature = "queue")]
 mod connect;
-#[cfg(feature = "server")]
+#[cfg(feature = "queue")]
 mod queue;
 pub mod secret_service;
-#[cfg(feature = "server")]
+#[cfg(feature = "secret-store")]
 mod secret_store;
 
 /// Expand `~/...` to the user's home directory.
-#[cfg(feature = "server")]
+#[cfg(feature = "queue")]
 pub(crate) fn expand_tilde(path: &str) -> String {
     if let Some(rest) = path.strip_prefix("~/") {
         if let Some(home) = dirs::home_dir() {
@@ -17,14 +17,14 @@ pub(crate) fn expand_tilde(path: &str) -> String {
     path.to_string()
 }
 
-#[cfg(feature = "server")]
+#[cfg(feature = "queue")]
 pub use connect::NatsConfig;
-#[cfg(feature = "server")]
+#[cfg(feature = "queue")]
 pub use queue::NatsQueue;
-#[cfg(feature = "server")]
+#[cfg(feature = "queue")]
 pub use queue::{
     complete_to_nats_headers, delegate_to_nats_headers, from_nats_headers, invoke_to_nats_headers,
     request_to_nats_headers, response_to_nats_headers, subject_to_routing_key,
 };
-#[cfg(feature = "server")]
+#[cfg(feature = "secret-store")]
 pub use secret_store::NatsSecretStore;
