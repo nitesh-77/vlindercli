@@ -7,91 +7,60 @@ build-sidecar:
     podman build -t localhost/vlinder-podman-sidecar:latest -f crates/vlinder-podman-sidecar/Dockerfile .
 
 # =============================================================================
-# Agent Builds (OCI container images via Podman)
+# Agent & Fleet Builds
 # =============================================================================
+# Convention: directory name = image name (localhost/<dir-name>:latest)
 
-# Build echo agent (OCI image via Podman, simplest possible agent)
-build-echo:
-    podman build -t localhost/echo:latest agents/echo/
+# Build a standalone agent image (usage: just build-agent echo)
+build-agent name:
+    podman build -t localhost/{{name}}:latest agents/{{name}}/
 
-# Build echo-container agent (OCI image via Podman)
-build-echo-container:
-    podman build -t localhost/echo-container:latest fleets/todoapp/agents/echo-container/
+# Build all standalone agent images
+build-agents:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for dir in agents/*/; do
+        [ -f "$dir/Dockerfile" ] || continue
+        name=$(basename "$dir")
+        echo "Building agent: $name"
+        podman build -t "localhost/$name:latest" "$dir"
+    done
 
-# Build echo-lambda agent (OCI image via Podman, Lambda + Web Adapter)
-build-echo-lambda:
-    podman build -t localhost/echo-lambda:latest agents/echo-lambda/
+# Build a fleet agent image (usage: just build-fleet-agent support support-agent)
+build-fleet-agent fleet name:
+    podman build -t localhost/{{name}}:latest fleets/{{fleet}}/agents/{{name}}/
 
-# Build openrouter-test agent (OCI image via Podman, exercises openrouter.vlinder.local)
-build-openrouter-test:
-    podman build -t localhost/openrouter-test:latest agents/openrouter-test/
+# Build all agent images in a fleet (usage: just build-fleet support)
+build-fleet fleet:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for dir in fleets/{{fleet}}/agents/*/; do
+        [ -f "$dir/Dockerfile" ] || continue
+        name=$(basename "$dir")
+        echo "Building fleet agent: {{fleet}}/$name"
+        podman build -t "localhost/$name:latest" "$dir"
+    done
 
-# Build sqlite-kv-test agent (OCI image via Podman, exercises sqlite-kv.vlinder.local)
-build-sqlite-kv-test:
-    podman build -t localhost/sqlite-kv-test:latest agents/sqlite-kv-test/
-
-# Build sqlite-vec-test agent (OCI image via Podman, exercises sqlite-vec.vlinder.local)
-build-sqlite-vec-test:
-    podman build -t localhost/sqlite-vec-test:latest agents/sqlite-vec-test/
-
-# Build s3-mount-test agent (OCI image via Podman, exercises S3-backed FUSE mounts)
-build-s3-mount-test:
-    podman build -t localhost/s3-mount-test:latest agents/s3-mount-test/
-
-# Build ollama-test agent (OCI image via Podman, exercises all four ollama.vlinder.local endpoints)
-build-ollama-test:
-    podman build -t localhost/ollama-test:latest agents/ollama-test/
-
-# Build todoapp-orchestrator agent (OCI image via Podman, delegation smoke test)
-build-todoapp-orchestrator:
-    podman build -t localhost/todoapp-orchestrator:latest fleets/todoapp/agents/todoapp-orchestrator/
-
-# Build all todoapp fleet container images
-build-todoapp-fleet: build-todoapp-orchestrator build-echo-container
-
-# Build todoapp agent (OCI image via Podman, OpenRouter integration test)
-build-todoapp:
-    podman build -t localhost/todoapp:latest agents/todoapp/
-
-# Build pensieve-container (OCI image via Podman, full pensieve in Rust)
-build-pensieve-container:
-    podman build -t localhost/pensieve-container:latest agents/pensieve-container/
-
-# Build support fleet agents (OCI images via Podman)
-build-support-agent:
-    podman build -t localhost/support-agent:latest fleets/support/agents/support-agent/
-
-build-log-analyst:
-    podman build -t localhost/log-analyst:latest fleets/support/agents/log-analyst/
-
-build-code-analyst:
-    podman build -t localhost/code-analyst:latest fleets/support/agents/code-analyst/
-
-# Build all support fleet container images
-build-support-fleet: build-support-agent build-log-analyst build-code-analyst
-
-# Build council fleet agents (OCI images via Podman)
-build-council-orchestrator:
-    podman build -t localhost/council-orchestrator:latest fleets/council/agents/council-orchestrator/
-
-build-sales-advisor:
-    podman build -t localhost/sales-advisor:latest fleets/council/agents/sales-advisor/
-
-build-product-advisor:
-    podman build -t localhost/product-advisor:latest fleets/council/agents/product-advisor/
-
-build-architect-advisor:
-    podman build -t localhost/architect-advisor:latest fleets/council/agents/architect-advisor/
-
-# Build all council fleet container images
-build-council-fleet: build-council-orchestrator build-sales-advisor build-product-advisor build-architect-advisor
+# Build all fleet agent images
+build-fleets:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for fleet_dir in fleets/*/; do
+        fleet=$(basename "$fleet_dir")
+        for dir in "$fleet_dir"agents/*/; do
+            [ -f "$dir/Dockerfile" ] || continue
+            name=$(basename "$dir")
+            echo "Building fleet agent: $fleet/$name"
+            podman build -t "localhost/$name:latest" "$dir"
+        done
+    done
 
 # =============================================================================
 # Main Commands
 # =============================================================================
 
-# Build everything needed to run agents: CLI + sidecar + agent container images
-build-everything: build build-sidecar build-todoapp build-todoapp-fleet build-council-fleet
+# Build everything: CLI + sidecar + all agent images
+build-everything: build build-sidecar build-agents build-fleets
 
 # Run tests
 test:
@@ -361,7 +330,7 @@ run-integration-tests:
     # 5. Check container images
     if ! podman image exists localhost/echo-container:latest 2>/dev/null; then
         echo "  ✗ Missing image: localhost/echo-container:latest"
-        echo "    Run: just build-echo-container"
+        echo "    Run: just build-fleet-agent todoapp echo-container"
         exit 1
     fi
     echo "  ✓ Container image: echo-container"

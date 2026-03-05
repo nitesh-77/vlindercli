@@ -1,6 +1,6 @@
 //! Integration tests for ContainerRuntime (long-running model).
 //!
-//! Requires: podman installed + `just build-echo-container` + NATS running.
+//! Requires: podman installed + `just build-fleet-agent todoapp echo-container` + NATS running.
 //! The sidecar creates its own queue from config, so these tests require
 //! shared queue infrastructure (NATS) — in-memory queues won't work.
 //!
