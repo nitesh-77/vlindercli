@@ -4,14 +4,19 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
+[features]
+default = ["client", "server"]
+client = []
+server = ["dep:async-nats", "dep:serde_json", "dep:futures", "dep:dirs"]
+
 [dependencies]
 vlinder-core = { path = "../vlinder-core" }
-serde_json = "1"
-async-nats = "0.38"
+serde_json = { version = "1", optional = true }
+async-nats = { version = "0.38", optional = true }
 tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
-futures = "0.3"
+futures = { version = "0.3", optional = true }
 tracing = "0.1"
-dirs = "6"
+dirs = { version = "6", optional = true }
 tonic = "0.12"
 prost = "0.13"
 
