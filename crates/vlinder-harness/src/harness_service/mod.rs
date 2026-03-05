@@ -4,10 +4,14 @@
 //! - `HarnessServiceServer`: Wraps a CoreHarness, serves gRPC requests
 //! - `GrpcHarnessClient`: Implements Harness trait via gRPC calls
 
+#[cfg(feature = "client")]
 mod client;
+#[cfg(feature = "server")]
 mod server;
 
+#[cfg(feature = "client")]
 pub use client::{ping_harness, GrpcHarnessClient};
+#[cfg(feature = "server")]
 pub use server::HarnessServiceServer;
 
 /// Generated protobuf types.
