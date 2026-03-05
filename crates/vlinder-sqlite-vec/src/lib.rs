@@ -1,12 +1,16 @@
 //! SQLite-vec provider — declares the hostname and routes
 //! for the sqlite-vec vector storage backend.
 
+#[cfg(feature = "worker")]
 mod storage;
 mod types;
+#[cfg(feature = "worker")]
 mod worker;
 
+#[cfg(feature = "worker")]
 pub use storage::SqliteVectorStorage;
 pub use types::{SqliteVecDeleteRequest, SqliteVecSearchRequest, SqliteVecStoreRequest};
+#[cfg(feature = "worker")]
 pub use worker::SqliteVecWorker;
 
 use vlinder_core::domain::{
