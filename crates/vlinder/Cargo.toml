@@ -6,7 +6,7 @@ publish = false
 
 [dependencies]
 vlinder-core = { path = "../vlinder-core" }
-vlinder-catalog = { path = "../vlinder-catalog" }
+vlinder-catalog = { path = "../vlinder-catalog", default-features = false, features = ["client"] }
 vlinder-nats = { path = "../vlinder-nats" }
 vlinder-harness = { path = "../vlinder-harness" }
 vlinder-sql-registry = { path = "../vlinder-sql-registry" }
