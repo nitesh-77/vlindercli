@@ -6,9 +6,9 @@ publish = false
 
 [dependencies]
 vlinder-core = { path = "../vlinder-core" }
-vlinder-nats = { path = "../vlinder-nats" }
-vlinder-sql-registry = { path = "../vlinder-sql-registry" }
-vlinder-sql-state = { path = "../vlinder-sql-state" }
+vlinder-nats = { path = "../vlinder-nats", default-features = false, features = ["queue", "secret-client"] }
+vlinder-sql-registry = { path = "../vlinder-sql-registry", default-features = false, features = ["client"] }
+vlinder-sql-state = { path = "../vlinder-sql-state", default-features = false, features = ["client"] }
 vlinder-ollama = { path = "../vlinder-ollama" }
 vlinder-infer-openrouter = { path = "../vlinder-infer-openrouter" }
 vlinder-sqlite-vec = { path = "../vlinder-sqlite-vec" }
