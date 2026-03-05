@@ -4083,10 +4083,6 @@ dependencies = [
  "tracing",
  "ureq 3.2.0",
  "vlinder-core",
- "vlinder-infer-openrouter",
- "vlinder-ollama",
- "vlinder-sqlite-kv",
- "vlinder-sqlite-vec",
 ]
 
 [[package]]
