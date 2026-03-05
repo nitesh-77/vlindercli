@@ -1,7 +1,7 @@
 name = "sales-advisor"
 description = "Go-to-market strategist advising on positioning, developer adoption, and messaging for vlindercli."
 runtime = "container"
-executable = "localhost/council-sales-advisor:latest"
+executable = "localhost/sales-advisor:latest"
 
 [requirements]
 

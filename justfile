@@ -59,13 +59,13 @@ build-pensieve-container:
 
 # Build support fleet agents (OCI images via Podman)
 build-support-agent:
-    podman build -t localhost/vlinder-support:latest fleets/support/agents/support-agent/
+    podman build -t localhost/support-agent:latest fleets/support/agents/support-agent/
 
 build-log-analyst:
-    podman build -t localhost/vlinder-log-analyst:latest fleets/support/agents/log-analyst/
+    podman build -t localhost/log-analyst:latest fleets/support/agents/log-analyst/
 
 build-code-analyst:
-    podman build -t localhost/vlinder-code-analyst:latest fleets/support/agents/code-analyst/
+    podman build -t localhost/code-analyst:latest fleets/support/agents/code-analyst/
 
 # Build all support fleet container images
 build-support-fleet: build-support-agent build-log-analyst build-code-analyst
@@ -75,13 +75,13 @@ build-council-orchestrator:
     podman build -t localhost/council-orchestrator:latest fleets/council/agents/council-orchestrator/
 
 build-sales-advisor:
-    podman build -t localhost/council-sales-advisor:latest fleets/council/agents/sales-advisor/
+    podman build -t localhost/sales-advisor:latest fleets/council/agents/sales-advisor/
 
 build-product-advisor:
-    podman build -t localhost/council-product-advisor:latest fleets/council/agents/product-advisor/
+    podman build -t localhost/product-advisor:latest fleets/council/agents/product-advisor/
 
 build-architect-advisor:
-    podman build -t localhost/council-architect-advisor:latest fleets/council/agents/architect-advisor/
+    podman build -t localhost/architect-advisor:latest fleets/council/agents/architect-advisor/
 
 # Build all council fleet container images
 build-council-fleet: build-council-orchestrator build-sales-advisor build-product-advisor build-architect-advisor
