@@ -1,14 +1,20 @@
 //! SQLite-kv provider — declares the hostname and routes
 //! for the sqlite-backed KV (object) storage backend.
 
+#[cfg(feature = "worker")]
 pub mod state_store;
+#[cfg(feature = "worker")]
 mod storage;
 mod types;
+#[cfg(feature = "worker")]
 mod worker;
 
+#[cfg(feature = "worker")]
 pub use state_store::SqliteStateStore;
+#[cfg(feature = "worker")]
 pub use storage::SqliteObjectStorage;
 pub use types::{KvDeleteRequest, KvGetRequest, KvListRequest, KvPutRequest};
+#[cfg(feature = "worker")]
 pub use worker::KvWorker;
 
 use vlinder_core::domain::{

@@ -19,7 +19,7 @@ vlinder-sql-state = { path = "../vlinder-sql-state", default-features = false, f
 vlinder-ollama = { path = "../vlinder-ollama", optional = true, default-features = false, features = ["routing"] }
 vlinder-infer-openrouter = { path = "../vlinder-infer-openrouter", optional = true, default-features = false, features = ["routing"] }
 vlinder-sqlite-vec = { path = "../vlinder-sqlite-vec", optional = true }
-vlinder-sqlite-kv = { path = "../vlinder-sqlite-kv", optional = true }
+vlinder-sqlite-kv = { path = "../vlinder-sqlite-kv", optional = true, default-features = false, features = ["routing"] }
 serde_json = "1"
 tracing = "0.1"
 tiny_http = "0.12"
