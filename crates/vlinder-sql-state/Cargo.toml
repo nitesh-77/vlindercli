@@ -7,7 +7,7 @@ publish = false
 [features]
 default = ["client", "server"]
 client = []
-server = ["dep:rusqlite", "dep:tiny_http"]
+server = ["dep:rusqlite", "dep:tiny_http", "tonic/server", "tonic/router"]
 
 [dependencies]
 vlinder-core = { path = "../vlinder-core" }
@@ -15,7 +15,7 @@ tiny_http = { version = "0.12", optional = true }
 tracing = "0.1"
 rusqlite = { version = "0.32", features = ["bundled"], optional = true }
 chrono = { version = "0.4", features = ["serde"] }
-tonic = "0.12"
+tonic = { version = "0.12", default-features = false, features = ["channel", "codegen", "prost", "transport"] }
 prost = "0.13"
 tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
 
