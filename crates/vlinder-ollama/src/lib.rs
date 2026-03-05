@@ -12,16 +12,20 @@
 //! Embedding:
 //! - `/api/embed` — Ollama native embed (Operation::Run)
 
+#[cfg(feature = "worker")]
 mod catalog;
 mod types;
+#[cfg(feature = "worker")]
 mod worker;
 
+#[cfg(feature = "worker")]
 pub use catalog::OllamaCatalog;
 
 pub use types::{
     OllamaChatRequest, OllamaChatResponse, OllamaEmbedRequest, OllamaEmbedResponse,
     OllamaGenerateRequest, OllamaGenerateResponse,
 };
+#[cfg(feature = "worker")]
 pub use worker::OllamaWorker;
 
 use async_openai::types::chat::{CreateChatCompletionRequest, CreateChatCompletionResponse};
