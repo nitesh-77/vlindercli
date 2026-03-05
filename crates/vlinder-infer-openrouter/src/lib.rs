@@ -2,10 +2,14 @@
 //! for the OpenRouter inference backend, and the worker that
 //! processes inference requests.
 
+#[cfg(feature = "worker")]
 mod catalog;
+#[cfg(feature = "worker")]
 mod worker;
 
+#[cfg(feature = "worker")]
 pub use catalog::OpenRouterCatalog;
+#[cfg(feature = "worker")]
 pub use worker::OpenRouterWorker;
 
 use async_openai::types::chat::{CreateChatCompletionRequest, CreateChatCompletionResponse};
