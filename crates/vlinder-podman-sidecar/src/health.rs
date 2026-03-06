@@ -6,10 +6,14 @@
 
 use std::time::{Duration, Instant};
 
-use vlinder_core::domain::{HealthSnapshot, HealthWindow};
+use vlinder_core::domain::{
+    ContainerId, HealthSnapshot, HealthWindow, ImageDigest, ImageRef, RuntimeDiagnostics,
+    RuntimeInfo,
+};
 
 /// Check the agent's health endpoint once and record the observation.
-pub fn check_once(client: &ureq::Agent, url: &str, health: &mut HealthWindow) -> Option<u16> {
+pub fn check_once(url: &str, health: &mut HealthWindow) -> Option<u16> {
+    let client = ureq::Agent::new();
     let check_start = Instant::now();
     let timestamp_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -35,12 +39,40 @@ pub fn check_once(client: &ureq::Agent, url: &str, health: &mut HealthWindow) ->
     }
 }
 
+/// Build runtime diagnostics for a completed invocation.
+///
+/// Performs a health check at completion time and includes the snapshot
+/// in the diagnostics.
+pub fn build_diagnostics(
+    health: &mut HealthWindow,
+    port: u16,
+    duration_ms: u64,
+    container_id: &ContainerId,
+    image_ref: &Option<ImageRef>,
+    image_digest: &Option<ImageDigest>,
+) -> RuntimeDiagnostics {
+    let url = format!("http://127.0.0.1:{}/health", port);
+    check_once(&url, health);
+    let snapshot = health.latest().cloned();
+
+    RuntimeDiagnostics {
+        stderr: Vec::new(),
+        runtime: RuntimeInfo::Container {
+            engine_version: "sidecar".to_string(),
+            image_ref: image_ref.clone(),
+            image_digest: image_digest.clone(),
+            container_id: container_id.clone(),
+        },
+        duration_ms,
+        health: snapshot,
+    }
+}
+
 /// Poll the agent's health endpoint until it returns 200 or the deadline passes.
 ///
 /// Every poll attempt is recorded as a HealthSnapshot — including
 /// failures before the container is ready.
 pub fn wait_for_ready(
-    client: &ureq::Agent,
     health: &mut HealthWindow,
     port: u16,
     agent_name: &str,
@@ -63,7 +95,7 @@ pub fn wait_for_ready(
             ));
         }
 
-        if check_once(client, &url, health).is_some() {
+        if check_once(&url, health).is_some() {
             tracing::info!(
                 event = "sidecar.agent_ready",
                 agent = %agent_name,

@@ -5,6 +5,7 @@
 //! agent container to be healthy, then enters the dispatch loop.
 
 mod config;
+mod dispatch;
 mod health;
 mod sidecar;
 
