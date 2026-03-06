@@ -877,6 +877,7 @@ mod tests {
                     container_id: ContainerId::new("abc123"),
                 },
                 duration_ms: 2300,
+                health: None,
             },
         );
         let msg = ObservableMessage::Complete(msg_inner);

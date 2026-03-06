@@ -139,6 +139,10 @@ pub struct RuntimeDiagnostics {
     pub runtime: RuntimeInfo,
     /// Wall-clock execution time in milliseconds.
     pub duration_ms: u64,
+    /// Health observation at completion time.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub health: Option<HealthSnapshot>,
 }
 
 /// Runtime-specific metadata — populated entirely by the platform.
@@ -178,7 +182,83 @@ impl RuntimeDiagnostics {
                 container_id: ContainerId::unknown(),
             },
             duration_ms,
+            health: None,
         }
+    }
+}
+
+// ============================================================================
+// HealthSnapshot / HealthWindow — Agent container health
+// ============================================================================
+
+/// A single health check observation.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct HealthSnapshot {
+    /// Unix timestamp in milliseconds when the check was performed.
+    pub timestamp_ms: u64,
+    /// Round-trip latency of the health check in milliseconds.
+    pub latency_ms: u64,
+    /// HTTP status code returned (0 if connection failed).
+    pub status_code: u16,
+}
+
+/// Sliding window of health snapshots, evicted by age.
+pub struct HealthWindow {
+    snapshots: std::collections::VecDeque<HealthSnapshot>,
+    /// Maximum age in milliseconds — snapshots older than this are evicted.
+    max_age_ms: u64,
+}
+
+impl HealthWindow {
+    /// Create a new window with the given maximum age.
+    pub fn new(max_age_ms: u64) -> Self {
+        Self {
+            snapshots: std::collections::VecDeque::new(),
+            max_age_ms,
+        }
+    }
+
+    /// Push a snapshot and evict any that are older than the window.
+    pub fn push(&mut self, snapshot: HealthSnapshot) {
+        let cutoff = snapshot.timestamp_ms.saturating_sub(self.max_age_ms);
+        while self
+            .snapshots
+            .front()
+            .map(|s| s.timestamp_ms < cutoff)
+            .unwrap_or(false)
+        {
+            self.snapshots.pop_front();
+        }
+        self.snapshots.push_back(snapshot);
+    }
+
+    /// Return all snapshots with timestamp >= `since_ms`.
+    pub fn since(&self, since_ms: u64) -> Vec<HealthSnapshot> {
+        self.snapshots
+            .iter()
+            .filter(|s| s.timestamp_ms >= since_ms)
+            .cloned()
+            .collect()
+    }
+
+    /// Whether the most recent snapshot indicates a healthy agent.
+    pub fn is_healthy(&self) -> bool {
+        self.latest().map(|s| s.status_code == 200).unwrap_or(false)
+    }
+
+    /// Number of snapshots currently in the window.
+    pub fn len(&self) -> usize {
+        self.snapshots.len()
+    }
+
+    /// Whether the window is empty.
+    pub fn is_empty(&self) -> bool {
+        self.snapshots.is_empty()
+    }
+
+    /// The most recent snapshot, if any.
+    pub fn latest(&self) -> Option<&HealthSnapshot> {
+        self.snapshots.back()
     }
 }
 
@@ -324,6 +404,7 @@ mod tests {
                 container_id: ContainerId::new("def456"),
             },
             duration_ms: 2300,
+            health: None,
         };
         let json = serde_json::to_string(&diag).unwrap();
         assert!(!json.contains("stderr"), "stderr should not appear in JSON");
@@ -348,6 +429,7 @@ mod tests {
                 container_id: ContainerId::new("abc123def456"),
             },
             duration_ms: 2300,
+            health: None,
         };
         let toml_str = toml::to_string_pretty(&diag).unwrap();
         assert!(
@@ -405,11 +487,93 @@ mod tests {
                 region: "us-east-1".to_string(),
             },
             duration_ms: 450,
+            health: None,
         };
         let json = serde_json::to_string(&diag).unwrap();
         let back: RuntimeDiagnostics = serde_json::from_str(&json).unwrap();
         assert_eq!(back.runtime, diag.runtime);
         assert_eq!(back.duration_ms, 450);
+    }
+
+    #[test]
+    fn health_window_push_and_evict() {
+        let mut w = HealthWindow::new(1000); // 1 second window
+        w.push(HealthSnapshot {
+            timestamp_ms: 100,
+            latency_ms: 5,
+            status_code: 200,
+        });
+        w.push(HealthSnapshot {
+            timestamp_ms: 500,
+            latency_ms: 3,
+            status_code: 200,
+        });
+        assert_eq!(w.len(), 2);
+
+        // Push one at 1200 — the first (100) is now older than 1000ms window
+        w.push(HealthSnapshot {
+            timestamp_ms: 1200,
+            latency_ms: 4,
+            status_code: 200,
+        });
+        assert_eq!(w.len(), 2); // 100 evicted, 500 and 1200 remain
+    }
+
+    #[test]
+    fn health_window_since() {
+        let mut w = HealthWindow::new(10000);
+        w.push(HealthSnapshot {
+            timestamp_ms: 100,
+            latency_ms: 5,
+            status_code: 200,
+        });
+        w.push(HealthSnapshot {
+            timestamp_ms: 200,
+            latency_ms: 3,
+            status_code: 200,
+        });
+        w.push(HealthSnapshot {
+            timestamp_ms: 300,
+            latency_ms: 4,
+            status_code: 500,
+        });
+
+        let slice = w.since(200);
+        assert_eq!(slice.len(), 2);
+        assert_eq!(slice[0].timestamp_ms, 200);
+        assert_eq!(slice[1].timestamp_ms, 300);
+    }
+
+    #[test]
+    fn health_window_is_healthy() {
+        let mut w = HealthWindow::new(10000);
+        assert!(!w.is_healthy()); // empty
+
+        w.push(HealthSnapshot {
+            timestamp_ms: 100,
+            latency_ms: 5,
+            status_code: 200,
+        });
+        assert!(w.is_healthy());
+
+        w.push(HealthSnapshot {
+            timestamp_ms: 200,
+            latency_ms: 5,
+            status_code: 0,
+        });
+        assert!(!w.is_healthy()); // connection failed
+    }
+
+    #[test]
+    fn health_snapshot_json_round_trip() {
+        let snap = HealthSnapshot {
+            timestamp_ms: 1700000000000,
+            latency_ms: 12,
+            status_code: 200,
+        };
+        let json = serde_json::to_string(&snap).unwrap();
+        let back: HealthSnapshot = serde_json::from_str(&json).unwrap();
+        assert_eq!(snap, back);
     }
 
     #[test]
@@ -421,6 +585,7 @@ mod tests {
                 region: "us-east-1".to_string(),
             },
             duration_ms: 450,
+            health: None,
         };
         let toml_str = toml::to_string_pretty(&diag).unwrap();
         let back: RuntimeDiagnostics = toml::from_str(&toml_str).unwrap();

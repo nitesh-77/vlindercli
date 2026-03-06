@@ -27,6 +27,7 @@ pub fn build_lambda_diagnostics(
             region: region.to_string(),
         },
         duration_ms,
+        health: None,
     }
 }
 

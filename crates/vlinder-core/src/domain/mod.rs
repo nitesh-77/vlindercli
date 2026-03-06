@@ -56,8 +56,8 @@ pub use service_type::ServiceType;
 // ============================================================================
 
 pub use diagnostics::{
-    DelegateDiagnostics, InvokeDiagnostics, RequestDiagnostics, RuntimeDiagnostics, RuntimeInfo,
-    ServiceDiagnostics, ServiceMetrics,
+    DelegateDiagnostics, HealthSnapshot, HealthWindow, InvokeDiagnostics, RequestDiagnostics,
+    RuntimeDiagnostics, RuntimeInfo, ServiceDiagnostics, ServiceMetrics,
 };
 pub use message::{
     CompleteMessage, DelegateMessage, ExpectsReply, HarnessType, InvokeMessage, MessageId,

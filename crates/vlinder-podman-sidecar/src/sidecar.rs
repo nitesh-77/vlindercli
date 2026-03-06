@@ -9,15 +9,16 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use vlinder_core::domain::{
-    AgentId, CompleteMessage, ContainerId, ExpectsReply, HarnessType, ImageDigest, ImageRef,
-    InvokeDiagnostics, InvokeMessage, MessageQueue, Registry, RoutingKey, RuntimeDiagnostics,
-    RuntimeInfo, RuntimeType,
+    AgentId, CompleteMessage, ContainerId, ExpectsReply, HarnessType, HealthWindow, ImageDigest,
+    ImageRef, InvokeDiagnostics, InvokeMessage, MessageQueue, Registry, RoutingKey,
+    RuntimeDiagnostics, RuntimeInfo, RuntimeType,
 };
 
 use vlinder_provider_server::factory;
 use vlinder_provider_server::provider_server::{build_hosts, ProviderServer};
 
 use crate::config::SidecarConfig;
+use crate::health;
 
 /// The sidecar process — mediates between the platform queue and the agent container.
 pub struct Sidecar {
@@ -35,6 +36,8 @@ pub struct Sidecar {
     container_id: ContainerId,
     /// A sync HTTP client for communicating with the agent container.
     http_client: ureq::Agent,
+    /// Sliding window of agent health observations.
+    health: HealthWindow,
 }
 
 impl Sidecar {
@@ -72,6 +75,7 @@ impl Sidecar {
             image_digest,
             container_id,
             http_client: ureq::Agent::new(),
+            health: HealthWindow::new(60_000), // 60 second window
         })
     }
 
@@ -173,46 +177,15 @@ impl Sidecar {
         }
     }
 
-    /// Wait for the agent container to become ready.
-    fn wait_for_agent(&self) -> Result<(), String> {
-        let url = format!("http://127.0.0.1:{}/health", self.container_port);
-        let deadline = Instant::now() + Duration::from_secs(60);
-
-        tracing::info!(
-            event = "sidecar.waiting",
-            agent = %self.agent_name,
-            port = self.container_port,
-            "Waiting for agent container to become ready"
-        );
-
-        loop {
-            if Instant::now() > deadline {
-                return Err(format!(
-                    "agent container did not become ready within 60 seconds (port {})",
-                    self.container_port
-                ));
-            }
-
-            match self.http_client.get(&url).call() {
-                Ok(_) => {
-                    tracing::info!(
-                        event = "sidecar.agent_ready",
-                        agent = %self.agent_name,
-                        "Agent container is ready"
-                    );
-                    return Ok(());
-                }
-                _ => {
-                    std::thread::sleep(Duration::from_millis(100));
-                }
-            }
-        }
-    }
-
     /// Main loop: wait for agent, then poll invoke/delegate queues until container death.
-    pub fn run(self) -> Result<(), Box<dyn std::error::Error>> {
-        self.wait_for_agent()
-            .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
+    pub fn run(mut self) -> Result<(), Box<dyn std::error::Error>> {
+        health::wait_for_ready(
+            &self.http_client,
+            &mut self.health,
+            self.container_port,
+            &self.agent_name,
+        )
+        .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
 
         tracing::info!(event = "sidecar.started", agent = %self.agent_name, "Sidecar loop started");
 
