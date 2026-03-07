@@ -8,9 +8,7 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use tiny_http::{Method, StatusCode};
-use vlinder_core::domain::{
-    HttpMethod, InvokeMessage, MessageQueue, ProviderHost, ProviderRoute, Registry,
-};
+use vlinder_core::domain::{HttpMethod, ProviderHost, ProviderRoute};
 
 use crate::handler::InvokeHandler;
 
@@ -30,12 +28,14 @@ pub struct ProviderServer {
 
 impl ProviderServer {
     /// Start the provider server on the given port.
+    ///
+    /// The caller constructs the `InvokeHandler` and the shared state `Arc`.
+    /// The provider server only does HTTP plumbing — it never touches the
+    /// queue, registry, or invoke message directly.
     pub fn start(
-        invoke: &InvokeMessage,
+        handler: InvokeHandler,
         hosts: Vec<ProviderHost>,
-        queue: Arc<dyn MessageQueue + Send + Sync>,
-        registry: Arc<dyn Registry>,
-        initial_state: Option<String>,
+        state: Arc<RwLock<Option<String>>>,
         port: u16,
     ) -> Self {
         let bind = format!("0.0.0.0:{}", port);
@@ -56,9 +56,6 @@ impl ProviderServer {
             .collect();
 
         let runtime_host = format!("runtime.vlinder.local:{}", port);
-
-        let state = Arc::new(RwLock::new(initial_state));
-        let handler = InvokeHandler::new(queue, registry, invoke.clone(), Arc::clone(&state));
 
         let shutdown_signal = Arc::new(AtomicBool::new(false));
         let should_stop = Arc::clone(&shutdown_signal);
@@ -112,11 +109,13 @@ fn request_loop(
                 let mut body = Vec::new();
                 let _ = request.as_reader().read_to_end(&mut body);
 
+                let checkpoint = extract_checkpoint(&request);
+
                 let (status, response_body) = if host == runtime_host {
                     handler.handle_runtime(&method.to_string(), &path, &body)
                 } else {
                     match match_route(&hosts, &method, &host, &path, &body) {
-                        Ok(route) => handler.forward_provider(route, body),
+                        Ok(route) => handler.forward_provider(route, body, checkpoint),
                         Err(err) => err,
                     }
                 };
@@ -146,6 +145,20 @@ fn extract_host(request: &tiny_http::Request) -> &str {
         .find(|h| h.field.as_str().as_str().eq_ignore_ascii_case("host"))
         .map(|h| h.value.as_str())
         .unwrap_or("")
+}
+
+/// Extract the X-Vlinder-Checkpoint header value, if present.
+fn extract_checkpoint(request: &tiny_http::Request) -> Option<String> {
+    request
+        .headers()
+        .iter()
+        .find(|h| {
+            h.field
+                .as_str()
+                .as_str()
+                .eq_ignore_ascii_case("x-vlinder-checkpoint")
+        })
+        .map(|h| h.value.as_str().to_string())
 }
 
 /// Match a request against the virtual host table (pure routing).

@@ -44,7 +44,12 @@ impl InvokeHandler {
     }
 
     /// Forward a matched provider request to the message queue.
-    pub fn forward_provider(&self, route: &ProviderRoute, body: Vec<u8>) -> (u16, Vec<u8>) {
+    pub fn forward_provider(
+        &self,
+        route: &ProviderRoute,
+        body: Vec<u8>,
+        checkpoint: Option<String>,
+    ) -> (u16, Vec<u8>) {
         let seq = self.sequence.next();
         let received_at_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -58,7 +63,7 @@ impl InvokeHandler {
             received_at_ms,
         };
 
-        let request = RequestMessage::new(
+        let mut request = RequestMessage::new(
             self.invoke.timeline.clone(),
             self.invoke.submission.clone(),
             self.invoke.session.clone(),
@@ -70,6 +75,7 @@ impl InvokeHandler {
             self.state.read().unwrap().clone(),
             diagnostics,
         );
+        request.checkpoint = checkpoint;
 
         match self.queue.call_service(request) {
             Ok(response) => {

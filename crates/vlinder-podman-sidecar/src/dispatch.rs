@@ -13,6 +13,7 @@ use vlinder_core::domain::{
     MessageQueue, Registry, RoutingKey,
 };
 
+use vlinder_provider_server::handler::InvokeHandler;
 use vlinder_provider_server::hosts::build_hosts;
 use vlinder_provider_server::provider_server::ProviderServer;
 
@@ -51,14 +52,14 @@ pub fn handle_invoke(
     };
 
     // Spawn provider server for this invoke — drops when this function returns.
-    let provider_server = ProviderServer::start(
-        invoke,
-        hosts,
+    let state = std::sync::Arc::new(std::sync::RwLock::new(initial_state));
+    let handler = InvokeHandler::new(
         ctx.queue.clone(),
         ctx.registry.clone(),
-        initial_state,
-        3544,
+        invoke.clone(),
+        std::sync::Arc::clone(&state),
     );
+    let provider_server = ProviderServer::start(handler, hosts, state, 3544);
 
     let client = ureq::Agent::new();
     let agent_url = format!("http://127.0.0.1:{}/invoke", ctx.container_port);
