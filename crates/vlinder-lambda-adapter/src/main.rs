@@ -26,7 +26,8 @@ use std::time::{Duration, Instant};
 use vlinder_core::domain::{MessageQueue, Registry};
 
 use vlinder_provider_server::factory;
-use vlinder_provider_server::provider_server::{build_hosts, ProviderServer};
+use vlinder_provider_server::hosts::build_hosts;
+use vlinder_provider_server::provider_server::ProviderServer;
 
 use adapter::{build_complete, build_error_body, build_lambda_diagnostics, deserialize_invoke};
 use config::AdapterConfig;

@@ -13,7 +13,8 @@ use vlinder_core::domain::{
     MessageQueue, Registry, RoutingKey,
 };
 
-use vlinder_provider_server::provider_server::{build_hosts, ProviderServer};
+use vlinder_provider_server::hosts::build_hosts;
+use vlinder_provider_server::provider_server::ProviderServer;
 
 use crate::health;
 
