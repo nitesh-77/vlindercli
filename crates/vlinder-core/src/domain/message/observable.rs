@@ -66,6 +66,7 @@ pub enum ObservableMessageHeaders {
         sequence: Sequence,
         state: Option<String>,
         diagnostics: RequestDiagnostics,
+        checkpoint: Option<String>,
     },
     Response {
         id: MessageId,
@@ -147,6 +148,7 @@ impl ObservableMessageHeaders {
                 sequence,
                 state,
                 diagnostics,
+                checkpoint,
             } => ObservableMessage::Request(RequestMessage {
                 id,
                 protocol_version,
@@ -160,6 +162,7 @@ impl ObservableMessageHeaders {
                 payload,
                 state,
                 diagnostics,
+                checkpoint,
             }),
             Self::Response {
                 id,

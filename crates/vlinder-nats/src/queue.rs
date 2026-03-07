@@ -459,6 +459,7 @@ impl MessageQueue for NatsQueue {
                 payload: js_msg.payload.to_vec(),
                 state: get_header(headers, "state").ok(),
                 diagnostics,
+                checkpoint: get_header(headers, "checkpoint").ok(),
             };
 
             Ok((msg, ack_fn))
@@ -908,6 +909,9 @@ pub fn request_to_nats_headers(msg: &RequestMessage) -> HashMap<String, String> 
     if let Ok(diag_json) = serde_json::to_string(&msg.diagnostics) {
         h.insert("diagnostics".to_string(), diag_json);
     }
+    if let Some(ref checkpoint) = msg.checkpoint {
+        h.insert("checkpoint".to_string(), checkpoint.clone());
+    }
     h
 }
 
@@ -1039,6 +1043,7 @@ pub fn from_nats_headers(
                 sequence: *sequence,
                 state,
                 diagnostics,
+                checkpoint: headers.get("checkpoint").cloned(),
             })
         }
         RoutingKey::Response {
