@@ -36,8 +36,8 @@ agent's state was on the call stack.
 ### Durable mode (opt-in via SDK)
 
 Same event-driven model as ADR 075 but with one generic primitive:
-`ctx.call(url, payload, then=handler)`. The platform drives the loop.
-Each handler ends with one of three actions:
+`ctx.call(url, payload, then=handler)`. Each handler ends with one of
+three actions:
 
 - `ctx.call(url, payload, then=handler)` — HTTP call to a provider,
   platform journals and executes it, calls the named handler with the
@@ -80,6 +80,46 @@ action — the agent uses real provider wire protocols (OpenAI,
 Anthropic, etc.) directly. The `then=` parameter names the callback
 handler, so the platform knows exactly which function to invoke with
 the result.
+
+### Event-driven, not loop-driven
+
+The sidecar already has an event loop that polls for invoke and
+delegate messages. Durable execution does not add a separate
+checkpoint loop. Instead, service responses are a third event type
+in the same loop:
+
+```
+loop {
+    if invoke arrives   → POST /invoke to agent
+    if delegate arrives → handle delegation
+    if response arrives → POST /handle to agent
+    else → sleep
+}
+```
+
+The agent returns a JSON action from `/invoke` or `/handle`. The
+sidecar interprets the action:
+
+- `{"action":"call", ...}` — send a service request to the queue
+  (fire and forget). The response will arrive later as an event.
+- `{"action":"complete", ...}` — build CompleteMessage, send it.
+
+Service requests and responses are decoupled. The sidecar does not
+block waiting for a response (`call_service()`). It sends the request
+and moves on. When the service response arrives on the queue, the
+sidecar picks it up and delivers it to the agent via `/handle`.
+
+This is the same pattern as invoke and delegate — message arrives,
+sidecar acts on it. No special orchestration. No nested loop.
+
+Note: `call_service()` (blocking request-reply) is a convenience
+wrapper on the `MessageQueue` trait — it calls `send_request()` then
+polls `receive_response()` in a loop. The decoupled primitives
+already exist on the trait. The sidecar's durable-mode code path
+calls them separately: `send_request()` to fire the request, then
+`receive_response()` later when processing queue events. No trait
+changes needed. `call_service()` remains unchanged for unmanaged
+mode (used by the provider server's `InvokeHandler`).
 
 ### No ctx.state — use KV
 
@@ -277,8 +317,10 @@ func handleResult(ctx *vlinder.Context) {
 
 - Unmanaged mode is untouched — existing agents keep working
 - Durable mode earns time travel with one generic primitive (`ctx.call`)
-- Same event-driven model as ADR 075 — platform drives the loop,
-  journals between handlers
+- Event-driven — service responses are events in the sidecar's
+  existing event loop, not a separate checkpoint loop
+- Decoupled request/reply — sidecar sends service requests to the
+  queue without blocking, picks up responses when they arrive
 - No pinholed enum variants — `ctx.call()` + `ctx.delegate()` +
   `ctx.complete()` replace all 10 ADR 075 action types
 - Agent code uses real provider wire protocols — not platform

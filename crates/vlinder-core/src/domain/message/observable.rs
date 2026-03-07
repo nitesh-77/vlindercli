@@ -82,6 +82,7 @@ pub enum ObservableMessageHeaders {
         state: Option<String>,
         diagnostics: ServiceDiagnostics,
         status_code: u16,
+        checkpoint: Option<String>,
     },
     Complete {
         id: MessageId,
@@ -178,6 +179,7 @@ impl ObservableMessageHeaders {
                 state,
                 diagnostics,
                 status_code,
+                checkpoint,
             } => ObservableMessage::Response(ResponseMessage {
                 id,
                 protocol_version,
@@ -193,6 +195,7 @@ impl ObservableMessageHeaders {
                 state,
                 diagnostics,
                 status_code,
+                checkpoint,
             }),
             Self::Complete {
                 id,

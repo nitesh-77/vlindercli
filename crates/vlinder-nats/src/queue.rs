@@ -314,6 +314,9 @@ impl MessageQueue for NatsQueue {
             if let Ok(diag_json) = serde_json::to_string(&msg.diagnostics) {
                 headers.insert("diagnostics", diag_json.as_str());
             }
+            if let Some(ref checkpoint) = msg.checkpoint {
+                headers.insert("checkpoint", checkpoint.as_str());
+            }
 
             self.inner
                 .jetstream
@@ -523,6 +526,7 @@ impl MessageQueue for NatsQueue {
                 state: get_header(headers, "state").ok(),
                 diagnostics,
                 status_code,
+                checkpoint: get_header(headers, "checkpoint").ok(),
             };
 
             Ok((msg, ack_fn))
@@ -1078,6 +1082,7 @@ pub fn from_nats_headers(
                 state,
                 diagnostics,
                 status_code,
+                checkpoint: headers.get("checkpoint").cloned(),
             })
         }
         RoutingKey::Complete {
