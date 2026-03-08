@@ -554,6 +554,7 @@ mod tests {
                 harness_version: "test".to_string(),
                 history_turns: 0,
             },
+            String::new(),
         );
         queue.send_invoke(invoke).unwrap();
 
@@ -609,6 +610,7 @@ mod tests {
                 harness_version: "test".to_string(),
                 history_turns: 0,
             },
+            String::new(),
         );
         let submission = invoke.submission.clone();
         queue.send_invoke(invoke).unwrap();

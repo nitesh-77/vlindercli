@@ -78,6 +78,15 @@ impl Harness for GrpcHarnessClient {
             .block_on(async { client.set_initial_state(request).await });
     }
 
+    fn set_dag_parent(&mut self, hash: String) {
+        let request = proto::SetDagParentRequest { hash };
+
+        let mut client = self.client.clone();
+        let _ = self
+            .runtime
+            .block_on(async { client.set_dag_parent(request).await });
+    }
+
     fn run_agent(&mut self, agent_id: &ResourceId, input: &str) -> Result<String, String> {
         let request = proto::RunAgentRequest {
             agent_id: agent_id.as_str().to_string(),

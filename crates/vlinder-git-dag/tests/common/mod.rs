@@ -108,6 +108,7 @@ pub fn make_invoke(
             harness_version: "0.1.0".to_string(),
             history_turns: 0,
         },
+        String::new(),
     );
     let created_at = DateTime::from_timestamp(epoch_secs, 0).unwrap();
     (ObservableMessage::Invoke(msg), created_at)

@@ -505,6 +505,7 @@ mod tests {
                 harness_version: "0.1.0".to_string(),
                 history_turns: 3,
             },
+            String::new(),
         );
         let created_at = DateTime::from_timestamp(epoch_secs, 0).unwrap();
         (ObservableMessage::Invoke(msg), created_at)
@@ -932,6 +933,7 @@ mod tests {
                 harness_version: "0.1.0".to_string(),
                 history_turns: 0,
             },
+            String::new(),
         );
         let msg = ObservableMessage::Invoke(invoke);
         let ts = DateTime::from_timestamp(1000, 0).unwrap();
