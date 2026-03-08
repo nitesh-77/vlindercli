@@ -58,15 +58,15 @@ use vlinder_core::domain::workers::dag::build_dag_node;
 use vlinder_core::domain::{DagWorker, ObservableMessage, Registry};
 
 /// DAG worker that writes commits to a git repository.
+///
+/// Stateless per-session: all session state (parent commit, canonical hash)
+/// is read from `refs/sessions/<session_id>` on each message. No in-memory
+/// maps survive across messages or restarts.
 pub struct GitDagWorker {
     repo: Repository,
     registry_host: String,
     /// Registry access for looking up agent/model state at commit time.
     registry: Option<Arc<dyn Registry>>,
-    /// Last git commit OID — for commit chaining.
-    last_commit: Option<Oid>,
-    /// Last canonical hash — for Merkle chain identity (domain-level, not git OID).
-    last_canonical_hash: String,
 }
 
 impl GitDagWorker {
@@ -85,20 +85,83 @@ impl GitDagWorker {
         }
         .map_err(|e| format!("git repo open/init failed: {}", e))?;
 
-        // Read current HEAD for commit chaining (resume after restart)
-        let last_commit = repo
-            .head()
-            .ok()
-            .and_then(|r| r.peel_to_commit().ok())
-            .map(|c| c.id());
+        // Create an empty initial commit on main if the repo is fresh.
+        // This gives `git checkout main` a clean working tree to return to.
+        if repo.head().is_err() {
+            let empty_tree = repo
+                .treebuilder(None)
+                .and_then(|tb| tb.write())
+                .and_then(|oid| repo.find_tree(oid))
+                .map_err(|e| format!("empty tree failed: {}", e))?;
+            let sig = Signature::now("vlinder", "vlinder@localhost")
+                .map_err(|e| format!("signature failed: {}", e))?;
+            repo.commit(
+                Some("refs/heads/main"),
+                &sig,
+                &sig,
+                "Initialize conversations repository",
+                &empty_tree,
+                &[],
+            )
+            .map_err(|e| format!("initial commit failed: {}", e))?;
+        }
 
         Ok(Self {
             repo,
             registry_host: registry_host.to_string(),
             registry,
-            last_commit,
-            last_canonical_hash: String::new(),
         })
+    }
+
+    /// Resolve the session ref to a commit OID. Returns None for a new session.
+    fn session_commit(&self, session_id: &str) -> Option<Oid> {
+        let refname = format!("refs/sessions/{}", session_id);
+        self.repo
+            .find_reference(&refname)
+            .ok()
+            .and_then(|r| r.peel_to_commit().ok())
+            .map(|c| c.id())
+    }
+
+    /// Read the canonical hash from the last commit's tree for a session.
+    /// Returns empty string for a new session (no parent).
+    fn session_canonical_hash(&self, session_id: &str) -> String {
+        let commit_oid = match self.session_commit(session_id) {
+            Some(oid) => oid,
+            None => return String::new(),
+        };
+        let commit = match self.repo.find_commit(commit_oid) {
+            Ok(c) => c,
+            Err(_) => return String::new(),
+        };
+        let tree = match commit.tree() {
+            Ok(t) => t,
+            Err(_) => return String::new(),
+        };
+
+        // Find the most recent message directory (last in sorted order)
+        // and read its hash file.
+        let mut msg_dirs: Vec<String> = Vec::new();
+        for entry in tree.iter() {
+            if let Some(name) = entry.name() {
+                // Message dirs match the timestamp-sender-type pattern
+                if name.contains('-') && entry.kind() == Some(git2::ObjectType::Tree) {
+                    msg_dirs.push(name.to_string());
+                }
+            }
+        }
+        msg_dirs.sort();
+
+        if let Some(last_dir) = msg_dirs.last() {
+            let path = format!("{}/hash", last_dir);
+            if let Ok(entry) = tree.get_path(std::path::Path::new(&path)) {
+                if let Ok(blob) = self.repo.find_blob(entry.id()) {
+                    return String::from_utf8_lossy(blob.content()).to_string();
+                }
+            }
+        }
+
+        String::new()
     }
 
     /// Build a subtree for a single message — one file per field (ADR 078).
@@ -207,6 +270,7 @@ impl GitDagWorker {
 
     /// Build the accumulated tree: all previous message directories + new one + metadata.
     /// Returns (tree OID, canonical hash) for the new message.
+    #[allow(clippy::too_many_arguments)]
     fn build_accumulated_tree(
         &self,
         msg: &ObservableMessage,
@@ -214,10 +278,11 @@ impl GitDagWorker {
         from: &str,
         _to: &str,
         msg_type: &str,
+        parent_commit: Option<Oid>,
+        canonical_parent: &str,
     ) -> Result<(Oid, String), String> {
         // Start from the parent commit's tree (if any)
-        let parent_tree = self
-            .last_commit
+        let parent_tree = parent_commit
             .and_then(|oid| self.repo.find_commit(oid).ok())
             .and_then(|c| c.tree().ok());
 
@@ -233,7 +298,7 @@ impl GitDagWorker {
 
         // Add new message directory
         let (msg_tree, canonical_hash) =
-            self.build_message_subtree(msg, created_at, &self.last_canonical_hash)?;
+            self.build_message_subtree(msg, created_at, canonical_parent)?;
         let msg_dir = format!(
             "{}-{}-{}",
             created_at.format("%Y%m%d-%H%M%S%.3f"),
@@ -345,17 +410,29 @@ impl GitDagWorker {
 impl DagWorker for GitDagWorker {
     fn on_observable_message(&mut self, msg: &ObservableMessage, created_at: DateTime<Utc>) {
         let result = (|| -> Result<(), String> {
+            let session_id = msg.session().as_str().to_string();
             let (from, to, msg_type) = message_routing(msg);
 
-            // 1. Build accumulated tree (all previous messages + new one)
-            let (tree_oid, canonical_hash) =
-                self.build_accumulated_tree(msg, created_at, &from, &to, msg_type)?;
+            // 1. Resolve session state from refs (stateless — no in-memory maps)
+            let parent_commit_oid = self.session_commit(&session_id);
+            let canonical_parent = self.session_canonical_hash(&session_id);
+
+            // 2. Build accumulated tree (session's previous messages + new one)
+            let (tree_oid, _canonical_hash) = self.build_accumulated_tree(
+                msg,
+                created_at,
+                &from,
+                &to,
+                msg_type,
+                parent_commit_oid,
+                &canonical_parent,
+            )?;
             let tree = self
                 .repo
                 .find_tree(tree_oid)
                 .map_err(|e| format!("find tree failed: {}", e))?;
 
-            // 2. Build commit message with trailers for filtering
+            // 3. Build commit message with trailers for filtering
             let mut message = format!(
                 "{}: {} \u{2192} {}\n\nSession: {}\nSubmission: {}",
                 msg_type,
@@ -372,7 +449,7 @@ impl DagWorker for GitDagWorker {
                 message.push_str(&format!("\nProtocol-Version: {}", pv));
             }
 
-            // 3. Author = message sender (ADR 069), committer = platform
+            // 4. Author = message sender (ADR 069), committer = platform
             let author_email = format!("{}@{}", from, self.registry_host);
             let timestamp = git2::Time::new(created_at.timestamp(), 0);
             let author = Signature::new(&from, &author_email, &timestamp)
@@ -380,60 +457,33 @@ impl DagWorker for GitDagWorker {
             let committer = Signature::new("vlinder", "vlinder@localhost", &timestamp)
                 .map_err(|e| format!("committer signature failed: {}", e))?;
 
-            // 4. Parent is the previous commit (chronological order)
-            let parent_commit = self
-                .last_commit
-                .and_then(|oid| self.repo.find_commit(oid).ok());
+            // 5. Parent: session's last commit, or orphan for new session
+            let parent_commit = parent_commit_oid.and_then(|oid| self.repo.find_commit(oid).ok());
             let parents: Vec<&git2::Commit> = parent_commit.iter().collect();
 
             tracing::debug!(
                 msg_type,
                 from = from.as_str(),
                 to = to.as_str(),
-                last_commit = ?self.last_commit,
-                session = %msg.session(),
+                session = %session_id,
+                parent = ?parent_commit_oid,
                 "Committing message",
             );
 
-            // 5. Create commit object (no ref update — we own the chain)
+            // 6. Create commit object
             let commit_oid = self
                 .repo
                 .commit(None, &author, &committer, &message, &tree, &parents)
                 .map_err(|e| format!("commit failed: {}", e))?;
 
-            // 6. Advance HEAD — matches `git update-ref HEAD <hash>`:
-            //    - HEAD attached (normal): advances the branch it points to
-            //    - HEAD detached (time-travel): advances detached HEAD only,
-            //      leaving the branch untouched
+            // 7. Update session ref (HEAD stays on main — working tree untouched)
+            let refname = format!("refs/sessions/{}", session_id);
             let reflog_msg = format!("{}: {} → {}", msg_type, from, to);
-            if self.repo.head_detached().unwrap_or(false) {
-                self.repo
-                    .set_head_detached(commit_oid)
-                    .map_err(|e| format!("set_head_detached failed: {}", e))?;
-            } else {
-                let branch = self
-                    .repo
-                    .find_reference("HEAD")
-                    .ok()
-                    .and_then(|r| r.symbolic_target().map(|s| s.to_string()))
-                    .unwrap_or_else(|| "refs/heads/main".to_string());
-                self.repo
-                    .reference(&branch, commit_oid, true, &reflog_msg)
-                    .map_err(|e| format!("ref update failed: {}", e))?;
-            }
-
-            // 7. Sync working tree so files are visible in the directory
-            let mut checkout = git2::build::CheckoutBuilder::new();
-            checkout.force();
             self.repo
-                .checkout_head(Some(&mut checkout))
-                .map_err(|e| format!("checkout failed: {}", e))?;
+                .reference(&refname, commit_oid, true, &reflog_msg)
+                .map_err(|e| format!("session ref update failed: {}", e))?;
 
-            // 8. Track last commit and canonical hash
-            self.last_commit = Some(commit_oid);
-            self.last_canonical_hash = canonical_hash;
-
-            tracing::debug!(commit = %commit_oid, "Commit succeeded");
+            tracing::debug!(commit = %commit_oid, session = %session_id, "Commit succeeded");
 
             Ok(())
         })();
@@ -659,6 +709,9 @@ mod tests {
         (worker, tmp, registry)
     }
 
+    /// Session ref for the default test session (sess-1).
+    const SESS1_REF: &str = "refs/sessions/sess-1";
+
     /// Run a git command against the test repo. Tests still use the CLI to
     /// verify that git2-written objects are readable by standard git.
     fn git(repo_path: &Path, args: &[&str]) -> Result<String, String> {
@@ -699,7 +752,11 @@ mod tests {
 
         worker.on_observable_message(&msg, ts);
 
-        let sha = git(tmp.path(), &["rev-parse", "--verify", "main"]).unwrap();
+        let sha = git(
+            tmp.path(),
+            &["rev-parse", "--verify", "refs/sessions/sess-1"],
+        )
+        .unwrap();
         assert_eq!(sha.len(), 40);
         assert!(sha.chars().all(|c| c.is_ascii_hexdigit()));
     }
@@ -711,7 +768,7 @@ mod tests {
 
         worker.on_observable_message(&msg, ts);
 
-        let subject = git(tmp.path(), &["log", "-1", "--format=%s", "main"]).unwrap();
+        let subject = git(tmp.path(), &["log", "-1", "--format=%s", SESS1_REF]).unwrap();
         assert_eq!(subject, "invoke: cli \u{2192} support-agent");
     }
 
@@ -722,7 +779,7 @@ mod tests {
 
         worker.on_observable_message(&msg, ts);
 
-        let body = git(tmp.path(), &["log", "-1", "--format=%b", "main"]).unwrap();
+        let body = git(tmp.path(), &["log", "-1", "--format=%b", SESS1_REF]).unwrap();
         assert!(body.contains("Session: sess-1"), "body: {}", body);
         assert!(body.contains("Submission: sub-1"), "body: {}", body);
     }
@@ -753,7 +810,7 @@ mod tests {
                 "log",
                 "-1",
                 "--format=%(trailers:key=Session,valueonly)",
-                "main",
+                SESS1_REF,
             ],
         )
         .unwrap();
@@ -763,7 +820,7 @@ mod tests {
                 "log",
                 "-1",
                 "--format=%(trailers:key=Submission,valueonly)",
-                "main",
+                SESS1_REF,
             ],
         )
         .unwrap();
@@ -773,7 +830,7 @@ mod tests {
                 "log",
                 "-1",
                 "--format=%(trailers:key=State,valueonly)",
-                "main",
+                SESS1_REF,
             ],
         )
         .unwrap();
@@ -790,7 +847,7 @@ mod tests {
 
         worker.on_observable_message(&msg, ts);
 
-        let author = git(tmp.path(), &["log", "-1", "--format=%an <%ae>", "main"]).unwrap();
+        let author = git(tmp.path(), &["log", "-1", "--format=%an <%ae>", SESS1_REF]).unwrap();
         assert_eq!(author, "cli <cli@registry.local:9000>");
     }
 
@@ -801,7 +858,7 @@ mod tests {
 
         worker.on_observable_message(&msg, ts);
 
-        let committer = git(tmp.path(), &["log", "-1", "--format=%cn <%ce>", "main"]).unwrap();
+        let committer = git(tmp.path(), &["log", "-1", "--format=%cn <%ce>", SESS1_REF]).unwrap();
         assert_eq!(committer, "vlinder <vlinder@localhost>");
     }
 
@@ -812,7 +869,7 @@ mod tests {
 
         worker.on_observable_message(&msg, ts);
 
-        let date = git(tmp.path(), &["log", "-1", "--format=%at", "main"]).unwrap();
+        let date = git(tmp.path(), &["log", "-1", "--format=%at", SESS1_REF]).unwrap();
         assert_eq!(date, "1700000000");
     }
 
@@ -826,7 +883,12 @@ mod tests {
         worker.on_observable_message(&msg, ts);
 
         let dir = "19700101-001640.000-cli-invoke";
-        let show = |field: &str| git(tmp.path(), &["show", &format!("main:{}/{}", dir, field)]);
+        let show = |field: &str| {
+            git(
+                tmp.path(),
+                &["show", &format!("{}:{}/{}", SESS1_REF, dir, field)],
+            )
+        };
 
         assert_eq!(show("type").unwrap(), "invoke");
         assert_eq!(show("session_id").unwrap(), "sess-1");
@@ -850,7 +912,12 @@ mod tests {
         worker.on_observable_message(&msg, ts);
 
         let dir = "19700101-001641.000-support-agent-request";
-        let show = |field: &str| git(tmp.path(), &["show", &format!("main:{}/{}", dir, field)]);
+        let show = |field: &str| {
+            git(
+                tmp.path(),
+                &["show", &format!("{}:{}/{}", SESS1_REF, dir, field)],
+            )
+        };
 
         assert_eq!(show("type").unwrap(), "request");
         assert_eq!(show("service").unwrap(), "infer");
@@ -868,7 +935,12 @@ mod tests {
         worker.on_observable_message(&msg, ts);
 
         let dir = "19700101-001642.000-infer.ollama-response";
-        let show = |field: &str| git(tmp.path(), &["show", &format!("main:{}/{}", dir, field)]);
+        let show = |field: &str| {
+            git(
+                tmp.path(),
+                &["show", &format!("{}:{}/{}", SESS1_REF, dir, field)],
+            )
+        };
 
         assert_eq!(show("type").unwrap(), "response");
         assert!(show("correlation_id").is_ok(), "should have correlation_id");
@@ -906,7 +978,12 @@ mod tests {
         worker.on_observable_message(&msg, ts);
 
         let dir = "19700101-001643.000-support-agent-complete";
-        let show = |field: &str| git(tmp.path(), &["show", &format!("main:{}/{}", dir, field)]);
+        let show = |field: &str| {
+            git(
+                tmp.path(),
+                &["show", &format!("{}:{}/{}", SESS1_REF, dir, field)],
+            )
+        };
 
         assert_eq!(show("type").unwrap(), "complete");
         assert_eq!(show("harness").unwrap(), "cli");
@@ -928,7 +1005,12 @@ mod tests {
         worker.on_observable_message(&msg, ts);
 
         let dir = "19700101-001644.000-coordinator-delegate";
-        let show = |field: &str| git(tmp.path(), &["show", &format!("main:{}/{}", dir, field)]);
+        let show = |field: &str| {
+            git(
+                tmp.path(),
+                &["show", &format!("{}:{}/{}", SESS1_REF, dir, field)],
+            )
+        };
 
         assert_eq!(show("type").unwrap(), "delegate");
         assert_eq!(show("caller_agent").unwrap(), "coordinator");
@@ -960,7 +1042,11 @@ mod tests {
         worker.on_observable_message(&msg, ts);
 
         let dir = "19700101-001640.000-cli-invoke";
-        let state = git(tmp.path(), &["show", &format!("main:{}/state", dir)]).unwrap();
+        let state = git(
+            tmp.path(),
+            &["show", &format!("{}:{}/state", SESS1_REF, dir)],
+        )
+        .unwrap();
         assert_eq!(state, "abc123state");
     }
 
@@ -972,7 +1058,10 @@ mod tests {
         worker.on_observable_message(&msg, ts);
 
         let dir = "19700101-001640.000-cli-invoke";
-        let result = git(tmp.path(), &["show", &format!("main:{}/state", dir)]);
+        let result = git(
+            tmp.path(),
+            &["show", &format!("{}:{}/state", SESS1_REF, dir)],
+        );
         assert!(result.is_err(), "should not have state file when None");
     }
 
@@ -984,7 +1073,10 @@ mod tests {
         worker.on_observable_message(&msg, ts);
 
         let dir = "19700101-001640.000-support-agent-complete";
-        let result = git(tmp.path(), &["show", &format!("main:{}/stderr", dir)]);
+        let result = git(
+            tmp.path(),
+            &["show", &format!("{}:{}/stderr", SESS1_REF, dir)],
+        );
         assert!(result.is_err(), "should not have stderr when empty");
     }
 
@@ -1003,7 +1095,7 @@ mod tests {
         let (m3, t3) = test_response(b"a", 1002);
         worker.on_observable_message(&m3, t3);
 
-        let ls = git(tmp.path(), &["ls-tree", "--name-only", "main"]).unwrap();
+        let ls = git(tmp.path(), &["ls-tree", "--name-only", SESS1_REF]).unwrap();
         assert!(ls.contains("19700101-001640.000-cli-invoke"), "ls: {}", ls);
         assert!(
             ls.contains("19700101-001641.000-support-agent-request"),
@@ -1023,14 +1115,14 @@ mod tests {
 
         let (m1, t1) = test_invoke(b"first", 1000);
         worker.on_observable_message(&m1, t1);
-        let commit1 = git(tmp.path(), &["rev-parse", "main"]).unwrap();
+        let commit1 = git(tmp.path(), &["rev-parse", SESS1_REF]).unwrap();
 
         let (m2, t2) = test_request(b"second", 1001);
         worker.on_observable_message(&m2, t2);
-        let commit2 = git(tmp.path(), &["rev-parse", "main"]).unwrap();
+        let commit2 = git(tmp.path(), &["rev-parse", SESS1_REF]).unwrap();
 
         assert_ne!(commit1, commit2);
-        let parent = git(tmp.path(), &["log", "-1", "--format=%P", "main"]).unwrap();
+        let parent = git(tmp.path(), &["log", "-1", "--format=%P", SESS1_REF]).unwrap();
         assert_eq!(parent, commit1);
     }
 
@@ -1041,7 +1133,7 @@ mod tests {
 
         worker.on_observable_message(&msg, ts);
 
-        let parent = git(tmp.path(), &["log", "-1", "--format=%P", "main"]).unwrap();
+        let parent = git(tmp.path(), &["log", "-1", "--format=%P", SESS1_REF]).unwrap();
         assert_eq!(parent, "");
     }
 
@@ -1060,7 +1152,7 @@ mod tests {
         let (m5, t5) = test_complete(b"5", 1004);
         worker.on_observable_message(&m5, t5);
 
-        let count = git(tmp.path(), &["rev-list", "--count", "main"]).unwrap();
+        let count = git(tmp.path(), &["rev-list", "--count", SESS1_REF]).unwrap();
         assert_eq!(count, "5");
     }
 
@@ -1073,7 +1165,7 @@ mod tests {
 
         worker.on_observable_message(&msg, ts);
 
-        let content = git(tmp.path(), &["show", "main:agent.toml"]).unwrap();
+        let content = git(tmp.path(), &["show", &format!("{}:agent.toml", SESS1_REF)]).unwrap();
         assert!(content.contains("support-agent"), "agent.toml: {}", content);
     }
 
@@ -1084,7 +1176,11 @@ mod tests {
 
         worker.on_observable_message(&msg, ts);
 
-        let content = git(tmp.path(), &["show", "main:platform.toml"]).unwrap();
+        let content = git(
+            tmp.path(),
+            &["show", &format!("{}:platform.toml", SESS1_REF)],
+        )
+        .unwrap();
         assert!(content.contains("version"), "platform.toml: {}", content);
         assert!(
             content.contains("registry_host"),
@@ -1094,214 +1190,175 @@ mod tests {
     }
 
     #[test]
-    fn working_tree_is_populated() {
+    fn working_tree_stays_empty() {
         let (mut worker, tmp) = test_worker();
         let (msg, ts) = test_invoke(b"visible", 1000);
 
         worker.on_observable_message(&msg, ts);
 
+        // Working tree should not have message directories (no auto-checkout)
         let dir = "19700101-001640.000-cli-invoke";
-        assert!(tmp.path().join(dir).join("payload").exists());
-        let content = std::fs::read(tmp.path().join(dir).join("payload")).unwrap();
-        assert_eq!(content, b"visible");
+        assert!(
+            !tmp.path().join(dir).exists(),
+            "working tree should be empty — data is in git objects"
+        );
+
+        // But data is accessible via git show
+        let payload = git(
+            tmp.path(),
+            &["show", &format!("{}:{}/payload", SESS1_REF, dir)],
+        )
+        .unwrap();
+        assert_eq!(payload, "visible");
     }
 
     #[test]
-    fn open_resumes_last_commit() {
-        let tmp = tempfile::TempDir::new().unwrap();
-
-        {
-            let mut worker = GitDagWorker::open(tmp.path(), "host", None).unwrap();
-            let (m1, t1) = test_invoke(b"1", 1000);
-            worker.on_observable_message(&m1, t1);
-            let (m2, t2) = test_request(b"2", 1001);
-            worker.on_observable_message(&m2, t2);
-        }
-
-        let mut worker = GitDagWorker::open(tmp.path(), "host", None).unwrap();
-        assert!(worker.last_commit.is_some());
-
-        let (m3, t3) = test_complete(b"3", 2000);
-        worker.on_observable_message(&m3, t3);
+    fn main_branch_has_empty_initial_commit() {
+        let (_worker, tmp) = test_worker();
 
         let count = git(tmp.path(), &["rev-list", "--count", "main"]).unwrap();
-        assert_eq!(count, "3");
+        assert_eq!(count, "1");
+
+        let ls = git(tmp.path(), &["ls-tree", "--name-only", "main"]).unwrap();
+        assert_eq!(ls, "", "main should have an empty tree");
     }
 
-    // --- Time-travel resilience tests ---
-    //
-    // Time-travel detaches HEAD at an earlier commit. The dag worker must:
-    //   - Keep writing commits (chained via last_commit, not HEAD)
-    //   - NOT advance main (main is the "present")
-    //   - Advance detached HEAD only
-    // This matches `git update-ref HEAD <hash>` semantics.
+    // --- Sessions as islands tests ---
+
+    fn test_invoke_session(
+        payload: &[u8],
+        epoch_secs: i64,
+        session: &str,
+    ) -> (ObservableMessage, DateTime<Utc>) {
+        let msg = InvokeMessage::new(
+            TimelineId::main(),
+            SubmissionId::from("sub-1".to_string()),
+            SessionId::from(session.to_string()),
+            HarnessType::Cli,
+            RuntimeType::Container,
+            test_agent_id(),
+            payload.to_vec(),
+            None,
+            InvokeDiagnostics {
+                harness_version: "0.1.0".to_string(),
+                history_turns: 0,
+            },
+            String::new(),
+        );
+        let created_at = DateTime::from_timestamp(epoch_secs, 0).unwrap();
+        (ObservableMessage::Invoke(msg), created_at)
+    }
 
     #[test]
-    fn commit_succeeds_after_head_moved_backwards() {
+    fn session_creates_ref() {
+        let (mut worker, tmp) = test_worker();
+        let (msg, ts) = test_invoke(b"hello", 1000);
+
+        worker.on_observable_message(&msg, ts);
+
+        let sha = git(
+            tmp.path(),
+            &["rev-parse", "--verify", "refs/sessions/sess-1"],
+        )
+        .unwrap();
+        assert_eq!(sha.len(), 40);
+    }
+
+    #[test]
+    fn different_sessions_are_orphan_islands() {
         let (mut worker, tmp) = test_worker();
 
-        let (m1, t1) = test_invoke(b"1", 1000);
+        let (m1, t1) = test_invoke_session(b"sess1", 1000, "sess-1");
         worker.on_observable_message(&m1, t1);
-        let commit1 = git(tmp.path(), &["rev-parse", "main"]).unwrap();
 
-        let (m2, t2) = test_request(b"2", 1001);
+        let (m2, t2) = test_invoke_session(b"sess2", 1001, "sess-2");
         worker.on_observable_message(&m2, t2);
 
-        let (m3, t3) = test_response(b"3", 1002);
-        worker.on_observable_message(&m3, t3);
-        let main_before = git(tmp.path(), &["rev-parse", "main"]).unwrap();
+        // Each session has its own ref
+        let sha1 = git(tmp.path(), &["rev-parse", "refs/sessions/sess-1"]).unwrap();
+        let sha2 = git(tmp.path(), &["rev-parse", "refs/sessions/sess-2"]).unwrap();
+        assert_ne!(sha1, sha2);
 
-        // Simulate time-travel: detach HEAD at commit 1
-        git(tmp.path(), &["checkout", &commit1]).unwrap();
-
-        // Worker writes another message — must not fail
-        let (m4, t4) = test_complete(b"4", 1003);
-        worker.on_observable_message(&m4, t4);
-
-        // main must NOT have moved — it stays at commit 3
-        let main_after = git(tmp.path(), &["rev-parse", "main"]).unwrap();
-        assert_eq!(
-            main_before, main_after,
-            "main should not advance during time-travel"
-        );
-
-        // HEAD (detached) should have advanced to include commit 4
-        let head_count = git(tmp.path(), &["rev-list", "--count", "HEAD"]).unwrap();
-        assert_eq!(head_count, "4");
+        // Each is a root commit (no parent)
+        let parent1 = git(tmp.path(), &["log", "-1", "--format=%P", &sha1]).unwrap();
+        let parent2 = git(tmp.path(), &["log", "-1", "--format=%P", &sha2]).unwrap();
+        assert_eq!(parent1, "", "sess-1 should be orphan");
+        assert_eq!(parent2, "", "sess-2 should be orphan");
     }
 
     #[test]
-    fn commit_succeeds_after_head_detached() {
-        let (mut worker, tmp) = test_worker();
-
-        let (m1, t1) = test_invoke(b"1", 1000);
-        worker.on_observable_message(&m1, t1);
-        let main_before = git(tmp.path(), &["rev-parse", "main"]).unwrap();
-
-        // Detach HEAD
-        git(tmp.path(), &["checkout", "--detach", &main_before]).unwrap();
-
-        // Worker writes — must succeed
-        let (m2, t2) = test_request(b"2", 1001);
-        worker.on_observable_message(&m2, t2);
-
-        // main stays at 1 commit, HEAD advanced to 2
-        let main_count = git(tmp.path(), &["rev-list", "--count", "main"]).unwrap();
-        assert_eq!(main_count, "1", "main should not advance when detached");
-        let head_count = git(tmp.path(), &["rev-list", "--count", "HEAD"]).unwrap();
-        assert_eq!(head_count, "2");
-    }
-
-    #[test]
-    fn main_advances_after_returning_from_time_travel() {
-        let (mut worker, tmp) = test_worker();
-
-        let (m1, t1) = test_invoke(b"1", 1000);
-        worker.on_observable_message(&m1, t1);
-        let commit1 = git(tmp.path(), &["rev-parse", "main"]).unwrap();
-
-        let (m2, t2) = test_request(b"2", 1001);
-        worker.on_observable_message(&m2, t2);
-
-        let (m3, t3) = test_response(b"3", 1002);
-        worker.on_observable_message(&m3, t3);
-        let main_before = git(tmp.path(), &["rev-parse", "main"]).unwrap();
-
-        // Time-travel: detach HEAD at commit 1
-        git(tmp.path(), &["checkout", &commit1]).unwrap();
-
-        // Write during time-travel
-        let (m4, t4) = test_complete(b"4", 1003);
-        worker.on_observable_message(&m4, t4);
-
-        // main unchanged
-        assert_eq!(
-            git(tmp.path(), &["rev-parse", "main"]).unwrap(),
-            main_before
-        );
-
-        // Return to main
-        git(tmp.path(), &["checkout", "main"]).unwrap();
-
-        // Write after returning — main should advance now
-        let (m5, t5) = test_invoke(b"5", 1004);
-        worker.on_observable_message(&m5, t5);
-
-        let main_count = git(tmp.path(), &["rev-list", "--count", "main"]).unwrap();
-        assert_eq!(main_count, "5", "main should advance after re-attach");
-
-        // Internal chain is linear: 5 → 4 → 3 → 2 → 1
-        let log = git(tmp.path(), &["log", "--format=%H", "main"]).unwrap();
-        let commits: Vec<&str> = log.lines().collect();
-        assert_eq!(commits.len(), 5);
-        for i in 0..4 {
-            let parent = git(tmp.path(), &["log", "-1", "--format=%P", commits[i]]).unwrap();
-            assert_eq!(parent, commits[i + 1], "commit {} parent mismatch", i);
-        }
-    }
-
-    #[test]
-    fn tree_accumulates_correctly_during_time_travel() {
-        let (mut worker, tmp) = test_worker();
-
-        let (m1, t1) = test_invoke(b"1", 1000);
-        worker.on_observable_message(&m1, t1);
-        let commit1 = git(tmp.path(), &["rev-parse", "main"]).unwrap();
-
-        let (m2, t2) = test_request(b"2", 1001);
-        worker.on_observable_message(&m2, t2);
-
-        // Time-travel backwards
-        git(tmp.path(), &["checkout", &commit1]).unwrap();
-
-        // Write a third message during time-travel
-        let (m3, t3) = test_response(b"3", 1002);
-        worker.on_observable_message(&m3, t3);
-
-        // The tree at HEAD (detached) should have all 3 message directories
-        let ls = git(tmp.path(), &["ls-tree", "--name-only", "HEAD"]).unwrap();
-        assert!(
-            ls.contains("19700101-001640.000-cli-invoke"),
-            "missing invoke: {}",
-            ls
-        );
-        assert!(
-            ls.contains("19700101-001641.000-support-agent-request"),
-            "missing request: {}",
-            ls
-        );
-        assert!(
-            ls.contains("19700101-001642.000-infer.ollama-response"),
-            "missing response: {}",
-            ls
-        );
-    }
-
-    #[test]
-    fn working_tree_updated_during_time_travel() {
+    fn messages_chain_within_session_via_ref() {
         let (mut worker, tmp) = test_worker();
 
         let (m1, t1) = test_invoke(b"first", 1000);
         worker.on_observable_message(&m1, t1);
-        let commit1 = git(tmp.path(), &["rev-parse", "main"]).unwrap();
+        let commit1 = git(tmp.path(), &["rev-parse", "refs/sessions/sess-1"]).unwrap();
 
         let (m2, t2) = test_request(b"second", 1001);
         worker.on_observable_message(&m2, t2);
+        let commit2 = git(tmp.path(), &["rev-parse", "refs/sessions/sess-1"]).unwrap();
 
-        // Time-travel backwards
-        git(tmp.path(), &["checkout", &commit1]).unwrap();
+        assert_ne!(commit1, commit2);
+        let parent = git(tmp.path(), &["log", "-1", "--format=%P", &commit2]).unwrap();
+        assert_eq!(parent, commit1, "second commit should parent first");
+    }
 
-        // Write after time-travel
-        let (m3, t3) = test_response(b"third", 1002);
-        worker.on_observable_message(&m3, t3);
+    #[test]
+    fn session_tree_only_contains_own_messages() {
+        let (mut worker, tmp) = test_worker();
 
-        // Working tree should have all 3 directories visible on disk
-        let invoke_dir = "19700101-001640.000-cli-invoke";
-        let request_dir = "19700101-001641.000-support-agent-request";
-        let response_dir = "19700101-001642.000-infer.ollama-response";
-        assert!(tmp.path().join(invoke_dir).join("payload").exists());
-        assert!(tmp.path().join(request_dir).join("payload").exists());
-        assert!(tmp.path().join(response_dir).join("payload").exists());
+        let (m1, t1) = test_invoke_session(b"sess1-msg", 1000, "sess-1");
+        worker.on_observable_message(&m1, t1);
+
+        let (m2, t2) = test_invoke_session(b"sess2-msg", 1001, "sess-2");
+        worker.on_observable_message(&m2, t2);
+
+        // sess-1's tree should only have its own message
+        let ls1 = git(
+            tmp.path(),
+            &["ls-tree", "--name-only", "refs/sessions/sess-1"],
+        )
+        .unwrap();
+        assert!(ls1.contains("19700101-001640.000-cli-invoke"));
+        assert!(
+            !ls1.contains("19700101-001641.000"),
+            "sess-1 should not have sess-2's message"
+        );
+
+        // sess-2's tree should only have its own message
+        let ls2 = git(
+            tmp.path(),
+            &["ls-tree", "--name-only", "refs/sessions/sess-2"],
+        )
+        .unwrap();
+        assert!(ls2.contains("19700101-001641.000-cli-invoke"));
+        assert!(
+            !ls2.contains("19700101-001640.000"),
+            "sess-2 should not have sess-1's message"
+        );
+    }
+
+    #[test]
+    fn stateless_worker_resumes_session_from_ref() {
+        let tmp = tempfile::TempDir::new().unwrap();
+
+        // First worker instance writes one message
+        {
+            let mut worker = GitDagWorker::open(tmp.path(), "host", None).unwrap();
+            let (m1, t1) = test_invoke(b"first", 1000);
+            worker.on_observable_message(&m1, t1);
+        }
+
+        // Second worker instance — no in-memory state carried over
+        {
+            let mut worker = GitDagWorker::open(tmp.path(), "host", None).unwrap();
+            let (m2, t2) = test_request(b"second", 1001);
+            worker.on_observable_message(&m2, t2);
+        }
+
+        // Should have 2 commits chained in sess-1
+        let count = git(tmp.path(), &["rev-list", "--count", "refs/sessions/sess-1"]).unwrap();
+        assert_eq!(count, "2");
     }
 
     // --- Canonical hash tests ---
@@ -1317,7 +1374,11 @@ mod tests {
         worker.on_observable_message(&msg, ts);
 
         let dir = "19700101-001640.000-cli-invoke";
-        let hash = git(tmp.path(), &["show", &format!("main:{}/hash", dir)]).unwrap();
+        let hash = git(
+            tmp.path(),
+            &["show", &format!("{}:{}/hash", SESS1_REF, dir)],
+        )
+        .unwrap();
         assert_eq!(
             hash, expected_node.hash,
             "hash file should contain canonical hash"
@@ -1333,7 +1394,11 @@ mod tests {
         worker.on_observable_message(&m1, t1);
 
         let dir1 = "19700101-001640.000-cli-invoke";
-        let hash1 = git(tmp.path(), &["show", &format!("main:{}/hash", dir1)]).unwrap();
+        let hash1 = git(
+            tmp.path(),
+            &["show", &format!("{}:{}/hash", SESS1_REF, dir1)],
+        )
+        .unwrap();
         assert_eq!(hash1, expected1.hash);
 
         let (m2, t2) = test_request(b"second", 1001);
@@ -1341,7 +1406,11 @@ mod tests {
         worker.on_observable_message(&m2, t2);
 
         let dir2 = "19700101-001641.000-support-agent-request";
-        let hash2 = git(tmp.path(), &["show", &format!("main:{}/hash", dir2)]).unwrap();
+        let hash2 = git(
+            tmp.path(),
+            &["show", &format!("{}:{}/hash", SESS1_REF, dir2)],
+        )
+        .unwrap();
         assert_eq!(hash2, expected2.hash, "second hash should chain from first");
         assert_ne!(hash1, hash2);
     }
