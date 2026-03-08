@@ -19,6 +19,9 @@ service Harness {
   // Set the initial state for the next invocation (time travel resume).
   rpc SetInitialState(SetInitialStateRequest) returns (SetInitialStateResponse);
 
+  // Set the DAG parent commit hash for the next invocation.
+  rpc SetDagParent(SetDagParentRequest) returns (SetDagParentResponse);
+
   // Run an agent to completion — send input, block for response.
   rpc RunAgent(RunAgentRequest) returns (RunAgentResponse);
 }
@@ -57,6 +60,12 @@ message SetInitialStateRequest {
 }
 
 message SetInitialStateResponse {}
+
+message SetDagParentRequest {
+  string hash = 1;
+}
+
+message SetDagParentResponse {}
 
 message RunAgentRequest {
   string agent_id = 1;  // ResourceId URI

@@ -53,6 +53,7 @@ pub enum ObservableMessageHeaders {
         agent_id: AgentId,
         state: Option<String>,
         diagnostics: InvokeDiagnostics,
+        dag_parent: String,
     },
     Request {
         id: MessageId,
@@ -124,6 +125,7 @@ impl ObservableMessageHeaders {
                 agent_id,
                 state,
                 diagnostics,
+                dag_parent,
             } => ObservableMessage::Invoke(InvokeMessage {
                 id,
                 protocol_version,
@@ -136,6 +138,7 @@ impl ObservableMessageHeaders {
                 payload,
                 state,
                 diagnostics,
+                dag_parent,
             }),
             Self::Request {
                 id,

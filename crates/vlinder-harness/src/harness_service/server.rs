@@ -6,8 +6,9 @@ use tonic::{Request, Response, Status};
 
 use super::proto::{
     self, harness_server::Harness as HarnessService, PingRequest, RunAgentRequest,
-    RunAgentResponse, SemVer, SetInitialStateRequest, SetInitialStateResponse, SetTimelineRequest,
-    SetTimelineResponse, StartSessionRequest, StartSessionResponse,
+    RunAgentResponse, SemVer, SetDagParentRequest, SetDagParentResponse, SetInitialStateRequest,
+    SetInitialStateResponse, SetTimelineRequest, SetTimelineResponse, StartSessionRequest,
+    StartSessionResponse,
 };
 use vlinder_core::domain::{Harness, ResourceId, TimelineId};
 
@@ -71,6 +72,15 @@ impl HarnessService for HarnessServiceServer {
         let req = request.into_inner();
         self.harness.lock().unwrap().set_initial_state(req.state);
         Ok(Response::new(SetInitialStateResponse {}))
+    }
+
+    async fn set_dag_parent(
+        &self,
+        request: Request<SetDagParentRequest>,
+    ) -> Result<Response<SetDagParentResponse>, Status> {
+        let req = request.into_inner();
+        self.harness.lock().unwrap().set_dag_parent(req.hash);
+        Ok(Response::new(SetDagParentResponse {}))
     }
 
     async fn run_agent(

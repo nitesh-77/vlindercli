@@ -95,6 +95,7 @@ mod tests {
             b"hello".to_vec(),
             None,
             test_invoke_diag(),
+            String::new(),
         );
 
         assert_eq!(msg.submission, submission);
@@ -199,6 +200,7 @@ mod tests {
             b"input".to_vec(),
             None,
             test_invoke_diag(),
+            String::new(),
         );
 
         let complete: CompleteMessage = invoke.create_reply(b"output".to_vec());
@@ -251,6 +253,7 @@ mod tests {
             b"test".to_vec(),
             None,
             test_invoke_diag(),
+            String::new(),
         );
         let id = invoke.id.clone();
         let submission = invoke.submission.clone();
@@ -298,6 +301,7 @@ mod tests {
             b"payload".to_vec(),
             None,
             test_invoke_diag(),
+            String::new(),
         );
 
         let observable: ObservableMessage = invoke.into();
@@ -321,6 +325,7 @@ mod tests {
             b"test".to_vec(),
             None,
             test_invoke_diag(),
+            String::new(),
         );
 
         let key = msg.routing_key();
@@ -542,6 +547,7 @@ mod tests {
             b"input".to_vec(),
             None,
             test_invoke_diag(),
+            String::new(),
         );
         let complete = invoke.create_reply(b"output".to_vec());
 
@@ -584,6 +590,7 @@ mod tests {
             agent_id: test_agent_id(),
             state: Some("state-abc".to_string()),
             diagnostics: test_invoke_diag(),
+            dag_parent: String::new(),
         };
 
         let msg = headers.assemble(b"hello".to_vec());

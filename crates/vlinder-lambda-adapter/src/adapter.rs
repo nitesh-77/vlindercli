@@ -76,6 +76,7 @@ mod tests {
                 harness_version: "0.1.0".to_string(),
                 history_turns: 0,
             },
+            String::new(),
         );
         serde_json::to_vec(&invoke).unwrap()
     }

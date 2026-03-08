@@ -282,6 +282,7 @@ mod tests {
                 harness_version: String::new(),
                 history_turns: 0,
             },
+            String::new(),
         );
         let original_id = invoke.id.clone();
 
@@ -318,6 +319,7 @@ mod tests {
                 harness_version: String::new(),
                 history_turns: 0,
             },
+            String::new(),
         );
 
         queue.send_invoke(invoke).unwrap();

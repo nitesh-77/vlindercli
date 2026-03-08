@@ -40,6 +40,14 @@ pub trait Harness {
     /// continuity). The state hash is passed to the agent on the next invoke.
     fn set_initial_state(&mut self, state: String);
 
+    /// Set the DAG parent commit hash for the next invocation.
+    ///
+    /// The harness stamps this into every InvokeMessage. The GitDagWorker
+    /// uses it as the parent for the invoke commit instead of its cached
+    /// last_commit. For normal invokes this is the current DAG tip; for
+    /// repair it will be the checked-out commit.
+    fn set_dag_parent(&mut self, hash: String);
+
     /// Run an agent to completion synchronously.
     ///
     /// Sends input to the agent and blocks until the response arrives.
@@ -75,6 +83,8 @@ pub struct CoreHarness {
     /// Whether the current timeline is sealed (ADR 093).
     /// Sealed timelines reject new invocations.
     timeline_sealed: bool,
+    /// DAG commit hash to parent the next invoke on.
+    dag_parent: String,
 }
 
 impl CoreHarness {
@@ -93,6 +103,7 @@ impl CoreHarness {
             pending_state: None,
             timeline: TimelineId::main(),
             timeline_sealed: false,
+            dag_parent: String::new(),
         }
     }
 
@@ -177,6 +188,7 @@ impl CoreHarness {
             payload.as_bytes().to_vec(),
             self.last_state.clone(),
             invoke_diag,
+            self.dag_parent.clone(),
         );
 
         Ok((invoke, job_id))
@@ -202,6 +214,10 @@ impl Harness for CoreHarness {
 
     fn set_initial_state(&mut self, state: String) {
         self.last_state = Some(state);
+    }
+
+    fn set_dag_parent(&mut self, hash: String) {
+        self.dag_parent = hash;
     }
 
     fn run_agent(&mut self, agent_id: &ResourceId, input: &str) -> Result<String, String> {

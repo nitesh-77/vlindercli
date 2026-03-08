@@ -46,6 +46,9 @@ pub struct InvokeMessage {
     pub state: Option<String>,
     /// Diagnostics from the harness (ADR 071).
     pub diagnostics: InvokeDiagnostics,
+    /// Git commit hash to parent this invoke on in the DAG.
+    /// The harness populates this from the conversations repo HEAD.
+    pub dag_parent: String,
 }
 
 impl InvokeMessage {
@@ -60,6 +63,7 @@ impl InvokeMessage {
         payload: Vec<u8>,
         state: Option<String>,
         diagnostics: InvokeDiagnostics,
+        dag_parent: String,
     ) -> Self {
         Self {
             id: MessageId::new(),
@@ -73,6 +77,7 @@ impl InvokeMessage {
             payload,
             state,
             diagnostics,
+            dag_parent,
         }
     }
 
@@ -161,6 +166,7 @@ mod tests {
                 harness_version: "0.1.0".to_string(),
                 history_turns: 3,
             },
+            String::new(),
         );
 
         let json = serde_json::to_string(&msg).unwrap();
@@ -194,6 +200,7 @@ mod tests {
                 harness_version: "0.1.0".to_string(),
                 history_turns: 0,
             },
+            String::new(),
         );
 
         let json = serde_json::to_string(&msg).unwrap();

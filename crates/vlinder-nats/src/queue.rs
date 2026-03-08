@@ -244,6 +244,9 @@ impl MessageQueue for NatsQueue {
             if let Ok(diag_json) = serde_json::to_string(&msg.diagnostics) {
                 headers.insert("diagnostics", diag_json.as_str());
             }
+            if !msg.dag_parent.is_empty() {
+                headers.insert("dag-parent", msg.dag_parent.as_str());
+            }
 
             self.inner
                 .jetstream
@@ -404,6 +407,7 @@ impl MessageQueue for NatsQueue {
                 payload: js_msg.payload.to_vec(),
                 state: get_header(headers, "state").ok(),
                 diagnostics,
+                dag_parent: get_header(headers, "dag-parent").unwrap_or_default(),
             };
 
             Ok((msg, ack_fn))
@@ -901,6 +905,9 @@ pub fn invoke_to_nats_headers(msg: &InvokeMessage) -> HashMap<String, String> {
     if let Ok(diag_json) = serde_json::to_string(&msg.diagnostics) {
         h.insert("diagnostics".to_string(), diag_json);
     }
+    if !msg.dag_parent.is_empty() {
+        h.insert("dag-parent".to_string(), msg.dag_parent.clone());
+    }
     h
 }
 
@@ -1007,6 +1014,8 @@ pub fn from_nats_headers(
                     history_turns: 0,
                 });
 
+            let dag_parent = headers.get("dag-parent").cloned().unwrap_or_default();
+
             Some(ObservableMessageHeaders::Invoke {
                 id,
                 protocol_version,
@@ -1018,6 +1027,7 @@ pub fn from_nats_headers(
                 agent_id: agent.clone(),
                 state,
                 diagnostics,
+                dag_parent,
             })
         }
         RoutingKey::Request {
@@ -1780,6 +1790,7 @@ mod tests {
                 harness_version: "0.1.0".to_string(),
                 history_turns: 0,
             },
+            String::new(),
         )
     }
 
