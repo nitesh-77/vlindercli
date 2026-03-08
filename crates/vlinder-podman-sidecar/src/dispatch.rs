@@ -22,6 +22,7 @@ use vlinder_provider_server::hosts::build_hosts;
 use vlinder_provider_server::provider_server::ProviderServer;
 
 use crate::health;
+use crate::trace::TraceLog;
 
 /// Everything the dispatch loop needs from the sidecar — avoids passing
 /// 9 individual parameters.
@@ -60,6 +61,7 @@ pub fn handle_invoke(
     reply_key: &Option<RoutingKey>,
 ) -> Result<InvokeOutcome, String> {
     let started_at = Instant::now();
+    let mut trace = TraceLog::new();
 
     // Look up agent to build provider hosts and determine initial state.
     let agent = ctx
@@ -87,6 +89,8 @@ pub fn handle_invoke(
     let agent_url = format!("http://127.0.0.1:{}/invoke", ctx.container_port);
     let payload = invoke.payload.clone();
 
+    trace.log(format!("POST {} ({} bytes)", agent_url, payload.len()));
+
     match client.post(&agent_url).send_bytes(&payload) {
         Ok(response) => {
             let is_durable = response
@@ -99,6 +103,11 @@ pub fn handle_invoke(
                 .into_reader()
                 .read_to_end(&mut output)
                 .map_err(|e| format!("Failed to read agent response body: {}", e))?;
+            trace.log(format!(
+                "Agent responded ({} bytes, {}ms)",
+                output.len(),
+                started_at.elapsed().as_millis()
+            ));
 
             if is_durable {
                 tracing::info!(
@@ -140,6 +149,7 @@ pub fn handle_invoke(
                     &ctx.image_ref,
                     &ctx.image_digest,
                 );
+                trace.log("Sending complete");
                 let complete =
                     invoke.create_reply_with_diagnostics(output, final_state, diagnostics);
                 send_reply(&ctx.queue, complete, reply_key);
