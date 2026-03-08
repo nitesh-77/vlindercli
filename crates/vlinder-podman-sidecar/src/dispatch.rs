@@ -110,11 +110,7 @@ pub fn handle_invoke(
             ));
 
             if is_durable {
-                tracing::info!(
-                    event = "durable.detected",
-                    agent = %invoke.agent_id,
-                    "Agent running in durable mode"
-                );
+                trace.log("Agent running in durable mode");
                 // Provider server not needed for durable mode — drop it.
                 drop(provider_server);
 
@@ -190,10 +186,18 @@ pub fn handle_service_response(
     session: DurableSession,
     response: ResponseMessage,
 ) -> Result<InvokeOutcome, String> {
+    let mut trace = TraceLog::new();
+
     let checkpoint = response
         .checkpoint
         .as_deref()
         .ok_or("service response missing checkpoint")?;
+
+    trace.log(format!(
+        "Service response for checkpoint '{}' ({} bytes)",
+        checkpoint,
+        response.payload.len()
+    ));
 
     let result_json: serde_json::Value =
         serde_json::from_slice(&response.payload).unwrap_or(serde_json::Value::Null);
@@ -206,14 +210,14 @@ pub fn handle_service_response(
     let callback_bytes = serde_json::to_vec(&callback)
         .map_err(|e| format!("Failed to serialize callback: {}", e))?;
 
-    tracing::info!(
-        event = "durable.callback",
-        handler = checkpoint,
-        "Sending callback to agent"
-    );
-
     let client = ureq::Agent::new();
     let agent_url = format!("http://127.0.0.1:{}/invoke", ctx.container_port);
+
+    trace.log(format!(
+        "POST {} callback ({} bytes)",
+        agent_url,
+        callback_bytes.len()
+    ));
 
     match client
         .post(&agent_url)
@@ -225,6 +229,11 @@ pub fn handle_service_response(
             resp.into_reader()
                 .read_to_end(&mut output)
                 .map_err(|e| format!("Failed to read callback response: {}", e))?;
+            trace.log(format!(
+                "Callback responded ({} bytes, {}ms elapsed)",
+                output.len(),
+                session.started_at.elapsed().as_millis()
+            ));
 
             handle_action(
                 ctx,
@@ -238,7 +247,7 @@ pub fn handle_service_response(
         }
         Err(e) => {
             let msg = format!("Callback to agent failed: {}", e);
-            tracing::warn!(event = "durable.callback_error", error = %msg);
+            trace.log(&msg);
             let complete = session
                 .invoke
                 .create_reply(format!("[error] {}", msg).into_bytes());
@@ -258,6 +267,8 @@ fn handle_action(
     sequence: SequenceCounter,
     started_at: Instant,
 ) -> Result<InvokeOutcome, String> {
+    let mut trace = TraceLog::new();
+
     let action: serde_json::Value = serde_json::from_slice(&action_bytes)
         .map_err(|e| format!("Failed to parse action: {}", e))?;
 
@@ -265,10 +276,20 @@ fn handle_action(
         .as_str()
         .ok_or("Missing 'action' field in agent response")?;
 
+    trace.log(format!(
+        "Action '{}' ({} bytes)",
+        action_type,
+        action_bytes.len()
+    ));
+
     match action_type {
         "complete" => {
             let payload = action["payload"].as_str().unwrap_or("");
-            tracing::info!(event = "durable.complete", "Agent completed");
+            trace.log(format!(
+                "Durable complete ({} bytes, {}ms elapsed)",
+                payload.len(),
+                started_at.elapsed().as_millis()
+            ));
             let complete = invoke.create_reply(payload.as_bytes().to_vec());
             send_reply(&ctx.queue, complete, reply_key);
             Ok(InvokeOutcome::Done)
@@ -313,13 +334,12 @@ fn handle_action(
             );
             request.checkpoint = Some(checkpoint.to_string());
 
-            tracing::info!(
-                event = "durable.call",
-                url = url,
-                checkpoint = checkpoint,
-                service = %route.service_backend.service_type().as_str(),
-                "Sending service request to queue"
-            );
+            trace.log(format!(
+                "Sending request to {} (checkpoint '{}', seq {})",
+                route.service_backend.service_type().as_str(),
+                checkpoint,
+                seq.as_u32()
+            ));
 
             ctx.queue
                 .send_request(request.clone())
