@@ -88,10 +88,17 @@ impl Sidecar {
                     agent = %self.agent_name,
                     "Dispatching to container"
                 );
-                if dispatch::handle_invoke(&self.dispatch, &mut self.health, &invoke, &None)
-                    .is_err()
-                {
-                    break;
+                match dispatch::handle_invoke(&self.dispatch, &mut self.health, &invoke, &None) {
+                    Ok(()) => {}
+                    Err(e) => {
+                        tracing::error!(
+                            event = "dispatch.error",
+                            error = %e,
+                            agent = %self.agent_name,
+                            "Dispatch failed"
+                        );
+                        break;
+                    }
                 }
             } else if let Ok((delegate, ack)) = self.dispatch.queue.receive_delegate(&agent_id) {
                 let _ = ack();
@@ -118,10 +125,18 @@ impl Sidecar {
                     },
                 );
                 let reply_key = Some(delegate.reply_routing_key());
-                if dispatch::handle_invoke(&self.dispatch, &mut self.health, &invoke, &reply_key)
-                    .is_err()
+                match dispatch::handle_invoke(&self.dispatch, &mut self.health, &invoke, &reply_key)
                 {
-                    break;
+                    Ok(()) => {}
+                    Err(e) => {
+                        tracing::error!(
+                            event = "delegation.error",
+                            error = %e,
+                            agent = %self.agent_name,
+                            "Delegation dispatch failed"
+                        );
+                        break;
+                    }
                 }
             } else {
                 std::thread::sleep(Duration::from_millis(50));
