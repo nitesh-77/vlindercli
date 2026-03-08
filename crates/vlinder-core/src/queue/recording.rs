@@ -43,17 +43,25 @@ impl RecordingQueue {
     fn record(&self, observable: &ObservableMessage) {
         let session_id = observable.session().as_str().to_string();
 
-        // Look up parent hash: in-memory cache first, then DagStore fallback
-        let parent_hash = {
-            let chain = self.chain.lock().unwrap();
-            chain.get(&session_id).cloned()
-        }.unwrap_or_else(|| {
-            self.store.latest_node_hash(&session_id)
-                .unwrap_or_else(|e| {
-                    tracing::warn!(error = %e, session = %session_id, "Failed to read latest node hash");
-                    None
-                })
-                .unwrap_or_default()
+        // Explicit dag_parent on Invoke overrides chain cache (fork/repair).
+        let dag_parent_override = match observable {
+            ObservableMessage::Invoke(m) if !m.dag_parent.is_empty() => Some(m.dag_parent.clone()),
+            _ => None,
+        };
+
+        // Look up parent hash: dag_parent override, then in-memory cache, then DagStore fallback
+        let parent_hash = dag_parent_override.unwrap_or_else(|| {
+            {
+                let chain = self.chain.lock().unwrap();
+                chain.get(&session_id).cloned()
+            }.unwrap_or_else(|| {
+                self.store.latest_node_hash(&session_id)
+                    .unwrap_or_else(|e| {
+                        tracing::warn!(error = %e, session = %session_id, "Failed to read latest node hash");
+                        None
+                    })
+                    .unwrap_or_default()
+            })
         });
 
         let node = build_dag_node(observable, &parent_hash);
@@ -483,5 +491,43 @@ mod tests {
         // Send should still succeed despite store failure
         let result = queue.send_invoke(test_invoke());
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn invoke_with_dag_parent_overrides_chain() {
+        let store = test_store();
+        let queue = test_queue(Arc::clone(&store));
+
+        // Send a normal invoke first to populate the chain
+        let invoke1 = test_invoke();
+        let session_id = invoke1.session.as_str().to_string();
+        queue.send_invoke(invoke1).unwrap();
+
+        let nodes = store.get_session_nodes(&session_id).unwrap();
+        assert_eq!(nodes.len(), 1);
+        let first_hash = nodes[0].hash.clone();
+
+        // Send a second invoke (same session) — normally chains off first
+        let mut invoke2 = test_invoke();
+        invoke2.payload = b"second".to_vec();
+        queue.send_invoke(invoke2).unwrap();
+
+        let nodes = store.get_session_nodes(&session_id).unwrap();
+        assert_eq!(nodes.len(), 2);
+        assert_eq!(nodes[1].parent_hash, first_hash, "normal chaining");
+
+        // Send a third invoke with explicit dag_parent pointing to first node,
+        // bypassing the chain cache (which would point to second node)
+        let mut invoke3 = test_invoke();
+        invoke3.payload = b"forked".to_vec();
+        invoke3.dag_parent = first_hash.clone();
+        queue.send_invoke(invoke3).unwrap();
+
+        let nodes = store.get_session_nodes(&session_id).unwrap();
+        assert_eq!(nodes.len(), 3);
+        assert_eq!(
+            nodes[2].parent_hash, first_hash,
+            "dag_parent should override chain cache"
+        );
     }
 }
