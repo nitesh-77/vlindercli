@@ -60,7 +60,7 @@ build-fleets:
 # =============================================================================
 
 # Build what's needed for local testing
-build-everything: build build-sidecar (build-agent "todoapp") (build-agent "ollama-test") (build-agent "openrouter-test") (build-agent "sqlite-kv-test") (build-agent "sqlite-vec-test")
+build-everything: build build-sidecar (build-agent "todoapp") (build-agent "ollama-test") (build-agent "openrouter-test") (build-agent "sqlite-kv-test") (build-agent "sqlite-vec-test") (build-agent "echo-checkpoint")
 
 # Run tests
 test:

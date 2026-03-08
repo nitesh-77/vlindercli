@@ -81,6 +81,29 @@ Anthropic, etc.) directly. The `then=` parameter names the callback
 handler, so the platform knows exactly which function to invoke with
 the result.
 
+### Wire protocol
+
+Both modes use the same endpoint: `POST /invoke`. All durable-mode
+requests are JSON with a `handler` field naming the function to call:
+
+```json
+{"handler": "on_invoke", "input": "user text"}
+{"handler": "handle_result", "result": {...}}
+```
+
+The sidecar wraps the raw invoke payload:
+`{"handler": "on_invoke", "input": "<payload>"}`. Callbacks use the
+checkpoint name from the service response:
+`{"handler": "<checkpoint>", "result": {...}}`.
+
+Durable agents return a JSON action with the `X-Vlinder-Mode: durable`
+response header. Unmanaged agents receive raw bytes on `/invoke` and
+return raw bytes (no header). The sidecar detects durable mode from
+the header on the first response.
+
+For repair, the sidecar sends the callback JSON directly to `/invoke`
+with the checkpoint name from the DAG.
+
 ### Event-driven, not loop-driven
 
 The sidecar already has an event loop that polls for invoke and
@@ -90,15 +113,15 @@ in the same loop:
 
 ```
 loop {
-    if invoke arrives   → POST /invoke to agent
+    if invoke arrives   → POST /invoke to agent (raw payload)
     if delegate arrives → handle delegation
-    if response arrives → POST /handle to agent
+    if response arrives → POST /invoke to agent (callback JSON)
     else → sleep
 }
 ```
 
-The agent returns a JSON action from `/invoke` or `/handle`. The
-sidecar interprets the action:
+The agent returns a JSON action from `/invoke`. The sidecar
+interprets the action:
 
 - `{"action":"call", ...}` — send a service request to the queue
   (fire and forget). The response will arrive later as an event.
@@ -107,7 +130,8 @@ sidecar interprets the action:
 Service requests and responses are decoupled. The sidecar does not
 block waiting for a response (`call_service()`). It sends the request
 and moves on. When the service response arrives on the queue, the
-sidecar picks it up and delivers it to the agent via `/handle`.
+sidecar picks it up and delivers it to the agent via `/invoke`,
+naming the checkpoint handler from the response.
 
 This is the same pattern as invoke and delegate — message arrives,
 sidecar acts on it. No special orchestration. No nested loop.
@@ -191,7 +215,7 @@ The migration from unmanaged to durable is mechanical — take each
 direct HTTP call and wrap it in `ctx.call()` with a `then=` callback:
 
 ```python
-# Before (unmanaged) — direct HTTP call in /invoke handler
+# Before (unmanaged) — direct HTTP call in handler
 response = requests.post(
     "http://openrouter.vlinder.local:3544/v1/chat/completions",
     json={"model": "anthropic/claude-sonnet-4",
@@ -257,10 +281,10 @@ $ vlinder timeline checkout a9be203    # the failed embed request
 At: request: todoapp → embed.ollama
 Checkpoint: handle_result
 
-$ vlinder timeline repair              # re-queues, drives loop
+$ vlinder timeline repair              # re-queues, calls /invoke
 Re-queuing request to embed.ollama...
 Response received (200 OK)
-Calling checkpoint 'handle_result'...
+Calling handler 'handle_result'...
 Agent completed.
 ```
 

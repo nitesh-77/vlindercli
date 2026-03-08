@@ -278,6 +278,9 @@ impl MessageQueue for NatsQueue {
             if let Ok(diag_json) = serde_json::to_string(&msg.diagnostics) {
                 headers.insert("diagnostics", diag_json.as_str());
             }
+            if let Some(ref checkpoint) = msg.checkpoint {
+                headers.insert("checkpoint", checkpoint.as_str());
+            }
 
             self.inner
                 .jetstream
