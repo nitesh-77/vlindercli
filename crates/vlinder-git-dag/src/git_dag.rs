@@ -21,6 +21,7 @@
 //! │   ├── runtime                 # "container"
 //! │   ├── agent_id                # "http://127.0.0.1:9000/agents/support-agent"
 //! │   ├── payload                 # raw bytes
+//! │   ├── hash                    # canonical domain hash (hash_dag_node)
 //! │   └── diagnostics.toml        # InvokeDiagnostics via serde
 //! ├── 20260211-143053.000-support-agent-request/
 //! │   ├── type                    # "request"
@@ -53,6 +54,7 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use git2::{FileMode, Oid, Repository, RepositoryInitOptions, Signature, TreeBuilder};
 
+use vlinder_core::domain::workers::dag::build_dag_node;
 use vlinder_core::domain::{DagWorker, ObservableMessage, Registry};
 
 /// DAG worker that writes commits to a git repository.
@@ -63,6 +65,8 @@ pub struct GitDagWorker {
     registry: Option<Arc<dyn Registry>>,
     /// Last git commit OID — for commit chaining.
     last_commit: Option<Oid>,
+    /// Last canonical hash — for Merkle chain identity (domain-level, not git OID).
+    last_canonical_hash: String,
 }
 
 impl GitDagWorker {
@@ -93,15 +97,18 @@ impl GitDagWorker {
             registry_host: registry_host.to_string(),
             registry,
             last_commit,
+            last_canonical_hash: String::new(),
         })
     }
 
     /// Build a subtree for a single message — one file per field (ADR 078).
+    /// Returns (tree OID, canonical hash) so the caller can update the chain.
     fn build_message_subtree(
         &self,
         msg: &ObservableMessage,
         created_at: DateTime<Utc>,
-    ) -> Result<Oid, String> {
+        canonical_parent: &str,
+    ) -> Result<(Oid, String), String> {
         let mut tb = self
             .repo
             .treebuilder(None)
@@ -188,11 +195,18 @@ impl GitDagWorker {
             }
         }
 
-        tb.write()
-            .map_err(|e| format!("write message subtree failed: {}", e))
+        // Compute canonical hash and store it in the subtree
+        let dag_node = build_dag_node(msg, canonical_parent);
+        self.insert_field(&mut tb, "hash", &dag_node.hash)?;
+
+        let tree_oid = tb
+            .write()
+            .map_err(|e| format!("write message subtree failed: {}", e))?;
+        Ok((tree_oid, dag_node.hash))
     }
 
     /// Build the accumulated tree: all previous message directories + new one + metadata.
+    /// Returns (tree OID, canonical hash) for the new message.
     fn build_accumulated_tree(
         &self,
         msg: &ObservableMessage,
@@ -200,7 +214,7 @@ impl GitDagWorker {
         from: &str,
         _to: &str,
         msg_type: &str,
-    ) -> Result<Oid, String> {
+    ) -> Result<(Oid, String), String> {
         // Start from the parent commit's tree (if any)
         let parent_tree = self
             .last_commit
@@ -218,7 +232,8 @@ impl GitDagWorker {
         let _ = tb.remove("models");
 
         // Add new message directory
-        let msg_tree = self.build_message_subtree(msg, created_at)?;
+        let (msg_tree, canonical_hash) =
+            self.build_message_subtree(msg, created_at, &self.last_canonical_hash)?;
         let msg_dir = format!(
             "{}-{}-{}",
             created_at.format("%Y%m%d-%H%M%S%.3f"),
@@ -259,8 +274,10 @@ impl GitDagWorker {
             }
         }
 
-        tb.write()
-            .map_err(|e| format!("write accumulated tree failed: {}", e))
+        let tree_oid = tb
+            .write()
+            .map_err(|e| format!("write accumulated tree failed: {}", e))?;
+        Ok((tree_oid, canonical_hash))
     }
 
     /// Build a models/ subtree with one TOML file per model.
@@ -331,7 +348,8 @@ impl DagWorker for GitDagWorker {
             let (from, to, msg_type) = message_routing(msg);
 
             // 1. Build accumulated tree (all previous messages + new one)
-            let tree_oid = self.build_accumulated_tree(msg, created_at, &from, &to, msg_type)?;
+            let (tree_oid, canonical_hash) =
+                self.build_accumulated_tree(msg, created_at, &from, &to, msg_type)?;
             let tree = self
                 .repo
                 .find_tree(tree_oid)
@@ -411,8 +429,9 @@ impl DagWorker for GitDagWorker {
                 .checkout_head(Some(&mut checkout))
                 .map_err(|e| format!("checkout failed: {}", e))?;
 
-            // 8. Track last commit
+            // 8. Track last commit and canonical hash
             self.last_commit = Some(commit_oid);
+            self.last_canonical_hash = canonical_hash;
 
             tracing::debug!(commit = %commit_oid, "Commit succeeded");
 
@@ -1283,5 +1302,47 @@ mod tests {
         assert!(tmp.path().join(invoke_dir).join("payload").exists());
         assert!(tmp.path().join(request_dir).join("payload").exists());
         assert!(tmp.path().join(response_dir).join("payload").exists());
+    }
+
+    // --- Canonical hash tests ---
+
+    #[test]
+    fn message_subtree_contains_canonical_hash() {
+        let (mut worker, tmp) = test_worker();
+        let (msg, ts) = test_invoke(b"my-payload", 1000);
+
+        // Compute the expected canonical hash (same as RecordingQueue would)
+        let expected_node = vlinder_core::domain::workers::dag::build_dag_node(&msg, "");
+
+        worker.on_observable_message(&msg, ts);
+
+        let dir = "19700101-001640.000-cli-invoke";
+        let hash = git(tmp.path(), &["show", &format!("main:{}/hash", dir)]).unwrap();
+        assert_eq!(
+            hash, expected_node.hash,
+            "hash file should contain canonical hash"
+        );
+    }
+
+    #[test]
+    fn canonical_hashes_chain_across_messages() {
+        let (mut worker, tmp) = test_worker();
+
+        let (m1, t1) = test_invoke(b"first", 1000);
+        let expected1 = vlinder_core::domain::workers::dag::build_dag_node(&m1, "");
+        worker.on_observable_message(&m1, t1);
+
+        let dir1 = "19700101-001640.000-cli-invoke";
+        let hash1 = git(tmp.path(), &["show", &format!("main:{}/hash", dir1)]).unwrap();
+        assert_eq!(hash1, expected1.hash);
+
+        let (m2, t2) = test_request(b"second", 1001);
+        let expected2 = vlinder_core::domain::workers::dag::build_dag_node(&m2, &hash1);
+        worker.on_observable_message(&m2, t2);
+
+        let dir2 = "19700101-001641.000-support-agent-request";
+        let hash2 = git(tmp.path(), &["show", &format!("main:{}/hash", dir2)]).unwrap();
+        assert_eq!(hash2, expected2.hash, "second hash should chain from first");
+        assert_ne!(hash1, hash2);
     }
 }
