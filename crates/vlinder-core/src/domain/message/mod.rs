@@ -6,12 +6,14 @@
 //! - `ResponseMessage`: Service → Runtime (service replies)
 //! - `CompleteMessage`: Runtime → Harness (submission finished)
 //! - `DelegateMessage`: Agent → Agent (via runtime)
+//! - `RepairMessage`: Platform → Sidecar (replay a failed service call, ADR 113)
 
 pub mod complete;
 pub mod delegate;
 pub mod identity;
 pub mod invoke;
 pub mod observable;
+pub mod repair;
 pub mod request;
 pub mod response;
 
@@ -23,6 +25,7 @@ pub use identity::{
 };
 pub use invoke::InvokeMessage;
 pub use observable::{ObservableMessage, ObservableMessageHeaders};
+pub use repair::RepairMessage;
 pub use request::RequestMessage;
 pub use response::ResponseMessage;
 

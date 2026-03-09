@@ -16,6 +16,7 @@ use super::complete::CompleteMessage;
 use super::delegate::DelegateMessage;
 use super::identity::{HarnessType, MessageId, Sequence, SessionId, SubmissionId, TimelineId};
 use super::invoke::InvokeMessage;
+use super::repair::RepairMessage;
 use super::request::RequestMessage;
 use super::response::ResponseMessage;
 
@@ -30,6 +31,7 @@ pub enum ObservableMessage {
     Response(ResponseMessage),
     Complete(CompleteMessage),
     Delegate(DelegateMessage),
+    Repair(RepairMessage),
 }
 
 /// Message metadata without payload.
@@ -258,6 +260,7 @@ impl ObservableMessage {
             ObservableMessage::Response(_) => MessageType::Response,
             ObservableMessage::Complete(_) => MessageType::Complete,
             ObservableMessage::Delegate(_) => MessageType::Delegate,
+            ObservableMessage::Repair(_) => MessageType::Repair,
         }
     }
 
@@ -268,6 +271,7 @@ impl ObservableMessage {
             ObservableMessage::Response(m) => &m.protocol_version,
             ObservableMessage::Complete(m) => &m.protocol_version,
             ObservableMessage::Delegate(m) => &m.protocol_version,
+            ObservableMessage::Repair(m) => &m.protocol_version,
         }
     }
 
@@ -278,6 +282,7 @@ impl ObservableMessage {
             ObservableMessage::Response(m) => &m.id,
             ObservableMessage::Complete(m) => &m.id,
             ObservableMessage::Delegate(m) => &m.id,
+            ObservableMessage::Repair(m) => &m.id,
         }
     }
 
@@ -288,6 +293,7 @@ impl ObservableMessage {
             ObservableMessage::Response(m) => &m.submission,
             ObservableMessage::Complete(m) => &m.submission,
             ObservableMessage::Delegate(m) => &m.submission,
+            ObservableMessage::Repair(m) => &m.submission,
         }
     }
 
@@ -298,6 +304,7 @@ impl ObservableMessage {
             ObservableMessage::Response(m) => &m.timeline,
             ObservableMessage::Complete(m) => &m.timeline,
             ObservableMessage::Delegate(m) => &m.timeline,
+            ObservableMessage::Repair(m) => &m.timeline,
         }
     }
 
@@ -308,6 +315,7 @@ impl ObservableMessage {
             ObservableMessage::Response(m) => &m.session,
             ObservableMessage::Complete(m) => &m.session,
             ObservableMessage::Delegate(m) => &m.session,
+            ObservableMessage::Repair(m) => &m.session,
         }
     }
 
@@ -319,6 +327,7 @@ impl ObservableMessage {
             ObservableMessage::Response(m) => &m.payload,
             ObservableMessage::Complete(m) => &m.payload,
             ObservableMessage::Delegate(m) => &m.payload,
+            ObservableMessage::Repair(m) => &m.payload,
         }
     }
 }
@@ -350,5 +359,11 @@ impl From<CompleteMessage> for ObservableMessage {
 impl From<DelegateMessage> for ObservableMessage {
     fn from(msg: DelegateMessage) -> Self {
         ObservableMessage::Delegate(msg)
+    }
+}
+
+impl From<RepairMessage> for ObservableMessage {
+    fn from(msg: RepairMessage) -> Self {
+        ObservableMessage::Repair(msg)
     }
 }

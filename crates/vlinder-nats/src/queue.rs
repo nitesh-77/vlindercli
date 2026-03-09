@@ -820,6 +820,17 @@ fn routing_key_to_subject(key: &RoutingKey) -> String {
                 timeline, submission, caller, target, nonce,
             )
         }
+        RoutingKey::Repair {
+            timeline,
+            submission,
+            harness,
+            agent,
+        } => {
+            format!(
+                "vlinder.{}.{}.repair.{}.{}",
+                timeline, submission, harness, agent,
+            )
+        }
     }
 }
 
@@ -884,6 +895,13 @@ pub fn subject_to_routing_key(subject: &str) -> Option<RoutingKey> {
             caller: AgentId::new(s[4]),
             target: AgentId::new(s[5]),
             nonce: Nonce::new(s[6]),
+        }),
+        // vlinder.{timeline}.{submission}.repair.{harness}.{agent}
+        "repair" if s.len() == 6 => Some(RoutingKey::Repair {
+            timeline,
+            submission,
+            harness: HarnessType::from_str(s[4]).ok()?,
+            agent: AgentId::new(s[5]),
         }),
         _ => None,
     }
@@ -1151,6 +1169,11 @@ pub fn from_nats_headers(
         RoutingKey::DelegateReply { .. } => {
             // DelegateReply carries a CompleteMessage — same as Complete.
             // Handled via receive_delegate_reply which already parses directly.
+            None
+        }
+        RoutingKey::Repair { .. } => {
+            // Repair is handled via a dedicated send/receive path, not
+            // generic header reconstruction.
             None
         }
     }

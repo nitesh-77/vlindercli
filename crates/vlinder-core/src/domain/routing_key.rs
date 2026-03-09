@@ -230,6 +230,13 @@ pub enum RoutingKey {
         target: AgentId,
         nonce: Nonce,
     },
+    /// Repair: Platform → Sidecar (replay a failed service call, ADR 113).
+    Repair {
+        timeline: TimelineId,
+        submission: SubmissionId,
+        harness: HarnessType,
+        agent: AgentId,
+    },
 }
 
 impl RoutingKey {
@@ -282,10 +289,11 @@ impl RoutingKey {
                 target: target.clone(),
                 nonce: n,
             }),
-            // Reply variants don't produce further replies.
+            // Reply variants and repair don't produce further replies.
             RoutingKey::Complete { .. }
             | RoutingKey::Response { .. }
-            | RoutingKey::DelegateReply { .. } => None,
+            | RoutingKey::DelegateReply { .. }
+            | RoutingKey::Repair { .. } => None,
         }
     }
 }

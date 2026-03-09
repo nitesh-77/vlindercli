@@ -61,8 +61,8 @@ pub use diagnostics::{
 };
 pub use message::{
     CompleteMessage, DelegateMessage, ExpectsReply, HarnessType, InvokeMessage, MessageId,
-    ObservableMessage, ObservableMessageHeaders, RequestMessage, ResponseMessage, Sequence,
-    SequenceCounter, SessionId, SubmissionId, TimelineId, PROTOCOL_VERSION,
+    ObservableMessage, ObservableMessageHeaders, RepairMessage, RequestMessage, ResponseMessage,
+    Sequence, SequenceCounter, SessionId, SubmissionId, TimelineId, PROTOCOL_VERSION,
 };
 pub use message_queue::{agent_routing_key, Acknowledgement, MessageQueue, QueueError};
 pub use routing_key::{

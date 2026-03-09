@@ -197,6 +197,7 @@ mod tests {
             MessageType::Response,
             MessageType::Complete,
             MessageType::Delegate,
+            MessageType::Repair,
         ] {
             let node = DagNode {
                 message_type: mt,

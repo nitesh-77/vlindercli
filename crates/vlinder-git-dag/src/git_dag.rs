@@ -263,6 +263,20 @@ impl GitDagWorker {
                         .map_err(|e| format!("insert stderr failed: {}", e))?;
                 }
             }
+            ObservableMessage::Repair(m) => {
+                self.insert_field(&mut tb, "type", "repair")?;
+                self.insert_field(&mut tb, "agent_id", m.agent_id.as_str())?;
+                self.insert_field(&mut tb, "harness", m.harness.as_str())?;
+                self.insert_field(&mut tb, "service", m.service.service_type().as_str())?;
+                self.insert_field(&mut tb, "backend", m.service.backend_str())?;
+                self.insert_field(&mut tb, "operation", m.operation.as_str())?;
+                self.insert_field(&mut tb, "sequence", &m.sequence.as_u32().to_string())?;
+                self.insert_field(&mut tb, "checkpoint", &m.checkpoint)?;
+                self.insert_field(&mut tb, "dag_parent", &m.dag_parent)?;
+                if let Some(ref state) = m.state {
+                    self.insert_field(&mut tb, "state", state)?;
+                }
+            }
         }
 
         // Compute canonical hash and store it in the subtree
@@ -528,6 +542,11 @@ fn message_routing(msg: &ObservableMessage) -> (String, String, &'static str) {
             "complete",
         ),
         ObservableMessage::Delegate(m) => (m.caller.to_string(), m.target.to_string(), "delegate"),
+        ObservableMessage::Repair(m) => (
+            m.harness.as_str().to_string(),
+            m.agent_id.to_string(),
+            "repair",
+        ),
     }
 }
 
@@ -539,6 +558,7 @@ fn message_agent_name(msg: &ObservableMessage) -> String {
         ObservableMessage::Response(m) => m.agent_id.to_string(),
         ObservableMessage::Complete(m) => m.agent_id.to_string(),
         ObservableMessage::Delegate(m) => m.target.to_string(),
+        ObservableMessage::Repair(m) => m.agent_id.to_string(),
     }
 }
 
@@ -550,6 +570,7 @@ fn message_state(msg: &ObservableMessage) -> Option<&str> {
         ObservableMessage::Response(m) => m.state.as_deref(),
         ObservableMessage::Complete(m) => m.state.as_deref(),
         ObservableMessage::Delegate(m) => m.state.as_deref(),
+        ObservableMessage::Repair(m) => m.state.as_deref(),
     }
 }
 
@@ -558,6 +579,7 @@ fn message_checkpoint(msg: &ObservableMessage) -> Option<&str> {
     match msg {
         ObservableMessage::Request(m) => m.checkpoint.as_deref(),
         ObservableMessage::Response(m) => m.checkpoint.as_deref(),
+        ObservableMessage::Repair(m) => Some(m.checkpoint.as_str()),
         _ => None,
     }
 }
