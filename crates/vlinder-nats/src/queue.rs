@@ -20,9 +20,9 @@ use std::str::FromStr;
 use vlinder_core::domain::{
     Acknowledgement, AgentId, CompleteMessage, DelegateDiagnostics, DelegateMessage, HarnessType,
     InvokeDiagnostics, InvokeMessage, MessageId, MessageQueue, Nonce, Operation, QueueError,
-    RequestDiagnostics, RequestMessage, ResponseMessage, RoutingKey, RuntimeDiagnostics,
-    RuntimeType, Sequence, ServiceBackend, ServiceDiagnostics, ServiceType, SessionId,
-    SubmissionId, TimelineId,
+    RepairMessage, RequestDiagnostics, RequestMessage, ResponseMessage, RoutingKey,
+    RuntimeDiagnostics, RuntimeType, Sequence, ServiceBackend, ServiceDiagnostics, ServiceType,
+    SessionId, SubmissionId, TimelineId,
 };
 
 /// NATS queue with JetStream durability.
@@ -727,6 +727,88 @@ impl MessageQueue for NatsQueue {
             Ok((msg, ack_fn))
         })
     }
+
+    fn send_repair(&self, msg: RepairMessage) -> Result<(), QueueError> {
+        let subject = routing_key_to_subject(&msg.routing_key());
+
+        self.inner.runtime.block_on(async {
+            let mut headers = async_nats::HeaderMap::new();
+            headers.insert("msg-id", msg.id.as_str());
+            headers.insert("protocol-version", msg.protocol_version.as_str());
+            headers.insert("timeline-id", msg.timeline.as_str());
+            headers.insert("submission-id", msg.submission.as_str());
+            headers.insert("session-id", msg.session.as_str());
+            headers.insert("agent-id", msg.agent_id.as_str());
+            headers.insert("harness", msg.harness.as_str());
+            headers.insert("dag-parent", msg.dag_parent.as_str());
+            headers.insert("checkpoint", msg.checkpoint.as_str());
+            headers.insert("service", msg.service.service_type().as_str());
+            headers.insert("backend", msg.service.backend_str());
+            headers.insert("operation", msg.operation.as_str());
+            headers.insert("sequence", msg.sequence.to_string());
+            if let Some(ref state) = msg.state {
+                headers.insert("state", state.as_str());
+            }
+
+            self.inner
+                .jetstream
+                .publish_with_headers(subject, headers, msg.payload.into())
+                .await
+                .map_err(|e| QueueError::SendFailed(e.to_string()))?
+                .await
+                .map_err(|e| QueueError::SendFailed(e.to_string()))?;
+
+            Ok(())
+        })
+    }
+
+    fn receive_repair(
+        &self,
+        agent: &AgentId,
+    ) -> Result<(RepairMessage, Acknowledgement), QueueError> {
+        // Build filter: vlinder.{timeline}.{submission}.repair.{harness}.{agent}
+        let filter = format!("vlinder.*.*.repair.*.{}", agent.as_str());
+
+        self.inner.runtime.block_on(async {
+            let (js_msg, ack_fn) = self.fetch_one(&filter).await?;
+
+            let headers = js_msg
+                .headers
+                .as_ref()
+                .ok_or_else(|| QueueError::ReceiveFailed("missing headers".to_string()))?;
+
+            let msg = RepairMessage {
+                id: MessageId::from(get_header(headers, "msg-id")?),
+                protocol_version: get_header(headers, "protocol-version").unwrap_or_default(),
+                timeline: get_header(headers, "timeline-id")
+                    .map(TimelineId::from)
+                    .unwrap_or_else(|_| TimelineId::main()),
+                submission: SubmissionId::from(get_header(headers, "submission-id")?),
+                session: SessionId::from(get_header(headers, "session-id")?),
+                agent_id: AgentId::new(get_header(headers, "agent-id")?),
+                harness: HarnessType::from_str(&get_header(headers, "harness")?)
+                    .map_err(|_| QueueError::ReceiveFailed("unknown harness type".to_string()))?,
+                dag_parent: get_header(headers, "dag-parent")?,
+                checkpoint: get_header(headers, "checkpoint")?,
+                service: ServiceBackend::from_parts(
+                    ServiceType::from_str(&get_header(headers, "service")?).map_err(|_| {
+                        QueueError::ReceiveFailed("unknown service type".to_string())
+                    })?,
+                    &get_header(headers, "backend")?,
+                )
+                .ok_or_else(|| QueueError::ReceiveFailed("invalid service/backend".to_string()))?,
+                operation: Operation::from_str(&get_header(headers, "operation")?)
+                    .map_err(|_| QueueError::ReceiveFailed("unknown operation".to_string()))?,
+                sequence: Sequence::from(
+                    get_header(headers, "sequence")?.parse::<u32>().unwrap_or(1),
+                ),
+                payload: js_msg.payload.to_vec(),
+                state: get_header(headers, "state").ok(),
+            };
+
+            Ok((msg, ack_fn))
+        })
+    }
 }
 
 /// Serialize a routing key to a NATS subject string (ADR 096 §8).
@@ -998,6 +1080,28 @@ pub fn delegate_to_nats_headers(msg: &DelegateMessage) -> HashMap<String, String
     h
 }
 
+/// Serialize a `RepairMessage` into NATS headers (sans payload).
+#[allow(dead_code)]
+pub fn repair_to_nats_headers(msg: &RepairMessage) -> HashMap<String, String> {
+    let mut h = HashMap::new();
+    h.insert("msg-id".to_string(), msg.id.as_str().to_string());
+    h.insert("protocol-version".to_string(), msg.protocol_version.clone());
+    h.insert("session-id".to_string(), msg.session.as_str().to_string());
+    h.insert("dag-parent".to_string(), msg.dag_parent.clone());
+    h.insert("checkpoint".to_string(), msg.checkpoint.clone());
+    h.insert(
+        "service".to_string(),
+        msg.service.service_type().as_str().to_string(),
+    );
+    h.insert("backend".to_string(), msg.service.backend_str().to_string());
+    h.insert("operation".to_string(), msg.operation.as_str().to_string());
+    h.insert("sequence".to_string(), msg.sequence.to_string());
+    if let Some(ref state) = msg.state {
+        h.insert("state".to_string(), state.clone());
+    }
+    h
+}
+
 /// Reconstruct typed message headers from a `RoutingKey` and NATS header map.
 ///
 /// The `RoutingKey` provides the message type discriminant and routing fields
@@ -1171,10 +1275,36 @@ pub fn from_nats_headers(
             // Handled via receive_delegate_reply which already parses directly.
             None
         }
-        RoutingKey::Repair { .. } => {
-            // Repair is handled via a dedicated send/receive path, not
-            // generic header reconstruction.
-            None
+        RoutingKey::Repair {
+            timeline,
+            submission,
+            harness,
+            agent,
+        } => {
+            let dag_parent = headers.get("dag-parent").cloned()?;
+            let checkpoint = headers.get("checkpoint").cloned()?;
+            let service = ServiceBackend::from_parts(
+                ServiceType::from_str(headers.get("service")?).ok()?,
+                headers.get("backend")?,
+            )?;
+            let operation = Operation::from_str(headers.get("operation")?).ok()?;
+            let sequence = Sequence::from(headers.get("sequence")?.parse::<u32>().ok()?);
+
+            Some(ObservableMessageHeaders::Repair {
+                id,
+                protocol_version,
+                timeline: timeline.clone(),
+                submission: submission.clone(),
+                session,
+                agent_id: agent.clone(),
+                harness: *harness,
+                dag_parent,
+                checkpoint,
+                service,
+                operation,
+                sequence,
+                state,
+            })
         }
     }
 }

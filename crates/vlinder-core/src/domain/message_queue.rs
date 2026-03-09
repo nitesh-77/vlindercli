@@ -11,7 +11,8 @@
 
 use super::{
     AgentId, CompleteMessage, DelegateMessage, HarnessType, InvokeMessage, Operation,
-    RequestMessage, ResourceId, ResponseMessage, RoutingKey, ServiceBackend, SubmissionId,
+    RepairMessage, RequestMessage, ResourceId, ResponseMessage, RoutingKey, ServiceBackend,
+    SubmissionId,
 };
 use std::fmt;
 
@@ -116,6 +117,23 @@ pub trait MessageQueue {
         &self,
         reply_key: &RoutingKey,
     ) -> Result<(CompleteMessage, Acknowledgement), QueueError>;
+
+    // -------------------------------------------------------------------------
+    // Repair methods (ADR 113)
+    // -------------------------------------------------------------------------
+
+    /// Send a RepairMessage (Platform → Sidecar).
+    ///
+    /// Instructs the sidecar to replay a failed service call.
+    fn send_repair(&self, msg: RepairMessage) -> Result<(), QueueError>;
+
+    /// Receive a RepairMessage for a specific agent.
+    ///
+    /// The sidecar subscribes to repair messages alongside invoke.
+    fn receive_repair(
+        &self,
+        agent: &AgentId,
+    ) -> Result<(RepairMessage, Acknowledgement), QueueError>;
 
     // -------------------------------------------------------------------------
     // Request-reply facades (ADR 092)

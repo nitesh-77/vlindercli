@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 use crate::domain::workers::dag::build_dag_node;
 use crate::domain::{
     Acknowledgement, CompleteMessage, DagStore, DelegateMessage, InvokeMessage, MessageQueue,
-    ObservableMessage, QueueError, RequestMessage, ResponseMessage, SubmissionId,
+    ObservableMessage, QueueError, RepairMessage, RequestMessage, ResponseMessage, SubmissionId,
 };
 
 /// A `MessageQueue` decorator that synchronously records DAG nodes on send.
@@ -167,6 +167,22 @@ impl MessageQueue for RecordingQueue {
         reply_key: &crate::domain::RoutingKey,
     ) -> Result<(CompleteMessage, Acknowledgement), QueueError> {
         self.inner.receive_delegate_reply(reply_key)
+    }
+
+    // -------------------------------------------------------------------------
+    // Repair methods — record + forward on send, delegate on receive
+    // -------------------------------------------------------------------------
+
+    fn send_repair(&self, msg: RepairMessage) -> Result<(), QueueError> {
+        self.record(&msg.clone().into());
+        self.inner.send_repair(msg)
+    }
+
+    fn receive_repair(
+        &self,
+        agent: &crate::domain::AgentId,
+    ) -> Result<(RepairMessage, Acknowledgement), QueueError> {
+        self.inner.receive_repair(agent)
     }
 }
 
