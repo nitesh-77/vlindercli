@@ -13,8 +13,8 @@ use std::time::Instant;
 
 use vlinder_core::domain::{
     CompleteMessage, ContainerId, ExpectsReply, HealthWindow, HttpMethod, ImageDigest, ImageRef,
-    InvokeMessage, MessageQueue, ProviderHost, ProviderRoute, Registry, RequestDiagnostics,
-    RequestMessage, ResponseMessage, RoutingKey, SequenceCounter,
+    InvokeMessage, MessageQueue, ProviderHost, ProviderRoute, Registry, RepairMessage,
+    RequestDiagnostics, RequestMessage, ResponseMessage, RoutingKey, SequenceCounter,
 };
 
 use vlinder_provider_server::handler::InvokeHandler;
@@ -255,6 +255,102 @@ pub fn handle_service_response(
             Err(msg)
         }
     }
+}
+
+/// Handle a repair message: construct and send the service request, return
+/// a durable session waiting for the response (ADR 113).
+///
+/// Skips the initial agent POST — the platform initiates the service call
+/// directly. When the response arrives, `handle_service_response` delivers
+/// it to the agent's checkpoint handler, re-entering the normal durable loop.
+pub fn handle_repair(
+    ctx: &DispatchContext,
+    repair: &RepairMessage,
+) -> Result<InvokeOutcome, String> {
+    let mut trace = TraceLog::new();
+    let started_at = Instant::now();
+
+    let agent = ctx
+        .registry
+        .get_agent_by_name(repair.agent_id.as_str())
+        .expect("agent not found");
+
+    // Build checkpoint hosts with :3544 suffix (same as durable mode).
+    let hosts: Vec<ProviderHost> = build_hosts(&agent)
+        .into_iter()
+        .map(|mut h| {
+            h.hostname = format!("{}:{}", h.hostname, 3544);
+            h
+        })
+        .collect();
+
+    let diagnostics = RequestDiagnostics {
+        sequence: repair.sequence.as_u32(),
+        endpoint: format!("/{}", repair.service.service_type().as_str()),
+        request_bytes: repair.payload.len() as u64,
+        received_at_ms: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64,
+    };
+
+    let mut request = RequestMessage::new(
+        repair.timeline.clone(),
+        repair.submission.clone(),
+        repair.session.clone(),
+        repair.agent_id.clone(),
+        repair.service,
+        repair.operation,
+        repair.sequence,
+        repair.payload.clone(),
+        repair.state.clone(),
+        diagnostics,
+    );
+    request.checkpoint = Some(repair.checkpoint.clone());
+
+    trace.log(format!(
+        "Repair: sending request to {} (checkpoint '{}', seq {})",
+        repair.service.service_type().as_str(),
+        repair.checkpoint,
+        repair.sequence.as_u32()
+    ));
+
+    ctx.queue
+        .send_request(request.clone())
+        .map_err(|e| format!("Failed to send repair request: {}", e))?;
+
+    // Build a synthetic InvokeMessage so DurableSession can create
+    // CompleteMessage replies when the agent finishes.
+    let invoke = InvokeMessage::new(
+        repair.timeline.clone(),
+        repair.submission.clone(),
+        repair.session.clone(),
+        repair.harness,
+        vlinder_core::domain::RuntimeType::Container,
+        repair.agent_id.clone(),
+        repair.payload.clone(),
+        repair.state.clone(),
+        vlinder_core::domain::InvokeDiagnostics {
+            harness_version: env!("CARGO_PKG_VERSION").to_string(),
+            history_turns: 0,
+        },
+        repair.dag_parent.clone(),
+    );
+
+    let sequence = SequenceCounter::new();
+    // Advance past the repair's sequence so subsequent calls don't collide.
+    for _ in 0..repair.sequence.as_u32() {
+        sequence.next();
+    }
+
+    Ok(InvokeOutcome::Pending(DurableSession {
+        invoke,
+        reply_key: None,
+        hosts,
+        sequence,
+        pending_request: request,
+        started_at,
+    }))
 }
 
 /// Parse and execute a JSON action from the agent.
