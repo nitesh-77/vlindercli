@@ -45,7 +45,8 @@ impl SqliteDagStore {
                  created_at TEXT NOT NULL,
                  state TEXT,
                  protocol_version TEXT NOT NULL DEFAULT '',
-                 checkpoint TEXT
+                 checkpoint TEXT,
+                 operation TEXT
              );
              CREATE INDEX IF NOT EXISTS idx_dag_nodes_session
                  ON dag_nodes (session_id, created_at);
@@ -219,7 +220,7 @@ fn row_to_timeline(row: &rusqlite::Row) -> Result<Timeline, rusqlite::Error> {
 ///
 /// Expects columns in order: hash, parent_hash, message_type, sender, receiver,
 /// session_id, submission_id, payload, diagnostics, stderr, created_at, state,
-/// protocol_version.
+/// protocol_version, checkpoint, operation.
 fn row_to_dag_node(row: &rusqlite::Row) -> Result<DagNode, rusqlite::Error> {
     let mt_str: String = row.get(2)?;
     let message_type = MessageType::from_str(&mt_str).map_err(|_| {
@@ -248,6 +249,7 @@ fn row_to_dag_node(row: &rusqlite::Row) -> Result<DagNode, rusqlite::Error> {
         state: row.get(11)?,
         protocol_version: row.get(12)?,
         checkpoint: row.get(13)?,
+        operation: row.get(14)?,
     })
 }
 
@@ -255,8 +257,8 @@ impl DagStore for SqliteDagStore {
     fn insert_node(&self, node: &DagNode) -> Result<(), String> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT OR IGNORE INTO dag_nodes (hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state, protocol_version, checkpoint)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+            "INSERT OR IGNORE INTO dag_nodes (hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state, protocol_version, checkpoint, operation)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
             rusqlite::params![
                 node.hash,
                 node.parent_hash,
@@ -272,6 +274,7 @@ impl DagStore for SqliteDagStore {
                 node.state,
                 node.protocol_version,
                 node.checkpoint,
+                node.operation,
             ],
         ).map_err(|e| format!("insert_node failed: {}", e))?;
 
@@ -291,7 +294,7 @@ impl DagStore for SqliteDagStore {
     fn get_node(&self, hash: &str) -> Result<Option<DagNode>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state, protocol_version, checkpoint
+            "SELECT hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state, protocol_version, checkpoint, operation
              FROM dag_nodes WHERE hash = ?1"
         ).map_err(|e| format!("get_node prepare failed: {}", e))?;
 
@@ -306,7 +309,7 @@ impl DagStore for SqliteDagStore {
     fn get_session_nodes(&self, session_id: &str) -> Result<Vec<DagNode>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state, protocol_version, checkpoint
+            "SELECT hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state, protocol_version, checkpoint, operation
              FROM dag_nodes WHERE session_id = ?1 ORDER BY created_at"
         ).map_err(|e| format!("get_session_nodes prepare failed: {}", e))?;
 
@@ -324,7 +327,7 @@ impl DagStore for SqliteDagStore {
     fn get_children(&self, parent_hash: &str) -> Result<Vec<DagNode>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state, protocol_version, checkpoint
+            "SELECT hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state, protocol_version, checkpoint, operation
              FROM dag_nodes WHERE parent_hash = ?1"
         ).map_err(|e| format!("get_children prepare failed: {}", e))?;
 
@@ -589,6 +592,7 @@ mod tests {
             state: None,
             protocol_version: String::new(),
             checkpoint: None,
+            operation: None,
         }
     }
 
@@ -623,6 +627,7 @@ mod tests {
             state: Some("abc123".to_string()),
             protocol_version: "0.1.0".to_string(),
             checkpoint: Some("summarize".to_string()),
+            operation: None,
         };
 
         store.insert_node(&node).unwrap();

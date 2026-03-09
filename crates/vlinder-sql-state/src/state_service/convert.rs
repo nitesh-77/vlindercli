@@ -28,6 +28,7 @@ impl From<DagNode> for proto::DagNode {
             state: node.state,
             protocol_version: node.protocol_version,
             checkpoint: node.checkpoint,
+            operation: node.operation,
         }
     }
 }
@@ -49,6 +50,7 @@ impl From<&DagNode> for proto::DagNode {
             state: node.state.clone(),
             protocol_version: node.protocol_version.clone(),
             checkpoint: node.checkpoint.clone(),
+            operation: node.operation.clone(),
         }
     }
 }
@@ -84,6 +86,7 @@ impl TryFrom<proto::DagNode> for DagNode {
             state: node.state,
             protocol_version: node.protocol_version,
             checkpoint: node.checkpoint,
+            operation: node.operation,
         })
     }
 }
@@ -155,6 +158,7 @@ mod tests {
             state: Some("state-hash-abc".to_string()),
             protocol_version: "0.1.0".to_string(),
             checkpoint: None,
+            operation: None,
         }
     }
 

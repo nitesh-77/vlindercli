@@ -60,6 +60,7 @@ message DagNode {
   optional string state = 12;
   string protocol_version = 13;
   optional string checkpoint = 14;
+  optional string operation = 15;
 }
 
 // =============================================================================

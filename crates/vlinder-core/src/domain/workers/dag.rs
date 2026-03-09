@@ -70,6 +70,19 @@ pub fn observable_checkpoint(msg: &ObservableMessage) -> Option<String> {
     }
 }
 
+/// Extract operation from a reconstructed message.
+///
+/// Only Request, Response, and Repair carry an operation. Returns None for
+/// other message types.
+pub fn observable_operation(msg: &ObservableMessage) -> Option<String> {
+    match msg {
+        ObservableMessage::Request(m) => Some(m.operation.as_str().to_string()),
+        ObservableMessage::Response(m) => Some(m.operation.as_str().to_string()),
+        ObservableMessage::Repair(m) => Some(m.operation.as_str().to_string()),
+        _ => None,
+    }
+}
+
 /// Extract state from a reconstructed message.
 pub fn observable_state(msg: &ObservableMessage) -> Option<String> {
     match msg {
@@ -93,6 +106,7 @@ pub fn build_dag_node(msg: &ObservableMessage, parent_hash: &str) -> DagNode {
     let stderr = extract_typed_stderr(msg);
     let state = observable_state(msg);
     let checkpoint = observable_checkpoint(msg);
+    let operation = observable_operation(msg);
     let payload = msg.payload();
     let session_id = msg.session().as_str().to_string();
     let hash = hash_dag_node(
@@ -118,6 +132,7 @@ pub fn build_dag_node(msg: &ObservableMessage, parent_hash: &str) -> DagNode {
         state,
         protocol_version: msg.protocol_version().to_string(),
         checkpoint,
+        operation,
     }
 }
 

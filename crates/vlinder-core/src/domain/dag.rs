@@ -88,6 +88,9 @@ pub struct DagNode {
     /// Checkpoint handler name for durable execution (ADR 111).
     /// Present on Request and Response messages when the agent uses checkpoints.
     pub checkpoint: Option<String>,
+    /// Operation for Request/Response/Repair messages (ADR 113).
+    /// E.g., "run", "get", "put". None for Invoke/Complete/Delegate.
+    pub operation: Option<String>,
 }
 
 /// Compute the content-addressed hash for a DAG node.

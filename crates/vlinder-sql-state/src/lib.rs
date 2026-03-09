@@ -392,6 +392,7 @@ mod tests {
             state: None,
             protocol_version: String::new(),
             checkpoint: None,
+            operation: None,
         }
     }
 
