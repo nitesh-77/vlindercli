@@ -61,7 +61,7 @@ use vlinder_core::domain::{DagWorker, ObservableMessage, Registry};
 /// DAG worker that writes commits to a git repository.
 ///
 /// Stateless per-session: all session state (parent commit, canonical hash)
-/// is read from `refs/sessions/<session_id>` on each message. No in-memory
+/// is read from `refs/sessions/<session_id>/main` on each message. No in-memory
 /// maps survive across messages or restarts.
 pub struct GitDagWorker {
     repo: Repository,
@@ -116,7 +116,7 @@ impl GitDagWorker {
 
     /// Resolve the session ref to a commit OID. Returns None for a new session.
     fn session_commit(&self, session_id: &str) -> Option<Oid> {
-        let refname = format!("refs/sessions/{}", session_id);
+        let refname = format!("refs/sessions/{}/main", session_id);
         self.repo
             .find_reference(&refname)
             .ok()
@@ -501,7 +501,7 @@ impl DagWorker for GitDagWorker {
                 .map_err(|e| format!("commit failed: {}", e))?;
 
             // 7. Update session ref (HEAD stays on main — working tree untouched)
-            let refname = format!("refs/sessions/{}", session_id);
+            let refname = format!("refs/sessions/{}/main", session_id);
             let reflog_msg = format!("{}: {} → {}", msg_type, from, to);
             self.repo
                 .reference(&refname, commit_oid, true, &reflog_msg)
@@ -751,7 +751,7 @@ mod tests {
     }
 
     /// Session ref for the default test session (sess-1).
-    const SESS1_REF: &str = "refs/sessions/sess-1";
+    const SESS1_REF: &str = "refs/sessions/sess-1/main";
 
     /// Run a git command against the test repo. Tests still use the CLI to
     /// verify that git2-written objects are readable by standard git.
@@ -795,7 +795,7 @@ mod tests {
 
         let sha = git(
             tmp.path(),
-            &["rev-parse", "--verify", "refs/sessions/sess-1"],
+            &["rev-parse", "--verify", "refs/sessions/sess-1/main"],
         )
         .unwrap();
         assert_eq!(sha.len(), 40);
@@ -1299,7 +1299,7 @@ mod tests {
 
         let sha = git(
             tmp.path(),
-            &["rev-parse", "--verify", "refs/sessions/sess-1"],
+            &["rev-parse", "--verify", "refs/sessions/sess-1/main"],
         )
         .unwrap();
         assert_eq!(sha.len(), 40);
@@ -1316,8 +1316,8 @@ mod tests {
         worker.on_observable_message(&m2, t2);
 
         // Each session has its own ref
-        let sha1 = git(tmp.path(), &["rev-parse", "refs/sessions/sess-1"]).unwrap();
-        let sha2 = git(tmp.path(), &["rev-parse", "refs/sessions/sess-2"]).unwrap();
+        let sha1 = git(tmp.path(), &["rev-parse", "refs/sessions/sess-1/main"]).unwrap();
+        let sha2 = git(tmp.path(), &["rev-parse", "refs/sessions/sess-2/main"]).unwrap();
         assert_ne!(sha1, sha2);
 
         // Each is a root commit (no parent)
@@ -1333,11 +1333,11 @@ mod tests {
 
         let (m1, t1) = test_invoke(b"first", 1000);
         worker.on_observable_message(&m1, t1);
-        let commit1 = git(tmp.path(), &["rev-parse", "refs/sessions/sess-1"]).unwrap();
+        let commit1 = git(tmp.path(), &["rev-parse", "refs/sessions/sess-1/main"]).unwrap();
 
         let (m2, t2) = test_request(b"second", 1001);
         worker.on_observable_message(&m2, t2);
-        let commit2 = git(tmp.path(), &["rev-parse", "refs/sessions/sess-1"]).unwrap();
+        let commit2 = git(tmp.path(), &["rev-parse", "refs/sessions/sess-1/main"]).unwrap();
 
         assert_ne!(commit1, commit2);
         let parent = git(tmp.path(), &["log", "-1", "--format=%P", &commit2]).unwrap();
@@ -1357,7 +1357,7 @@ mod tests {
         // sess-1's tree should only have its own message
         let ls1 = git(
             tmp.path(),
-            &["ls-tree", "--name-only", "refs/sessions/sess-1"],
+            &["ls-tree", "--name-only", "refs/sessions/sess-1/main"],
         )
         .unwrap();
         assert!(ls1.contains("19700101-001640.000-cli-invoke"));
@@ -1369,7 +1369,7 @@ mod tests {
         // sess-2's tree should only have its own message
         let ls2 = git(
             tmp.path(),
-            &["ls-tree", "--name-only", "refs/sessions/sess-2"],
+            &["ls-tree", "--name-only", "refs/sessions/sess-2/main"],
         )
         .unwrap();
         assert!(ls2.contains("19700101-001641.000-cli-invoke"));
@@ -1398,7 +1398,11 @@ mod tests {
         }
 
         // Should have 2 commits chained in sess-1
-        let count = git(tmp.path(), &["rev-list", "--count", "refs/sessions/sess-1"]).unwrap();
+        let count = git(
+            tmp.path(),
+            &["rev-list", "--count", "refs/sessions/sess-1/main"],
+        )
+        .unwrap();
         assert_eq!(count, "2");
     }
 
