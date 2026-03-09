@@ -150,6 +150,19 @@ pub trait MessageQueue {
         )
     }
 
+    /// Send a repair and block until the agent completes.
+    ///
+    /// Used by the harness to replay a failed service call (ADR 113).
+    /// Reply type is CompleteMessage, same as invoke.
+    fn repair_agent(&self, msg: RepairMessage) -> Result<CompleteMessage, QueueError> {
+        let submission = msg.submission.clone();
+        let harness = msg.harness;
+        send_and_wait(
+            || self.send_repair(msg),
+            || self.receive_complete(&submission, harness),
+        )
+    }
+
     /// Send an invocation and block until the agent completes.
     ///
     /// Used by the harness to run an agent to completion.
