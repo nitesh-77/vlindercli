@@ -31,6 +31,7 @@
 //! │   ├── backend                 # "ollama"
 //! │   ├── operation               # "run"
 //! │   ├── sequence                # "1"
+//! │   ├── checkpoint              # "summarize" (optional, ADR 111)
 //! │   ├── payload
 //! │   └── diagnostics.toml
 //! ├── agent.toml
@@ -212,6 +213,9 @@ impl GitDagWorker {
                 if let Some(ref state) = m.state {
                     self.insert_field(&mut tb, "state", state)?;
                 }
+                if let Some(ref checkpoint) = m.checkpoint {
+                    self.insert_field(&mut tb, "checkpoint", checkpoint)?;
+                }
                 self.insert_diagnostics_toml(&mut tb, &m.diagnostics)?;
             }
             ObservableMessage::Response(m) => {
@@ -224,6 +228,9 @@ impl GitDagWorker {
                 self.insert_field(&mut tb, "correlation_id", m.correlation_id.as_str())?;
                 if let Some(ref state) = m.state {
                     self.insert_field(&mut tb, "state", state)?;
+                }
+                if let Some(ref checkpoint) = m.checkpoint {
+                    self.insert_field(&mut tb, "checkpoint", checkpoint)?;
                 }
                 self.insert_diagnostics_toml(&mut tb, &m.diagnostics)?;
             }
@@ -444,6 +451,9 @@ impl DagWorker for GitDagWorker {
             if let Some(state) = message_state(msg) {
                 message.push_str(&format!("\nState: {}", state));
             }
+            if let Some(checkpoint) = message_checkpoint(msg) {
+                message.push_str(&format!("\nCheckpoint: {}", checkpoint));
+            }
             let pv = msg.protocol_version();
             if !pv.is_empty() {
                 message.push_str(&format!("\nProtocol-Version: {}", pv));
@@ -540,6 +550,15 @@ fn message_state(msg: &ObservableMessage) -> Option<&str> {
         ObservableMessage::Response(m) => m.state.as_deref(),
         ObservableMessage::Complete(m) => m.state.as_deref(),
         ObservableMessage::Delegate(m) => m.state.as_deref(),
+    }
+}
+
+/// Extract checkpoint handler name from the message (ADR 111).
+fn message_checkpoint(msg: &ObservableMessage) -> Option<&str> {
+    match msg {
+        ObservableMessage::Request(m) => m.checkpoint.as_deref(),
+        ObservableMessage::Response(m) => m.checkpoint.as_deref(),
+        _ => None,
     }
 }
 
@@ -1413,5 +1432,65 @@ mod tests {
         .unwrap();
         assert_eq!(hash2, expected2.hash, "second hash should chain from first");
         assert_ne!(hash1, hash2);
+    }
+
+    // --- Checkpoint tests ---
+
+    #[test]
+    fn request_subtree_contains_checkpoint_file() {
+        let (mut worker, tmp) = test_worker();
+        let (m1, t1) = test_invoke(b"start", 1000);
+        worker.on_observable_message(&m1, t1);
+
+        let (mut msg, ts) = test_request(b"prompt", 1001);
+        if let ObservableMessage::Request(ref mut m) = msg {
+            m.checkpoint = Some("summarize".to_string());
+        }
+        worker.on_observable_message(&msg, ts);
+
+        let dir = "19700101-001641.000-support-agent-request";
+        let checkpoint = git(
+            tmp.path(),
+            &["show", &format!("{}:{}/checkpoint", SESS1_REF, dir)],
+        )
+        .unwrap();
+        assert_eq!(checkpoint, "summarize");
+    }
+
+    #[test]
+    fn request_without_checkpoint_has_no_file() {
+        let (mut worker, tmp) = test_worker();
+        let (m1, t1) = test_invoke(b"start", 1000);
+        worker.on_observable_message(&m1, t1);
+
+        let (msg, ts) = test_request(b"prompt", 1001);
+        worker.on_observable_message(&msg, ts);
+
+        let dir = "19700101-001641.000-support-agent-request";
+        let result = git(
+            tmp.path(),
+            &["show", &format!("{}:{}/checkpoint", SESS1_REF, dir)],
+        );
+        assert!(result.is_err(), "no checkpoint file when not set");
+    }
+
+    #[test]
+    fn checkpoint_trailer_on_commit_message() {
+        let (mut worker, tmp) = test_worker();
+        let (m1, t1) = test_invoke(b"start", 1000);
+        worker.on_observable_message(&m1, t1);
+
+        let (mut msg, ts) = test_request(b"prompt", 1001);
+        if let ObservableMessage::Request(ref mut m) = msg {
+            m.checkpoint = Some("handle_result".to_string());
+        }
+        worker.on_observable_message(&msg, ts);
+
+        let body = git(tmp.path(), &["log", "-1", "--format=%b", SESS1_REF]).unwrap();
+        assert!(
+            body.contains("Checkpoint: handle_result"),
+            "commit body should contain Checkpoint trailer, got: {}",
+            body
+        );
     }
 }
