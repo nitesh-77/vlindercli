@@ -82,6 +82,9 @@ pub struct DagNode {
     /// Protocol version of the sender (semver from Cargo.toml).
     /// Empty for messages captured before protocol versioning was added.
     pub protocol_version: String,
+    /// Checkpoint handler name for durable execution (ADR 111).
+    /// Present on Request and Response messages when the agent uses checkpoints.
+    pub checkpoint: Option<String>,
 }
 
 /// Compute the content-addressed hash for a DAG node.

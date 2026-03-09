@@ -27,6 +27,7 @@ impl From<DagNode> for proto::DagNode {
             created_at: node.created_at.to_rfc3339(),
             state: node.state,
             protocol_version: node.protocol_version,
+            checkpoint: node.checkpoint,
         }
     }
 }
@@ -47,6 +48,7 @@ impl From<&DagNode> for proto::DagNode {
             created_at: node.created_at.to_rfc3339(),
             state: node.state.clone(),
             protocol_version: node.protocol_version.clone(),
+            checkpoint: node.checkpoint.clone(),
         }
     }
 }
@@ -81,6 +83,7 @@ impl TryFrom<proto::DagNode> for DagNode {
             created_at,
             state: node.state,
             protocol_version: node.protocol_version,
+            checkpoint: node.checkpoint,
         })
     }
 }
@@ -151,6 +154,7 @@ mod tests {
             created_at: Utc::now(),
             state: Some("state-hash-abc".to_string()),
             protocol_version: "0.1.0".to_string(),
+            checkpoint: None,
         }
     }
 

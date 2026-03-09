@@ -59,6 +59,7 @@ message DagNode {
   string created_at = 11;          // ISO-8601
   optional string state = 12;
   string protocol_version = 13;
+  optional string checkpoint = 14;
 }
 
 // =============================================================================
