@@ -5,7 +5,9 @@ mod help;
 mod model;
 mod repl;
 mod secret;
+mod session;
 mod timeline;
+mod turn;
 
 use clap::{Parser, Subcommand};
 
@@ -41,10 +43,20 @@ pub enum Command {
         #[command(subcommand)]
         cmd: secret::SecretCommand,
     },
+    /// Inspect and repair agent sessions
+    Session {
+        #[command(subcommand)]
+        cmd: session::SessionCommand,
+    },
     /// Explore agent conversations via git
     Timeline {
         #[command(subcommand)]
         cmd: timeline::TimelineCommand,
+    },
+    /// Inspect individual turns within a session
+    Turn {
+        #[command(subcommand)]
+        cmd: turn::TurnCommand,
     },
 }
 
@@ -57,7 +69,9 @@ pub fn run() {
         Command::Support => help::execute(),
         Command::Model { cmd } => model::execute(cmd),
         Command::Secret { cmd } => secret::execute(cmd),
+        Command::Session { cmd } => session::execute(cmd),
         Command::Timeline { cmd } => timeline::execute(cmd),
+        Command::Turn { cmd } => turn::execute(cmd),
     }
 }
 
@@ -451,6 +465,105 @@ mod tests {
     #[test]
     fn cli_secret_missing_action_fails() {
         let result = Cli::try_parse_from(["vlinder", "secret"]);
+        assert!(result.is_err());
+    }
+
+    // --- Session subcommand tests ---
+
+    #[test]
+    fn cli_session_list() {
+        let cli = Cli::try_parse_from(["vlinder", "session", "list", "todoapp"]).unwrap();
+        assert_eq!(
+            cli.command,
+            Command::Session {
+                cmd: session::SessionCommand::List {
+                    agent_name: "todoapp".to_string(),
+                }
+            }
+        );
+    }
+
+    #[test]
+    fn cli_session_get() {
+        let cli = Cli::try_parse_from(["vlinder", "session", "get", "sess-1"]).unwrap();
+        assert_eq!(
+            cli.command,
+            Command::Session {
+                cmd: session::SessionCommand::Get {
+                    session_id: "sess-1".to_string(),
+                }
+            }
+        );
+    }
+
+    #[test]
+    fn cli_session_fork() {
+        let cli = Cli::try_parse_from([
+            "vlinder", "session", "fork", "sess-1", "--from", "abc123", "--name", "repair-1",
+        ])
+        .unwrap();
+        assert_eq!(
+            cli.command,
+            Command::Session {
+                cmd: session::SessionCommand::Fork {
+                    session_id: "sess-1".to_string(),
+                    from: "abc123".to_string(),
+                    name: "repair-1".to_string(),
+                }
+            }
+        );
+    }
+
+    #[test]
+    fn cli_session_repair() {
+        let cli = Cli::try_parse_from(["vlinder", "session", "repair", "repair-1"]).unwrap();
+        assert_eq!(
+            cli.command,
+            Command::Session {
+                cmd: session::SessionCommand::Repair {
+                    branch: "repair-1".to_string(),
+                }
+            }
+        );
+    }
+
+    #[test]
+    fn cli_session_promote() {
+        let cli = Cli::try_parse_from(["vlinder", "session", "promote", "repair-1"]).unwrap();
+        assert_eq!(
+            cli.command,
+            Command::Session {
+                cmd: session::SessionCommand::Promote {
+                    branch: "repair-1".to_string(),
+                }
+            }
+        );
+    }
+
+    #[test]
+    fn cli_session_missing_action_fails() {
+        let result = Cli::try_parse_from(["vlinder", "session"]);
+        assert!(result.is_err());
+    }
+
+    // --- Turn subcommand tests ---
+
+    #[test]
+    fn cli_turn_get() {
+        let cli = Cli::try_parse_from(["vlinder", "turn", "get", "sub-1"]).unwrap();
+        assert_eq!(
+            cli.command,
+            Command::Turn {
+                cmd: turn::TurnCommand::Get {
+                    submission_id: "sub-1".to_string(),
+                }
+            }
+        );
+    }
+
+    #[test]
+    fn cli_turn_missing_action_fails() {
+        let result = Cli::try_parse_from(["vlinder", "turn"]);
         assert!(result.is_err());
     }
 }
