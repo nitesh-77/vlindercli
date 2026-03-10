@@ -306,6 +306,37 @@ impl DagStore for SqliteDagStore {
         Ok(result)
     }
 
+    fn get_node_by_prefix(&self, prefix: &str) -> Result<Option<DagNode>, String> {
+        let conn = self.conn.lock().unwrap();
+        let pattern = format!("{}%", prefix);
+
+        // Count matches first to detect ambiguity
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM dag_nodes WHERE hash LIKE ?1",
+                rusqlite::params![pattern],
+                |row| row.get(0),
+            )
+            .map_err(|e| format!("get_node_by_prefix count failed: {}", e))?;
+
+        match count {
+            0 => Ok(None),
+            1 => {
+                let mut stmt = conn.prepare(
+                    "SELECT hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state, protocol_version, checkpoint, operation
+                     FROM dag_nodes WHERE hash LIKE ?1"
+                ).map_err(|e| format!("get_node_by_prefix prepare failed: {}", e))?;
+
+                let node = stmt
+                    .query_row(rusqlite::params![pattern], row_to_dag_node)
+                    .map_err(|e| format!("get_node_by_prefix query failed: {}", e))?;
+
+                Ok(Some(node))
+            }
+            n => Err(format!("ambiguous hash prefix '{}': {} matches", prefix, n)),
+        }
+    }
+
     fn get_session_nodes(&self, session_id: &str) -> Result<Vec<DagNode>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(

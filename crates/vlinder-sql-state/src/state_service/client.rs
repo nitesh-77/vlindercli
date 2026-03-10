@@ -313,4 +313,21 @@ impl DagStore for GrpcStateClient {
             .map(|n| n.try_into())
             .collect()
     }
+
+    fn get_node_by_prefix(&self, prefix: &str) -> Result<Option<DagNode>, String> {
+        let request = proto::GetNodeByPrefixRequest {
+            prefix: prefix.to_string(),
+        };
+
+        let mut client = self.client.clone();
+        let response = self
+            .runtime
+            .block_on(async { client.get_node_by_prefix(request).await })
+            .map_err(|e| e.to_string())?;
+
+        match response.into_inner().node {
+            Some(n) => Ok(Some(n.try_into()?)),
+            None => Ok(None),
+        }
+    }
 }

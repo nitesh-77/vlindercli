@@ -6,10 +6,10 @@ use tonic::{Request, Response, Status};
 use super::proto::{
     self, state_service_server::StateService, CreateTimelineRequest, CreateTimelineResponse,
     EnsureMainTimelineRequest, EnsureMainTimelineResponse, GetChildrenRequest, GetChildrenResponse,
-    GetNodeRequest, GetNodeResponse, GetNodesBySubmissionRequest, GetNodesBySubmissionResponse,
-    GetSessionNodesRequest, GetSessionNodesResponse, GetTimelineByBranchRequest,
-    GetTimelineByIdRequest, GetTimelineResponse, InsertNodeRequest, InsertNodeResponse,
-    IsTimelineSealedRequest, IsTimelineSealedResponse, LatestNodeHashRequest,
+    GetNodeByPrefixRequest, GetNodeRequest, GetNodeResponse, GetNodesBySubmissionRequest,
+    GetNodesBySubmissionResponse, GetSessionNodesRequest, GetSessionNodesResponse,
+    GetTimelineByBranchRequest, GetTimelineByIdRequest, GetTimelineResponse, InsertNodeRequest,
+    InsertNodeResponse, IsTimelineSealedRequest, IsTimelineSealedResponse, LatestNodeHashRequest,
     LatestNodeHashResponse, LatestStateRequest, LatestStateResponse, ListSessionsRequest,
     ListSessionsResponse, PingRequest, RenameTimelineRequest, RenameTimelineResponse,
     SealTimelineRequest, SealTimelineResponse, SemVer, SetCheckoutStateRequest,
@@ -293,5 +293,18 @@ impl StateService for StateServiceServer {
             .map(|n| n.into())
             .collect();
         Ok(Response::new(GetNodesBySubmissionResponse { nodes }))
+    }
+
+    async fn get_node_by_prefix(
+        &self,
+        request: Request<GetNodeByPrefixRequest>,
+    ) -> Result<Response<GetNodeResponse>, Status> {
+        let req = request.into_inner();
+        let node = self
+            .store
+            .get_node_by_prefix(&req.prefix)
+            .map_err(Status::internal)?
+            .map(|n| n.into());
+        Ok(Response::new(GetNodeResponse { node }))
     }
 }

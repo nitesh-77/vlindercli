@@ -159,6 +159,12 @@ pub trait DagStore: Send + Sync {
     /// Retrieve a node by its content hash.
     fn get_node(&self, hash: &str) -> Result<Option<DagNode>, String>;
 
+    /// Retrieve a node by hash prefix. Returns an error if ambiguous.
+    fn get_node_by_prefix(&self, prefix: &str) -> Result<Option<DagNode>, String> {
+        // Default: try exact match first, then scan is left to implementors.
+        self.get_node(prefix)
+    }
+
     /// Get all nodes in a session, ordered by `created_at`.
     fn get_session_nodes(&self, session_id: &str) -> Result<Vec<DagNode>, String>;
 
@@ -261,6 +267,19 @@ impl DagStore for InMemoryDagStore {
     fn get_node(&self, hash: &str) -> Result<Option<DagNode>, String> {
         let nodes = self.nodes.lock().unwrap();
         Ok(nodes.iter().find(|n| n.hash == hash).cloned())
+    }
+
+    fn get_node_by_prefix(&self, prefix: &str) -> Result<Option<DagNode>, String> {
+        let nodes = self.nodes.lock().unwrap();
+        let matches: Vec<_> = nodes
+            .iter()
+            .filter(|n| n.hash.starts_with(prefix))
+            .collect();
+        match matches.len() {
+            0 => Ok(None),
+            1 => Ok(Some(matches[0].clone())),
+            n => Err(format!("ambiguous hash prefix '{}': {} matches", prefix, n)),
+        }
     }
 
     fn get_session_nodes(&self, session_id: &str) -> Result<Vec<DagNode>, String> {

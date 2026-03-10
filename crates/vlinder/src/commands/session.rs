@@ -154,7 +154,7 @@ fn fork(session_id: &str, from_hash: &str, branch_name: &str) {
 
     // Verify the node exists and belongs to this session
     let node = store
-        .get_node(from_hash)
+        .get_node_by_prefix(from_hash)
         .unwrap_or_else(|e| {
             eprintln!("Failed to look up node: {}", e);
             std::process::exit(1);
@@ -177,8 +177,9 @@ fn fork(session_id: &str, from_hash: &str, branch_name: &str) {
         std::process::exit(1);
     });
 
+    // Use the full resolved hash for the fork point
     let timeline_id = store
-        .create_timeline(branch_name, Some(1), Some(from_hash))
+        .create_timeline(branch_name, Some(1), Some(&node.hash))
         .unwrap_or_else(|e| {
             eprintln!("Failed to create timeline: {}", e);
             std::process::exit(1);
@@ -188,7 +189,7 @@ fn fork(session_id: &str, from_hash: &str, branch_name: &str) {
         "Created timeline '{}' (id: {}) forked from {}",
         branch_name,
         timeline_id,
-        &from_hash[..8]
+        &node.hash[..8]
     );
 }
 
