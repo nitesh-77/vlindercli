@@ -10,7 +10,7 @@
 //! AckFn acknowledges successful processing.
 
 use super::{
-    AgentId, CompleteMessage, DelegateMessage, HarnessType, InvokeMessage, Operation,
+    AgentId, CompleteMessage, DelegateMessage, ForkMessage, HarnessType, InvokeMessage, Operation,
     RepairMessage, RequestMessage, ResourceId, ResponseMessage, RoutingKey, ServiceBackend,
     SubmissionId,
 };
@@ -134,6 +134,16 @@ pub trait MessageQueue {
         &self,
         agent: &AgentId,
     ) -> Result<(RepairMessage, Acknowledgement), QueueError>;
+
+    // -------------------------------------------------------------------------
+    // Fork methods
+    // -------------------------------------------------------------------------
+
+    /// Send a ForkMessage (CLI → Platform).
+    ///
+    /// Creates a new timeline branch in the DAG. Both SQL and git projections
+    /// react to this message.
+    fn send_fork(&self, msg: ForkMessage) -> Result<(), QueueError>;
 
     // -------------------------------------------------------------------------
     // Request-reply facades (ADR 092)

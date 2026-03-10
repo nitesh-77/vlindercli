@@ -5,15 +5,16 @@ use std::sync::{Arc, Mutex};
 use tonic::{Request, Response, Status};
 
 use super::proto::{
-    self, harness_server::Harness as HarnessService, PingRequest, RepairAgentRequest,
-    RepairAgentResponse, RunAgentRequest, RunAgentResponse, SemVer, SetDagParentRequest,
-    SetDagParentResponse, SetInitialStateRequest, SetInitialStateResponse, SetTimelineRequest,
-    SetTimelineResponse, StartSessionRequest, StartSessionResponse,
+    self, harness_server::Harness as HarnessService, ForkTimelineRequest, ForkTimelineResponse,
+    PingRequest, RepairAgentRequest, RepairAgentResponse, RunAgentRequest, RunAgentResponse,
+    SemVer, SetDagParentRequest, SetDagParentResponse, SetInitialStateRequest,
+    SetInitialStateResponse, SetTimelineRequest, SetTimelineResponse, StartSessionRequest,
+    StartSessionResponse,
 };
 use std::str::FromStr;
 use vlinder_core::domain::{
-    AgentId, Harness, Operation, RepairParams, ResourceId, Sequence, ServiceBackend, ServiceType,
-    TimelineId,
+    AgentId, ForkParams, Harness, Operation, RepairParams, ResourceId, Sequence, ServiceBackend,
+    ServiceType, TimelineId,
 };
 
 /// gRPC server that wraps a Harness implementation.
@@ -160,6 +161,31 @@ impl HarnessService for HarnessServiceServer {
                 output: String::new(),
                 error: Some(e),
             })),
+        }
+    }
+
+    async fn fork_timeline(
+        &self,
+        request: Request<ForkTimelineRequest>,
+    ) -> Result<Response<ForkTimelineResponse>, Status> {
+        let req = request.into_inner();
+        let harness = Arc::clone(&self.harness);
+
+        let result = tokio::task::spawn_blocking(move || {
+            let params = ForkParams {
+                agent_name: req.agent_name,
+                branch_name: req.branch_name,
+                fork_point: req.fork_point,
+                parent_timeline_id: req.parent_timeline_id,
+            };
+            harness.lock().unwrap().fork_timeline(params)
+        })
+        .await
+        .map_err(|e| Status::internal(format!("spawn_blocking failed: {}", e)))?;
+
+        match result {
+            Ok(()) => Ok(Response::new(ForkTimelineResponse { error: None })),
+            Err(e) => Ok(Response::new(ForkTimelineResponse { error: Some(e) })),
         }
     }
 }

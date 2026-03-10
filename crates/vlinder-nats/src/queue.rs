@@ -809,6 +809,12 @@ impl MessageQueue for NatsQueue {
             Ok((msg, ack_fn))
         })
     }
+
+    fn send_fork(&self, _msg: vlinder_core::domain::ForkMessage) -> Result<(), QueueError> {
+        // Fork is fire-and-forget — no consumer subscribes.
+        // RecordingQueue intercepts and records the DagNode before this is called.
+        Ok(())
+    }
 }
 
 /// Serialize a routing key to a NATS subject string (ADR 096 §8).

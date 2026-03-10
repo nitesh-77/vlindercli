@@ -16,7 +16,7 @@
 use chrono::{DateTime, Utc};
 use sha2::{Digest, Sha256};
 
-/// The six message types in the Vlinder protocol (ADR 044, 113).
+/// The message types in the Vlinder protocol (ADR 044, 113).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MessageType {
     Invoke,
@@ -25,6 +25,7 @@ pub enum MessageType {
     Complete,
     Delegate,
     Repair,
+    Fork,
 }
 
 impl MessageType {
@@ -36,6 +37,7 @@ impl MessageType {
             MessageType::Complete => "complete",
             MessageType::Delegate => "delegate",
             MessageType::Repair => "repair",
+            MessageType::Fork => "fork",
         }
     }
 }
@@ -53,6 +55,7 @@ impl std::str::FromStr for MessageType {
             "complete" => Ok(MessageType::Complete),
             "delegate" => Ok(MessageType::Delegate),
             "repair" => Ok(MessageType::Repair),
+            "fork" => Ok(MessageType::Fork),
             _ => Err(format!("unknown message type: {}", s)),
         }
     }
@@ -491,6 +494,7 @@ mod tests {
             MessageType::Complete,
             MessageType::Delegate,
             MessageType::Repair,
+            MessageType::Fork,
         ] {
             assert_eq!(MessageType::from_str(mt.as_str()), Ok(mt));
         }

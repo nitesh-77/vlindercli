@@ -12,8 +12,9 @@ use std::sync::{Arc, Mutex};
 
 use crate::domain::workers::dag::build_dag_node;
 use crate::domain::{
-    Acknowledgement, CompleteMessage, DagStore, DelegateMessage, InvokeMessage, MessageQueue,
-    ObservableMessage, QueueError, RepairMessage, RequestMessage, ResponseMessage, SubmissionId,
+    Acknowledgement, CompleteMessage, DagStore, DelegateMessage, ForkMessage, InvokeMessage,
+    MessageQueue, ObservableMessage, QueueError, RepairMessage, RequestMessage, ResponseMessage,
+    SubmissionId,
 };
 
 /// A `MessageQueue` decorator that synchronously records DAG nodes on send.
@@ -43,9 +44,10 @@ impl RecordingQueue {
     fn record(&self, observable: &ObservableMessage) {
         let session_id = observable.session().as_str().to_string();
 
-        // Explicit dag_parent on Invoke overrides chain cache (fork/repair).
+        // Explicit dag_parent on Invoke/Fork overrides chain cache.
         let dag_parent_override = match observable {
             ObservableMessage::Invoke(m) if !m.dag_parent.is_empty() => Some(m.dag_parent.clone()),
+            ObservableMessage::Fork(m) => Some(m.fork_point.clone()),
             _ => None,
         };
 
@@ -183,6 +185,15 @@ impl MessageQueue for RecordingQueue {
         agent: &crate::domain::AgentId,
     ) -> Result<(RepairMessage, Acknowledgement), QueueError> {
         self.inner.receive_repair(agent)
+    }
+
+    // -------------------------------------------------------------------------
+    // Fork methods — record + forward on send
+    // -------------------------------------------------------------------------
+
+    fn send_fork(&self, msg: ForkMessage) -> Result<(), QueueError> {
+        self.record(&msg.clone().into());
+        self.inner.send_fork(msg)
     }
 }
 

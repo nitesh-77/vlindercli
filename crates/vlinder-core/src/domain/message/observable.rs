@@ -14,6 +14,7 @@ use super::super::routing_key::{AgentId, Nonce, ServiceBackend};
 use super::super::RuntimeType;
 use super::complete::CompleteMessage;
 use super::delegate::DelegateMessage;
+use super::fork::ForkMessage;
 use super::identity::{HarnessType, MessageId, Sequence, SessionId, SubmissionId, TimelineId};
 use super::invoke::InvokeMessage;
 use super::repair::RepairMessage;
@@ -32,6 +33,7 @@ pub enum ObservableMessage {
     Complete(CompleteMessage),
     Delegate(DelegateMessage),
     Repair(RepairMessage),
+    Fork(ForkMessage),
 }
 
 /// Message metadata without payload.
@@ -124,6 +126,17 @@ pub enum ObservableMessageHeaders {
         operation: Operation,
         sequence: Sequence,
         state: Option<String>,
+    },
+    Fork {
+        id: MessageId,
+        protocol_version: String,
+        timeline: TimelineId,
+        submission: SubmissionId,
+        session: SessionId,
+        agent_name: String,
+        branch_name: String,
+        fork_point: String,
+        parent_timeline_id: i64,
     },
 }
 
@@ -293,6 +306,27 @@ impl ObservableMessageHeaders {
                 payload,
                 state,
             }),
+            Self::Fork {
+                id,
+                protocol_version,
+                timeline,
+                submission,
+                session,
+                agent_name,
+                branch_name,
+                fork_point,
+                parent_timeline_id,
+            } => ObservableMessage::Fork(ForkMessage {
+                id,
+                protocol_version,
+                timeline,
+                submission,
+                session,
+                agent_name,
+                branch_name,
+                fork_point,
+                parent_timeline_id,
+            }),
         }
     }
 }
@@ -306,6 +340,7 @@ impl ObservableMessage {
             ObservableMessage::Complete(_) => MessageType::Complete,
             ObservableMessage::Delegate(_) => MessageType::Delegate,
             ObservableMessage::Repair(_) => MessageType::Repair,
+            ObservableMessage::Fork(_) => MessageType::Fork,
         }
     }
 
@@ -317,6 +352,7 @@ impl ObservableMessage {
             ObservableMessage::Complete(m) => &m.protocol_version,
             ObservableMessage::Delegate(m) => &m.protocol_version,
             ObservableMessage::Repair(m) => &m.protocol_version,
+            ObservableMessage::Fork(m) => &m.protocol_version,
         }
     }
 
@@ -328,6 +364,7 @@ impl ObservableMessage {
             ObservableMessage::Complete(m) => &m.id,
             ObservableMessage::Delegate(m) => &m.id,
             ObservableMessage::Repair(m) => &m.id,
+            ObservableMessage::Fork(m) => &m.id,
         }
     }
 
@@ -339,6 +376,7 @@ impl ObservableMessage {
             ObservableMessage::Complete(m) => &m.submission,
             ObservableMessage::Delegate(m) => &m.submission,
             ObservableMessage::Repair(m) => &m.submission,
+            ObservableMessage::Fork(m) => &m.submission,
         }
     }
 
@@ -350,6 +388,7 @@ impl ObservableMessage {
             ObservableMessage::Complete(m) => &m.timeline,
             ObservableMessage::Delegate(m) => &m.timeline,
             ObservableMessage::Repair(m) => &m.timeline,
+            ObservableMessage::Fork(m) => &m.timeline,
         }
     }
 
@@ -361,6 +400,7 @@ impl ObservableMessage {
             ObservableMessage::Complete(m) => &m.session,
             ObservableMessage::Delegate(m) => &m.session,
             ObservableMessage::Repair(m) => &m.session,
+            ObservableMessage::Fork(m) => &m.session,
         }
     }
 
@@ -373,6 +413,7 @@ impl ObservableMessage {
             ObservableMessage::Complete(m) => &m.payload,
             ObservableMessage::Delegate(m) => &m.payload,
             ObservableMessage::Repair(m) => &m.payload,
+            ObservableMessage::Fork(_) => &[],
         }
     }
 }
@@ -410,5 +451,11 @@ impl From<DelegateMessage> for ObservableMessage {
 impl From<RepairMessage> for ObservableMessage {
     fn from(msg: RepairMessage) -> Self {
         ObservableMessage::Repair(msg)
+    }
+}
+
+impl From<ForkMessage> for ObservableMessage {
+    fn from(msg: ForkMessage) -> Self {
+        ObservableMessage::Fork(msg)
     }
 }

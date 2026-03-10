@@ -1,9 +1,9 @@
 //! In-memory queue implementation.
 
 use crate::domain::{
-    Acknowledgement, AgentId, CompleteMessage, DelegateMessage, HarnessType, InvokeMessage,
-    MessageQueue, ObservableMessage, Operation, QueueError, RepairMessage, RequestMessage,
-    ResponseMessage, RoutingKey, ServiceBackend, SubmissionId,
+    Acknowledgement, AgentId, CompleteMessage, DelegateMessage, ForkMessage, HarnessType,
+    InvokeMessage, MessageQueue, ObservableMessage, Operation, QueueError, RepairMessage,
+    RequestMessage, ResponseMessage, RoutingKey, ServiceBackend, SubmissionId,
 };
 #[cfg(test)]
 use crate::domain::{
@@ -271,6 +271,12 @@ impl MessageQueue for InMemoryQueue {
         }
 
         Err(QueueError::Timeout)
+    }
+
+    fn send_fork(&self, _msg: ForkMessage) -> Result<(), QueueError> {
+        // Fork is fire-and-forget — no consumer subscribes.
+        // RecordingQueue intercepts and records the DagNode before this is called.
+        Ok(())
     }
 }
 

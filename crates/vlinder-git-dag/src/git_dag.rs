@@ -292,6 +292,16 @@ impl GitDagWorker {
                     self.insert_field(&mut tb, "state", state)?;
                 }
             }
+            ObservableMessage::Fork(m) => {
+                self.insert_field(&mut tb, "type", "fork")?;
+                self.insert_field(&mut tb, "branch_name", &m.branch_name)?;
+                self.insert_field(&mut tb, "fork_point", &m.fork_point)?;
+                self.insert_field(
+                    &mut tb,
+                    "parent_timeline_id",
+                    &m.parent_timeline_id.to_string(),
+                )?;
+            }
         }
 
         // Compute canonical hash and store it in the subtree
@@ -363,9 +373,15 @@ impl GitDagWorker {
             .treebuilder(existing_timelines_tree.as_ref())
             .map_err(|e| format!("timelines treebuilder failed: {}", e))?;
 
-        // Append new message dir to timeline/main
+        // Determine which timeline to append to
+        let active_timeline = match msg {
+            ObservableMessage::Fork(m) => m.branch_name.as_str(),
+            _ => "main",
+        };
+
+        // Append new message dir to the active timeline index file
         let timeline_content = if let Some(ref tl_tree) = existing_timelines_tree {
-            if let Some(entry) = tl_tree.get_name("main") {
+            if let Some(entry) = tl_tree.get_name(active_timeline) {
                 if let Ok(blob) = self.repo.find_blob(entry.id()) {
                     let existing = String::from_utf8_lossy(blob.content()).to_string();
                     format!("{}\n{}", existing, msg_dir)
@@ -381,10 +397,13 @@ impl GitDagWorker {
 
         let timeline_oid = self.write_blob(timeline_content.as_bytes())?;
         timelines_tb
-            .insert("main", timeline_oid, FileMode::Blob.into())
-            .map_err(|e| format!("insert timeline main failed: {}", e))?;
+            .insert(active_timeline, timeline_oid, FileMode::Blob.into())
+            .map_err(|e| format!("insert timeline '{}' failed: {}", active_timeline, e))?;
 
-        let active_oid = self.write_blob(b"main")?;
+        // For fork: also ensure the main timeline index is preserved (it may not
+        // have been touched) and set ACTIVE to the new branch
+        let active_value = active_timeline;
+        let active_oid = self.write_blob(active_value.as_bytes())?;
         timelines_tb
             .insert("ACTIVE", active_oid, FileMode::Blob.into())
             .map_err(|e| format!("insert ACTIVE failed: {}", e))?;
@@ -607,7 +626,26 @@ impl DagWorker for GitDagWorker {
                 .commit(Some("HEAD"), &author, &committer, &message, &tree, &parents)
                 .map_err(|e| format!("commit failed: {}", e))?;
 
-            // 7. Sync working tree so `ls` shows the folder structure
+            // 7. Fork-specific: create a git branch at this commit
+            if let ObservableMessage::Fork(fork_msg) = msg {
+                let commit = self
+                    .repo
+                    .find_commit(commit_oid)
+                    .map_err(|e| format!("find fork commit failed: {}", e))?;
+                self.repo
+                    .branch(&fork_msg.branch_name, &commit, false)
+                    .map_err(|e| {
+                        format!("create branch '{}' failed: {}", fork_msg.branch_name, e)
+                    })?;
+                tracing::info!(
+                    branch = %fork_msg.branch_name,
+                    fork_point = %fork_msg.fork_point,
+                    commit = %commit_oid,
+                    "Created git branch for fork"
+                );
+            }
+
+            // 8. Sync working tree so `ls` shows the folder structure
             self.repo
                 .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
                 .map_err(|e| format!("checkout HEAD failed: {}", e))?;
@@ -652,6 +690,7 @@ fn message_routing(msg: &ObservableMessage) -> (String, String, &'static str) {
             m.agent_id.to_string(),
             "repair",
         ),
+        ObservableMessage::Fork(m) => ("platform".to_string(), m.branch_name.clone(), "fork"),
     }
 }
 
@@ -664,6 +703,7 @@ fn message_agent_name(msg: &ObservableMessage) -> String {
         ObservableMessage::Complete(m) => m.agent_id.to_string(),
         ObservableMessage::Delegate(m) => m.target.to_string(),
         ObservableMessage::Repair(m) => m.agent_id.to_string(),
+        ObservableMessage::Fork(m) => m.agent_name.clone(),
     }
 }
 
@@ -676,6 +716,7 @@ fn message_state(msg: &ObservableMessage) -> Option<&str> {
         ObservableMessage::Complete(m) => m.state.as_deref(),
         ObservableMessage::Delegate(m) => m.state.as_deref(),
         ObservableMessage::Repair(m) => m.state.as_deref(),
+        ObservableMessage::Fork(_) => None,
     }
 }
 
@@ -1590,5 +1631,93 @@ mod tests {
             "commit body should contain Checkpoint trailer, got: {}",
             body
         );
+    }
+
+    // ========================================================================
+    // Fork message tests
+    // ========================================================================
+
+    fn test_fork(
+        agent_name: &str,
+        branch_name: &str,
+        fork_point: &str,
+        epoch_secs: i64,
+    ) -> (ObservableMessage, DateTime<Utc>) {
+        use vlinder_core::domain::ForkMessage;
+        let msg = ForkMessage::new(
+            TimelineId::main(),
+            SubmissionId::from("sub-fork".to_string()),
+            SessionId::from("sess-1".to_string()),
+            agent_name.to_string(),
+            branch_name.to_string(),
+            fork_point.to_string(),
+            1,
+        );
+        let created_at = DateTime::from_timestamp(epoch_secs, 0).unwrap();
+        (ObservableMessage::Fork(msg), created_at)
+    }
+
+    #[test]
+    fn fork_creates_git_branch() {
+        let (mut worker, tmp) = test_worker();
+
+        // Send an invoke so there's a commit on main
+        let (m1, t1) = test_invoke(b"hello", 1000);
+        worker.on_observable_message(&m1, t1);
+
+        // Send a fork message
+        let (fork, ft) = test_fork("support-agent", "repair-branch", "fake-hash", 1001);
+        worker.on_observable_message(&fork, ft);
+
+        // Verify the branch exists
+        let branches = git(tmp.path(), &["branch", "--list"]).unwrap();
+        assert!(
+            branches.contains("repair-branch"),
+            "expected 'repair-branch' in branches, got: {}",
+            branches
+        );
+    }
+
+    #[test]
+    fn fork_branch_points_to_fork_commit() {
+        let (mut worker, tmp) = test_worker();
+
+        let (m1, t1) = test_invoke(b"hello", 1000);
+        worker.on_observable_message(&m1, t1);
+
+        let (fork, ft) = test_fork("support-agent", "my-fork", "fake-hash", 1001);
+        worker.on_observable_message(&fork, ft);
+
+        // The fork branch should point to the same commit as main HEAD
+        // (the fork commit was the last commit on main)
+        let main_head = git(tmp.path(), &["rev-parse", "main"]).unwrap();
+        let fork_head = git(tmp.path(), &["rev-parse", "my-fork"]).unwrap();
+        assert_eq!(main_head, fork_head);
+    }
+
+    #[test]
+    fn fork_creates_timeline_index_file() {
+        let (mut worker, tmp) = test_worker();
+
+        let (m1, t1) = test_invoke(b"hello", 1000);
+        worker.on_observable_message(&m1, t1);
+
+        let (fork, ft) = test_fork("support-agent", "repair-branch", "fake-hash", 1001);
+        worker.on_observable_message(&fork, ft);
+
+        // The timelines/ dir should have both 'main' and 'repair-branch' index files
+        let session_path = tmp.path().join("support-agent/sess-1/timelines");
+        assert!(
+            session_path.join("main").exists(),
+            "main timeline index should exist"
+        );
+        assert!(
+            session_path.join("repair-branch").exists(),
+            "repair-branch timeline index should exist"
+        );
+
+        // ACTIVE should point to the fork branch
+        let active = std::fs::read_to_string(session_path.join("ACTIVE")).unwrap();
+        assert_eq!(active, "repair-branch");
     }
 }

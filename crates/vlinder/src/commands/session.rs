@@ -4,7 +4,8 @@ use clap::Subcommand;
 
 use crate::config::CliConfig;
 use vlinder_core::domain::{
-    AgentId, DagStore, MessageType, Operation, RepairParams, Sequence, ServiceBackend, ServiceType,
+    AgentId, DagStore, ForkParams, MessageType, Operation, RepairParams, Sequence, ServiceBackend,
+    ServiceType,
 };
 
 use super::connect::{connect_harness, open_dag_store};
@@ -178,18 +179,31 @@ fn fork(session_id: &str, from_hash: &str, branch_name: &str) {
         std::process::exit(1);
     }
 
-    // Use the full resolved hash for the fork point
-    let timeline_id = store
-        .create_timeline(branch_name, session_id, Some(1), Some(&node.hash))
-        .unwrap_or_else(|e| {
-            eprintln!("Failed to create timeline: {}", e);
-            std::process::exit(1);
-        });
+    // Derive agent name from the session's Invoke message
+    let agent_name = find_agent_name(&*store, session_id).unwrap_or_else(|| {
+        eprintln!("Cannot determine agent name for session {}", session_id);
+        std::process::exit(1);
+    });
+
+    // Send ForkMessage through the harness/queue (CQRS: both SQL and git react)
+    let mut harness = connect_harness(&config);
+    harness.start_session(&agent_name);
+
+    let params = ForkParams {
+        agent_name,
+        branch_name: branch_name.to_string(),
+        fork_point: node.hash.clone(),
+        parent_timeline_id: 1, // main timeline
+    };
+
+    harness.fork_timeline(params).unwrap_or_else(|e| {
+        eprintln!("Failed to fork timeline: {}", e);
+        std::process::exit(1);
+    });
 
     println!(
-        "Created timeline '{}' (id: {}) forked from {}",
+        "Created timeline '{}' forked from {}",
         branch_name,
-        timeline_id,
         &node.hash[..8]
     );
 }
