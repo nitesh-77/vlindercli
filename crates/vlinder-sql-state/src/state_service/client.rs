@@ -173,27 +173,16 @@ impl DagStore for GrpcStateClient {
     // Timeline methods (ADR 093)
     // -------------------------------------------------------------------------
 
-    fn ensure_main_timeline(&self) -> Result<i64, String> {
-        let mut client = self.client.clone();
-        let response = self
-            .runtime
-            .block_on(async {
-                client
-                    .ensure_main_timeline(proto::EnsureMainTimelineRequest {})
-                    .await
-            })
-            .map_err(|e| e.to_string())?;
-        Ok(response.into_inner().id)
-    }
-
     fn create_timeline(
         &self,
         branch_name: &str,
+        session_id: &str,
         parent_id: Option<i64>,
         fork_point: Option<&str>,
     ) -> Result<i64, String> {
         let request = proto::CreateTimelineRequest {
             branch_name: branch_name.to_string(),
+            session_id: session_id.to_string(),
             parent_id,
             fork_point: fork_point.map(|s| s.to_string()),
         };

@@ -57,12 +57,15 @@ impl SqliteDagStore {
              CREATE TABLE IF NOT EXISTS timelines (
                  id INTEGER PRIMARY KEY AUTOINCREMENT,
                  branch_name TEXT NOT NULL UNIQUE,
+                 session_id TEXT NOT NULL DEFAULT '',
                  parent_timeline_id INTEGER,
                  fork_point TEXT,
                  created_at TEXT NOT NULL,
                  broken_at TEXT,
                  FOREIGN KEY (parent_timeline_id) REFERENCES timelines(id)
-             );",
+             );
+             CREATE INDEX IF NOT EXISTS idx_timelines_session
+                 ON timelines (session_id);",
         )
         .map_err(|e| format!("failed to initialize dag store: {}", e))?;
 
@@ -147,12 +150,15 @@ impl SqliteDagStore {
                 "CREATE TABLE IF NOT EXISTS timelines (
                      id INTEGER PRIMARY KEY AUTOINCREMENT,
                      branch_name TEXT NOT NULL UNIQUE,
+                     session_id TEXT NOT NULL DEFAULT '',
                      parent_timeline_id INTEGER,
                      fork_point TEXT,
                      created_at TEXT NOT NULL,
                      broken_at TEXT,
                      FOREIGN KEY (parent_timeline_id) REFERENCES timelines(id)
-                 );",
+                 );
+                 CREATE INDEX IF NOT EXISTS idx_timelines_session
+                     ON timelines (session_id);",
             )
             .map_err(|e| format!("timelines migration failed: {}", e))?;
         }
@@ -191,14 +197,14 @@ impl SqliteDagStore {
 
 /// Construct a Timeline from a SQLite row.
 ///
-/// Expects columns in order: id, branch_name, parent_timeline_id, fork_point,
-/// created_at, broken_at.
+/// Expects columns in order: id, branch_name, session_id, parent_timeline_id,
+/// fork_point, created_at, broken_at.
 fn row_to_timeline(row: &rusqlite::Row) -> Result<Timeline, rusqlite::Error> {
-    let created_at_str: String = row.get(4)?;
+    let created_at_str: String = row.get(5)?;
     let created_at = DateTime::parse_from_rfc3339(&created_at_str)
         .map(|dt| dt.with_timezone(&Utc))
         .unwrap_or_default();
-    let broken_at_str: Option<String> = row.get(5)?;
+    let broken_at_str: Option<String> = row.get(6)?;
     let broken_at = broken_at_str.and_then(|s| {
         DateTime::parse_from_rfc3339(&s)
             .map(|dt| dt.with_timezone(&Utc))
@@ -207,8 +213,9 @@ fn row_to_timeline(row: &rusqlite::Row) -> Result<Timeline, rusqlite::Error> {
     Ok(Timeline {
         id: row.get(0)?,
         branch_name: row.get(1)?,
-        parent_timeline_id: row.get(2)?,
-        fork_point: row.get(3)?,
+        session_id: row.get(2)?,
+        parent_timeline_id: row.get(3)?,
+        fork_point: row.get(4)?,
         created_at,
         broken_at,
     })
@@ -405,27 +412,18 @@ impl DagStore for SqliteDagStore {
     // Timeline methods (ADR 093)
     // -------------------------------------------------------------------------
 
-    fn ensure_main_timeline(&self) -> Result<i64, String> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "INSERT OR IGNORE INTO timelines (id, branch_name, created_at) VALUES (1, 'main', ?1)",
-            rusqlite::params![Utc::now().to_rfc3339()],
-        )
-        .map_err(|e| format!("ensure_main_timeline failed: {}", e))?;
-        Ok(1)
-    }
-
     fn create_timeline(
         &self,
         branch_name: &str,
+        session_id: &str,
         parent_id: Option<i64>,
         fork_point: Option<&str>,
     ) -> Result<i64, String> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO timelines (branch_name, parent_timeline_id, fork_point, created_at)
-             VALUES (?1, ?2, ?3, ?4)",
-            rusqlite::params![branch_name, parent_id, fork_point, Utc::now().to_rfc3339(),],
+            "INSERT INTO timelines (branch_name, session_id, parent_timeline_id, fork_point, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![branch_name, session_id, parent_id, fork_point, Utc::now().to_rfc3339()],
         )
         .map_err(|e| format!("create_timeline failed: {}", e))?;
         Ok(conn.last_insert_rowid())
@@ -435,7 +433,7 @@ impl DagStore for SqliteDagStore {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
             .prepare(
-                "SELECT id, branch_name, parent_timeline_id, fork_point, created_at, broken_at
+                "SELECT id, branch_name, session_id, parent_timeline_id, fork_point, created_at, broken_at
              FROM timelines WHERE branch_name = ?1",
             )
             .map_err(|e| format!("get_timeline_by_branch prepare failed: {}", e))?;
@@ -449,7 +447,7 @@ impl DagStore for SqliteDagStore {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
             .prepare(
-                "SELECT id, branch_name, parent_timeline_id, fork_point, created_at, broken_at
+                "SELECT id, branch_name, session_id, parent_timeline_id, fork_point, created_at, broken_at
              FROM timelines WHERE id = ?1",
             )
             .map_err(|e| format!("get_timeline prepare failed: {}", e))?;
@@ -907,52 +905,42 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn ensure_main_timeline_creates_row_1() {
-        let store = test_store();
-        let id = store.ensure_main_timeline().unwrap();
-        assert_eq!(id, 1);
-
-        let tl = store.get_timeline(1).unwrap().unwrap();
-        assert_eq!(tl.branch_name, "main");
-        assert!(tl.parent_timeline_id.is_none());
-        assert!(tl.fork_point.is_none());
-        assert!(tl.broken_at.is_none());
-    }
-
-    #[test]
-    fn ensure_main_timeline_is_idempotent() {
-        let store = test_store();
-        store.ensure_main_timeline().unwrap();
-        store.ensure_main_timeline().unwrap();
-
-        let tl = store.get_timeline(1).unwrap().unwrap();
-        assert_eq!(tl.branch_name, "main");
-    }
-
-    #[test]
     fn create_timeline_returns_auto_id() {
         let store = test_store();
-        store.ensure_main_timeline().unwrap();
 
         let id = store
-            .create_timeline("repair-2026-01-01-1", Some(1), Some("abc123"))
+            .create_timeline("repair-1", "sess-1", None, Some("abc123"))
             .unwrap();
-        assert!(id > 1);
+        assert!(id >= 1);
 
         let tl = store.get_timeline(id).unwrap().unwrap();
-        assert_eq!(tl.branch_name, "repair-2026-01-01-1");
-        assert_eq!(tl.parent_timeline_id, Some(1));
+        assert_eq!(tl.branch_name, "repair-1");
+        assert_eq!(tl.session_id, "sess-1");
+        assert!(tl.parent_timeline_id.is_none());
         assert_eq!(tl.fork_point, Some("abc123".to_string()));
         assert!(tl.broken_at.is_none());
     }
 
     #[test]
+    fn create_timeline_with_parent() {
+        let store = test_store();
+
+        let parent_id = store.create_timeline("main", "sess-1", None, None).unwrap();
+        let fork_id = store
+            .create_timeline("repair-1", "sess-1", Some(parent_id), Some("abc123"))
+            .unwrap();
+
+        let tl = store.get_timeline(fork_id).unwrap().unwrap();
+        assert_eq!(tl.parent_timeline_id, Some(parent_id));
+    }
+
+    #[test]
     fn get_timeline_by_branch() {
         let store = test_store();
-        store.ensure_main_timeline().unwrap();
+        store.create_timeline("main", "sess-1", None, None).unwrap();
 
         let tl = store.get_timeline_by_branch("main").unwrap().unwrap();
-        assert_eq!(tl.id, 1);
+        assert_eq!(tl.session_id, "sess-1");
 
         assert!(store
             .get_timeline_by_branch("nonexistent")
@@ -963,30 +951,30 @@ mod tests {
     #[test]
     fn seal_timeline_sets_broken_at() {
         let store = test_store();
-        store.ensure_main_timeline().unwrap();
+        let id = store.create_timeline("main", "sess-1", None, None).unwrap();
 
-        assert!(!store.is_timeline_sealed(1).unwrap());
+        assert!(!store.is_timeline_sealed(id).unwrap());
 
-        store.seal_timeline(1).unwrap();
-        assert!(store.is_timeline_sealed(1).unwrap());
+        store.seal_timeline(id).unwrap();
+        assert!(store.is_timeline_sealed(id).unwrap());
 
-        let tl = store.get_timeline(1).unwrap().unwrap();
+        let tl = store.get_timeline(id).unwrap().unwrap();
         assert!(tl.broken_at.is_some());
     }
 
     #[test]
     fn rename_timeline_updates_branch_name() {
         let store = test_store();
-        store.ensure_main_timeline().unwrap();
+        let id = store.create_timeline("main", "sess-1", None, None).unwrap();
 
-        store.rename_timeline(1, "broken-main-2026-01-01").unwrap();
+        store.rename_timeline(id, "broken-main-2026-01-01").unwrap();
 
         assert!(store.get_timeline_by_branch("main").unwrap().is_none());
         let tl = store
             .get_timeline_by_branch("broken-main-2026-01-01")
             .unwrap()
             .unwrap();
-        assert_eq!(tl.id, 1);
+        assert_eq!(tl.id, id);
     }
 
     #[test]

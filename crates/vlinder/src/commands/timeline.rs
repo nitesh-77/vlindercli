@@ -290,11 +290,9 @@ fn repair(dir: &Path, path: Option<PathBuf>) {
     }
 
     // Insert timeline row (ADR 093)
+    let session_id = session_trailer.as_deref().unwrap_or("");
     let timeline_id = if let Some(ref store) = dag_store {
-        if let Err(e) = store.ensure_main_timeline() {
-            eprintln!("Warning: failed to ensure main timeline: {}", e);
-        }
-        match store.create_timeline(&branch_name, Some(1), Some(&head_sha)) {
+        match store.create_timeline(&branch_name, session_id, None, Some(&head_sha)) {
             Ok(id) => {
                 println!("Timeline {} created for branch '{}'.", id, branch_name);
                 Some(id)
@@ -412,8 +410,6 @@ fn promote(dir: &Path) {
 
     // Update timeline rows (ADR 093): seal old main, rename both
     if let Some(store) = open_dag_store(&CliConfig::load()) {
-        let _ = store.ensure_main_timeline();
-
         if let Ok(Some(old_main)) = store.get_timeline_by_branch("main") {
             if let Err(e) = store.seal_timeline(old_main.id) {
                 eprintln!("Warning: failed to seal old main timeline: {}", e);
