@@ -7,8 +7,7 @@
 //!
 //! Receive and routing methods delegate straight through.
 
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use crate::domain::workers::dag::build_dag_node;
 use crate::domain::{
@@ -24,46 +23,41 @@ use crate::domain::{
 /// original message to inner queue.
 ///
 /// DagStore write failures are logged but don't block message sending.
+///
+/// Merkle chain parent resolution uses the timeline `head` pointer stored
+/// in the database, ensuring that multiple RecordingQueue instances (sidecar
+/// + daemon) share a single source of truth for chaining (issue #37).
 pub struct RecordingQueue {
     inner: Arc<dyn MessageQueue + Send + Sync>,
     store: Arc<dyn DagStore>,
-    /// Per-session Merkle chain state: session_id → last node hash.
-    chain: Mutex<HashMap<String, String>>,
 }
 
 impl RecordingQueue {
     pub fn new(inner: Arc<dyn MessageQueue + Send + Sync>, store: Arc<dyn DagStore>) -> Self {
-        Self {
-            inner,
-            store,
-            chain: Mutex::new(HashMap::new()),
-        }
+        Self { inner, store }
     }
 
-    /// Record a DAG node for the given observable message, then update chain state.
+    /// Record a DAG node for the given observable message, then update timeline head.
     fn record(&self, observable: &ObservableMessage) {
-        let session_id = observable.session().as_str().to_string();
+        let timeline_id_str = observable.timeline().as_str();
+        let timeline_id: i64 = timeline_id_str.parse().unwrap_or(1);
 
-        // Explicit dag_parent on Invoke/Fork overrides chain cache.
+        // Explicit dag_parent on Invoke/Fork overrides timeline head.
         let dag_parent_override = match observable {
             ObservableMessage::Invoke(m) if !m.dag_parent.is_empty() => Some(m.dag_parent.clone()),
             ObservableMessage::Fork(m) => Some(m.fork_point.clone()),
             _ => None,
         };
 
-        // Look up parent hash: dag_parent override, then in-memory cache, then DagStore fallback
+        // Look up parent hash: dag_parent override → timeline head
         let parent_hash = dag_parent_override.unwrap_or_else(|| {
-            {
-                let chain = self.chain.lock().unwrap();
-                chain.get(&session_id).cloned()
-            }.unwrap_or_else(|| {
-                self.store.latest_node_hash(&session_id)
-                    .unwrap_or_else(|e| {
-                        tracing::warn!(error = %e, session = %session_id, "Failed to read latest node hash");
-                        None
-                    })
-                    .unwrap_or_default()
-            })
+            self.store
+                .get_timeline_head(timeline_id)
+                .unwrap_or_else(|e| {
+                    tracing::warn!(error = %e, timeline = timeline_id, "Failed to read timeline head");
+                    None
+                })
+                .unwrap_or_default()
         });
 
         let node = build_dag_node(observable, &parent_hash);
@@ -73,10 +67,11 @@ impl RecordingQueue {
             tracing::warn!(error = %e, hash = %node_hash, "Failed to record DAG node (outbox)");
         }
 
-        // Update chain state regardless of store success — the hash is
-        // deterministic, so even if the insert failed the next node should
-        // chain from the correct parent.
-        self.chain.lock().unwrap().insert(session_id, node_hash);
+        // Advance the timeline head — both sidecar and daemon update
+        // the same row, giving a single Merkle chain per timeline.
+        if let Err(e) = self.store.update_timeline_head(timeline_id, &node_hash) {
+            tracing::warn!(error = %e, hash = %node_hash, "Failed to update timeline head");
+        }
     }
 }
 
@@ -223,7 +218,10 @@ mod tests {
     use crate::queue::InMemoryQueue;
 
     fn test_store() -> Arc<dyn DagStore> {
-        Arc::new(InMemoryDagStore::new())
+        let store = Arc::new(InMemoryDagStore::new());
+        // Seed "main" timeline (id=1) — mirrors production setup.
+        store.create_timeline("main", "", None, None).unwrap();
+        store
     }
 
     fn test_queue(store: Arc<dyn DagStore>) -> RecordingQueue {
@@ -417,13 +415,12 @@ mod tests {
     }
 
     #[test]
-    fn different_sessions_chain_independently() {
+    fn same_timeline_chains_across_sessions() {
         let store = test_store();
         let queue = test_queue(Arc::clone(&store));
 
-        // Use different payloads — the content hash covers payload but not
-        // session_id, so identical payloads produce the same hash and
-        // INSERT OR IGNORE deduplicates.
+        // Two sessions on the same timeline chain sequentially via the
+        // shared timeline head pointer.
         let mut invoke1 = test_invoke();
         invoke1.session = SessionId::from("ses-aaa".to_string());
         invoke1.payload = b"hello-aaa".to_vec();
@@ -442,9 +439,9 @@ mod tests {
 
         assert_eq!(nodes1.len(), 1);
         assert_eq!(nodes2.len(), 1);
-        // Both are root nodes (no parent)
+        // First invoke is root, second chains off first via timeline head
         assert_eq!(nodes1[0].parent_hash, "");
-        assert_eq!(nodes2[0].parent_hash, "");
+        assert_eq!(nodes2[0].parent_hash, nodes1[0].hash);
     }
 
     #[test]
@@ -529,6 +526,12 @@ mod tests {
                 _: &str,
             ) -> Result<Vec<crate::domain::Timeline>, String> {
                 Ok(vec![])
+            }
+            fn get_timeline_head(&self, _: i64) -> Result<Option<String>, String> {
+                Ok(None)
+            }
+            fn update_timeline_head(&self, _: i64, _: &str) -> Result<(), String> {
+                Ok(())
             }
         }
 

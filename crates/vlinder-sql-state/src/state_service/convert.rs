@@ -105,6 +105,7 @@ impl From<Timeline> for proto::Timeline {
             fork_point: tl.fork_point,
             created_at: tl.created_at.to_rfc3339(),
             broken_at: tl.broken_at.map(|dt| dt.to_rfc3339()),
+            head: tl.head,
         }
     }
 }
@@ -135,6 +136,7 @@ impl TryFrom<proto::Timeline> for Timeline {
             fork_point: tl.fork_point,
             created_at,
             broken_at,
+            head: tl.head,
         })
     }
 }

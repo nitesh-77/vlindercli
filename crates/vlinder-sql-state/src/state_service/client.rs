@@ -341,4 +341,33 @@ impl DagStore for GrpcStateClient {
             .map(|t| t.try_into())
             .collect()
     }
+
+    fn get_timeline_head(&self, timeline_id: i64) -> Result<Option<String>, String> {
+        let request = proto::GetTimelineHeadRequest { timeline_id };
+        let mut client = self.client.clone();
+        let response = self
+            .runtime
+            .block_on(async { client.get_timeline_head(request).await })
+            .map_err(|e| e.to_string())?;
+        Ok(response.into_inner().hash)
+    }
+
+    fn update_timeline_head(&self, timeline_id: i64, hash: &str) -> Result<(), String> {
+        let request = proto::UpdateTimelineHeadRequest {
+            timeline_id,
+            hash: hash.to_string(),
+        };
+        let mut client = self.client.clone();
+        let response = self
+            .runtime
+            .block_on(async { client.update_timeline_head(request).await })
+            .map_err(|e| e.to_string())?;
+
+        let resp = response.into_inner();
+        if resp.success {
+            Ok(())
+        } else {
+            Err(resp.error.unwrap_or_else(|| "unknown error".to_string()))
+        }
+    }
 }

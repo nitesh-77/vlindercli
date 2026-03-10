@@ -77,6 +77,7 @@ impl SqliteDagStore {
         Self::migrate_state(&conn)?;
         Self::migrate_protocol_version(&conn)?;
         Self::migrate_timelines(&conn)?;
+        Self::migrate_timeline_head(&conn)?;
 
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
@@ -168,6 +169,32 @@ impl SqliteDagStore {
         Ok(())
     }
 
+    /// Migrate existing databases to include the head column on timelines.
+    fn migrate_timeline_head(conn: &Connection) -> Result<(), String> {
+        let has_head = conn
+            .prepare("PRAGMA table_info(timelines)")
+            .and_then(|mut stmt| {
+                let mut found = false;
+                let mut rows = stmt.query([])?;
+                while let Some(row) = rows.next()? {
+                    let name: String = row.get(1)?;
+                    if name == "head" {
+                        found = true;
+                        break;
+                    }
+                }
+                Ok(found)
+            })
+            .map_err(|e| format!("migration check failed: {}", e))?;
+
+        if !has_head {
+            conn.execute_batch("ALTER TABLE timelines ADD COLUMN head TEXT;")
+                .map_err(|e| format!("timeline head migration failed: {}", e))?;
+        }
+
+        Ok(())
+    }
+
     /// Migrate existing databases to include the protocol_version column.
     fn migrate_protocol_version(conn: &Connection) -> Result<(), String> {
         let has_col = conn
@@ -200,7 +227,7 @@ impl SqliteDagStore {
 /// Construct a Timeline from a SQLite row.
 ///
 /// Expects columns in order: id, branch_name, session_id, parent_timeline_id,
-/// fork_point, created_at, broken_at.
+/// fork_point, created_at, broken_at, head.
 fn row_to_timeline(row: &rusqlite::Row) -> Result<Timeline, rusqlite::Error> {
     let created_at_str: String = row.get(5)?;
     let created_at = DateTime::parse_from_rfc3339(&created_at_str)
@@ -220,6 +247,7 @@ fn row_to_timeline(row: &rusqlite::Row) -> Result<Timeline, rusqlite::Error> {
         fork_point: row.get(4)?,
         created_at,
         broken_at,
+        head: row.get(7)?,
     })
 }
 
@@ -470,7 +498,7 @@ impl DagStore for SqliteDagStore {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
             .prepare(
-                "SELECT id, branch_name, session_id, parent_timeline_id, fork_point, created_at, broken_at
+                "SELECT id, branch_name, session_id, parent_timeline_id, fork_point, created_at, broken_at, head
              FROM timelines WHERE branch_name = ?1",
             )
             .map_err(|e| format!("get_timeline_by_branch prepare failed: {}", e))?;
@@ -484,7 +512,7 @@ impl DagStore for SqliteDagStore {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
             .prepare(
-                "SELECT id, branch_name, session_id, parent_timeline_id, fork_point, created_at, broken_at
+                "SELECT id, branch_name, session_id, parent_timeline_id, fork_point, created_at, broken_at, head
              FROM timelines WHERE id = ?1",
             )
             .map_err(|e| format!("get_timeline prepare failed: {}", e))?;
@@ -605,8 +633,8 @@ impl DagStore for SqliteDagStore {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
             .prepare(
-                "SELECT t.id, t.branch_name, t.parent_timeline_id, t.fork_point,
-                        t.created_at, t.broken_at
+                "SELECT t.id, t.branch_name, t.session_id, t.parent_timeline_id, t.fork_point,
+                        t.created_at, t.broken_at, t.head
                  FROM timelines t
                  JOIN dag_nodes d ON t.fork_point = d.hash
                  WHERE d.session_id = ?1
@@ -624,6 +652,31 @@ impl DagStore for SqliteDagStore {
                 .push(row.map_err(|e| format!("get_timelines_for_session row failed: {}", e))?);
         }
         Ok(timelines)
+    }
+
+    fn get_timeline_head(&self, timeline_id: i64) -> Result<Option<String>, String> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare("SELECT head FROM timelines WHERE id = ?1")
+            .map_err(|e| format!("get_timeline_head prepare failed: {}", e))?;
+
+        let result: Option<String> = stmt
+            .query_row(rusqlite::params![timeline_id], |row| row.get(0))
+            .optional()
+            .map_err(|e| format!("get_timeline_head query failed: {}", e))?
+            .flatten();
+
+        Ok(result)
+    }
+
+    fn update_timeline_head(&self, timeline_id: i64, hash: &str) -> Result<(), String> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE timelines SET head = ?1 WHERE id = ?2",
+            rusqlite::params![hash, timeline_id],
+        )
+        .map_err(|e| format!("update_timeline_head failed: {}", e))?;
+        Ok(())
     }
 }
 

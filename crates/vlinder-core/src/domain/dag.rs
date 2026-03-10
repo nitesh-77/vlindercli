@@ -144,6 +144,9 @@ pub struct Timeline {
     pub created_at: DateTime<Utc>,
     /// When this timeline was sealed (broken). None = still active.
     pub broken_at: Option<DateTime<Utc>>,
+    /// Hash of the latest DagNode recorded on this timeline.
+    /// Moves forward with each recorded message. None before any messages.
+    pub head: Option<String>,
 }
 
 /// A worker that persists observable messages to a DAG structure.
@@ -230,6 +233,12 @@ pub trait DagStore: Send + Sync {
 
     /// Get all timelines whose fork point belongs to the given session.
     fn get_timelines_for_session(&self, session_id: &str) -> Result<Vec<Timeline>, String>;
+
+    /// Get the head hash for a timeline (the latest recorded DagNode hash).
+    fn get_timeline_head(&self, timeline_id: i64) -> Result<Option<String>, String>;
+
+    /// Advance the head pointer of a timeline to the given hash.
+    fn update_timeline_head(&self, timeline_id: i64, hash: &str) -> Result<(), String>;
 }
 
 // ============================================================================
@@ -357,6 +366,7 @@ impl DagStore for InMemoryDagStore {
             fork_point: fork_point.map(|s| s.to_string()),
             created_at: Utc::now(),
             broken_at: None,
+            head: None,
         });
         Ok(id)
     }
@@ -475,6 +485,22 @@ impl DagStore for InMemoryDagStore {
             })
             .cloned()
             .collect())
+    }
+
+    fn get_timeline_head(&self, timeline_id: i64) -> Result<Option<String>, String> {
+        let timelines = self.timelines.lock().unwrap();
+        Ok(timelines
+            .iter()
+            .find(|t| t.id == timeline_id)
+            .and_then(|t| t.head.clone()))
+    }
+
+    fn update_timeline_head(&self, timeline_id: i64, hash: &str) -> Result<(), String> {
+        let mut timelines = self.timelines.lock().unwrap();
+        if let Some(t) = timelines.iter_mut().find(|t| t.id == timeline_id) {
+            t.head = Some(hash.to_string());
+        }
+        Ok(())
     }
 }
 

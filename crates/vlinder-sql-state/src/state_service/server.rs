@@ -8,12 +8,13 @@ use super::proto::{
     GetChildrenRequest, GetChildrenResponse, GetNodeByPrefixRequest, GetNodeRequest,
     GetNodeResponse, GetNodesBySubmissionRequest, GetNodesBySubmissionResponse,
     GetSessionNodesRequest, GetSessionNodesResponse, GetTimelineByBranchRequest,
-    GetTimelineByIdRequest, GetTimelineResponse, GetTimelinesForSessionRequest,
-    GetTimelinesForSessionResponse, InsertNodeRequest, InsertNodeResponse, IsTimelineSealedRequest,
-    IsTimelineSealedResponse, LatestNodeHashRequest, LatestNodeHashResponse, LatestStateRequest,
-    LatestStateResponse, ListSessionsRequest, ListSessionsResponse, PingRequest,
-    RenameTimelineRequest, RenameTimelineResponse, SealTimelineRequest, SealTimelineResponse,
-    SemVer, SetCheckoutStateRequest, SetCheckoutStateResponse,
+    GetTimelineByIdRequest, GetTimelineHeadRequest, GetTimelineHeadResponse, GetTimelineResponse,
+    GetTimelinesForSessionRequest, GetTimelinesForSessionResponse, InsertNodeRequest,
+    InsertNodeResponse, IsTimelineSealedRequest, IsTimelineSealedResponse, LatestNodeHashRequest,
+    LatestNodeHashResponse, LatestStateRequest, LatestStateResponse, ListSessionsRequest,
+    ListSessionsResponse, PingRequest, RenameTimelineRequest, RenameTimelineResponse,
+    SealTimelineRequest, SealTimelineResponse, SemVer, SetCheckoutStateRequest,
+    SetCheckoutStateResponse, UpdateTimelineHeadRequest, UpdateTimelineHeadResponse,
 };
 use vlinder_core::domain::DagStore;
 
@@ -315,5 +316,38 @@ impl StateService for StateServiceServer {
             .map(|t| t.into())
             .collect();
         Ok(Response::new(GetTimelinesForSessionResponse { timelines }))
+    }
+
+    // -------------------------------------------------------------------------
+    // Timeline head RPCs (issue #37)
+    // -------------------------------------------------------------------------
+
+    async fn get_timeline_head(
+        &self,
+        request: Request<GetTimelineHeadRequest>,
+    ) -> Result<Response<GetTimelineHeadResponse>, Status> {
+        let req = request.into_inner();
+        let hash = self
+            .store
+            .get_timeline_head(req.timeline_id)
+            .map_err(Status::internal)?;
+        Ok(Response::new(GetTimelineHeadResponse { hash }))
+    }
+
+    async fn update_timeline_head(
+        &self,
+        request: Request<UpdateTimelineHeadRequest>,
+    ) -> Result<Response<UpdateTimelineHeadResponse>, Status> {
+        let req = request.into_inner();
+        match self.store.update_timeline_head(req.timeline_id, &req.hash) {
+            Ok(()) => Ok(Response::new(UpdateTimelineHeadResponse {
+                success: true,
+                error: None,
+            })),
+            Err(e) => Ok(Response::new(UpdateTimelineHeadResponse {
+                success: false,
+                error: Some(e),
+            })),
+        }
     }
 }
