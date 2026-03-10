@@ -14,7 +14,7 @@ use vlinder_core::domain::{
 use vlinder_provider_server::factory;
 
 use crate::config::SidecarConfig;
-use crate::dispatch::{self, DispatchContext};
+use crate::dispatch::{self, DispatchContext, DurableSession, InvokeOutcome};
 use crate::health;
 
 /// The sidecar process — mediates between the platform queue and the agent container.
@@ -66,7 +66,7 @@ impl Sidecar {
         })
     }
 
-    /// Main loop: wait for agent, then poll invoke/delegate queues until container death.
+    /// Main loop: wait for agent, then poll invoke/delegate/response queues.
     pub fn run(mut self) -> Result<(), Box<dyn std::error::Error>> {
         health::wait_for_ready(
             &mut self.health,
@@ -77,9 +77,50 @@ impl Sidecar {
 
         tracing::info!(event = "sidecar.started", agent = %self.agent_name, "Sidecar loop started");
 
+        let mut durable_session: Option<DurableSession> = None;
+
         loop {
             let agent_id = AgentId::new(&self.agent_name);
-            if let Ok((invoke, ack)) = self.dispatch.queue.receive_invoke(&agent_id) {
+
+            // Poll for service responses first (durable mode).
+            if let Some(session) = durable_session.take() {
+                match self
+                    .dispatch
+                    .queue
+                    .receive_response(&session.pending_request)
+                {
+                    Ok((response, ack)) => {
+                        let _ = ack();
+                        match dispatch::handle_service_response(&self.dispatch, session, response) {
+                            Ok(InvokeOutcome::Done) => {}
+                            Ok(InvokeOutcome::Pending(next)) => {
+                                durable_session = Some(next);
+                            }
+                            Err(e) => {
+                                tracing::error!(
+                                    event = "durable.handler_error",
+                                    error = %e,
+                                    agent = %self.agent_name,
+                                    "Durable handler failed"
+                                );
+                                break;
+                            }
+                        }
+                    }
+                    Err(vlinder_core::domain::QueueError::Timeout) => {
+                        // No response yet — put session back and continue polling.
+                        durable_session = Some(session);
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            event = "durable.response_error",
+                            error = %e,
+                            "Failed to receive service response"
+                        );
+                        break;
+                    }
+                }
+            } else if let Ok((invoke, ack)) = self.dispatch.queue.receive_invoke(&agent_id) {
                 let _ = ack();
                 tracing::info!(
                     event = "dispatch.started",
@@ -89,7 +130,10 @@ impl Sidecar {
                     "Dispatching to container"
                 );
                 match dispatch::handle_invoke(&self.dispatch, &mut self.health, &invoke, &None) {
-                    Ok(()) => {}
+                    Ok(InvokeOutcome::Done) => {}
+                    Ok(InvokeOutcome::Pending(session)) => {
+                        durable_session = Some(session);
+                    }
                     Err(e) => {
                         tracing::error!(
                             event = "dispatch.error",
@@ -128,13 +172,41 @@ impl Sidecar {
                 let reply_key = Some(delegate.reply_routing_key());
                 match dispatch::handle_invoke(&self.dispatch, &mut self.health, &invoke, &reply_key)
                 {
-                    Ok(()) => {}
+                    Ok(InvokeOutcome::Done) => {}
+                    Ok(InvokeOutcome::Pending(session)) => {
+                        durable_session = Some(session);
+                    }
                     Err(e) => {
                         tracing::error!(
                             event = "delegation.error",
                             error = %e,
                             agent = %self.agent_name,
                             "Delegation dispatch failed"
+                        );
+                        break;
+                    }
+                }
+            } else if let Ok((repair, ack)) = self.dispatch.queue.receive_repair(&agent_id) {
+                let _ = ack();
+                tracing::info!(
+                    event = "repair.received",
+                    sha = %repair.submission,
+                    session = %repair.session,
+                    agent = %self.agent_name,
+                    checkpoint = %repair.checkpoint,
+                    "Dispatching repair"
+                );
+                match dispatch::handle_repair(&self.dispatch, &repair) {
+                    Ok(InvokeOutcome::Done) => {}
+                    Ok(InvokeOutcome::Pending(session)) => {
+                        durable_session = Some(session);
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            event = "repair.error",
+                            error = %e,
+                            agent = %self.agent_name,
+                            "Repair dispatch failed"
                         );
                         break;
                     }

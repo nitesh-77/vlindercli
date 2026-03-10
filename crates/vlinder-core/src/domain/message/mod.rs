@@ -6,23 +6,29 @@
 //! - `ResponseMessage`: Service → Runtime (service replies)
 //! - `CompleteMessage`: Runtime → Harness (submission finished)
 //! - `DelegateMessage`: Agent → Agent (via runtime)
+//! - `RepairMessage`: Platform → Sidecar (replay a failed service call, ADR 113)
+//! - `ForkMessage`: CLI → Platform (create a timeline fork)
 
 pub mod complete;
 pub mod delegate;
+pub mod fork;
 pub mod identity;
 pub mod invoke;
 pub mod observable;
+pub mod repair;
 pub mod request;
 pub mod response;
 
 // Re-export everything at the module level for backwards compatibility.
 pub use complete::CompleteMessage;
 pub use delegate::DelegateMessage;
+pub use fork::ForkMessage;
 pub use identity::{
     HarnessType, MessageId, Sequence, SequenceCounter, SessionId, SubmissionId, TimelineId,
 };
 pub use invoke::InvokeMessage;
 pub use observable::{ObservableMessage, ObservableMessageHeaders};
+pub use repair::RepairMessage;
 pub use request::RequestMessage;
 pub use response::ResponseMessage;
 

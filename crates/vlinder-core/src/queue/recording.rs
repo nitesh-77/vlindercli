@@ -7,13 +7,13 @@
 //!
 //! Receive and routing methods delegate straight through.
 
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use crate::domain::workers::dag::build_dag_node;
 use crate::domain::{
-    Acknowledgement, CompleteMessage, DagStore, DelegateMessage, InvokeMessage, MessageQueue,
-    ObservableMessage, QueueError, RequestMessage, ResponseMessage, SubmissionId,
+    Acknowledgement, CompleteMessage, DagStore, DelegateMessage, ForkMessage, InvokeMessage,
+    MessageQueue, ObservableMessage, QueueError, RepairMessage, RequestMessage, ResponseMessage,
+    SubmissionId,
 };
 
 /// A `MessageQueue` decorator that synchronously records DAG nodes on send.
@@ -23,45 +23,41 @@ use crate::domain::{
 /// original message to inner queue.
 ///
 /// DagStore write failures are logged but don't block message sending.
+///
+/// Merkle chain parent resolution uses the timeline `head` pointer stored
+/// in the database, ensuring that multiple RecordingQueue instances (sidecar
+/// + daemon) share a single source of truth for chaining (issue #37).
 pub struct RecordingQueue {
     inner: Arc<dyn MessageQueue + Send + Sync>,
     store: Arc<dyn DagStore>,
-    /// Per-session Merkle chain state: session_id → last node hash.
-    chain: Mutex<HashMap<String, String>>,
 }
 
 impl RecordingQueue {
     pub fn new(inner: Arc<dyn MessageQueue + Send + Sync>, store: Arc<dyn DagStore>) -> Self {
-        Self {
-            inner,
-            store,
-            chain: Mutex::new(HashMap::new()),
-        }
+        Self { inner, store }
     }
 
-    /// Record a DAG node for the given observable message, then update chain state.
+    /// Record a DAG node for the given observable message, then update timeline head.
     fn record(&self, observable: &ObservableMessage) {
-        let session_id = observable.session().as_str().to_string();
+        let timeline_id_str = observable.timeline().as_str();
+        let timeline_id: i64 = timeline_id_str.parse().unwrap_or(1);
 
-        // Explicit dag_parent on Invoke overrides chain cache (fork/repair).
+        // Explicit dag_parent on Invoke/Fork overrides timeline head.
         let dag_parent_override = match observable {
             ObservableMessage::Invoke(m) if !m.dag_parent.is_empty() => Some(m.dag_parent.clone()),
+            ObservableMessage::Fork(m) => Some(m.fork_point.clone()),
             _ => None,
         };
 
-        // Look up parent hash: dag_parent override, then in-memory cache, then DagStore fallback
+        // Look up parent hash: dag_parent override → timeline head
         let parent_hash = dag_parent_override.unwrap_or_else(|| {
-            {
-                let chain = self.chain.lock().unwrap();
-                chain.get(&session_id).cloned()
-            }.unwrap_or_else(|| {
-                self.store.latest_node_hash(&session_id)
-                    .unwrap_or_else(|e| {
-                        tracing::warn!(error = %e, session = %session_id, "Failed to read latest node hash");
-                        None
-                    })
-                    .unwrap_or_default()
-            })
+            self.store
+                .get_timeline_head(timeline_id)
+                .unwrap_or_else(|e| {
+                    tracing::warn!(error = %e, timeline = timeline_id, "Failed to read timeline head");
+                    None
+                })
+                .unwrap_or_default()
         });
 
         let node = build_dag_node(observable, &parent_hash);
@@ -71,10 +67,11 @@ impl RecordingQueue {
             tracing::warn!(error = %e, hash = %node_hash, "Failed to record DAG node (outbox)");
         }
 
-        // Update chain state regardless of store success — the hash is
-        // deterministic, so even if the insert failed the next node should
-        // chain from the correct parent.
-        self.chain.lock().unwrap().insert(session_id, node_hash);
+        // Advance the timeline head — both sidecar and daemon update
+        // the same row, giving a single Merkle chain per timeline.
+        if let Err(e) = self.store.update_timeline_head(timeline_id, &node_hash) {
+            tracing::warn!(error = %e, hash = %node_hash, "Failed to update timeline head");
+        }
     }
 }
 
@@ -168,6 +165,69 @@ impl MessageQueue for RecordingQueue {
     ) -> Result<(CompleteMessage, Acknowledgement), QueueError> {
         self.inner.receive_delegate_reply(reply_key)
     }
+
+    // -------------------------------------------------------------------------
+    // Repair methods — record + forward on send, delegate on receive
+    // -------------------------------------------------------------------------
+
+    fn send_repair(&self, msg: RepairMessage) -> Result<(), QueueError> {
+        self.record(&msg.clone().into());
+        self.inner.send_repair(msg)
+    }
+
+    fn receive_repair(
+        &self,
+        agent: &crate::domain::AgentId,
+    ) -> Result<(RepairMessage, Acknowledgement), QueueError> {
+        self.inner.receive_repair(agent)
+    }
+
+    // -------------------------------------------------------------------------
+    // Fork methods — record + forward on send
+    // -------------------------------------------------------------------------
+
+    fn send_fork(&self, msg: ForkMessage) -> Result<(), QueueError> {
+        self.record(&msg.clone().into());
+
+        // Create the timeline row so `--branch` and `session repair` can find it.
+        let session_id = msg.session.as_str();
+        match self.store.create_timeline(
+            &msg.branch_name,
+            session_id,
+            Some(msg.parent_timeline_id),
+            Some(&msg.fork_point),
+        ) {
+            Ok(id) => {
+                tracing::info!(
+                    timeline_id = id,
+                    branch = %msg.branch_name,
+                    "Created timeline on fork"
+                );
+            }
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    branch = %msg.branch_name,
+                    "Failed to create timeline on fork"
+                );
+            }
+        }
+
+        // Restore agent state to the fork point so the next `agent run`
+        // resumes from the correct KV/vec snapshot.
+        if let Ok(Some(node)) = self.store.get_node(&msg.fork_point) {
+            let state = node.state.as_deref().unwrap_or("");
+            if let Err(e) = self.store.set_checkout_state(&msg.agent_name, state) {
+                tracing::warn!(
+                    error = %e,
+                    agent = %msg.agent_name,
+                    "Failed to set checkout state on fork"
+                );
+            }
+        }
+
+        self.inner.send_fork(msg)
+    }
 }
 
 #[cfg(test)]
@@ -182,7 +242,10 @@ mod tests {
     use crate::queue::InMemoryQueue;
 
     fn test_store() -> Arc<dyn DagStore> {
-        Arc::new(InMemoryDagStore::new())
+        let store = Arc::new(InMemoryDagStore::new());
+        // Seed "main" timeline (id=1) — mirrors production setup.
+        store.create_timeline("main", "", None, None).unwrap();
+        store
     }
 
     fn test_queue(store: Arc<dyn DagStore>) -> RecordingQueue {
@@ -376,13 +439,12 @@ mod tests {
     }
 
     #[test]
-    fn different_sessions_chain_independently() {
+    fn same_timeline_chains_across_sessions() {
         let store = test_store();
         let queue = test_queue(Arc::clone(&store));
 
-        // Use different payloads — the content hash covers payload but not
-        // session_id, so identical payloads produce the same hash and
-        // INSERT OR IGNORE deduplicates.
+        // Two sessions on the same timeline chain sequentially via the
+        // shared timeline head pointer.
         let mut invoke1 = test_invoke();
         invoke1.session = SessionId::from("ses-aaa".to_string());
         invoke1.payload = b"hello-aaa".to_vec();
@@ -401,9 +463,9 @@ mod tests {
 
         assert_eq!(nodes1.len(), 1);
         assert_eq!(nodes2.len(), 1);
-        // Both are root nodes (no parent)
+        // First invoke is root, second chains off first via timeline head
         assert_eq!(nodes1[0].parent_hash, "");
-        assert_eq!(nodes2[0].parent_hash, "");
+        assert_eq!(nodes2[0].parent_hash, nodes1[0].hash);
     }
 
     #[test]
@@ -479,6 +541,21 @@ mod tests {
             }
             fn list_sessions(&self) -> Result<Vec<crate::domain::SessionSummary>, String> {
                 Ok(vec![])
+            }
+            fn get_nodes_by_submission(&self, _: &str) -> Result<Vec<DagNode>, String> {
+                Ok(vec![])
+            }
+            fn get_timelines_for_session(
+                &self,
+                _: &str,
+            ) -> Result<Vec<crate::domain::Timeline>, String> {
+                Ok(vec![])
+            }
+            fn get_timeline_head(&self, _: i64) -> Result<Option<String>, String> {
+                Ok(None)
+            }
+            fn update_timeline_head(&self, _: i64, _: &str) -> Result<(), String> {
+                Ok(())
             }
         }
 

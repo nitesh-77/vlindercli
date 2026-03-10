@@ -28,6 +28,8 @@ pub fn observable_from_to(msg: &ObservableMessage) -> (String, String) {
         ),
         ObservableMessage::Complete(m) => (m.agent_id.to_string(), m.harness.as_str().to_string()),
         ObservableMessage::Delegate(m) => (m.caller.to_string(), m.target.to_string()),
+        ObservableMessage::Repair(m) => (m.harness.as_str().to_string(), m.agent_id.to_string()),
+        ObservableMessage::Fork(m) => ("platform".to_string(), m.agent_name.clone()),
     }
 }
 
@@ -39,6 +41,7 @@ pub fn serialize_diagnostics(msg: &ObservableMessage) -> Vec<u8> {
         ObservableMessage::Response(m) => serde_json::to_vec(&m.diagnostics),
         ObservableMessage::Complete(m) => serde_json::to_vec(&m.diagnostics),
         ObservableMessage::Delegate(m) => serde_json::to_vec(&m.diagnostics),
+        ObservableMessage::Repair(_) | ObservableMessage::Fork(_) => return Vec::new(),
     };
     json.unwrap_or_default()
 }
@@ -55,6 +58,32 @@ pub fn extract_typed_stderr(msg: &ObservableMessage) -> Vec<u8> {
     }
 }
 
+/// Extract checkpoint handler name from a reconstructed message.
+///
+/// Only Request and Response carry checkpoint (ADR 111). Returns None for
+/// other message types or when the agent doesn't use checkpoints.
+pub fn observable_checkpoint(msg: &ObservableMessage) -> Option<String> {
+    match msg {
+        ObservableMessage::Request(m) => m.checkpoint.clone(),
+        ObservableMessage::Response(m) => m.checkpoint.clone(),
+        ObservableMessage::Repair(m) => Some(m.checkpoint.clone()),
+        _ => None,
+    }
+}
+
+/// Extract operation from a reconstructed message.
+///
+/// Only Request, Response, and Repair carry an operation. Returns None for
+/// other message types.
+pub fn observable_operation(msg: &ObservableMessage) -> Option<String> {
+    match msg {
+        ObservableMessage::Request(m) => Some(m.operation.as_str().to_string()),
+        ObservableMessage::Response(m) => Some(m.operation.as_str().to_string()),
+        ObservableMessage::Repair(m) => Some(m.operation.as_str().to_string()),
+        _ => None,
+    }
+}
+
 /// Extract state from a reconstructed message.
 pub fn observable_state(msg: &ObservableMessage) -> Option<String> {
     match msg {
@@ -63,6 +92,8 @@ pub fn observable_state(msg: &ObservableMessage) -> Option<String> {
         ObservableMessage::Response(m) => m.state.clone(),
         ObservableMessage::Complete(m) => m.state.clone(),
         ObservableMessage::Delegate(m) => m.state.clone(),
+        ObservableMessage::Repair(m) => m.state.clone(),
+        ObservableMessage::Fork(_) => None,
     }
 }
 
@@ -76,6 +107,8 @@ pub fn build_dag_node(msg: &ObservableMessage, parent_hash: &str) -> DagNode {
     let diagnostics = serialize_diagnostics(msg);
     let stderr = extract_typed_stderr(msg);
     let state = observable_state(msg);
+    let checkpoint = observable_checkpoint(msg);
+    let operation = observable_operation(msg);
     let payload = msg.payload();
     let session_id = msg.session().as_str().to_string();
     let hash = hash_dag_node(
@@ -100,6 +133,8 @@ pub fn build_dag_node(msg: &ObservableMessage, parent_hash: &str) -> DagNode {
         created_at: Utc::now(),
         state,
         protocol_version: msg.protocol_version().to_string(),
+        checkpoint,
+        operation,
     }
 }
 
@@ -261,6 +296,23 @@ mod tests {
         assert_eq!(node.message_type, MessageType::Delegate);
         assert_eq!(node.from, "coordinator");
         assert_eq!(node.to, "summarizer");
+    }
+
+    #[test]
+    fn build_dag_node_checkpoint_preserved_on_request() {
+        let mut msg = test_request(b"prompt");
+        if let ObservableMessage::Request(ref mut m) = msg {
+            m.checkpoint = Some("summarize".to_string());
+        }
+        let node = build_dag_node(&msg, "");
+        assert_eq!(node.checkpoint, Some("summarize".to_string()));
+    }
+
+    #[test]
+    fn build_dag_node_checkpoint_none_on_invoke() {
+        let msg = test_invoke(b"payload");
+        let node = build_dag_node(&msg, "");
+        assert_eq!(node.checkpoint, None);
     }
 
     #[test]

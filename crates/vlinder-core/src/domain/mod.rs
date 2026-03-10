@@ -60,9 +60,10 @@ pub use diagnostics::{
     RuntimeDiagnostics, RuntimeInfo, ServiceDiagnostics, ServiceMetrics,
 };
 pub use message::{
-    CompleteMessage, DelegateMessage, ExpectsReply, HarnessType, InvokeMessage, MessageId,
-    ObservableMessage, ObservableMessageHeaders, RequestMessage, ResponseMessage, Sequence,
-    SequenceCounter, SessionId, SubmissionId, TimelineId, PROTOCOL_VERSION,
+    CompleteMessage, DelegateMessage, ExpectsReply, ForkMessage, HarnessType, InvokeMessage,
+    MessageId, ObservableMessage, ObservableMessageHeaders, RepairMessage, RequestMessage,
+    ResponseMessage, Sequence, SequenceCounter, SessionId, SubmissionId, TimelineId,
+    PROTOCOL_VERSION,
 };
 pub use message_queue::{agent_routing_key, Acknowledgement, MessageQueue, QueueError};
 pub use routing_key::{
@@ -125,7 +126,7 @@ pub use runtime::{Runtime, RuntimeType};
 // Harness (API surface for agent interaction)
 // ============================================================================
 
-pub use harness::{CoreHarness, Harness};
+pub use harness::{CoreHarness, ForkParams, Harness, RepairParams};
 pub use session::{HistoryEntry, Session};
 
 // ============================================================================

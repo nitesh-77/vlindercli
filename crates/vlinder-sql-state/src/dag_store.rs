@@ -44,7 +44,9 @@ impl SqliteDagStore {
                  stderr BLOB NOT NULL DEFAULT x'',
                  created_at TEXT NOT NULL,
                  state TEXT,
-                 protocol_version TEXT NOT NULL DEFAULT ''
+                 protocol_version TEXT NOT NULL DEFAULT '',
+                 checkpoint TEXT,
+                 operation TEXT
              );
              CREATE INDEX IF NOT EXISTS idx_dag_nodes_session
                  ON dag_nodes (session_id, created_at);
@@ -75,6 +77,7 @@ impl SqliteDagStore {
         Self::migrate_state(&conn)?;
         Self::migrate_protocol_version(&conn)?;
         Self::migrate_timelines(&conn)?;
+        Self::migrate_timeline_head(&conn)?;
 
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
@@ -166,6 +169,32 @@ impl SqliteDagStore {
         Ok(())
     }
 
+    /// Migrate existing databases to include the head column on timelines.
+    fn migrate_timeline_head(conn: &Connection) -> Result<(), String> {
+        let has_head = conn
+            .prepare("PRAGMA table_info(timelines)")
+            .and_then(|mut stmt| {
+                let mut found = false;
+                let mut rows = stmt.query([])?;
+                while let Some(row) = rows.next()? {
+                    let name: String = row.get(1)?;
+                    if name == "head" {
+                        found = true;
+                        break;
+                    }
+                }
+                Ok(found)
+            })
+            .map_err(|e| format!("migration check failed: {}", e))?;
+
+        if !has_head {
+            conn.execute_batch("ALTER TABLE timelines ADD COLUMN head TEXT;")
+                .map_err(|e| format!("timeline head migration failed: {}", e))?;
+        }
+
+        Ok(())
+    }
+
     /// Migrate existing databases to include the protocol_version column.
     fn migrate_protocol_version(conn: &Connection) -> Result<(), String> {
         let has_col = conn
@@ -198,7 +227,7 @@ impl SqliteDagStore {
 /// Construct a Timeline from a SQLite row.
 ///
 /// Expects columns in order: id, branch_name, session_id, parent_timeline_id,
-/// fork_point, created_at, broken_at.
+/// fork_point, created_at, broken_at, head.
 fn row_to_timeline(row: &rusqlite::Row) -> Result<Timeline, rusqlite::Error> {
     let created_at_str: String = row.get(5)?;
     let created_at = DateTime::parse_from_rfc3339(&created_at_str)
@@ -218,6 +247,7 @@ fn row_to_timeline(row: &rusqlite::Row) -> Result<Timeline, rusqlite::Error> {
         fork_point: row.get(4)?,
         created_at,
         broken_at,
+        head: row.get(7)?,
     })
 }
 
@@ -225,7 +255,7 @@ fn row_to_timeline(row: &rusqlite::Row) -> Result<Timeline, rusqlite::Error> {
 ///
 /// Expects columns in order: hash, parent_hash, message_type, sender, receiver,
 /// session_id, submission_id, payload, diagnostics, stderr, created_at, state,
-/// protocol_version.
+/// protocol_version, checkpoint, operation.
 fn row_to_dag_node(row: &rusqlite::Row) -> Result<DagNode, rusqlite::Error> {
     let mt_str: String = row.get(2)?;
     let message_type = MessageType::from_str(&mt_str).map_err(|_| {
@@ -253,6 +283,8 @@ fn row_to_dag_node(row: &rusqlite::Row) -> Result<DagNode, rusqlite::Error> {
         created_at,
         state: row.get(11)?,
         protocol_version: row.get(12)?,
+        checkpoint: row.get(13)?,
+        operation: row.get(14)?,
     })
 }
 
@@ -260,8 +292,8 @@ impl DagStore for SqliteDagStore {
     fn insert_node(&self, node: &DagNode) -> Result<(), String> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT OR IGNORE INTO dag_nodes (hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state, protocol_version)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            "INSERT OR IGNORE INTO dag_nodes (hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state, protocol_version, checkpoint, operation)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
             rusqlite::params![
                 node.hash,
                 node.parent_hash,
@@ -276,6 +308,8 @@ impl DagStore for SqliteDagStore {
                 node.created_at.to_rfc3339(),
                 node.state,
                 node.protocol_version,
+                node.checkpoint,
+                node.operation,
             ],
         ).map_err(|e| format!("insert_node failed: {}", e))?;
 
@@ -295,7 +329,7 @@ impl DagStore for SqliteDagStore {
     fn get_node(&self, hash: &str) -> Result<Option<DagNode>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state, protocol_version
+            "SELECT hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state, protocol_version, checkpoint, operation
              FROM dag_nodes WHERE hash = ?1"
         ).map_err(|e| format!("get_node prepare failed: {}", e))?;
 
@@ -307,10 +341,41 @@ impl DagStore for SqliteDagStore {
         Ok(result)
     }
 
+    fn get_node_by_prefix(&self, prefix: &str) -> Result<Option<DagNode>, String> {
+        let conn = self.conn.lock().unwrap();
+        let pattern = format!("{}%", prefix);
+
+        // Count matches first to detect ambiguity
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM dag_nodes WHERE hash LIKE ?1",
+                rusqlite::params![pattern],
+                |row| row.get(0),
+            )
+            .map_err(|e| format!("get_node_by_prefix count failed: {}", e))?;
+
+        match count {
+            0 => Ok(None),
+            1 => {
+                let mut stmt = conn.prepare(
+                    "SELECT hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state, protocol_version, checkpoint, operation
+                     FROM dag_nodes WHERE hash LIKE ?1"
+                ).map_err(|e| format!("get_node_by_prefix prepare failed: {}", e))?;
+
+                let node = stmt
+                    .query_row(rusqlite::params![pattern], row_to_dag_node)
+                    .map_err(|e| format!("get_node_by_prefix query failed: {}", e))?;
+
+                Ok(Some(node))
+            }
+            n => Err(format!("ambiguous hash prefix '{}': {} matches", prefix, n)),
+        }
+    }
+
     fn get_session_nodes(&self, session_id: &str) -> Result<Vec<DagNode>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state, protocol_version
+            "SELECT hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state, protocol_version, checkpoint, operation
              FROM dag_nodes WHERE session_id = ?1 ORDER BY created_at"
         ).map_err(|e| format!("get_session_nodes prepare failed: {}", e))?;
 
@@ -328,7 +393,7 @@ impl DagStore for SqliteDagStore {
     fn get_children(&self, parent_hash: &str) -> Result<Vec<DagNode>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state, protocol_version
+            "SELECT hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state, protocol_version, checkpoint, operation
              FROM dag_nodes WHERE parent_hash = ?1"
         ).map_err(|e| format!("get_children prepare failed: {}", e))?;
 
@@ -433,7 +498,7 @@ impl DagStore for SqliteDagStore {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
             .prepare(
-                "SELECT id, branch_name, session_id, parent_timeline_id, fork_point, created_at, broken_at
+                "SELECT id, branch_name, session_id, parent_timeline_id, fork_point, created_at, broken_at, head
              FROM timelines WHERE branch_name = ?1",
             )
             .map_err(|e| format!("get_timeline_by_branch prepare failed: {}", e))?;
@@ -447,7 +512,7 @@ impl DagStore for SqliteDagStore {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
             .prepare(
-                "SELECT id, branch_name, session_id, parent_timeline_id, fork_point, created_at, broken_at
+                "SELECT id, branch_name, session_id, parent_timeline_id, fork_point, created_at, broken_at, head
              FROM timelines WHERE id = ?1",
             )
             .map_err(|e| format!("get_timeline prepare failed: {}", e))?;
@@ -539,6 +604,80 @@ impl DagStore for SqliteDagStore {
         }
         Ok(summaries)
     }
+
+    fn get_nodes_by_submission(&self, submission_id: &str) -> Result<Vec<DagNode>, String> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare(
+                "SELECT hash, parent_hash, message_type, sender, receiver,
+                        session_id, submission_id, payload, diagnostics, stderr,
+                        created_at, state, protocol_version, checkpoint, operation
+                 FROM dag_nodes
+                 WHERE submission_id = ?1
+                 ORDER BY created_at",
+            )
+            .map_err(|e| format!("get_nodes_by_submission prepare failed: {}", e))?;
+
+        let rows = stmt
+            .query_map([submission_id], row_to_dag_node)
+            .map_err(|e| format!("get_nodes_by_submission query failed: {}", e))?;
+
+        let mut nodes = Vec::new();
+        for row in rows {
+            nodes.push(row.map_err(|e| format!("get_nodes_by_submission row failed: {}", e))?);
+        }
+        Ok(nodes)
+    }
+
+    fn get_timelines_for_session(&self, session_id: &str) -> Result<Vec<Timeline>, String> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare(
+                "SELECT t.id, t.branch_name, t.session_id, t.parent_timeline_id, t.fork_point,
+                        t.created_at, t.broken_at, t.head
+                 FROM timelines t
+                 JOIN dag_nodes d ON t.fork_point = d.hash
+                 WHERE d.session_id = ?1
+                 ORDER BY t.created_at",
+            )
+            .map_err(|e| format!("get_timelines_for_session prepare failed: {}", e))?;
+
+        let rows = stmt
+            .query_map(rusqlite::params![session_id], row_to_timeline)
+            .map_err(|e| format!("get_timelines_for_session query failed: {}", e))?;
+
+        let mut timelines = Vec::new();
+        for row in rows {
+            timelines
+                .push(row.map_err(|e| format!("get_timelines_for_session row failed: {}", e))?);
+        }
+        Ok(timelines)
+    }
+
+    fn get_timeline_head(&self, timeline_id: i64) -> Result<Option<String>, String> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare("SELECT head FROM timelines WHERE id = ?1")
+            .map_err(|e| format!("get_timeline_head prepare failed: {}", e))?;
+
+        let result: Option<String> = stmt
+            .query_row(rusqlite::params![timeline_id], |row| row.get(0))
+            .optional()
+            .map_err(|e| format!("get_timeline_head query failed: {}", e))?
+            .flatten();
+
+        Ok(result)
+    }
+
+    fn update_timeline_head(&self, timeline_id: i64, hash: &str) -> Result<(), String> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE timelines SET head = ?1 WHERE id = ?2",
+            rusqlite::params![hash, timeline_id],
+        )
+        .map_err(|e| format!("update_timeline_head failed: {}", e))?;
+        Ok(())
+    }
 }
 
 /// Trait extension for rusqlite optional queries.
@@ -583,6 +722,8 @@ mod tests {
             created_at: Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap(),
             state: None,
             protocol_version: String::new(),
+            checkpoint: None,
+            operation: None,
         }
     }
 
@@ -616,6 +757,8 @@ mod tests {
             created_at: Utc.with_ymd_and_hms(2025, 6, 15, 12, 0, 0).unwrap(),
             state: Some("abc123".to_string()),
             protocol_version: "0.1.0".to_string(),
+            checkpoint: Some("summarize".to_string()),
+            operation: None,
         };
 
         store.insert_node(&node).unwrap();
@@ -989,8 +1132,8 @@ mod tests {
         let store = test_store();
         let conn = store.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO dag_nodes (hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state, protocol_version)
-             VALUES ('h1', '', 'bogus', 'cli', 'agent-a', 'sess-1', 'sub-1', x'', x'', x'', '2025-01-01T00:00:00Z', NULL, '')",
+            "INSERT INTO dag_nodes (hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state, protocol_version, checkpoint)
+             VALUES ('h1', '', 'bogus', 'cli', 'agent-a', 'sess-1', 'sub-1', x'', x'', x'', '2025-01-01T00:00:00Z', NULL, '', NULL)",
             [],
         ).unwrap();
         drop(conn);

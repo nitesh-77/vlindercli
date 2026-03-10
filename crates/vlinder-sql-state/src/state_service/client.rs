@@ -270,6 +270,104 @@ impl DagStore for GrpcStateClient {
     }
 
     fn list_sessions(&self) -> Result<Vec<vlinder_core::domain::SessionSummary>, String> {
-        Err("list_sessions is not available over gRPC".to_string())
+        let mut client = self.client.clone();
+        let response = self
+            .runtime
+            .block_on(async { client.list_sessions(proto::ListSessionsRequest {}).await })
+            .map_err(|e| e.to_string())?;
+
+        response
+            .into_inner()
+            .sessions
+            .into_iter()
+            .map(|s| s.try_into())
+            .collect()
+    }
+
+    fn get_nodes_by_submission(&self, submission_id: &str) -> Result<Vec<DagNode>, String> {
+        let request = proto::GetNodesBySubmissionRequest {
+            submission_id: submission_id.to_string(),
+        };
+
+        let mut client = self.client.clone();
+        let response = self
+            .runtime
+            .block_on(async { client.get_nodes_by_submission(request).await })
+            .map_err(|e| e.to_string())?;
+
+        response
+            .into_inner()
+            .nodes
+            .into_iter()
+            .map(|n| n.try_into())
+            .collect()
+    }
+
+    fn get_node_by_prefix(&self, prefix: &str) -> Result<Option<DagNode>, String> {
+        let request = proto::GetNodeByPrefixRequest {
+            prefix: prefix.to_string(),
+        };
+
+        let mut client = self.client.clone();
+        let response = self
+            .runtime
+            .block_on(async { client.get_node_by_prefix(request).await })
+            .map_err(|e| e.to_string())?;
+
+        match response.into_inner().node {
+            Some(n) => Ok(Some(n.try_into()?)),
+            None => Ok(None),
+        }
+    }
+
+    fn get_timelines_for_session(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<vlinder_core::domain::Timeline>, String> {
+        let request = proto::GetTimelinesForSessionRequest {
+            session_id: session_id.to_string(),
+        };
+
+        let mut client = self.client.clone();
+        let response = self
+            .runtime
+            .block_on(async { client.get_timelines_for_session(request).await })
+            .map_err(|e| e.to_string())?;
+
+        response
+            .into_inner()
+            .timelines
+            .into_iter()
+            .map(|t| t.try_into())
+            .collect()
+    }
+
+    fn get_timeline_head(&self, timeline_id: i64) -> Result<Option<String>, String> {
+        let request = proto::GetTimelineHeadRequest { timeline_id };
+        let mut client = self.client.clone();
+        let response = self
+            .runtime
+            .block_on(async { client.get_timeline_head(request).await })
+            .map_err(|e| e.to_string())?;
+        Ok(response.into_inner().hash)
+    }
+
+    fn update_timeline_head(&self, timeline_id: i64, hash: &str) -> Result<(), String> {
+        let request = proto::UpdateTimelineHeadRequest {
+            timeline_id,
+            hash: hash.to_string(),
+        };
+        let mut client = self.client.clone();
+        let response = self
+            .runtime
+            .block_on(async { client.update_timeline_head(request).await })
+            .map_err(|e| e.to_string())?;
+
+        let resp = response.into_inner();
+        if resp.success {
+            Ok(())
+        } else {
+            Err(resp.error.unwrap_or_else(|| "unknown error".to_string()))
+        }
     }
 }

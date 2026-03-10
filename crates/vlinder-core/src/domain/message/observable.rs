@@ -14,8 +14,10 @@ use super::super::routing_key::{AgentId, Nonce, ServiceBackend};
 use super::super::RuntimeType;
 use super::complete::CompleteMessage;
 use super::delegate::DelegateMessage;
+use super::fork::ForkMessage;
 use super::identity::{HarnessType, MessageId, Sequence, SessionId, SubmissionId, TimelineId};
 use super::invoke::InvokeMessage;
+use super::repair::RepairMessage;
 use super::request::RequestMessage;
 use super::response::ResponseMessage;
 
@@ -30,6 +32,8 @@ pub enum ObservableMessage {
     Response(ResponseMessage),
     Complete(CompleteMessage),
     Delegate(DelegateMessage),
+    Repair(RepairMessage),
+    Fork(ForkMessage),
 }
 
 /// Message metadata without payload.
@@ -67,6 +71,7 @@ pub enum ObservableMessageHeaders {
         sequence: Sequence,
         state: Option<String>,
         diagnostics: RequestDiagnostics,
+        checkpoint: Option<String>,
     },
     Response {
         id: MessageId,
@@ -82,6 +87,7 @@ pub enum ObservableMessageHeaders {
         state: Option<String>,
         diagnostics: ServiceDiagnostics,
         status_code: u16,
+        checkpoint: Option<String>,
     },
     Complete {
         id: MessageId,
@@ -105,6 +111,32 @@ pub enum ObservableMessageHeaders {
         nonce: Nonce,
         state: Option<String>,
         diagnostics: DelegateDiagnostics,
+    },
+    Repair {
+        id: MessageId,
+        protocol_version: String,
+        timeline: TimelineId,
+        submission: SubmissionId,
+        session: SessionId,
+        agent_id: AgentId,
+        harness: HarnessType,
+        dag_parent: String,
+        checkpoint: String,
+        service: ServiceBackend,
+        operation: Operation,
+        sequence: Sequence,
+        state: Option<String>,
+    },
+    Fork {
+        id: MessageId,
+        protocol_version: String,
+        timeline: TimelineId,
+        submission: SubmissionId,
+        session: SessionId,
+        agent_name: String,
+        branch_name: String,
+        fork_point: String,
+        parent_timeline_id: i64,
     },
 }
 
@@ -150,6 +182,7 @@ impl ObservableMessageHeaders {
                 sequence,
                 state,
                 diagnostics,
+                checkpoint,
             } => ObservableMessage::Request(RequestMessage {
                 id,
                 protocol_version,
@@ -163,6 +196,7 @@ impl ObservableMessageHeaders {
                 payload,
                 state,
                 diagnostics,
+                checkpoint,
             }),
             Self::Response {
                 id,
@@ -178,6 +212,7 @@ impl ObservableMessageHeaders {
                 state,
                 diagnostics,
                 status_code,
+                checkpoint,
             } => ObservableMessage::Response(ResponseMessage {
                 id,
                 protocol_version,
@@ -193,6 +228,7 @@ impl ObservableMessageHeaders {
                 state,
                 diagnostics,
                 status_code,
+                checkpoint,
             }),
             Self::Complete {
                 id,
@@ -240,6 +276,57 @@ impl ObservableMessageHeaders {
                 state,
                 diagnostics,
             }),
+            Self::Repair {
+                id,
+                protocol_version,
+                timeline,
+                submission,
+                session,
+                agent_id,
+                harness,
+                dag_parent,
+                checkpoint,
+                service,
+                operation,
+                sequence,
+                state,
+            } => ObservableMessage::Repair(RepairMessage {
+                id,
+                protocol_version,
+                timeline,
+                submission,
+                session,
+                agent_id,
+                harness,
+                dag_parent,
+                checkpoint,
+                service,
+                operation,
+                sequence,
+                payload,
+                state,
+            }),
+            Self::Fork {
+                id,
+                protocol_version,
+                timeline,
+                submission,
+                session,
+                agent_name,
+                branch_name,
+                fork_point,
+                parent_timeline_id,
+            } => ObservableMessage::Fork(ForkMessage {
+                id,
+                protocol_version,
+                timeline,
+                submission,
+                session,
+                agent_name,
+                branch_name,
+                fork_point,
+                parent_timeline_id,
+            }),
         }
     }
 }
@@ -252,6 +339,8 @@ impl ObservableMessage {
             ObservableMessage::Response(_) => MessageType::Response,
             ObservableMessage::Complete(_) => MessageType::Complete,
             ObservableMessage::Delegate(_) => MessageType::Delegate,
+            ObservableMessage::Repair(_) => MessageType::Repair,
+            ObservableMessage::Fork(_) => MessageType::Fork,
         }
     }
 
@@ -262,6 +351,8 @@ impl ObservableMessage {
             ObservableMessage::Response(m) => &m.protocol_version,
             ObservableMessage::Complete(m) => &m.protocol_version,
             ObservableMessage::Delegate(m) => &m.protocol_version,
+            ObservableMessage::Repair(m) => &m.protocol_version,
+            ObservableMessage::Fork(m) => &m.protocol_version,
         }
     }
 
@@ -272,6 +363,8 @@ impl ObservableMessage {
             ObservableMessage::Response(m) => &m.id,
             ObservableMessage::Complete(m) => &m.id,
             ObservableMessage::Delegate(m) => &m.id,
+            ObservableMessage::Repair(m) => &m.id,
+            ObservableMessage::Fork(m) => &m.id,
         }
     }
 
@@ -282,6 +375,8 @@ impl ObservableMessage {
             ObservableMessage::Response(m) => &m.submission,
             ObservableMessage::Complete(m) => &m.submission,
             ObservableMessage::Delegate(m) => &m.submission,
+            ObservableMessage::Repair(m) => &m.submission,
+            ObservableMessage::Fork(m) => &m.submission,
         }
     }
 
@@ -292,6 +387,8 @@ impl ObservableMessage {
             ObservableMessage::Response(m) => &m.timeline,
             ObservableMessage::Complete(m) => &m.timeline,
             ObservableMessage::Delegate(m) => &m.timeline,
+            ObservableMessage::Repair(m) => &m.timeline,
+            ObservableMessage::Fork(m) => &m.timeline,
         }
     }
 
@@ -302,6 +399,8 @@ impl ObservableMessage {
             ObservableMessage::Response(m) => &m.session,
             ObservableMessage::Complete(m) => &m.session,
             ObservableMessage::Delegate(m) => &m.session,
+            ObservableMessage::Repair(m) => &m.session,
+            ObservableMessage::Fork(m) => &m.session,
         }
     }
 
@@ -313,6 +412,8 @@ impl ObservableMessage {
             ObservableMessage::Response(m) => &m.payload,
             ObservableMessage::Complete(m) => &m.payload,
             ObservableMessage::Delegate(m) => &m.payload,
+            ObservableMessage::Repair(m) => &m.payload,
+            ObservableMessage::Fork(_) => &[],
         }
     }
 }
@@ -344,5 +445,17 @@ impl From<CompleteMessage> for ObservableMessage {
 impl From<DelegateMessage> for ObservableMessage {
     fn from(msg: DelegateMessage) -> Self {
         ObservableMessage::Delegate(msg)
+    }
+}
+
+impl From<RepairMessage> for ObservableMessage {
+    fn from(msg: RepairMessage) -> Self {
+        ObservableMessage::Repair(msg)
+    }
+}
+
+impl From<ForkMessage> for ObservableMessage {
+    fn from(msg: ForkMessage) -> Self {
+        ObservableMessage::Fork(msg)
     }
 }

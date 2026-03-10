@@ -26,6 +26,16 @@ service StateService {
   rpc SealTimeline(SealTimelineRequest) returns (SealTimelineResponse);
   rpc RenameTimeline(RenameTimelineRequest) returns (RenameTimelineResponse);
   rpc IsTimelineSealed(IsTimelineSealedRequest) returns (IsTimelineSealedResponse);
+
+  // Session queries (ADR 113)
+  rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
+  rpc GetNodesBySubmission(GetNodesBySubmissionRequest) returns (GetNodesBySubmissionResponse);
+  rpc GetNodeByPrefix(GetNodeByPrefixRequest) returns (GetNodeResponse);
+  rpc GetTimelinesForSession(GetTimelinesForSessionRequest) returns (GetTimelinesForSessionResponse);
+
+  // Timeline head pointer
+  rpc GetTimelineHead(GetTimelineHeadRequest) returns (GetTimelineHeadResponse);
+  rpc UpdateTimelineHead(UpdateTimelineHeadRequest) returns (UpdateTimelineHeadResponse);
 }
 
 // =============================================================================
@@ -58,6 +68,8 @@ message DagNode {
   string created_at = 11;          // ISO-8601
   optional string state = 12;
   string protocol_version = 13;
+  optional string checkpoint = 14;
+  optional string operation = 15;
 }
 
 // =============================================================================
@@ -103,6 +115,7 @@ message Timeline {
   optional string fork_point = 5;
   string created_at = 6;                 // ISO-8601
   optional string broken_at = 7;         // ISO-8601, None = still active
+  optional string head = 8;              // hash of latest DagNode on this timeline
 }
 
 message CreateTimelineRequest {
@@ -125,3 +138,36 @@ message RenameTimelineResponse { bool success = 1; optional string error = 2; }
 
 message IsTimelineSealedRequest { int64 id = 1; }
 message IsTimelineSealedResponse { bool sealed = 1; }
+
+// =============================================================================
+// Session Queries (ADR 113)
+// =============================================================================
+
+message SessionSummary {
+  string session_id = 1;
+  string agent_name = 2;
+  string started_at = 3;
+  uint64 message_count = 4;
+  bool is_open = 5;
+}
+
+message ListSessionsRequest {}
+message ListSessionsResponse { repeated SessionSummary sessions = 1; }
+
+message GetNodesBySubmissionRequest { string submission_id = 1; }
+message GetNodesBySubmissionResponse { repeated DagNode nodes = 1; }
+
+message GetNodeByPrefixRequest { string prefix = 1; }
+
+message GetTimelinesForSessionRequest { string session_id = 1; }
+message GetTimelinesForSessionResponse { repeated Timeline timelines = 1; }
+
+// =============================================================================
+// Timeline Head (issue #37)
+// =============================================================================
+
+message GetTimelineHeadRequest { int64 timeline_id = 1; }
+message GetTimelineHeadResponse { optional string hash = 1; }
+
+message UpdateTimelineHeadRequest { int64 timeline_id = 1; string hash = 2; }
+message UpdateTimelineHeadResponse { bool success = 1; optional string error = 2; }

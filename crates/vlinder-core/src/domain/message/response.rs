@@ -35,6 +35,11 @@ pub struct ResponseMessage {
     /// HTTP status code for the response (used by provider server).
     /// Defaults to 200. Workers set this to signal errors (e.g. 500).
     pub status_code: u16,
+    /// Checkpoint name echoed from the request (ADR 111).
+    /// Present only for durable-mode calls. Enables repair: the platform
+    /// can re-execute only requests that have a checkpoint (named re-entry point).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub checkpoint: Option<String>,
 }
 
 impl ResponseMessage {
@@ -71,6 +76,7 @@ impl ResponseMessage {
             state: None,
             diagnostics,
             status_code: 200,
+            checkpoint: request.checkpoint.clone(),
         }
     }
 

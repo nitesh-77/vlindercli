@@ -3,7 +3,9 @@
 use tonic::transport::Channel;
 
 use super::proto::{self, harness_client::HarnessClient};
-use vlinder_core::domain::{Harness, HarnessType, ResourceId, TimelineId};
+use vlinder_core::domain::{
+    ForkParams, Harness, HarnessType, RepairParams, ResourceId, TimelineId,
+};
 
 /// Ping a harness service at the given address, returning its protocol version.
 ///
@@ -104,6 +106,55 @@ impl Harness for GrpcHarnessClient {
             Err(error)
         } else {
             Ok(resp.output)
+        }
+    }
+
+    fn repair_agent(&mut self, params: RepairParams) -> Result<String, String> {
+        let request = proto::RepairAgentRequest {
+            agent_id: params.agent_id.as_str().to_string(),
+            dag_parent: params.dag_parent,
+            checkpoint: params.checkpoint,
+            service: params.service.service_type().as_str().to_string(),
+            backend: params.service.backend_str().to_string(),
+            operation: params.operation.as_str().to_string(),
+            sequence: params.sequence.as_u32(),
+            payload: params.payload,
+            state: params.state,
+        };
+
+        let mut client = self.client.clone();
+        let response = self
+            .runtime
+            .block_on(async { client.repair_agent(request).await })
+            .map_err(|e| format!("gRPC error: {}", e))?;
+
+        let resp = response.into_inner();
+        if let Some(error) = resp.error {
+            Err(error)
+        } else {
+            Ok(resp.output)
+        }
+    }
+
+    fn fork_timeline(&mut self, params: ForkParams) -> Result<(), String> {
+        let request = proto::ForkTimelineRequest {
+            agent_name: params.agent_name,
+            branch_name: params.branch_name,
+            fork_point: params.fork_point,
+            parent_timeline_id: params.parent_timeline_id,
+        };
+
+        let mut client = self.client.clone();
+        let response = self
+            .runtime
+            .block_on(async { client.fork_timeline(request).await })
+            .map_err(|e| format!("gRPC error: {}", e))?;
+
+        let resp = response.into_inner();
+        if let Some(error) = resp.error {
+            Err(error)
+        } else {
+            Ok(())
         }
     }
 }

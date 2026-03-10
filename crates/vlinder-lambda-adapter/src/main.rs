@@ -26,7 +26,9 @@ use std::time::{Duration, Instant};
 use vlinder_core::domain::{MessageQueue, Registry};
 
 use vlinder_provider_server::factory;
-use vlinder_provider_server::provider_server::{build_hosts, ProviderServer};
+use vlinder_provider_server::handler::InvokeHandler;
+use vlinder_provider_server::hosts::build_hosts;
+use vlinder_provider_server::provider_server::ProviderServer;
 
 use adapter::{build_complete, build_error_body, build_lambda_diagnostics, deserialize_invoke};
 use config::AdapterConfig;
@@ -258,14 +260,14 @@ fn handle_invocation(
     };
 
     // Spawn provider server — drops when this function returns.
-    let provider_server = ProviderServer::start(
-        &invoke,
-        hosts,
+    let state = std::sync::Arc::new(std::sync::RwLock::new(initial_state));
+    let handler = InvokeHandler::new(
         queue.clone(),
         registry.clone(),
-        initial_state,
-        3544,
+        invoke.clone(),
+        std::sync::Arc::clone(&state),
     );
+    let provider_server = ProviderServer::start(handler, hosts, state, 3544);
 
     // POST payload to agent on localhost.
     let agent_url = format!("http://127.0.0.1:{}/invoke", config.agent_port);

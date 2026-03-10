@@ -121,9 +121,21 @@ impl From<String> for SubmissionId {
 pub struct SessionId(String);
 
 impl SessionId {
-    /// Create a new session ID with "ses-" prefix.
+    /// Create a new session ID as a human-readable petname.
+    ///
+    /// Generates Docker-style names like "elegant-knuth-a3f2".
+    /// Readable in CLI output and git refs (`refs/sessions/elegant-knuth-a3f2/main`).
     pub fn new() -> Self {
-        Self(format!("ses-{}", Uuid::new_v4()))
+        use petname::{Generator, Petnames};
+        use rand::Rng;
+
+        let petnames = Petnames::default();
+        let mut rng = rand::thread_rng();
+        let name = petnames
+            .generate(&mut rng, 2, "-")
+            .unwrap_or_else(|| format!("ses-{}", Uuid::new_v4()));
+        let suffix: u16 = rng.gen();
+        Self(format!("{}-{:04x}", name, suffix))
     }
 
     pub fn as_str(&self) -> &str {
@@ -408,10 +420,25 @@ mod tests {
     }
 
     #[test]
-    fn session_id_has_ses_prefix() {
+    fn session_id_is_petname_with_suffix() {
         let id = SessionId::new();
-        assert!(id.as_str().starts_with("ses-"));
-        assert!(id.to_string().starts_with("ses-"));
+        let s = id.as_str();
+        // Format: "adjective-noun-hex4" e.g. "elegant-knuth-a3f2"
+        let parts: Vec<&str> = s.split('-').collect();
+        assert!(
+            parts.len() >= 3,
+            "expected at least 3 parts in '{}', got {}",
+            s,
+            parts.len()
+        );
+        // Last part is 4 hex digits
+        let suffix = parts.last().unwrap();
+        assert_eq!(suffix.len(), 4, "suffix '{}' should be 4 hex chars", suffix);
+        assert!(
+            suffix.chars().all(|c| c.is_ascii_hexdigit()),
+            "suffix '{}' should be hex",
+            suffix
+        );
     }
 
     #[test]

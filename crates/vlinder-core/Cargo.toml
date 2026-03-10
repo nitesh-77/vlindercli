@@ -13,6 +13,7 @@ uuid = { version = "1.20.0", features = ["v4"] }
 tracing = "0.1"
 base64 = "0.22.1"
 ed25519-dalek = { version = "2", features = ["rand_core"] }
+petname = "2"
 rand = "0.8"
 toml = "0.8"
 semver = "1"

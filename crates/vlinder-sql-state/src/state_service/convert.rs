@@ -5,7 +5,7 @@ use std::str::FromStr;
 use chrono::{DateTime, Utc};
 
 use super::proto;
-use vlinder_core::domain::{DagNode, MessageType, Timeline};
+use vlinder_core::domain::{DagNode, MessageType, SessionSummary, Timeline};
 
 // =============================================================================
 // DagNode → proto::DagNode
@@ -27,6 +27,8 @@ impl From<DagNode> for proto::DagNode {
             created_at: node.created_at.to_rfc3339(),
             state: node.state,
             protocol_version: node.protocol_version,
+            checkpoint: node.checkpoint,
+            operation: node.operation,
         }
     }
 }
@@ -47,6 +49,8 @@ impl From<&DagNode> for proto::DagNode {
             created_at: node.created_at.to_rfc3339(),
             state: node.state.clone(),
             protocol_version: node.protocol_version.clone(),
+            checkpoint: node.checkpoint.clone(),
+            operation: node.operation.clone(),
         }
     }
 }
@@ -81,6 +85,8 @@ impl TryFrom<proto::DagNode> for DagNode {
             created_at,
             state: node.state,
             protocol_version: node.protocol_version,
+            checkpoint: node.checkpoint,
+            operation: node.operation,
         })
     }
 }
@@ -99,6 +105,7 @@ impl From<Timeline> for proto::Timeline {
             fork_point: tl.fork_point,
             created_at: tl.created_at.to_rfc3339(),
             broken_at: tl.broken_at.map(|dt| dt.to_rfc3339()),
+            head: tl.head,
         }
     }
 }
@@ -129,6 +136,46 @@ impl TryFrom<proto::Timeline> for Timeline {
             fork_point: tl.fork_point,
             created_at,
             broken_at,
+            head: tl.head,
+        })
+    }
+}
+
+// =============================================================================
+// SessionSummary → proto::SessionSummary
+// =============================================================================
+
+impl From<SessionSummary> for proto::SessionSummary {
+    fn from(s: SessionSummary) -> Self {
+        Self {
+            session_id: s.session_id,
+            agent_name: s.agent_name,
+            started_at: s.started_at.to_rfc3339(),
+            message_count: s.message_count as u64,
+            is_open: s.is_open,
+        }
+    }
+}
+
+// =============================================================================
+// proto::SessionSummary → SessionSummary
+// =============================================================================
+
+impl TryFrom<proto::SessionSummary> for SessionSummary {
+    type Error = String;
+
+    fn try_from(s: proto::SessionSummary) -> Result<Self, Self::Error> {
+        let started_at: DateTime<Utc> = s
+            .started_at
+            .parse()
+            .map_err(|e| format!("invalid started_at: {}", e))?;
+
+        Ok(Self {
+            session_id: s.session_id,
+            agent_name: s.agent_name,
+            started_at,
+            message_count: s.message_count as usize,
+            is_open: s.is_open,
         })
     }
 }
@@ -153,6 +200,8 @@ mod tests {
             created_at: Utc::now(),
             state: Some("state-hash-abc".to_string()),
             protocol_version: "0.1.0".to_string(),
+            checkpoint: None,
+            operation: None,
         }
     }
 
@@ -195,6 +244,7 @@ mod tests {
             MessageType::Response,
             MessageType::Complete,
             MessageType::Delegate,
+            MessageType::Repair,
         ] {
             let node = DagNode {
                 message_type: mt,

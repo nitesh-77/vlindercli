@@ -10,8 +10,9 @@
 //! AckFn acknowledges successful processing.
 
 use super::{
-    AgentId, CompleteMessage, DelegateMessage, HarnessType, InvokeMessage, Operation,
-    RequestMessage, ResourceId, ResponseMessage, RoutingKey, ServiceBackend, SubmissionId,
+    AgentId, CompleteMessage, DelegateMessage, ForkMessage, HarnessType, InvokeMessage, Operation,
+    RepairMessage, RequestMessage, ResourceId, ResponseMessage, RoutingKey, ServiceBackend,
+    SubmissionId,
 };
 use std::fmt;
 
@@ -118,6 +119,33 @@ pub trait MessageQueue {
     ) -> Result<(CompleteMessage, Acknowledgement), QueueError>;
 
     // -------------------------------------------------------------------------
+    // Repair methods (ADR 113)
+    // -------------------------------------------------------------------------
+
+    /// Send a RepairMessage (Platform → Sidecar).
+    ///
+    /// Instructs the sidecar to replay a failed service call.
+    fn send_repair(&self, msg: RepairMessage) -> Result<(), QueueError>;
+
+    /// Receive a RepairMessage for a specific agent.
+    ///
+    /// The sidecar subscribes to repair messages alongside invoke.
+    fn receive_repair(
+        &self,
+        agent: &AgentId,
+    ) -> Result<(RepairMessage, Acknowledgement), QueueError>;
+
+    // -------------------------------------------------------------------------
+    // Fork methods
+    // -------------------------------------------------------------------------
+
+    /// Send a ForkMessage (CLI → Platform).
+    ///
+    /// Creates a new timeline branch in the DAG. Both SQL and git projections
+    /// react to this message.
+    fn send_fork(&self, msg: ForkMessage) -> Result<(), QueueError>;
+
+    // -------------------------------------------------------------------------
     // Request-reply facades (ADR 092)
     // -------------------------------------------------------------------------
 
@@ -129,6 +157,19 @@ pub trait MessageQueue {
         send_and_wait(
             || self.send_request(msg),
             || self.receive_response(&msg_for_recv),
+        )
+    }
+
+    /// Send a repair and block until the agent completes.
+    ///
+    /// Used by the harness to replay a failed service call (ADR 113).
+    /// Reply type is CompleteMessage, same as invoke.
+    fn repair_agent(&self, msg: RepairMessage) -> Result<CompleteMessage, QueueError> {
+        let submission = msg.submission.clone();
+        let harness = msg.harness;
+        send_and_wait(
+            || self.send_repair(msg),
+            || self.receive_complete(&submission, harness),
         )
     }
 

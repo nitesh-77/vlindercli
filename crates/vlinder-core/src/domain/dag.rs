@@ -16,7 +16,7 @@
 use chrono::{DateTime, Utc};
 use sha2::{Digest, Sha256};
 
-/// The five message types in the Vlinder protocol (ADR 044).
+/// The message types in the Vlinder protocol (ADR 044, 113).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MessageType {
     Invoke,
@@ -24,6 +24,8 @@ pub enum MessageType {
     Response,
     Complete,
     Delegate,
+    Repair,
+    Fork,
 }
 
 impl MessageType {
@@ -34,6 +36,8 @@ impl MessageType {
             MessageType::Response => "response",
             MessageType::Complete => "complete",
             MessageType::Delegate => "delegate",
+            MessageType::Repair => "repair",
+            MessageType::Fork => "fork",
         }
     }
 }
@@ -50,6 +54,8 @@ impl std::str::FromStr for MessageType {
             "res" | "response" => Ok(MessageType::Response),
             "complete" => Ok(MessageType::Complete),
             "delegate" => Ok(MessageType::Delegate),
+            "repair" => Ok(MessageType::Repair),
+            "fork" => Ok(MessageType::Fork),
             _ => Err(format!("unknown message type: {}", s)),
         }
     }
@@ -82,6 +88,12 @@ pub struct DagNode {
     /// Protocol version of the sender (semver from Cargo.toml).
     /// Empty for messages captured before protocol versioning was added.
     pub protocol_version: String,
+    /// Checkpoint handler name for durable execution (ADR 111).
+    /// Present on Request and Response messages when the agent uses checkpoints.
+    pub checkpoint: Option<String>,
+    /// Operation for Request/Response/Repair messages (ADR 113).
+    /// E.g., "run", "get", "put". None for Invoke/Complete/Delegate.
+    pub operation: Option<String>,
 }
 
 /// Compute the content-addressed hash for a DAG node.
@@ -132,6 +144,9 @@ pub struct Timeline {
     pub created_at: DateTime<Utc>,
     /// When this timeline was sealed (broken). None = still active.
     pub broken_at: Option<DateTime<Utc>>,
+    /// Hash of the latest DagNode recorded on this timeline.
+    /// Moves forward with each recorded message. None before any messages.
+    pub head: Option<String>,
 }
 
 /// A worker that persists observable messages to a DAG structure.
@@ -150,6 +165,12 @@ pub trait DagStore: Send + Sync {
 
     /// Retrieve a node by its content hash.
     fn get_node(&self, hash: &str) -> Result<Option<DagNode>, String>;
+
+    /// Retrieve a node by hash prefix. Returns an error if ambiguous.
+    fn get_node_by_prefix(&self, prefix: &str) -> Result<Option<DagNode>, String> {
+        // Default: try exact match first, then scan is left to implementors.
+        self.get_node(prefix)
+    }
 
     /// Get all nodes in a session, ordered by `created_at`.
     fn get_session_nodes(&self, session_id: &str) -> Result<Vec<DagNode>, String>;
@@ -206,6 +227,18 @@ pub trait DagStore: Send + Sync {
 
     /// List all sessions with summary information.
     fn list_sessions(&self) -> Result<Vec<SessionSummary>, String>;
+
+    /// Get all nodes for a submission (a single turn), ordered by `created_at`.
+    fn get_nodes_by_submission(&self, submission_id: &str) -> Result<Vec<DagNode>, String>;
+
+    /// Get all timelines whose fork point belongs to the given session.
+    fn get_timelines_for_session(&self, session_id: &str) -> Result<Vec<Timeline>, String>;
+
+    /// Get the head hash for a timeline (the latest recorded DagNode hash).
+    fn get_timeline_head(&self, timeline_id: i64) -> Result<Option<String>, String>;
+
+    /// Advance the head pointer of a timeline to the given hash.
+    fn update_timeline_head(&self, timeline_id: i64, hash: &str) -> Result<(), String>;
 }
 
 // ============================================================================
@@ -248,6 +281,19 @@ impl DagStore for InMemoryDagStore {
     fn get_node(&self, hash: &str) -> Result<Option<DagNode>, String> {
         let nodes = self.nodes.lock().unwrap();
         Ok(nodes.iter().find(|n| n.hash == hash).cloned())
+    }
+
+    fn get_node_by_prefix(&self, prefix: &str) -> Result<Option<DagNode>, String> {
+        let nodes = self.nodes.lock().unwrap();
+        let matches: Vec<_> = nodes
+            .iter()
+            .filter(|n| n.hash.starts_with(prefix))
+            .collect();
+        match matches.len() {
+            0 => Ok(None),
+            1 => Ok(Some(matches[0].clone())),
+            n => Err(format!("ambiguous hash prefix '{}': {} matches", prefix, n)),
+        }
     }
 
     fn get_session_nodes(&self, session_id: &str) -> Result<Vec<DagNode>, String> {
@@ -320,6 +366,7 @@ impl DagStore for InMemoryDagStore {
             fork_point: fork_point.map(|s| s.to_string()),
             created_at: Utc::now(),
             broken_at: None,
+            head: None,
         });
         Ok(id)
     }
@@ -407,6 +454,54 @@ impl DagStore for InMemoryDagStore {
         summaries.sort_by(|a, b| b.started_at.cmp(&a.started_at));
         Ok(summaries)
     }
+
+    fn get_nodes_by_submission(&self, submission_id: &str) -> Result<Vec<DagNode>, String> {
+        let nodes = self.nodes.lock().unwrap();
+        let mut result: Vec<DagNode> = nodes
+            .iter()
+            .filter(|n| n.submission_id == submission_id)
+            .cloned()
+            .collect();
+        result.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+        Ok(result)
+    }
+
+    fn get_timelines_for_session(&self, session_id: &str) -> Result<Vec<Timeline>, String> {
+        let nodes = self.nodes.lock().unwrap();
+        let session_hashes: std::collections::HashSet<&str> = nodes
+            .iter()
+            .filter(|n| n.session_id == session_id)
+            .map(|n| n.hash.as_str())
+            .collect();
+
+        let timelines = self.timelines.lock().unwrap();
+        Ok(timelines
+            .iter()
+            .filter(|t| {
+                t.fork_point
+                    .as_deref()
+                    .map(|fp| session_hashes.contains(fp))
+                    .unwrap_or(false)
+            })
+            .cloned()
+            .collect())
+    }
+
+    fn get_timeline_head(&self, timeline_id: i64) -> Result<Option<String>, String> {
+        let timelines = self.timelines.lock().unwrap();
+        Ok(timelines
+            .iter()
+            .find(|t| t.id == timeline_id)
+            .and_then(|t| t.head.clone()))
+    }
+
+    fn update_timeline_head(&self, timeline_id: i64, hash: &str) -> Result<(), String> {
+        let mut timelines = self.timelines.lock().unwrap();
+        if let Some(t) = timelines.iter_mut().find(|t| t.id == timeline_id) {
+            t.head = Some(hash.to_string());
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -424,6 +519,8 @@ mod tests {
             MessageType::Response,
             MessageType::Complete,
             MessageType::Delegate,
+            MessageType::Repair,
+            MessageType::Fork,
         ] {
             assert_eq!(MessageType::from_str(mt.as_str()), Ok(mt));
         }

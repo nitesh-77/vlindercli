@@ -1,9 +1,9 @@
 //! In-memory queue implementation.
 
 use crate::domain::{
-    Acknowledgement, AgentId, CompleteMessage, DelegateMessage, HarnessType, InvokeMessage,
-    MessageQueue, ObservableMessage, Operation, QueueError, RequestMessage, ResponseMessage,
-    RoutingKey, ServiceBackend, SubmissionId,
+    Acknowledgement, AgentId, CompleteMessage, DelegateMessage, ForkMessage, HarnessType,
+    InvokeMessage, MessageQueue, ObservableMessage, Operation, QueueError, RepairMessage,
+    RequestMessage, ResponseMessage, RoutingKey, ServiceBackend, SubmissionId,
 };
 #[cfg(test)]
 use crate::domain::{
@@ -238,6 +238,45 @@ impl MessageQueue for InMemoryQueue {
         }
 
         Err(QueueError::Timeout)
+    }
+
+    fn send_repair(&self, msg: RepairMessage) -> Result<(), QueueError> {
+        let key = msg.routing_key();
+        let mut typed = self.typed_queues.lock().unwrap();
+        typed
+            .entry(key)
+            .or_default()
+            .push_back(ObservableMessage::Repair(msg));
+        Ok(())
+    }
+
+    fn receive_repair(
+        &self,
+        agent: &AgentId,
+    ) -> Result<(RepairMessage, Acknowledgement), QueueError> {
+        let mut typed = self.typed_queues.lock().unwrap();
+
+        for (key, queue) in typed.iter_mut() {
+            let matches = match key {
+                RoutingKey::Repair { agent: a, .. } => a == agent,
+                _ => false,
+            };
+            if matches {
+                if let Some(ObservableMessage::Repair(msg)) = queue.front() {
+                    let msg = msg.clone();
+                    queue.pop_front();
+                    return Ok((msg, Box::new(|| Ok(()))));
+                }
+            }
+        }
+
+        Err(QueueError::Timeout)
+    }
+
+    fn send_fork(&self, _msg: ForkMessage) -> Result<(), QueueError> {
+        // Fork is fire-and-forget — no consumer subscribes.
+        // RecordingQueue intercepts and records the DagNode before this is called.
+        Ok(())
     }
 }
 

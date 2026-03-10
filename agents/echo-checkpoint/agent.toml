@@ -1,0 +1,13 @@
+name = "echo-checkpoint"
+description = "Durable-mode echo agent — embeds via Ollama, returns dimensions (ADR 111)"
+runtime = "container"
+executable = "localhost/echo-checkpoint:latest"
+
+[requirements]
+
+[requirements.models]
+embedding_model = "nomic-embed"
+
+[requirements.services.embed]
+provider = "ollama"
+protocol = "openai"

@@ -32,6 +32,9 @@ pub struct RequestMessage {
     /// Diagnostics from the bridge (ADR 071).
     #[serde(skip)]
     pub diagnostics: RequestDiagnostics,
+    /// SDK-supplied checkpoint name for durable execution (set after construction).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub checkpoint: Option<String>,
 }
 
 impl RequestMessage {
@@ -61,6 +64,7 @@ impl RequestMessage {
             payload,
             state,
             diagnostics,
+            checkpoint: None,
         }
     }
 

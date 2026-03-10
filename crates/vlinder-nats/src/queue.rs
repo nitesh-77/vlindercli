@@ -20,9 +20,9 @@ use std::str::FromStr;
 use vlinder_core::domain::{
     Acknowledgement, AgentId, CompleteMessage, DelegateDiagnostics, DelegateMessage, HarnessType,
     InvokeDiagnostics, InvokeMessage, MessageId, MessageQueue, Nonce, Operation, QueueError,
-    RequestDiagnostics, RequestMessage, ResponseMessage, RoutingKey, RuntimeDiagnostics,
-    RuntimeType, Sequence, ServiceBackend, ServiceDiagnostics, ServiceType, SessionId,
-    SubmissionId, TimelineId,
+    RepairMessage, RequestDiagnostics, RequestMessage, ResponseMessage, RoutingKey,
+    RuntimeDiagnostics, RuntimeType, Sequence, ServiceBackend, ServiceDiagnostics, ServiceType,
+    SessionId, SubmissionId, TimelineId,
 };
 
 /// NATS queue with JetStream durability.
@@ -281,6 +281,9 @@ impl MessageQueue for NatsQueue {
             if let Ok(diag_json) = serde_json::to_string(&msg.diagnostics) {
                 headers.insert("diagnostics", diag_json.as_str());
             }
+            if let Some(ref checkpoint) = msg.checkpoint {
+                headers.insert("checkpoint", checkpoint.as_str());
+            }
 
             self.inner
                 .jetstream
@@ -316,6 +319,9 @@ impl MessageQueue for NatsQueue {
             }
             if let Ok(diag_json) = serde_json::to_string(&msg.diagnostics) {
                 headers.insert("diagnostics", diag_json.as_str());
+            }
+            if let Some(ref checkpoint) = msg.checkpoint {
+                headers.insert("checkpoint", checkpoint.as_str());
             }
 
             self.inner
@@ -463,6 +469,7 @@ impl MessageQueue for NatsQueue {
                 payload: js_msg.payload.to_vec(),
                 state: get_header(headers, "state").ok(),
                 diagnostics,
+                checkpoint: get_header(headers, "checkpoint").ok(),
             };
 
             Ok((msg, ack_fn))
@@ -526,6 +533,7 @@ impl MessageQueue for NatsQueue {
                 state: get_header(headers, "state").ok(),
                 diagnostics,
                 status_code,
+                checkpoint: get_header(headers, "checkpoint").ok(),
             };
 
             Ok((msg, ack_fn))
@@ -719,6 +727,119 @@ impl MessageQueue for NatsQueue {
             Ok((msg, ack_fn))
         })
     }
+
+    fn send_repair(&self, msg: RepairMessage) -> Result<(), QueueError> {
+        let subject = routing_key_to_subject(&msg.routing_key());
+
+        self.inner.runtime.block_on(async {
+            let mut headers = async_nats::HeaderMap::new();
+            headers.insert("msg-id", msg.id.as_str());
+            headers.insert("protocol-version", msg.protocol_version.as_str());
+            headers.insert("timeline-id", msg.timeline.as_str());
+            headers.insert("submission-id", msg.submission.as_str());
+            headers.insert("session-id", msg.session.as_str());
+            headers.insert("agent-id", msg.agent_id.as_str());
+            headers.insert("harness", msg.harness.as_str());
+            headers.insert("dag-parent", msg.dag_parent.as_str());
+            headers.insert("checkpoint", msg.checkpoint.as_str());
+            headers.insert("service", msg.service.service_type().as_str());
+            headers.insert("backend", msg.service.backend_str());
+            headers.insert("operation", msg.operation.as_str());
+            headers.insert("sequence", msg.sequence.to_string());
+            if let Some(ref state) = msg.state {
+                headers.insert("state", state.as_str());
+            }
+
+            self.inner
+                .jetstream
+                .publish_with_headers(subject, headers, msg.payload.into())
+                .await
+                .map_err(|e| QueueError::SendFailed(e.to_string()))?
+                .await
+                .map_err(|e| QueueError::SendFailed(e.to_string()))?;
+
+            Ok(())
+        })
+    }
+
+    fn receive_repair(
+        &self,
+        agent: &AgentId,
+    ) -> Result<(RepairMessage, Acknowledgement), QueueError> {
+        // Build filter: vlinder.{timeline}.{submission}.repair.{harness}.{agent}
+        let filter = format!("vlinder.*.*.repair.*.{}", agent.as_str());
+
+        self.inner.runtime.block_on(async {
+            let (js_msg, ack_fn) = self.fetch_one(&filter).await?;
+
+            let headers = js_msg
+                .headers
+                .as_ref()
+                .ok_or_else(|| QueueError::ReceiveFailed("missing headers".to_string()))?;
+
+            let msg = RepairMessage {
+                id: MessageId::from(get_header(headers, "msg-id")?),
+                protocol_version: get_header(headers, "protocol-version").unwrap_or_default(),
+                timeline: get_header(headers, "timeline-id")
+                    .map(TimelineId::from)
+                    .unwrap_or_else(|_| TimelineId::main()),
+                submission: SubmissionId::from(get_header(headers, "submission-id")?),
+                session: SessionId::from(get_header(headers, "session-id")?),
+                agent_id: AgentId::new(get_header(headers, "agent-id")?),
+                harness: HarnessType::from_str(&get_header(headers, "harness")?)
+                    .map_err(|_| QueueError::ReceiveFailed("unknown harness type".to_string()))?,
+                dag_parent: get_header(headers, "dag-parent")?,
+                checkpoint: get_header(headers, "checkpoint")?,
+                service: ServiceBackend::from_parts(
+                    ServiceType::from_str(&get_header(headers, "service")?).map_err(|_| {
+                        QueueError::ReceiveFailed("unknown service type".to_string())
+                    })?,
+                    &get_header(headers, "backend")?,
+                )
+                .ok_or_else(|| QueueError::ReceiveFailed("invalid service/backend".to_string()))?,
+                operation: Operation::from_str(&get_header(headers, "operation")?)
+                    .map_err(|_| QueueError::ReceiveFailed("unknown operation".to_string()))?,
+                sequence: Sequence::from(
+                    get_header(headers, "sequence")?.parse::<u32>().unwrap_or(1),
+                ),
+                payload: js_msg.payload.to_vec(),
+                state: get_header(headers, "state").ok(),
+            };
+
+            Ok((msg, ack_fn))
+        })
+    }
+
+    fn send_fork(&self, msg: vlinder_core::domain::ForkMessage) -> Result<(), QueueError> {
+        let subject = routing_key_to_subject(&RoutingKey::Fork {
+            timeline: msg.timeline.clone(),
+            submission: msg.submission.clone(),
+            agent_name: msg.agent_name.clone(),
+        });
+
+        self.inner.runtime.block_on(async {
+            let mut headers = async_nats::HeaderMap::new();
+            headers.insert("msg-id", msg.id.as_str());
+            headers.insert("protocol-version", msg.protocol_version.as_str());
+            headers.insert("session-id", msg.session.as_str());
+            headers.insert("branch-name", msg.branch_name.as_str());
+            headers.insert("fork-point", msg.fork_point.as_str());
+            headers.insert(
+                "parent-timeline-id",
+                msg.parent_timeline_id.to_string().as_str(),
+            );
+
+            self.inner
+                .jetstream
+                .publish_with_headers(subject, headers, "".into())
+                .await
+                .map_err(|e| QueueError::SendFailed(e.to_string()))?
+                .await
+                .map_err(|e| QueueError::SendFailed(e.to_string()))?;
+
+            Ok(())
+        })
+    }
 }
 
 /// Serialize a routing key to a NATS subject string (ADR 096 §8).
@@ -812,6 +933,24 @@ fn routing_key_to_subject(key: &RoutingKey) -> String {
                 timeline, submission, caller, target, nonce,
             )
         }
+        RoutingKey::Repair {
+            timeline,
+            submission,
+            harness,
+            agent,
+        } => {
+            format!(
+                "vlinder.{}.{}.repair.{}.{}",
+                timeline, submission, harness, agent,
+            )
+        }
+        RoutingKey::Fork {
+            timeline,
+            submission,
+            agent_name,
+        } => {
+            format!("vlinder.{}.{}.fork.{}", timeline, submission, agent_name,)
+        }
     }
 }
 
@@ -877,6 +1016,19 @@ pub fn subject_to_routing_key(subject: &str) -> Option<RoutingKey> {
             target: AgentId::new(s[5]),
             nonce: Nonce::new(s[6]),
         }),
+        // vlinder.{timeline}.{submission}.repair.{harness}.{agent}
+        "repair" if s.len() == 6 => Some(RoutingKey::Repair {
+            timeline,
+            submission,
+            harness: HarnessType::from_str(s[4]).ok()?,
+            agent: AgentId::new(s[5]),
+        }),
+        // vlinder.{timeline}.{submission}.fork.{agent_name}
+        "fork" if s.len() == 5 => Some(RoutingKey::Fork {
+            timeline,
+            submission,
+            agent_name: s[4].to_string(),
+        }),
         _ => None,
     }
 }
@@ -914,6 +1066,9 @@ pub fn request_to_nats_headers(msg: &RequestMessage) -> HashMap<String, String> 
     }
     if let Ok(diag_json) = serde_json::to_string(&msg.diagnostics) {
         h.insert("diagnostics".to_string(), diag_json);
+    }
+    if let Some(ref checkpoint) = msg.checkpoint {
+        h.insert("checkpoint".to_string(), checkpoint.clone());
     }
     h
 }
@@ -965,6 +1120,28 @@ pub fn delegate_to_nats_headers(msg: &DelegateMessage) -> HashMap<String, String
     }
     if let Ok(diag_json) = serde_json::to_string(&msg.diagnostics) {
         h.insert("diagnostics".to_string(), diag_json);
+    }
+    h
+}
+
+/// Serialize a `RepairMessage` into NATS headers (sans payload).
+#[allow(dead_code)]
+pub fn repair_to_nats_headers(msg: &RepairMessage) -> HashMap<String, String> {
+    let mut h = HashMap::new();
+    h.insert("msg-id".to_string(), msg.id.as_str().to_string());
+    h.insert("protocol-version".to_string(), msg.protocol_version.clone());
+    h.insert("session-id".to_string(), msg.session.as_str().to_string());
+    h.insert("dag-parent".to_string(), msg.dag_parent.clone());
+    h.insert("checkpoint".to_string(), msg.checkpoint.clone());
+    h.insert(
+        "service".to_string(),
+        msg.service.service_type().as_str().to_string(),
+    );
+    h.insert("backend".to_string(), msg.service.backend_str().to_string());
+    h.insert("operation".to_string(), msg.operation.as_str().to_string());
+    h.insert("sequence".to_string(), msg.sequence.to_string());
+    if let Some(ref state) = msg.state {
+        h.insert("state".to_string(), state.clone());
     }
     h
 }
@@ -1049,6 +1226,7 @@ pub fn from_nats_headers(
                 sequence: *sequence,
                 state,
                 diagnostics,
+                checkpoint: headers.get("checkpoint").cloned(),
             })
         }
         RoutingKey::Response {
@@ -1083,6 +1261,7 @@ pub fn from_nats_headers(
                 state,
                 diagnostics,
                 status_code,
+                checkpoint: headers.get("checkpoint").cloned(),
             })
         }
         RoutingKey::Complete {
@@ -1139,6 +1318,60 @@ pub fn from_nats_headers(
             // DelegateReply carries a CompleteMessage — same as Complete.
             // Handled via receive_delegate_reply which already parses directly.
             None
+        }
+        RoutingKey::Repair {
+            timeline,
+            submission,
+            harness,
+            agent,
+        } => {
+            let dag_parent = headers.get("dag-parent").cloned()?;
+            let checkpoint = headers.get("checkpoint").cloned()?;
+            let service = ServiceBackend::from_parts(
+                ServiceType::from_str(headers.get("service")?).ok()?,
+                headers.get("backend")?,
+            )?;
+            let operation = Operation::from_str(headers.get("operation")?).ok()?;
+            let sequence = Sequence::from(headers.get("sequence")?.parse::<u32>().ok()?);
+
+            Some(ObservableMessageHeaders::Repair {
+                id,
+                protocol_version,
+                timeline: timeline.clone(),
+                submission: submission.clone(),
+                session,
+                agent_id: agent.clone(),
+                harness: *harness,
+                dag_parent,
+                checkpoint,
+                service,
+                operation,
+                sequence,
+                state,
+            })
+        }
+        RoutingKey::Fork {
+            timeline,
+            submission,
+            agent_name,
+        } => {
+            let branch_name = headers.get("branch-name").cloned()?;
+            let fork_point = headers.get("fork-point").cloned()?;
+            let parent_timeline_id = headers
+                .get("parent-timeline-id")
+                .and_then(|s| s.parse::<i64>().ok())?;
+
+            Some(ObservableMessageHeaders::Fork {
+                id,
+                protocol_version,
+                timeline: timeline.clone(),
+                submission: submission.clone(),
+                session,
+                agent_name: agent_name.clone(),
+                branch_name,
+                fork_point,
+                parent_timeline_id,
+            })
         }
     }
 }

@@ -11,8 +11,9 @@ use std::sync::Arc;
 
 use crate::domain::Session;
 use crate::domain::{
-    HarnessType, InvokeDiagnostics, InvokeMessage, JobId, JobStatus, MessageQueue, Registry,
-    ResourceId, SessionId, SubmissionId, TimelineId,
+    AgentId, ForkMessage, HarnessType, InvokeDiagnostics, InvokeMessage, JobId, JobStatus,
+    MessageQueue, Operation, Registry, RepairMessage, ResourceId, Sequence, ServiceBackend,
+    SessionId, SubmissionId, TimelineId,
 };
 
 /// Common harness operations shared across all harness types.
@@ -53,6 +54,48 @@ pub trait Harness {
     /// Sends input to the agent and blocks until the response arrives.
     /// Returns the agent's output as a string.
     fn run_agent(&mut self, agent_id: &ResourceId, input: &str) -> Result<String, String>;
+
+    /// Replay a failed service call (ADR 113).
+    ///
+    /// The caller provides the repair metadata (read from the DAG at the
+    /// checkout point). The harness adds its own context (timeline, session,
+    /// harness type) and sends a RepairMessage through the queue.
+    ///
+    /// Returns the agent's output after the checkpoint handler processes
+    /// the replayed service response.
+    fn repair_agent(&mut self, params: RepairParams) -> Result<String, String>;
+
+    /// Create a timeline fork by sending a ForkMessage through the queue.
+    ///
+    /// Fire-and-forget: both SQL (via RecordingQueue) and git (via
+    /// GitDagWorker) react to the message. No response is expected.
+    fn fork_timeline(&mut self, params: ForkParams) -> Result<(), String>;
+}
+
+/// Parameters for `Harness::repair_agent()`.
+///
+/// The caller (CLI) reads these from the DAG at the checkout point.
+/// The harness adds timeline, session, submission, and harness type.
+pub struct RepairParams {
+    pub agent_id: AgentId,
+    pub dag_parent: String,
+    pub checkpoint: String,
+    pub service: ServiceBackend,
+    pub operation: Operation,
+    pub sequence: Sequence,
+    pub payload: Vec<u8>,
+    pub state: Option<String>,
+}
+
+/// Parameters for `Harness::fork_timeline()`.
+///
+/// The CLI reads these from the DagStore (node lookup + session context).
+/// The harness wraps them in a ForkMessage and sends through the queue.
+pub struct ForkParams {
+    pub agent_name: String,
+    pub branch_name: String,
+    pub fork_point: String,
+    pub parent_timeline_id: i64,
 }
 
 // ============================================================================
@@ -232,6 +275,71 @@ impl Harness for CoreHarness {
         let result = String::from_utf8_lossy(&complete.payload).to_string();
         self.registry
             .update_job_status(&job_id, JobStatus::Completed(result.clone()));
+        if complete.state.is_some() {
+            self.pending_state = complete.state;
+        }
+        self.record_response(&result);
+        Ok(result)
+    }
+
+    fn fork_timeline(&mut self, params: ForkParams) -> Result<(), String> {
+        let session_id = self
+            .session
+            .as_ref()
+            .map(|s| s.session.clone())
+            .unwrap_or_default();
+
+        let submission = SubmissionId::new();
+
+        let fork_msg = ForkMessage::new(
+            self.timeline.clone(),
+            submission,
+            session_id,
+            params.agent_name,
+            params.branch_name,
+            params.fork_point,
+            params.parent_timeline_id,
+        );
+
+        self.queue
+            .send_fork(fork_msg)
+            .map_err(|e| format!("queue error: {}", e))
+    }
+
+    fn repair_agent(&mut self, params: RepairParams) -> Result<String, String> {
+        let session_id = self
+            .session
+            .as_ref()
+            .map(|s| s.session.clone())
+            .unwrap_or_default();
+
+        let submission = SubmissionId::content_addressed(
+            &params.payload,
+            session_id.as_str(),
+            self.last_submission_id.as_deref().unwrap_or(""),
+        );
+
+        let repair_msg = RepairMessage::new(
+            self.timeline.clone(),
+            submission,
+            session_id,
+            params.agent_id,
+            self.harness_type(),
+            params.dag_parent,
+            params.checkpoint,
+            params.service,
+            params.operation,
+            params.sequence,
+            params.payload,
+            params.state,
+        );
+
+        let complete = self
+            .queue
+            .repair_agent(repair_msg)
+            .map_err(|e| format!("queue error: {}", e))?;
+
+        let result = String::from_utf8_lossy(&complete.payload).to_string();
         if complete.state.is_some() {
             self.pending_state = complete.state;
         }
