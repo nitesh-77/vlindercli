@@ -189,6 +189,30 @@ impl MessageQueue for RecordingQueue {
     fn send_fork(&self, msg: ForkMessage) -> Result<(), QueueError> {
         self.record(&msg.clone().into());
 
+        // Create the timeline row so `--branch` and `session repair` can find it.
+        let session_id = msg.session.as_str();
+        match self.store.create_timeline(
+            &msg.branch_name,
+            session_id,
+            Some(msg.parent_timeline_id),
+            Some(&msg.fork_point),
+        ) {
+            Ok(id) => {
+                tracing::info!(
+                    timeline_id = id,
+                    branch = %msg.branch_name,
+                    "Created timeline on fork"
+                );
+            }
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    branch = %msg.branch_name,
+                    "Failed to create timeline on fork"
+                );
+            }
+        }
+
         // Restore agent state to the fork point so the next `agent run`
         // resumes from the correct KV/vec snapshot.
         if let Ok(Some(node)) = self.store.get_node(&msg.fork_point) {
