@@ -2518,6 +2518,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "petname"
+version = "2.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9cd31dcfdbbd7431a807ef4df6edd6473228e94d5c805e8cf671227a21bad068"
+dependencies = [
+ "anyhow",
+ "clap",
+ "itertools 0.14.0",
+ "proc-macro2",
+ "quote",
+ "rand",
+]
+
+[[package]]
 name = "pin-project"
 version = "1.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3935,6 +3949,7 @@ dependencies = [
  "indicatif",
  "reedline",
  "serde",
+ "serde_json",
  "tempfile",
  "termimad",
  "toml",
@@ -3969,6 +3984,7 @@ dependencies = [
  "base64",
  "chrono",
  "ed25519-dalek",
+ "petname",
  "rand",
  "semver",
  "serde",

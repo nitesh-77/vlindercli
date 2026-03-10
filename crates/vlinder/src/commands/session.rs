@@ -128,7 +128,9 @@ fn get(session_id: &str) {
     for (sub_id, messages) in &turns {
         println!("Turn {}", sub_id);
         for node in messages {
+            let ts = node.created_at.format("%H:%M:%S%.3f");
             let mut parts = vec![
+                format!("{}", ts),
                 node.hash[..8].to_string(),
                 node.message_type.as_str().to_string(),
                 node.from.clone(),
