@@ -498,6 +498,9 @@ mod tests {
             fn list_sessions(&self) -> Result<Vec<crate::domain::SessionSummary>, String> {
                 Ok(vec![])
             }
+            fn get_nodes_by_submission(&self, _: &str) -> Result<Vec<DagNode>, String> {
+                Ok(vec![])
+            }
         }
 
         let store: Arc<dyn DagStore> = Arc::new(FailStore);

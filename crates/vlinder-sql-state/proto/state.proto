@@ -27,6 +27,10 @@ service StateService {
   rpc SealTimeline(SealTimelineRequest) returns (SealTimelineResponse);
   rpc RenameTimeline(RenameTimelineRequest) returns (RenameTimelineResponse);
   rpc IsTimelineSealed(IsTimelineSealedRequest) returns (IsTimelineSealedResponse);
+
+  // Session queries (ADR 113)
+  rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
+  rpc GetNodesBySubmission(GetNodesBySubmissionRequest) returns (GetNodesBySubmissionResponse);
 }
 
 // =============================================================================
@@ -129,3 +133,21 @@ message RenameTimelineResponse { bool success = 1; optional string error = 2; }
 
 message IsTimelineSealedRequest { int64 id = 1; }
 message IsTimelineSealedResponse { bool sealed = 1; }
+
+// =============================================================================
+// Session Queries (ADR 113)
+// =============================================================================
+
+message SessionSummary {
+  string session_id = 1;
+  string agent_name = 2;
+  string started_at = 3;
+  uint64 message_count = 4;
+  bool is_open = 5;
+}
+
+message ListSessionsRequest {}
+message ListSessionsResponse { repeated SessionSummary sessions = 1; }
+
+message GetNodesBySubmissionRequest { string submission_id = 1; }
+message GetNodesBySubmissionResponse { repeated DagNode nodes = 1; }

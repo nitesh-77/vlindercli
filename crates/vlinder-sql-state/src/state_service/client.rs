@@ -281,6 +281,36 @@ impl DagStore for GrpcStateClient {
     }
 
     fn list_sessions(&self) -> Result<Vec<vlinder_core::domain::SessionSummary>, String> {
-        Err("list_sessions is not available over gRPC".to_string())
+        let mut client = self.client.clone();
+        let response = self
+            .runtime
+            .block_on(async { client.list_sessions(proto::ListSessionsRequest {}).await })
+            .map_err(|e| e.to_string())?;
+
+        response
+            .into_inner()
+            .sessions
+            .into_iter()
+            .map(|s| s.try_into())
+            .collect()
+    }
+
+    fn get_nodes_by_submission(&self, submission_id: &str) -> Result<Vec<DagNode>, String> {
+        let request = proto::GetNodesBySubmissionRequest {
+            submission_id: submission_id.to_string(),
+        };
+
+        let mut client = self.client.clone();
+        let response = self
+            .runtime
+            .block_on(async { client.get_nodes_by_submission(request).await })
+            .map_err(|e| e.to_string())?;
+
+        response
+            .into_inner()
+            .nodes
+            .into_iter()
+            .map(|n| n.try_into())
+            .collect()
     }
 }

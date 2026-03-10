@@ -5,7 +5,7 @@ use std::str::FromStr;
 use chrono::{DateTime, Utc};
 
 use super::proto;
-use vlinder_core::domain::{DagNode, MessageType, Timeline};
+use vlinder_core::domain::{DagNode, MessageType, SessionSummary, Timeline};
 
 // =============================================================================
 // DagNode → proto::DagNode
@@ -133,6 +133,45 @@ impl TryFrom<proto::Timeline> for Timeline {
             fork_point: tl.fork_point,
             created_at,
             broken_at,
+        })
+    }
+}
+
+// =============================================================================
+// SessionSummary → proto::SessionSummary
+// =============================================================================
+
+impl From<SessionSummary> for proto::SessionSummary {
+    fn from(s: SessionSummary) -> Self {
+        Self {
+            session_id: s.session_id,
+            agent_name: s.agent_name,
+            started_at: s.started_at.to_rfc3339(),
+            message_count: s.message_count as u64,
+            is_open: s.is_open,
+        }
+    }
+}
+
+// =============================================================================
+// proto::SessionSummary → SessionSummary
+// =============================================================================
+
+impl TryFrom<proto::SessionSummary> for SessionSummary {
+    type Error = String;
+
+    fn try_from(s: proto::SessionSummary) -> Result<Self, Self::Error> {
+        let started_at: DateTime<Utc> = s
+            .started_at
+            .parse()
+            .map_err(|e| format!("invalid started_at: {}", e))?;
+
+        Ok(Self {
+            session_id: s.session_id,
+            agent_name: s.agent_name,
+            started_at,
+            message_count: s.message_count as usize,
+            is_open: s.is_open,
         })
     }
 }

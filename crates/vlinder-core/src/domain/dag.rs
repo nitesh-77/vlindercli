@@ -216,6 +216,9 @@ pub trait DagStore: Send + Sync {
 
     /// List all sessions with summary information.
     fn list_sessions(&self) -> Result<Vec<SessionSummary>, String>;
+
+    /// Get all nodes for a submission (a single turn), ordered by `created_at`.
+    fn get_nodes_by_submission(&self, submission_id: &str) -> Result<Vec<DagNode>, String>;
 }
 
 // ============================================================================
@@ -429,6 +432,17 @@ impl DagStore for InMemoryDagStore {
 
         summaries.sort_by(|a, b| b.started_at.cmp(&a.started_at));
         Ok(summaries)
+    }
+
+    fn get_nodes_by_submission(&self, submission_id: &str) -> Result<Vec<DagNode>, String> {
+        let nodes = self.nodes.lock().unwrap();
+        let mut result: Vec<DagNode> = nodes
+            .iter()
+            .filter(|n| n.submission_id == submission_id)
+            .cloned()
+            .collect();
+        result.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+        Ok(result)
     }
 }
 

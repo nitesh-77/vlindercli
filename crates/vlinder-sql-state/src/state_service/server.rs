@@ -6,12 +6,14 @@ use tonic::{Request, Response, Status};
 use super::proto::{
     self, state_service_server::StateService, CreateTimelineRequest, CreateTimelineResponse,
     EnsureMainTimelineRequest, EnsureMainTimelineResponse, GetChildrenRequest, GetChildrenResponse,
-    GetNodeRequest, GetNodeResponse, GetSessionNodesRequest, GetSessionNodesResponse,
-    GetTimelineByBranchRequest, GetTimelineByIdRequest, GetTimelineResponse, InsertNodeRequest,
-    InsertNodeResponse, IsTimelineSealedRequest, IsTimelineSealedResponse, LatestNodeHashRequest,
-    LatestNodeHashResponse, LatestStateRequest, LatestStateResponse, PingRequest,
-    RenameTimelineRequest, RenameTimelineResponse, SealTimelineRequest, SealTimelineResponse,
-    SemVer, SetCheckoutStateRequest, SetCheckoutStateResponse,
+    GetNodeRequest, GetNodeResponse, GetNodesBySubmissionRequest, GetNodesBySubmissionResponse,
+    GetSessionNodesRequest, GetSessionNodesResponse, GetTimelineByBranchRequest,
+    GetTimelineByIdRequest, GetTimelineResponse, InsertNodeRequest, InsertNodeResponse,
+    IsTimelineSealedRequest, IsTimelineSealedResponse, LatestNodeHashRequest,
+    LatestNodeHashResponse, LatestStateRequest, LatestStateResponse, ListSessionsRequest,
+    ListSessionsResponse, PingRequest, RenameTimelineRequest, RenameTimelineResponse,
+    SealTimelineRequest, SealTimelineResponse, SemVer, SetCheckoutStateRequest,
+    SetCheckoutStateResponse,
 };
 use vlinder_core::domain::DagStore;
 
@@ -258,5 +260,38 @@ impl StateService for StateServiceServer {
             .is_timeline_sealed(req.id)
             .map_err(Status::internal)?;
         Ok(Response::new(IsTimelineSealedResponse { sealed }))
+    }
+
+    // -------------------------------------------------------------------------
+    // Session query RPCs (ADR 113)
+    // -------------------------------------------------------------------------
+
+    async fn list_sessions(
+        &self,
+        _request: Request<ListSessionsRequest>,
+    ) -> Result<Response<ListSessionsResponse>, Status> {
+        let sessions = self
+            .store
+            .list_sessions()
+            .map_err(Status::internal)?
+            .into_iter()
+            .map(|s| s.into())
+            .collect();
+        Ok(Response::new(ListSessionsResponse { sessions }))
+    }
+
+    async fn get_nodes_by_submission(
+        &self,
+        request: Request<GetNodesBySubmissionRequest>,
+    ) -> Result<Response<GetNodesBySubmissionResponse>, Status> {
+        let req = request.into_inner();
+        let nodes = self
+            .store
+            .get_nodes_by_submission(&req.submission_id)
+            .map_err(Status::internal)?
+            .into_iter()
+            .map(|n| n.into())
+            .collect();
+        Ok(Response::new(GetNodesBySubmissionResponse { nodes }))
     }
 }

@@ -547,6 +547,30 @@ impl DagStore for SqliteDagStore {
         }
         Ok(summaries)
     }
+
+    fn get_nodes_by_submission(&self, submission_id: &str) -> Result<Vec<DagNode>, String> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare(
+                "SELECT hash, parent_hash, message_type, sender, receiver,
+                        session_id, submission_id, payload, diagnostics, stderr,
+                        created_at, state, protocol_version, checkpoint, operation
+                 FROM dag_nodes
+                 WHERE submission_id = ?1
+                 ORDER BY created_at",
+            )
+            .map_err(|e| format!("get_nodes_by_submission prepare failed: {}", e))?;
+
+        let rows = stmt
+            .query_map([submission_id], row_to_dag_node)
+            .map_err(|e| format!("get_nodes_by_submission query failed: {}", e))?;
+
+        let mut nodes = Vec::new();
+        for row in rows {
+            nodes.push(row.map_err(|e| format!("get_nodes_by_submission row failed: {}", e))?);
+        }
+        Ok(nodes)
+    }
 }
 
 /// Trait extension for rusqlite optional queries.

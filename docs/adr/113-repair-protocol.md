@@ -125,18 +125,26 @@ The session gains a second branch in git via multiple refs under
 `refs/sessions/<id>/`.
 
 After the repair completes, the user promotes the repaired branch to
-main using the existing `vlinder timeline promote` mechanism:
+main using `vlinder session promote`:
 
-1. `vlinder timeline checkout <hash>` — cursor to the failed point
-2. `vlinder timeline repair` — new branch, replays the service call
-3. Agent continues to completion on the repaired branch
-4. `vlinder timeline promote` — repaired branch becomes main, old
-   branch is sealed (labelled broken)
-5. `vlinder agent run <name>` — next invoke parents from the promoted
-   branch tip, conversation continues
+1. `vlinder session list <agent-name>` — find the session
+2. `vlinder session get <session-id>` — browse turns and messages,
+   identify the failed request by its canonical hash
+3. `vlinder session fork <session-id> --from <hash> --name <branch>`
+   — create a named timeline from the failed point
+4. `vlinder session repair <branch>` — replay the failed service call
+5. `vlinder session promote <branch>` — make the repaired branch
+   canonical, seal the old one
 
-No new machinery for branch resolution. The existing promote mechanism
-(move main label, seal old branch via `broken_at`) handles it.
+The branch name is the handle that ties fork → repair → promote
+together. Multiple forks of the same session can exist independently.
+
+The canonical hash visible in `session get` output is the bridge
+between the user's view and the SQL DAG store. Fork uses it to
+identify the exact message to branch from.
+
+No new machinery for branch resolution. The existing Timeline entity
+(branch_name, parent_timeline_id, fork_point, broken_at) handles it.
 
 ### Git ref naming
 
@@ -223,6 +231,16 @@ RepairMessage {
 
 ### CLI (vlinder)
 
-- `vlinder timeline repair` — read DAG at checkout point, construct
-  RepairMessage, call harness
-- Checkout stores `dag_parent` so repair knows the fork point
+New `vlinder session` and `vlinder turn` subcommands:
+
+- `vlinder session list <agent-name>` — list sessions from DagStore
+- `vlinder session get <session-id>` — show turns with messages,
+  canonical hashes visible for each message
+- `vlinder session fork <session-id> --from <hash> --name <branch>`
+  — create Timeline row, set fork_point to canonical hash
+- `vlinder session repair <branch>` — read fork point from Timeline,
+  look up DagNode by canonical hash, build RepairParams, call
+  `harness.repair_agent()`
+- `vlinder session promote <branch>` — seal old timeline, rename
+  repaired branch to main
+- `vlinder turn get <submission-id>` — show all messages in a turn
