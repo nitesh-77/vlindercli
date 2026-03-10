@@ -810,10 +810,35 @@ impl MessageQueue for NatsQueue {
         })
     }
 
-    fn send_fork(&self, _msg: vlinder_core::domain::ForkMessage) -> Result<(), QueueError> {
-        // Fork is fire-and-forget — no consumer subscribes.
-        // RecordingQueue intercepts and records the DagNode before this is called.
-        Ok(())
+    fn send_fork(&self, msg: vlinder_core::domain::ForkMessage) -> Result<(), QueueError> {
+        let subject = routing_key_to_subject(&RoutingKey::Fork {
+            timeline: msg.timeline.clone(),
+            submission: msg.submission.clone(),
+            agent_name: msg.agent_name.clone(),
+        });
+
+        self.inner.runtime.block_on(async {
+            let mut headers = async_nats::HeaderMap::new();
+            headers.insert("msg-id", msg.id.as_str());
+            headers.insert("protocol-version", msg.protocol_version.as_str());
+            headers.insert("session-id", msg.session.as_str());
+            headers.insert("branch-name", msg.branch_name.as_str());
+            headers.insert("fork-point", msg.fork_point.as_str());
+            headers.insert(
+                "parent-timeline-id",
+                msg.parent_timeline_id.to_string().as_str(),
+            );
+
+            self.inner
+                .jetstream
+                .publish_with_headers(subject, headers, "".into())
+                .await
+                .map_err(|e| QueueError::SendFailed(e.to_string()))?
+                .await
+                .map_err(|e| QueueError::SendFailed(e.to_string()))?;
+
+            Ok(())
+        })
     }
 }
 
@@ -919,6 +944,13 @@ fn routing_key_to_subject(key: &RoutingKey) -> String {
                 timeline, submission, harness, agent,
             )
         }
+        RoutingKey::Fork {
+            timeline,
+            submission,
+            agent_name,
+        } => {
+            format!("vlinder.{}.{}.fork.{}", timeline, submission, agent_name,)
+        }
     }
 }
 
@@ -990,6 +1022,12 @@ pub fn subject_to_routing_key(subject: &str) -> Option<RoutingKey> {
             submission,
             harness: HarnessType::from_str(s[4]).ok()?,
             agent: AgentId::new(s[5]),
+        }),
+        // vlinder.{timeline}.{submission}.fork.{agent_name}
+        "fork" if s.len() == 5 => Some(RoutingKey::Fork {
+            timeline,
+            submission,
+            agent_name: s[4].to_string(),
         }),
         _ => None,
     }
@@ -1310,6 +1348,29 @@ pub fn from_nats_headers(
                 operation,
                 sequence,
                 state,
+            })
+        }
+        RoutingKey::Fork {
+            timeline,
+            submission,
+            agent_name,
+        } => {
+            let branch_name = headers.get("branch-name").cloned()?;
+            let fork_point = headers.get("fork-point").cloned()?;
+            let parent_timeline_id = headers
+                .get("parent-timeline-id")
+                .and_then(|s| s.parse::<i64>().ok())?;
+
+            Some(ObservableMessageHeaders::Fork {
+                id,
+                protocol_version,
+                timeline: timeline.clone(),
+                submission: submission.clone(),
+                session,
+                agent_name: agent_name.clone(),
+                branch_name,
+                fork_point,
+                parent_timeline_id,
             })
         }
     }

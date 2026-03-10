@@ -237,6 +237,12 @@ pub enum RoutingKey {
         harness: HarnessType,
         agent: AgentId,
     },
+    /// Fork: CLI → Platform (create a timeline branch).
+    Fork {
+        timeline: TimelineId,
+        submission: SubmissionId,
+        agent_name: String,
+    },
 }
 
 impl RoutingKey {
@@ -293,7 +299,8 @@ impl RoutingKey {
             RoutingKey::Complete { .. }
             | RoutingKey::Response { .. }
             | RoutingKey::DelegateReply { .. }
-            | RoutingKey::Repair { .. } => None,
+            | RoutingKey::Repair { .. }
+            | RoutingKey::Fork { .. } => None,
         }
     }
 }
