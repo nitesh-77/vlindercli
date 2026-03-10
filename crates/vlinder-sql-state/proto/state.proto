@@ -32,6 +32,7 @@ service StateService {
   rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
   rpc GetNodesBySubmission(GetNodesBySubmissionRequest) returns (GetNodesBySubmissionResponse);
   rpc GetNodeByPrefix(GetNodeByPrefixRequest) returns (GetNodeResponse);
+  rpc GetTimelinesForSession(GetTimelinesForSessionRequest) returns (GetTimelinesForSessionResponse);
 }
 
 // =============================================================================
@@ -154,3 +155,6 @@ message GetNodesBySubmissionRequest { string submission_id = 1; }
 message GetNodesBySubmissionResponse { repeated DagNode nodes = 1; }
 
 message GetNodeByPrefixRequest { string prefix = 1; }
+
+message GetTimelinesForSessionRequest { string session_id = 1; }
+message GetTimelinesForSessionResponse { repeated Timeline timelines = 1; }

@@ -602,6 +602,31 @@ impl DagStore for SqliteDagStore {
         }
         Ok(nodes)
     }
+
+    fn get_timelines_for_session(&self, session_id: &str) -> Result<Vec<Timeline>, String> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare(
+                "SELECT t.id, t.branch_name, t.parent_timeline_id, t.fork_point,
+                        t.created_at, t.broken_at
+                 FROM timelines t
+                 JOIN dag_nodes d ON t.fork_point = d.hash
+                 WHERE d.session_id = ?1
+                 ORDER BY t.created_at",
+            )
+            .map_err(|e| format!("get_timelines_for_session prepare failed: {}", e))?;
+
+        let rows = stmt
+            .query_map(rusqlite::params![session_id], row_to_timeline)
+            .map_err(|e| format!("get_timelines_for_session query failed: {}", e))?;
+
+        let mut timelines = Vec::new();
+        for row in rows {
+            timelines
+                .push(row.map_err(|e| format!("get_timelines_for_session row failed: {}", e))?);
+        }
+        Ok(timelines)
+    }
 }
 
 /// Trait extension for rusqlite optional queries.

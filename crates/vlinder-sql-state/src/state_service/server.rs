@@ -8,7 +8,8 @@ use super::proto::{
     EnsureMainTimelineRequest, EnsureMainTimelineResponse, GetChildrenRequest, GetChildrenResponse,
     GetNodeByPrefixRequest, GetNodeRequest, GetNodeResponse, GetNodesBySubmissionRequest,
     GetNodesBySubmissionResponse, GetSessionNodesRequest, GetSessionNodesResponse,
-    GetTimelineByBranchRequest, GetTimelineByIdRequest, GetTimelineResponse, InsertNodeRequest,
+    GetTimelineByBranchRequest, GetTimelineByIdRequest, GetTimelineResponse,
+    GetTimelinesForSessionRequest, GetTimelinesForSessionResponse, InsertNodeRequest,
     InsertNodeResponse, IsTimelineSealedRequest, IsTimelineSealedResponse, LatestNodeHashRequest,
     LatestNodeHashResponse, LatestStateRequest, LatestStateResponse, ListSessionsRequest,
     ListSessionsResponse, PingRequest, RenameTimelineRequest, RenameTimelineResponse,
@@ -306,5 +307,20 @@ impl StateService for StateServiceServer {
             .map_err(Status::internal)?
             .map(|n| n.into());
         Ok(Response::new(GetNodeResponse { node }))
+    }
+
+    async fn get_timelines_for_session(
+        &self,
+        request: Request<GetTimelinesForSessionRequest>,
+    ) -> Result<Response<GetTimelinesForSessionResponse>, Status> {
+        let req = request.into_inner();
+        let timelines = self
+            .store
+            .get_timelines_for_session(&req.session_id)
+            .map_err(Status::internal)?
+            .into_iter()
+            .map(|t| t.into())
+            .collect();
+        Ok(Response::new(GetTimelinesForSessionResponse { timelines }))
     }
 }

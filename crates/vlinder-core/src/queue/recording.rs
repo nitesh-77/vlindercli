@@ -501,6 +501,12 @@ mod tests {
             fn get_nodes_by_submission(&self, _: &str) -> Result<Vec<DagNode>, String> {
                 Ok(vec![])
             }
+            fn get_timelines_for_session(
+                &self,
+                _: &str,
+            ) -> Result<Vec<crate::domain::Timeline>, String> {
+                Ok(vec![])
+            }
         }
 
         let store: Arc<dyn DagStore> = Arc::new(FailStore);

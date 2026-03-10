@@ -42,6 +42,11 @@ pub enum SessionCommand {
         /// Branch name to promote
         branch: String,
     },
+    /// List branches (timelines) forked from a session
+    Branches {
+        /// Session ID
+        session_id: String,
+    },
 }
 
 pub fn execute(cmd: SessionCommand) {
@@ -55,6 +60,7 @@ pub fn execute(cmd: SessionCommand) {
         } => fork(&session_id, &from, &name),
         SessionCommand::Repair { branch } => repair(&branch),
         SessionCommand::Promote { branch } => promote(&branch),
+        SessionCommand::Branches { session_id } => branches(&session_id),
     }
 }
 
@@ -333,6 +339,48 @@ fn promote(branch: &str) {
         "Promoted '{}': parent timeline {} sealed",
         branch, parent_id
     );
+}
+
+fn branches(session_id: &str) {
+    let config = CliConfig::load();
+    let store = require_dag_store(&config);
+
+    let timelines = store
+        .get_timelines_for_session(session_id)
+        .unwrap_or_else(|e| {
+            eprintln!("Failed to query timelines: {}", e);
+            std::process::exit(1);
+        });
+
+    if timelines.is_empty() {
+        println!("No branches for session '{}'", session_id);
+        return;
+    }
+
+    println!(
+        "{:<4} {:<24} {:<10} {:<10} FORK_POINT",
+        "ID", "BRANCH", "PARENT", "STATUS"
+    );
+    for t in &timelines {
+        let status = if t.broken_at.is_some() {
+            "sealed"
+        } else {
+            "active"
+        };
+        let parent = t
+            .parent_timeline_id
+            .map(|id| id.to_string())
+            .unwrap_or_else(|| "-".to_string());
+        let fork = t
+            .fork_point
+            .as_deref()
+            .map(|h| &h[..8.min(h.len())])
+            .unwrap_or("-");
+        println!(
+            "{:<4} {:<24} {:<10} {:<10} {}",
+            t.id, t.branch_name, parent, status, fork
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

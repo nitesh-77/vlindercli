@@ -541,6 +541,20 @@ mod tests {
     }
 
     #[test]
+    fn cli_session_branches() {
+        let cli =
+            Cli::try_parse_from(["vlinder", "session", "branches", "wired-pig-543e"]).unwrap();
+        assert_eq!(
+            cli.command,
+            Command::Session {
+                cmd: session::SessionCommand::Branches {
+                    session_id: "wired-pig-543e".to_string(),
+                }
+            }
+        );
+    }
+
+    #[test]
     fn cli_session_missing_action_fails() {
         let result = Cli::try_parse_from(["vlinder", "session"]);
         assert!(result.is_err());

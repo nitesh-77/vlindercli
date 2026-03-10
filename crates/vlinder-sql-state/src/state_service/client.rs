@@ -330,4 +330,26 @@ impl DagStore for GrpcStateClient {
             None => Ok(None),
         }
     }
+
+    fn get_timelines_for_session(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<vlinder_core::domain::Timeline>, String> {
+        let request = proto::GetTimelinesForSessionRequest {
+            session_id: session_id.to_string(),
+        };
+
+        let mut client = self.client.clone();
+        let response = self
+            .runtime
+            .block_on(async { client.get_timelines_for_session(request).await })
+            .map_err(|e| e.to_string())?;
+
+        response
+            .into_inner()
+            .timelines
+            .into_iter()
+            .map(|t| t.try_into())
+            .collect()
+    }
 }

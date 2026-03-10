@@ -225,6 +225,9 @@ pub trait DagStore: Send + Sync {
 
     /// Get all nodes for a submission (a single turn), ordered by `created_at`.
     fn get_nodes_by_submission(&self, submission_id: &str) -> Result<Vec<DagNode>, String>;
+
+    /// Get all timelines whose fork point belongs to the given session.
+    fn get_timelines_for_session(&self, session_id: &str) -> Result<Vec<Timeline>, String>;
 }
 
 // ============================================================================
@@ -462,6 +465,27 @@ impl DagStore for InMemoryDagStore {
             .collect();
         result.sort_by(|a, b| a.created_at.cmp(&b.created_at));
         Ok(result)
+    }
+
+    fn get_timelines_for_session(&self, session_id: &str) -> Result<Vec<Timeline>, String> {
+        let nodes = self.nodes.lock().unwrap();
+        let session_hashes: std::collections::HashSet<&str> = nodes
+            .iter()
+            .filter(|n| n.session_id == session_id)
+            .map(|n| n.hash.as_str())
+            .collect();
+
+        let timelines = self.timelines.lock().unwrap();
+        Ok(timelines
+            .iter()
+            .filter(|t| {
+                t.fork_point
+                    .as_deref()
+                    .map(|fp| session_hashes.contains(fp))
+                    .unwrap_or(false)
+            })
+            .cloned()
+            .collect())
     }
 }
 
