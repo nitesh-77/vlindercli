@@ -4,7 +4,7 @@ use std::sync::Arc;
 use clap::{Subcommand, ValueEnum};
 
 use crate::config::CliConfig;
-use vlinder_core::domain::{Agent, AgentManifest, Harness, Registry};
+use vlinder_core::domain::{Agent, AgentManifest, DagStore, Harness, Registry, TimelineId};
 
 use super::connect::{connect_harness, connect_registry, open_dag_store, read_latest_state};
 use super::repl;
@@ -50,6 +50,9 @@ pub enum AgentCommand {
     Run {
         /// Agent name
         name: String,
+        /// Resume on a named branch (created by `session fork`)
+        #[arg(long)]
+        branch: Option<String>,
     },
     /// List deployed agents
     List,
@@ -75,7 +78,7 @@ pub enum AgentCommand {
 pub fn execute(cmd: AgentCommand) {
     match cmd {
         AgentCommand::Deploy { path } => deploy(path),
-        AgentCommand::Run { name } => run(&name),
+        AgentCommand::Run { name, branch } => run(&name, branch.as_deref()),
         AgentCommand::List => list(),
         AgentCommand::Get { name } => get(&name),
         AgentCommand::Delete { name } => delete(&name),
@@ -127,7 +130,7 @@ pub(super) fn deploy_agent_from_path(agent_dir: &Path, registry: &dyn Registry) 
     })
 }
 
-fn run(name: &str) {
+fn run(name: &str, branch: Option<&str>) {
     let config = CliConfig::load();
     let registry = connect_registry(&config);
 
@@ -152,8 +155,13 @@ fn run(name: &str) {
     // Start conversation session (ADR 054, ADR 070)
     harness.start_session(name);
 
-    // Read state from state service (ADR 079)
-    apply_latest_state(&config, &mut *harness, name);
+    if let Some(branch_name) = branch {
+        // Switch to named branch: look up timeline, set state + dag_parent + timeline
+        apply_branch(&config, &mut *harness, name, branch_name);
+    } else {
+        // Default: read latest state for the agent (ADR 079)
+        apply_latest_state(&config, &mut *harness, name);
+    }
 
     // Run REPL with synchronous run_agent (ADR 092)
     repl::run(|input| match harness.run_agent(&agent_id, input) {
@@ -171,6 +179,72 @@ fn apply_latest_state(config: &CliConfig, harness: &mut dyn Harness, agent_name:
         println!("Resuming from state {}…", &state[..8.min(state.len())]);
         harness.set_initial_state(state);
     }
+}
+
+/// Switch to a named branch: look up the timeline, read the head node's
+/// state, and configure the harness to chain from the branch tip.
+fn apply_branch(config: &CliConfig, harness: &mut dyn Harness, agent_name: &str, branch: &str) {
+    let store = require_dag_store(config);
+
+    let timeline = store
+        .get_timeline_by_branch(branch)
+        .unwrap_or_else(|e| {
+            eprintln!("Failed to look up timeline: {}", e);
+            std::process::exit(1);
+        })
+        .unwrap_or_else(|| {
+            eprintln!("Branch '{}' not found", branch);
+            std::process::exit(1);
+        });
+
+    if timeline.broken_at.is_some() {
+        eprintln!(
+            "Branch '{}' is sealed — cannot run on a sealed timeline",
+            branch
+        );
+        std::process::exit(1);
+    }
+
+    // Find the tip of the branch — head pointer, falling back to fork_point
+    let tip_hash = timeline
+        .head
+        .as_deref()
+        .or(timeline.fork_point.as_deref())
+        .unwrap_or_else(|| {
+            eprintln!("Branch '{}' has no head or fork point", branch);
+            std::process::exit(1);
+        })
+        .to_string();
+
+    // Read state from the tip node and set checkout state
+    if let Ok(Some(node)) = store.get_node(&tip_hash) {
+        let state = node.state.as_deref().unwrap_or("");
+        if !state.is_empty() {
+            println!(
+                "Resuming '{}' from state {}…",
+                branch,
+                &state[..8.min(state.len())]
+            );
+            harness.set_initial_state(state.to_string());
+        }
+        if let Err(e) = store.set_checkout_state(agent_name, state) {
+            tracing::warn!(error = %e, "Failed to set checkout state for branch");
+        }
+    }
+
+    // Set dag_parent so the next message chains from the branch tip
+    harness.set_dag_parent(tip_hash);
+    // Set the timeline so all messages are recorded on this branch
+    harness.set_timeline(TimelineId::from(timeline.id), false);
+
+    println!("On branch '{}'", branch);
+}
+
+fn require_dag_store(config: &CliConfig) -> Box<dyn DagStore> {
+    open_dag_store(config).unwrap_or_else(|| {
+        eprintln!("Cannot connect to state service. Is the daemon running?");
+        std::process::exit(1);
+    })
 }
 
 fn list() {

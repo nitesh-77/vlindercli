@@ -88,7 +88,24 @@ mod tests {
             cli.command,
             Command::Agent {
                 cmd: agent::AgentCommand::Run {
-                    name: "todoapp".to_string()
+                    name: "todoapp".to_string(),
+                    branch: None,
+                }
+            }
+        );
+    }
+
+    #[test]
+    fn cli_agent_run_with_branch() {
+        let cli =
+            Cli::try_parse_from(["vlinder", "agent", "run", "todoapp", "--branch", "fix-typo"])
+                .unwrap();
+        assert_eq!(
+            cli.command,
+            Command::Agent {
+                cmd: agent::AgentCommand::Run {
+                    name: "todoapp".to_string(),
+                    branch: Some("fix-typo".to_string()),
                 }
             }
         );
