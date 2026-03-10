@@ -193,6 +193,20 @@ impl MessageQueue for RecordingQueue {
 
     fn send_fork(&self, msg: ForkMessage) -> Result<(), QueueError> {
         self.record(&msg.clone().into());
+
+        // Restore agent state to the fork point so the next `agent run`
+        // resumes from the correct KV/vec snapshot.
+        if let Ok(Some(node)) = self.store.get_node(&msg.fork_point) {
+            let state = node.state.as_deref().unwrap_or("");
+            if let Err(e) = self.store.set_checkout_state(&msg.agent_name, state) {
+                tracing::warn!(
+                    error = %e,
+                    agent = %msg.agent_name,
+                    "Failed to set checkout state on fork"
+                );
+            }
+        }
+
         self.inner.send_fork(msg)
     }
 }
