@@ -100,6 +100,7 @@ impl From<Timeline> for proto::Timeline {
         Self {
             id: tl.id,
             branch_name: tl.branch_name,
+            session_id: tl.session_id,
             parent_timeline_id: tl.parent_timeline_id,
             fork_point: tl.fork_point,
             created_at: tl.created_at.to_rfc3339(),
@@ -129,6 +130,7 @@ impl TryFrom<proto::Timeline> for Timeline {
         Ok(Self {
             id: tl.id,
             branch_name: tl.branch_name,
+            session_id: tl.session_id,
             parent_timeline_id: tl.parent_timeline_id,
             fork_point: tl.fork_point,
             created_at,

@@ -5,16 +5,15 @@ use tonic::{Request, Response, Status};
 
 use super::proto::{
     self, state_service_server::StateService, CreateTimelineRequest, CreateTimelineResponse,
-    EnsureMainTimelineRequest, EnsureMainTimelineResponse, GetChildrenRequest, GetChildrenResponse,
-    GetNodeByPrefixRequest, GetNodeRequest, GetNodeResponse, GetNodesBySubmissionRequest,
-    GetNodesBySubmissionResponse, GetSessionNodesRequest, GetSessionNodesResponse,
-    GetTimelineByBranchRequest, GetTimelineByIdRequest, GetTimelineResponse,
-    GetTimelinesForSessionRequest, GetTimelinesForSessionResponse, InsertNodeRequest,
-    InsertNodeResponse, IsTimelineSealedRequest, IsTimelineSealedResponse, LatestNodeHashRequest,
-    LatestNodeHashResponse, LatestStateRequest, LatestStateResponse, ListSessionsRequest,
-    ListSessionsResponse, PingRequest, RenameTimelineRequest, RenameTimelineResponse,
-    SealTimelineRequest, SealTimelineResponse, SemVer, SetCheckoutStateRequest,
-    SetCheckoutStateResponse,
+    GetChildrenRequest, GetChildrenResponse, GetNodeByPrefixRequest, GetNodeRequest,
+    GetNodeResponse, GetNodesBySubmissionRequest, GetNodesBySubmissionResponse,
+    GetSessionNodesRequest, GetSessionNodesResponse, GetTimelineByBranchRequest,
+    GetTimelineByIdRequest, GetTimelineResponse, GetTimelinesForSessionRequest,
+    GetTimelinesForSessionResponse, InsertNodeRequest, InsertNodeResponse, IsTimelineSealedRequest,
+    IsTimelineSealedResponse, LatestNodeHashRequest, LatestNodeHashResponse, LatestStateRequest,
+    LatestStateResponse, ListSessionsRequest, ListSessionsResponse, PingRequest,
+    RenameTimelineRequest, RenameTimelineResponse, SealTimelineRequest, SealTimelineResponse,
+    SemVer, SetCheckoutStateRequest, SetCheckoutStateResponse,
 };
 use vlinder_core::domain::DagStore;
 
@@ -168,17 +167,6 @@ impl StateService for StateServiceServer {
     // Timeline RPCs (ADR 093)
     // -------------------------------------------------------------------------
 
-    async fn ensure_main_timeline(
-        &self,
-        _request: Request<EnsureMainTimelineRequest>,
-    ) -> Result<Response<EnsureMainTimelineResponse>, Status> {
-        let id = self
-            .store
-            .ensure_main_timeline()
-            .map_err(Status::internal)?;
-        Ok(Response::new(EnsureMainTimelineResponse { id }))
-    }
-
     async fn create_timeline(
         &self,
         request: Request<CreateTimelineRequest>,
@@ -186,7 +174,12 @@ impl StateService for StateServiceServer {
         let req = request.into_inner();
         let id = self
             .store
-            .create_timeline(&req.branch_name, req.parent_id, req.fork_point.as_deref())
+            .create_timeline(
+                &req.branch_name,
+                &req.session_id,
+                req.parent_id,
+                req.fork_point.as_deref(),
+            )
             .map_err(Status::internal)?;
         Ok(Response::new(CreateTimelineResponse { id }))
     }

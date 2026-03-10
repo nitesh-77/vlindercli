@@ -178,14 +178,9 @@ fn fork(session_id: &str, from_hash: &str, branch_name: &str) {
         std::process::exit(1);
     }
 
-    store.ensure_main_timeline().unwrap_or_else(|e| {
-        eprintln!("Failed to ensure main timeline: {}", e);
-        std::process::exit(1);
-    });
-
     // Use the full resolved hash for the fork point
     let timeline_id = store
-        .create_timeline(branch_name, Some(1), Some(&node.hash))
+        .create_timeline(branch_name, session_id, Some(1), Some(&node.hash))
         .unwrap_or_else(|e| {
             eprintln!("Failed to create timeline: {}", e);
             std::process::exit(1);

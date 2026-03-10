@@ -1,8 +1,9 @@
-//! GitDagWorker — writes typed messages as git commits (ADR 064, 069, 070, 078).
+//! GitDagWorker — writes typed messages as git commits (ADR 064, 069, 070, 078, 114).
 //!
-//! Each message becomes a commit. The commit tree accumulates — each commit
-//! contains all previous message directories plus the new one. The working
-//! tree always shows the full conversation state.
+//! Each message becomes a commit on `main`. The commit tree accumulates under
+//! `<agent>/<session>/` — each commit contains all previous message directories
+//! plus the new one. Each session has a `timelines/` folder with index files
+//! tracking active message paths (ADR 114).
 //!
 //! Each message directory stores one file per field (ADR 078). Scalar fields
 //! are plain-text blobs (just the value — the filename is the key). Binary
@@ -11,40 +12,31 @@
 //!
 //! ```text
 //! tree
-//! ├── 20260211-143052.000-cli-invoke/
-//! │   ├── type                    # "invoke"
-//! │   ├── session_id              # "ses-abc123" — same blob across session
-//! │   ├── submission_id           # "sub-def456"
-//! │   ├── protocol_version        # "0.1.0"
-//! │   ├── created_at              # "2026-02-12T14:30:52.000Z"
-//! │   ├── harness                 # "cli"
-//! │   ├── runtime                 # "container"
-//! │   ├── agent_id                # "http://127.0.0.1:9000/agents/support-agent"
-//! │   ├── payload                 # raw bytes
-//! │   ├── hash                    # canonical domain hash (hash_dag_node)
-//! │   └── diagnostics.toml        # InvokeDiagnostics via serde
-//! ├── 20260211-143053.000-support-agent-request/
-//! │   ├── type                    # "request"
-//! │   ├── session_id              # same blob as above
-//! │   ├── ...per-field files...
-//! │   ├── service                 # "infer"
-//! │   ├── backend                 # "ollama"
-//! │   ├── operation               # "run"
-//! │   ├── sequence                # "1"
-//! │   ├── checkpoint              # "summarize" (optional, ADR 111)
-//! │   ├── payload
-//! │   └── diagnostics.toml
+//! ├── support-agent/
+//! │   └── ses-abc123/
+//! │       ├── timelines/
+//! │       │   ├── main            # "001-cli-invoke\n002-..."
+//! │       │   └── ACTIVE          # "main"
+//! │       ├── 001-cli-invoke/
+//! │       │   ├── type            # "invoke"
+//! │       │   ├── session_id      # "ses-abc123"
+//! │       │   ├── payload         # raw bytes
+//! │       │   ├── hash            # canonical domain hash
+//! │       │   └── diagnostics.toml
+//! │       └── 002-support-agent-request/
+//! │           ├── type            # "request"
+//! │           ├── service         # "infer"
+//! │           └── ...
 //! ├── agent.toml
 //! ├── platform.toml
 //! └── models/
 //! ```
 //!
-//! Directory names are `{YYYYMMDD-HHMMSS.mmm}-{sender}-{type}`. The timestamp is
-//! the observed time (when the platform received the message). Natural `ls`
-//! sorting gives chronological order.
+//! Directory names are `{NNN}-{sender}-{type}`. The sequence number is
+//! per-session, giving natural `ls` ordering.
 //!
-//! Commits advance the current branch (HEAD). Sessions are distinguished by
-//! `Session:` trailers. Users can fork a branch to diverge from the timeline.
+//! All commits go on `main`. No orphan chains, no `refs/sessions/` refs.
+//! Standard git commands (log, checkout, diff) work as expected.
 //!
 //! Uses git2 (libgit2) for all git operations — no subprocess spawning, no
 //! file lock contention between processes.
@@ -60,9 +52,9 @@ use vlinder_core::domain::{DagWorker, ObservableMessage, Registry};
 
 /// DAG worker that writes commits to a git repository.
 ///
-/// Stateless per-session: all session state (parent commit, canonical hash)
-/// is read from `refs/sessions/<session_id>/main` on each message. No in-memory
-/// maps survive across messages or restarts.
+/// All commits go on `main`. Session state (message count, canonical hash)
+/// is read from the tree structure on each message. No in-memory maps
+/// survive across messages or restarts.
 pub struct GitDagWorker {
     repo: Repository,
     registry_host: String,
@@ -114,48 +106,71 @@ impl GitDagWorker {
         })
     }
 
-    /// Resolve the session ref to a commit OID. Returns None for a new session.
-    fn session_commit(&self, session_id: &str) -> Option<Oid> {
-        let refname = format!("refs/sessions/{}/main", session_id);
+    /// Get the HEAD commit (whatever branch HEAD points to).
+    fn head_commit(&self) -> Option<Oid> {
         self.repo
-            .find_reference(&refname)
+            .head()
             .ok()
             .and_then(|r| r.peel_to_commit().ok())
             .map(|c| c.id())
     }
 
-    /// Read the canonical hash from the last commit's tree for a session.
-    /// Returns empty string for a new session (no parent).
-    fn session_canonical_hash(&self, session_id: &str) -> String {
-        let commit_oid = match self.session_commit(session_id) {
-            Some(oid) => oid,
+    /// Navigate into a named subtree entry.
+    fn get_subtree<'a>(&'a self, tree: &git2::Tree, name: &str) -> Option<git2::Tree<'a>> {
+        let entry = tree.get_name(name)?;
+        if entry.kind() != Some(git2::ObjectType::Tree) {
+            return None;
+        }
+        self.repo.find_tree(entry.id()).ok()
+    }
+
+    /// Count message directories in a session subtree.
+    /// Message dirs match the pattern `NNN-sender-type`.
+    fn session_message_count(&self, session_tree: &git2::Tree) -> usize {
+        session_tree
+            .iter()
+            .filter(|entry| {
+                entry.kind() == Some(git2::ObjectType::Tree)
+                    && entry.name().is_some_and(|n| {
+                        n.len() >= 4
+                            && n.as_bytes()[..3].iter().all(|b| b.is_ascii_digit())
+                            && n.as_bytes()[3] == b'-'
+                    })
+            })
+            .count()
+    }
+
+    /// Read the canonical hash from the last message in a session subtree.
+    fn session_canonical_hash_from_tree(
+        &self,
+        root_tree: &git2::Tree,
+        agent_name: &str,
+        session_id: &str,
+    ) -> String {
+        let agent_tree = match self.get_subtree(root_tree, agent_name) {
+            Some(t) => t,
             None => return String::new(),
         };
-        let commit = match self.repo.find_commit(commit_oid) {
-            Ok(c) => c,
-            Err(_) => return String::new(),
-        };
-        let tree = match commit.tree() {
-            Ok(t) => t,
-            Err(_) => return String::new(),
+        let session_tree = match self.get_subtree(&agent_tree, session_id) {
+            Some(t) => t,
+            None => return String::new(),
         };
 
-        // Find the most recent message directory (last in sorted order)
-        // and read its hash file.
-        let mut msg_dirs: Vec<String> = Vec::new();
-        for entry in tree.iter() {
-            if let Some(name) = entry.name() {
-                // Message dirs match the timestamp-sender-type pattern
-                if name.contains('-') && entry.kind() == Some(git2::ObjectType::Tree) {
-                    msg_dirs.push(name.to_string());
-                }
-            }
-        }
+        let mut msg_dirs: Vec<String> = session_tree
+            .iter()
+            .filter(|e| e.kind() == Some(git2::ObjectType::Tree))
+            .filter_map(|e| e.name().map(|n| n.to_string()))
+            .filter(|n| {
+                n.len() >= 4
+                    && n.as_bytes()[..3].iter().all(|b| b.is_ascii_digit())
+                    && n.as_bytes()[3] == b'-'
+            })
+            .collect();
         msg_dirs.sort();
 
         if let Some(last_dir) = msg_dirs.last() {
-            let path = format!("{}/hash", last_dir);
-            if let Ok(entry) = tree.get_path(std::path::Path::new(&path)) {
+            let path = format!("{}/{}/{}/hash", agent_name, session_id, last_dir);
+            if let Ok(entry) = root_tree.get_path(std::path::Path::new(&path)) {
                 if let Ok(blob) = self.repo.find_blob(entry.id()) {
                     return String::from_utf8_lossy(blob.content()).to_string();
                 }
@@ -289,8 +304,8 @@ impl GitDagWorker {
         Ok((tree_oid, dag_node.hash))
     }
 
-    /// Build the accumulated tree: all previous message directories + new one + metadata.
-    /// Returns (tree OID, canonical hash) for the new message.
+    /// Build the accumulated tree: nested under `<agent>/<session>/` with timeline
+    /// indexes (ADR 114). Returns (tree OID, canonical hash) for the new message.
     #[allow(clippy::too_many_arguments)]
     fn build_accumulated_tree(
         &self,
@@ -302,41 +317,120 @@ impl GitDagWorker {
         parent_commit: Option<Oid>,
         canonical_parent: &str,
     ) -> Result<(Oid, String), String> {
-        // Start from the parent commit's tree (if any)
+        let agent_name = message_agent_name(msg);
+        let session_id = msg.session().as_str().to_string();
+
+        // Get parent tree from main HEAD
         let parent_tree = parent_commit
             .and_then(|oid| self.repo.find_commit(oid).ok())
             .and_then(|c| c.tree().ok());
 
-        let mut tb = self
-            .repo
-            .treebuilder(parent_tree.as_ref())
-            .map_err(|e| format!("treebuilder failed: {}", e))?;
+        // Navigate existing subtrees
+        let existing_agent_tree = parent_tree
+            .as_ref()
+            .and_then(|t| self.get_subtree(t, &agent_name));
+        let existing_session_tree = existing_agent_tree
+            .as_ref()
+            .and_then(|t| self.get_subtree(t, &session_id));
+        let existing_timelines_tree = existing_session_tree
+            .as_ref()
+            .and_then(|t| self.get_subtree(t, "timelines"));
 
-        // Remove top-level metadata — we re-add fresh copies
-        let _ = tb.remove("agent.toml");
-        let _ = tb.remove("platform.toml");
-        let _ = tb.remove("models");
+        // Sequence number = count of existing message dirs + 1
+        let seq = existing_session_tree
+            .as_ref()
+            .map_or(0, |t| self.session_message_count(t))
+            + 1;
 
-        // Add new message directory
-        let (msg_tree, canonical_hash) =
+        // Build new message subtree
+        let (msg_tree_oid, canonical_hash) =
             self.build_message_subtree(msg, created_at, canonical_parent)?;
-        let msg_dir = format!(
-            "{}-{}-{}",
-            created_at.format("%Y%m%d-%H%M%S%.3f"),
-            from,
-            msg_type,
-        );
-        tb.insert(&msg_dir, msg_tree, FileMode::Tree.into())
+        let msg_dir = format!("{:03}-{}-{}", seq, from, msg_type);
+
+        // Build session subtree: existing messages + new one + timelines
+        let mut session_tb = self
+            .repo
+            .treebuilder(existing_session_tree.as_ref())
+            .map_err(|e| format!("session treebuilder failed: {}", e))?;
+        let _ = session_tb.remove("timelines");
+        session_tb
+            .insert(&msg_dir, msg_tree_oid, FileMode::Tree.into())
             .map_err(|e| format!("insert message dir failed: {}", e))?;
 
-        // Add top-level metadata from registry
-        if let Some(ref registry) = self.registry {
-            let agent_name = message_agent_name(msg);
+        // Build timelines subtree
+        let mut timelines_tb = self
+            .repo
+            .treebuilder(existing_timelines_tree.as_ref())
+            .map_err(|e| format!("timelines treebuilder failed: {}", e))?;
 
+        // Append new message dir to timeline/main
+        let timeline_content = if let Some(ref tl_tree) = existing_timelines_tree {
+            if let Some(entry) = tl_tree.get_name("main") {
+                if let Ok(blob) = self.repo.find_blob(entry.id()) {
+                    let existing = String::from_utf8_lossy(blob.content()).to_string();
+                    format!("{}\n{}", existing, msg_dir)
+                } else {
+                    msg_dir.clone()
+                }
+            } else {
+                msg_dir.clone()
+            }
+        } else {
+            msg_dir.clone()
+        };
+
+        let timeline_oid = self.write_blob(timeline_content.as_bytes())?;
+        timelines_tb
+            .insert("main", timeline_oid, FileMode::Blob.into())
+            .map_err(|e| format!("insert timeline main failed: {}", e))?;
+
+        let active_oid = self.write_blob(b"main")?;
+        timelines_tb
+            .insert("ACTIVE", active_oid, FileMode::Blob.into())
+            .map_err(|e| format!("insert ACTIVE failed: {}", e))?;
+
+        let timelines_tree_oid = timelines_tb
+            .write()
+            .map_err(|e| format!("write timelines tree failed: {}", e))?;
+        session_tb
+            .insert("timelines", timelines_tree_oid, FileMode::Tree.into())
+            .map_err(|e| format!("insert timelines dir failed: {}", e))?;
+
+        let session_tree_oid = session_tb
+            .write()
+            .map_err(|e| format!("write session tree failed: {}", e))?;
+
+        // Build agent subtree
+        let mut agent_tb = self
+            .repo
+            .treebuilder(existing_agent_tree.as_ref())
+            .map_err(|e| format!("agent treebuilder failed: {}", e))?;
+        agent_tb
+            .insert(&session_id, session_tree_oid, FileMode::Tree.into())
+            .map_err(|e| format!("insert session dir failed: {}", e))?;
+        let agent_tree_oid = agent_tb
+            .write()
+            .map_err(|e| format!("write agent tree failed: {}", e))?;
+
+        // Build root tree
+        let mut root_tb = self
+            .repo
+            .treebuilder(parent_tree.as_ref())
+            .map_err(|e| format!("root treebuilder failed: {}", e))?;
+        root_tb
+            .insert(&agent_name, agent_tree_oid, FileMode::Tree.into())
+            .map_err(|e| format!("insert agent dir failed: {}", e))?;
+
+        // Add top-level metadata from registry
+        let _ = root_tb.remove("agent.toml");
+        let _ = root_tb.remove("platform.toml");
+        let _ = root_tb.remove("models");
+
+        if let Some(ref registry) = self.registry {
             if let Some(agent) = registry.get_agent_by_name(&agent_name) {
                 if let Ok(agent_toml) = toml::to_string_pretty(&agent) {
                     if let Ok(oid) = self.write_blob(agent_toml.as_bytes()) {
-                        let _ = tb.insert("agent.toml", oid, FileMode::Blob.into());
+                        let _ = root_tb.insert("agent.toml", oid, FileMode::Blob.into());
                     }
                 }
 
@@ -344,7 +438,7 @@ impl GitDagWorker {
                     if let Ok(models_oid) =
                         self.build_models_subtree(registry, &agent.requirements.models)
                     {
-                        let _ = tb.insert("models", models_oid, FileMode::Tree.into());
+                        let _ = root_tb.insert("models", models_oid, FileMode::Tree.into());
                     }
                 }
             }
@@ -356,13 +450,13 @@ impl GitDagWorker {
                 self.registry_host,
             );
             if let Ok(oid) = self.write_blob(platform_toml.as_bytes()) {
-                let _ = tb.insert("platform.toml", oid, FileMode::Blob.into());
+                let _ = root_tb.insert("platform.toml", oid, FileMode::Blob.into());
             }
         }
 
-        let tree_oid = tb
+        let tree_oid = root_tb
             .write()
-            .map_err(|e| format!("write accumulated tree failed: {}", e))?;
+            .map_err(|e| format!("write root tree failed: {}", e))?;
         Ok((tree_oid, canonical_hash))
     }
 
@@ -432,13 +526,26 @@ impl DagWorker for GitDagWorker {
     fn on_observable_message(&mut self, msg: &ObservableMessage, created_at: DateTime<Utc>) {
         let result = (|| -> Result<(), String> {
             let session_id = msg.session().as_str().to_string();
+            let agent_name = message_agent_name(msg);
             let (from, to, msg_type) = message_routing(msg);
 
-            // 1. Resolve session state from refs (stateless — no in-memory maps)
-            let parent_commit_oid = self.session_commit(&session_id);
-            let canonical_parent = self.session_canonical_hash(&session_id);
+            // 1. Resolve state from HEAD (stateless — no in-memory maps)
+            let parent_commit_oid = self.head_commit();
+            let canonical_parent = match parent_commit_oid {
+                Some(oid) => {
+                    let commit = self
+                        .repo
+                        .find_commit(oid)
+                        .map_err(|e| format!("find commit failed: {}", e))?;
+                    let tree = commit
+                        .tree()
+                        .map_err(|e| format!("tree lookup failed: {}", e))?;
+                    self.session_canonical_hash_from_tree(&tree, &agent_name, &session_id)
+                }
+                None => String::new(),
+            };
 
-            // 2. Build accumulated tree (session's previous messages + new one)
+            // 2. Build accumulated tree (nested under agent/session)
             let (tree_oid, _canonical_hash) = self.build_accumulated_tree(
                 msg,
                 created_at,
@@ -481,7 +588,7 @@ impl DagWorker for GitDagWorker {
             let committer = Signature::new("vlinder", "vlinder@localhost", &timestamp)
                 .map_err(|e| format!("committer signature failed: {}", e))?;
 
-            // 5. Parent: session's last commit, or orphan for new session
+            // 5. Parent: main HEAD (all commits on main)
             let parent_commit = parent_commit_oid.and_then(|oid| self.repo.find_commit(oid).ok());
             let parents: Vec<&git2::Commit> = parent_commit.iter().collect();
 
@@ -494,18 +601,16 @@ impl DagWorker for GitDagWorker {
                 "Committing message",
             );
 
-            // 6. Create commit object
+            // 6. Commit to HEAD (advances whatever branch HEAD points to)
             let commit_oid = self
                 .repo
-                .commit(None, &author, &committer, &message, &tree, &parents)
+                .commit(Some("HEAD"), &author, &committer, &message, &tree, &parents)
                 .map_err(|e| format!("commit failed: {}", e))?;
 
-            // 7. Update session ref (HEAD stays on main — working tree untouched)
-            let refname = format!("refs/sessions/{}/main", session_id);
-            let reflog_msg = format!("{}: {} → {}", msg_type, from, to);
+            // 7. Sync working tree so `ls` shows the folder structure
             self.repo
-                .reference(&refname, commit_oid, true, &reflog_msg)
-                .map_err(|e| format!("session ref update failed: {}", e))?;
+                .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+                .map_err(|e| format!("checkout HEAD failed: {}", e))?;
 
             tracing::debug!(commit = %commit_oid, session = %session_id, "Commit succeeded");
 
@@ -750,11 +855,11 @@ mod tests {
         (worker, tmp, registry)
     }
 
-    /// Session ref for the default test session (sess-1).
-    const SESS1_REF: &str = "refs/sessions/sess-1/main";
+    /// Agent/session path prefix for the default test session.
+    const AGENT: &str = "support-agent";
+    const SESSION: &str = "sess-1";
 
-    /// Run a git command against the test repo. Tests still use the CLI to
-    /// verify that git2-written objects are readable by standard git.
+    /// Run a git command against the test repo.
     fn git(repo_path: &Path, args: &[&str]) -> Result<String, String> {
         let output = Command::new("git")
             .args(args)
@@ -768,6 +873,12 @@ mod tests {
         }
 
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    }
+
+    /// Show a file from the session subtree on main.
+    fn show_session_file(repo_path: &Path, msg_dir: &str, field: &str) -> Result<String, String> {
+        let path = format!("main:{}/{}/{}/{}", AGENT, SESSION, msg_dir, field);
+        git(repo_path, &["show", &path])
     }
 
     // --- Basic commit tests ---
@@ -793,13 +904,9 @@ mod tests {
 
         worker.on_observable_message(&msg, ts);
 
-        let sha = git(
-            tmp.path(),
-            &["rev-parse", "--verify", "refs/sessions/sess-1/main"],
-        )
-        .unwrap();
-        assert_eq!(sha.len(), 40);
-        assert!(sha.chars().all(|c| c.is_ascii_hexdigit()));
+        // main should have 2 commits: initial + invoke
+        let count = git(tmp.path(), &["rev-list", "--count", "main"]).unwrap();
+        assert_eq!(count, "2");
     }
 
     #[test]
@@ -809,7 +916,7 @@ mod tests {
 
         worker.on_observable_message(&msg, ts);
 
-        let subject = git(tmp.path(), &["log", "-1", "--format=%s", SESS1_REF]).unwrap();
+        let subject = git(tmp.path(), &["log", "-1", "--format=%s", "main"]).unwrap();
         assert_eq!(subject, "invoke: cli \u{2192} support-agent");
     }
 
@@ -820,7 +927,7 @@ mod tests {
 
         worker.on_observable_message(&msg, ts);
 
-        let body = git(tmp.path(), &["log", "-1", "--format=%b", SESS1_REF]).unwrap();
+        let body = git(tmp.path(), &["log", "-1", "--format=%b", "main"]).unwrap();
         assert!(body.contains("Session: sess-1"), "body: {}", body);
         assert!(body.contains("Submission: sub-1"), "body: {}", body);
     }
@@ -851,17 +958,7 @@ mod tests {
                 "log",
                 "-1",
                 "--format=%(trailers:key=Session,valueonly)",
-                SESS1_REF,
-            ],
-        )
-        .unwrap();
-        let submission = git(
-            tmp.path(),
-            &[
-                "log",
-                "-1",
-                "--format=%(trailers:key=Submission,valueonly)",
-                SESS1_REF,
+                "main",
             ],
         )
         .unwrap();
@@ -871,13 +968,12 @@ mod tests {
                 "log",
                 "-1",
                 "--format=%(trailers:key=State,valueonly)",
-                SESS1_REF,
+                "main",
             ],
         )
         .unwrap();
 
         assert_eq!(session.trim(), "sess-1");
-        assert_eq!(submission.trim(), "sub-1");
         assert_eq!(state.trim(), "state-abc123");
     }
 
@@ -888,7 +984,7 @@ mod tests {
 
         worker.on_observable_message(&msg, ts);
 
-        let author = git(tmp.path(), &["log", "-1", "--format=%an <%ae>", SESS1_REF]).unwrap();
+        let author = git(tmp.path(), &["log", "-1", "--format=%an <%ae>", "main"]).unwrap();
         assert_eq!(author, "cli <cli@registry.local:9000>");
     }
 
@@ -899,7 +995,7 @@ mod tests {
 
         worker.on_observable_message(&msg, ts);
 
-        let committer = git(tmp.path(), &["log", "-1", "--format=%cn <%ce>", SESS1_REF]).unwrap();
+        let committer = git(tmp.path(), &["log", "-1", "--format=%cn <%ce>", "main"]).unwrap();
         assert_eq!(committer, "vlinder <vlinder@localhost>");
     }
 
@@ -910,7 +1006,7 @@ mod tests {
 
         worker.on_observable_message(&msg, ts);
 
-        let date = git(tmp.path(), &["log", "-1", "--format=%at", SESS1_REF]).unwrap();
+        let date = git(tmp.path(), &["log", "-1", "--format=%at", "main"]).unwrap();
         assert_eq!(date, "1700000000");
     }
 
@@ -923,13 +1019,8 @@ mod tests {
 
         worker.on_observable_message(&msg, ts);
 
-        let dir = "19700101-001640.000-cli-invoke";
-        let show = |field: &str| {
-            git(
-                tmp.path(),
-                &["show", &format!("{}:{}/{}", SESS1_REF, dir, field)],
-            )
-        };
+        let dir = "001-cli-invoke";
+        let show = |field: &str| show_session_file(tmp.path(), dir, field);
 
         assert_eq!(show("type").unwrap(), "invoke");
         assert_eq!(show("session_id").unwrap(), "sess-1");
@@ -948,17 +1039,16 @@ mod tests {
     #[test]
     fn request_directory_has_service_fields() {
         let (mut worker, tmp) = test_worker();
-        let (msg, ts) = test_request(b"prompt", 1001);
 
+        // Need invoke first to get sequence 001
+        let (m1, t1) = test_invoke(b"q", 1000);
+        worker.on_observable_message(&m1, t1);
+
+        let (msg, ts) = test_request(b"prompt", 1001);
         worker.on_observable_message(&msg, ts);
 
-        let dir = "19700101-001641.000-support-agent-request";
-        let show = |field: &str| {
-            git(
-                tmp.path(),
-                &["show", &format!("{}:{}/{}", SESS1_REF, dir, field)],
-            )
-        };
+        let dir = "002-support-agent-request";
+        let show = |field: &str| show_session_file(tmp.path(), dir, field);
 
         assert_eq!(show("type").unwrap(), "request");
         assert_eq!(show("service").unwrap(), "infer");
@@ -971,17 +1061,15 @@ mod tests {
     #[test]
     fn response_directory_has_correlation_id() {
         let (mut worker, tmp) = test_worker();
-        let (msg, ts) = test_response(b"answer", 1002);
 
+        let (m1, t1) = test_invoke(b"q", 1000);
+        worker.on_observable_message(&m1, t1);
+
+        let (msg, ts) = test_response(b"answer", 1002);
         worker.on_observable_message(&msg, ts);
 
-        let dir = "19700101-001642.000-infer.ollama-response";
-        let show = |field: &str| {
-            git(
-                tmp.path(),
-                &["show", &format!("{}:{}/{}", SESS1_REF, dir, field)],
-            )
-        };
+        let dir = "002-infer.ollama-response";
+        let show = |field: &str| show_session_file(tmp.path(), dir, field);
 
         assert_eq!(show("type").unwrap(), "response");
         assert!(show("correlation_id").is_ok(), "should have correlation_id");
@@ -1018,13 +1106,8 @@ mod tests {
 
         worker.on_observable_message(&msg, ts);
 
-        let dir = "19700101-001643.000-support-agent-complete";
-        let show = |field: &str| {
-            git(
-                tmp.path(),
-                &["show", &format!("{}:{}/{}", SESS1_REF, dir, field)],
-            )
-        };
+        let dir = "001-support-agent-complete";
+        let show = |field: &str| show_session_file(tmp.path(), dir, field);
 
         assert_eq!(show("type").unwrap(), "complete");
         assert_eq!(show("harness").unwrap(), "cli");
@@ -1045,13 +1128,10 @@ mod tests {
 
         worker.on_observable_message(&msg, ts);
 
-        let dir = "19700101-001644.000-coordinator-delegate";
-        let show = |field: &str| {
-            git(
-                tmp.path(),
-                &["show", &format!("{}:{}/{}", SESS1_REF, dir, field)],
-            )
-        };
+        // Delegate agent is "summarizer" (target), so folder is summarizer/sess-1/
+        let dir = "001-coordinator-delegate";
+        let path = format!("main:summarizer/{}/{}", SESSION, dir);
+        let show = |field: &str| git(tmp.path(), &["show", &format!("{}/{}", path, field)]);
 
         assert_eq!(show("type").unwrap(), "delegate");
         assert_eq!(show("caller_agent").unwrap(), "coordinator");
@@ -1082,12 +1162,7 @@ mod tests {
 
         worker.on_observable_message(&msg, ts);
 
-        let dir = "19700101-001640.000-cli-invoke";
-        let state = git(
-            tmp.path(),
-            &["show", &format!("{}:{}/state", SESS1_REF, dir)],
-        )
-        .unwrap();
+        let state = show_session_file(tmp.path(), "001-cli-invoke", "state").unwrap();
         assert_eq!(state, "abc123state");
     }
 
@@ -1098,11 +1173,7 @@ mod tests {
 
         worker.on_observable_message(&msg, ts);
 
-        let dir = "19700101-001640.000-cli-invoke";
-        let result = git(
-            tmp.path(),
-            &["show", &format!("{}:{}/state", SESS1_REF, dir)],
-        );
+        let result = show_session_file(tmp.path(), "001-cli-invoke", "state");
         assert!(result.is_err(), "should not have state file when None");
     }
 
@@ -1113,18 +1184,14 @@ mod tests {
 
         worker.on_observable_message(&msg, ts);
 
-        let dir = "19700101-001640.000-support-agent-complete";
-        let result = git(
-            tmp.path(),
-            &["show", &format!("{}:{}/stderr", SESS1_REF, dir)],
-        );
+        let result = show_session_file(tmp.path(), "001-support-agent-complete", "stderr");
         assert!(result.is_err(), "should not have stderr when empty");
     }
 
     // --- Accumulation and chaining tests ---
 
     #[test]
-    fn messages_accumulate_in_tree() {
+    fn messages_accumulate_in_session_folder() {
         let (mut worker, tmp) = test_worker();
 
         let (m1, t1) = test_invoke(b"q", 1000);
@@ -1136,46 +1203,51 @@ mod tests {
         let (m3, t3) = test_response(b"a", 1002);
         worker.on_observable_message(&m3, t3);
 
-        let ls = git(tmp.path(), &["ls-tree", "--name-only", SESS1_REF]).unwrap();
-        assert!(ls.contains("19700101-001640.000-cli-invoke"), "ls: {}", ls);
-        assert!(
-            ls.contains("19700101-001641.000-support-agent-request"),
-            "ls: {}",
-            ls
-        );
-        assert!(
-            ls.contains("19700101-001642.000-infer.ollama-response"),
-            "ls: {}",
-            ls
-        );
+        let ls = git(
+            tmp.path(),
+            &[
+                "ls-tree",
+                "--name-only",
+                &format!("main:{}/{}", AGENT, SESSION),
+            ],
+        )
+        .unwrap();
+        assert!(ls.contains("001-cli-invoke"), "ls: {}", ls);
+        assert!(ls.contains("002-support-agent-request"), "ls: {}", ls);
+        assert!(ls.contains("003-infer.ollama-response"), "ls: {}", ls);
+        assert!(ls.contains("timelines"), "ls: {}", ls);
     }
 
     #[test]
-    fn commits_chain_correctly() {
+    fn commits_chain_on_main() {
         let (mut worker, tmp) = test_worker();
 
         let (m1, t1) = test_invoke(b"first", 1000);
         worker.on_observable_message(&m1, t1);
-        let commit1 = git(tmp.path(), &["rev-parse", SESS1_REF]).unwrap();
+        let commit1 = git(tmp.path(), &["rev-parse", "main"]).unwrap();
 
         let (m2, t2) = test_request(b"second", 1001);
         worker.on_observable_message(&m2, t2);
-        let commit2 = git(tmp.path(), &["rev-parse", SESS1_REF]).unwrap();
+        let commit2 = git(tmp.path(), &["rev-parse", "main"]).unwrap();
 
         assert_ne!(commit1, commit2);
-        let parent = git(tmp.path(), &["log", "-1", "--format=%P", SESS1_REF]).unwrap();
+        let parent = git(tmp.path(), &["log", "-1", "--format=%P", "main"]).unwrap();
         assert_eq!(parent, commit1);
     }
 
     #[test]
-    fn first_commit_is_root() {
+    fn first_message_parents_initial_commit() {
         let (mut worker, tmp) = test_worker();
-        let (msg, ts) = test_invoke(b"first", 1000);
+        let initial = git(tmp.path(), &["rev-parse", "main"]).unwrap();
 
+        let (msg, ts) = test_invoke(b"first", 1000);
         worker.on_observable_message(&msg, ts);
 
-        let parent = git(tmp.path(), &["log", "-1", "--format=%P", SESS1_REF]).unwrap();
-        assert_eq!(parent, "");
+        let parent = git(tmp.path(), &["log", "-1", "--format=%P", "main"]).unwrap();
+        assert_eq!(
+            parent, initial,
+            "first message should parent initial commit"
+        );
     }
 
     #[test]
@@ -1193,8 +1265,9 @@ mod tests {
         let (m5, t5) = test_complete(b"5", 1004);
         worker.on_observable_message(&m5, t5);
 
-        let count = git(tmp.path(), &["rev-list", "--count", SESS1_REF]).unwrap();
-        assert_eq!(count, "5");
+        // 1 initial + 5 messages = 6
+        let count = git(tmp.path(), &["rev-list", "--count", "main"]).unwrap();
+        assert_eq!(count, "6");
     }
 
     // --- Rich tree tests (ADR 070) ---
@@ -1206,7 +1279,7 @@ mod tests {
 
         worker.on_observable_message(&msg, ts);
 
-        let content = git(tmp.path(), &["show", &format!("{}:agent.toml", SESS1_REF)]).unwrap();
+        let content = git(tmp.path(), &["show", "main:agent.toml"]).unwrap();
         assert!(content.contains("support-agent"), "agent.toml: {}", content);
     }
 
@@ -1217,40 +1290,13 @@ mod tests {
 
         worker.on_observable_message(&msg, ts);
 
-        let content = git(
-            tmp.path(),
-            &["show", &format!("{}:platform.toml", SESS1_REF)],
-        )
-        .unwrap();
+        let content = git(tmp.path(), &["show", "main:platform.toml"]).unwrap();
         assert!(content.contains("version"), "platform.toml: {}", content);
         assert!(
             content.contains("registry_host"),
             "platform.toml: {}",
             content
         );
-    }
-
-    #[test]
-    fn working_tree_stays_empty() {
-        let (mut worker, tmp) = test_worker();
-        let (msg, ts) = test_invoke(b"visible", 1000);
-
-        worker.on_observable_message(&msg, ts);
-
-        // Working tree should not have message directories (no auto-checkout)
-        let dir = "19700101-001640.000-cli-invoke";
-        assert!(
-            !tmp.path().join(dir).exists(),
-            "working tree should be empty — data is in git objects"
-        );
-
-        // But data is accessible via git show
-        let payload = git(
-            tmp.path(),
-            &["show", &format!("{}:{}/payload", SESS1_REF, dir)],
-        )
-        .unwrap();
-        assert_eq!(payload, "visible");
     }
 
     #[test]
@@ -1264,7 +1310,7 @@ mod tests {
         assert_eq!(ls, "", "main should have an empty tree");
     }
 
-    // --- Sessions as islands tests ---
+    // --- Session folder isolation tests (ADR 114) ---
 
     fn test_invoke_session(
         payload: &[u8],
@@ -1291,22 +1337,7 @@ mod tests {
     }
 
     #[test]
-    fn session_creates_ref() {
-        let (mut worker, tmp) = test_worker();
-        let (msg, ts) = test_invoke(b"hello", 1000);
-
-        worker.on_observable_message(&msg, ts);
-
-        let sha = git(
-            tmp.path(),
-            &["rev-parse", "--verify", "refs/sessions/sess-1/main"],
-        )
-        .unwrap();
-        assert_eq!(sha.len(), 40);
-    }
-
-    #[test]
-    fn different_sessions_are_orphan_islands() {
+    fn sessions_share_main_branch() {
         let (mut worker, tmp) = test_worker();
 
         let (m1, t1) = test_invoke_session(b"sess1", 1000, "sess-1");
@@ -1315,37 +1346,20 @@ mod tests {
         let (m2, t2) = test_invoke_session(b"sess2", 1001, "sess-2");
         worker.on_observable_message(&m2, t2);
 
-        // Each session has its own ref
-        let sha1 = git(tmp.path(), &["rev-parse", "refs/sessions/sess-1/main"]).unwrap();
-        let sha2 = git(tmp.path(), &["rev-parse", "refs/sessions/sess-2/main"]).unwrap();
-        assert_ne!(sha1, sha2);
+        // Both commits on main, 3 total (initial + 2 messages)
+        let count = git(tmp.path(), &["rev-list", "--count", "main"]).unwrap();
+        assert_eq!(count, "3");
 
-        // Each is a root commit (no parent)
-        let parent1 = git(tmp.path(), &["log", "-1", "--format=%P", &sha1]).unwrap();
-        let parent2 = git(tmp.path(), &["log", "-1", "--format=%P", &sha2]).unwrap();
-        assert_eq!(parent1, "", "sess-1 should be orphan");
-        assert_eq!(parent2, "", "sess-2 should be orphan");
+        // No session refs exist
+        let refs = git(tmp.path(), &["for-each-ref", "refs/sessions/"]);
+        assert!(
+            refs.is_err() || refs.unwrap().is_empty(),
+            "should not have session refs"
+        );
     }
 
     #[test]
-    fn messages_chain_within_session_via_ref() {
-        let (mut worker, tmp) = test_worker();
-
-        let (m1, t1) = test_invoke(b"first", 1000);
-        worker.on_observable_message(&m1, t1);
-        let commit1 = git(tmp.path(), &["rev-parse", "refs/sessions/sess-1/main"]).unwrap();
-
-        let (m2, t2) = test_request(b"second", 1001);
-        worker.on_observable_message(&m2, t2);
-        let commit2 = git(tmp.path(), &["rev-parse", "refs/sessions/sess-1/main"]).unwrap();
-
-        assert_ne!(commit1, commit2);
-        let parent = git(tmp.path(), &["log", "-1", "--format=%P", &commit2]).unwrap();
-        assert_eq!(parent, commit1, "second commit should parent first");
-    }
-
-    #[test]
-    fn session_tree_only_contains_own_messages() {
+    fn sessions_isolated_by_folder() {
         let (mut worker, tmp) = test_worker();
 
         let (m1, t1) = test_invoke_session(b"sess1-msg", 1000, "sess-1");
@@ -1354,56 +1368,138 @@ mod tests {
         let (m2, t2) = test_invoke_session(b"sess2-msg", 1001, "sess-2");
         worker.on_observable_message(&m2, t2);
 
-        // sess-1's tree should only have its own message
+        // Each session has its own folder under the agent
+        let ls = git(
+            tmp.path(),
+            &["ls-tree", "--name-only", &format!("main:{}", AGENT)],
+        )
+        .unwrap();
+        assert!(ls.contains("sess-1"), "ls: {}", ls);
+        assert!(ls.contains("sess-2"), "ls: {}", ls);
+
+        // Each session folder has its own message
         let ls1 = git(
             tmp.path(),
-            &["ls-tree", "--name-only", "refs/sessions/sess-1/main"],
+            &["ls-tree", "--name-only", &format!("main:{}/sess-1", AGENT)],
         )
         .unwrap();
-        assert!(ls1.contains("19700101-001640.000-cli-invoke"));
-        assert!(
-            !ls1.contains("19700101-001641.000"),
-            "sess-1 should not have sess-2's message"
-        );
+        assert!(ls1.contains("001-cli-invoke"), "ls1: {}", ls1);
 
-        // sess-2's tree should only have its own message
         let ls2 = git(
             tmp.path(),
-            &["ls-tree", "--name-only", "refs/sessions/sess-2/main"],
+            &["ls-tree", "--name-only", &format!("main:{}/sess-2", AGENT)],
         )
         .unwrap();
-        assert!(ls2.contains("19700101-001641.000-cli-invoke"));
-        assert!(
-            !ls2.contains("19700101-001640.000"),
-            "sess-2 should not have sess-1's message"
-        );
+        assert!(ls2.contains("001-cli-invoke"), "ls2: {}", ls2);
     }
 
     #[test]
-    fn stateless_worker_resumes_session_from_ref() {
+    fn stateless_worker_resumes_from_main() {
         let tmp = tempfile::TempDir::new().unwrap();
 
-        // First worker instance writes one message
         {
             let mut worker = GitDagWorker::open(tmp.path(), "host", None).unwrap();
             let (m1, t1) = test_invoke(b"first", 1000);
             worker.on_observable_message(&m1, t1);
         }
 
-        // Second worker instance — no in-memory state carried over
         {
             let mut worker = GitDagWorker::open(tmp.path(), "host", None).unwrap();
             let (m2, t2) = test_request(b"second", 1001);
             worker.on_observable_message(&m2, t2);
         }
 
-        // Should have 2 commits chained in sess-1
-        let count = git(
+        // 1 initial + 2 messages = 3
+        let count = git(tmp.path(), &["rev-list", "--count", "main"]).unwrap();
+        assert_eq!(count, "3");
+
+        // Session folder has both messages
+        let ls = git(
             tmp.path(),
-            &["rev-list", "--count", "refs/sessions/sess-1/main"],
+            &[
+                "ls-tree",
+                "--name-only",
+                &format!("main:{}/{}", AGENT, SESSION),
+            ],
         )
         .unwrap();
-        assert_eq!(count, "2");
+        assert!(ls.contains("001-cli-invoke"), "ls: {}", ls);
+        assert!(ls.contains("002-support-agent-request"), "ls: {}", ls);
+    }
+
+    // --- Timeline index tests (ADR 114) ---
+
+    #[test]
+    fn timeline_main_file_tracks_messages() {
+        let (mut worker, tmp) = test_worker();
+
+        let (m1, t1) = test_invoke(b"q", 1000);
+        worker.on_observable_message(&m1, t1);
+
+        let (m2, t2) = test_request(b"r", 1001);
+        worker.on_observable_message(&m2, t2);
+
+        let timeline = git(
+            tmp.path(),
+            &[
+                "show",
+                &format!("main:{}/{}/timelines/main", AGENT, SESSION),
+            ],
+        )
+        .unwrap();
+        assert!(
+            timeline.contains("001-cli-invoke"),
+            "timeline: {}",
+            timeline
+        );
+        assert!(
+            timeline.contains("002-support-agent-request"),
+            "timeline: {}",
+            timeline
+        );
+    }
+
+    #[test]
+    fn active_file_points_to_main() {
+        let (mut worker, tmp) = test_worker();
+
+        let (msg, ts) = test_invoke(b"q", 1000);
+        worker.on_observable_message(&msg, ts);
+
+        let active = git(
+            tmp.path(),
+            &[
+                "show",
+                &format!("main:{}/{}/timelines/ACTIVE", AGENT, SESSION),
+            ],
+        )
+        .unwrap();
+        assert_eq!(active, "main");
+    }
+
+    #[test]
+    fn working_tree_has_folder_structure() {
+        let (mut worker, tmp) = test_worker();
+        let (msg, ts) = test_invoke(b"browsable", 1000);
+
+        worker.on_observable_message(&msg, ts);
+
+        // Working tree should have the agent/session/message folder structure
+        let msg_dir = tmp.path().join(AGENT).join(SESSION).join("001-cli-invoke");
+        assert!(msg_dir.exists(), "message dir should exist in working tree");
+
+        let payload = std::fs::read_to_string(msg_dir.join("payload")).unwrap();
+        assert_eq!(payload, "browsable");
+
+        let active = std::fs::read_to_string(
+            tmp.path()
+                .join(AGENT)
+                .join(SESSION)
+                .join("timelines")
+                .join("ACTIVE"),
+        )
+        .unwrap();
+        assert_eq!(active, "main");
     }
 
     // --- Canonical hash tests ---
@@ -1413,17 +1509,11 @@ mod tests {
         let (mut worker, tmp) = test_worker();
         let (msg, ts) = test_invoke(b"my-payload", 1000);
 
-        // Compute the expected canonical hash (same as RecordingQueue would)
         let expected_node = vlinder_core::domain::workers::dag::build_dag_node(&msg, "");
 
         worker.on_observable_message(&msg, ts);
 
-        let dir = "19700101-001640.000-cli-invoke";
-        let hash = git(
-            tmp.path(),
-            &["show", &format!("{}:{}/hash", SESS1_REF, dir)],
-        )
-        .unwrap();
+        let hash = show_session_file(tmp.path(), "001-cli-invoke", "hash").unwrap();
         assert_eq!(
             hash, expected_node.hash,
             "hash file should contain canonical hash"
@@ -1438,29 +1528,19 @@ mod tests {
         let expected1 = vlinder_core::domain::workers::dag::build_dag_node(&m1, "");
         worker.on_observable_message(&m1, t1);
 
-        let dir1 = "19700101-001640.000-cli-invoke";
-        let hash1 = git(
-            tmp.path(),
-            &["show", &format!("{}:{}/hash", SESS1_REF, dir1)],
-        )
-        .unwrap();
+        let hash1 = show_session_file(tmp.path(), "001-cli-invoke", "hash").unwrap();
         assert_eq!(hash1, expected1.hash);
 
         let (m2, t2) = test_request(b"second", 1001);
         let expected2 = vlinder_core::domain::workers::dag::build_dag_node(&m2, &hash1);
         worker.on_observable_message(&m2, t2);
 
-        let dir2 = "19700101-001641.000-support-agent-request";
-        let hash2 = git(
-            tmp.path(),
-            &["show", &format!("{}:{}/hash", SESS1_REF, dir2)],
-        )
-        .unwrap();
+        let hash2 = show_session_file(tmp.path(), "002-support-agent-request", "hash").unwrap();
         assert_eq!(hash2, expected2.hash, "second hash should chain from first");
         assert_ne!(hash1, hash2);
     }
 
-    // --- Checkpoint tests ---
+    // --- Checkpoint tests (ADR 111) ---
 
     #[test]
     fn request_subtree_contains_checkpoint_file() {
@@ -1474,12 +1554,8 @@ mod tests {
         }
         worker.on_observable_message(&msg, ts);
 
-        let dir = "19700101-001641.000-support-agent-request";
-        let checkpoint = git(
-            tmp.path(),
-            &["show", &format!("{}:{}/checkpoint", SESS1_REF, dir)],
-        )
-        .unwrap();
+        let checkpoint =
+            show_session_file(tmp.path(), "002-support-agent-request", "checkpoint").unwrap();
         assert_eq!(checkpoint, "summarize");
     }
 
@@ -1492,11 +1568,7 @@ mod tests {
         let (msg, ts) = test_request(b"prompt", 1001);
         worker.on_observable_message(&msg, ts);
 
-        let dir = "19700101-001641.000-support-agent-request";
-        let result = git(
-            tmp.path(),
-            &["show", &format!("{}:{}/checkpoint", SESS1_REF, dir)],
-        );
+        let result = show_session_file(tmp.path(), "002-support-agent-request", "checkpoint");
         assert!(result.is_err(), "no checkpoint file when not set");
     }
 
@@ -1512,7 +1584,7 @@ mod tests {
         }
         worker.on_observable_message(&msg, ts);
 
-        let body = git(tmp.path(), &["log", "-1", "--format=%b", SESS1_REF]).unwrap();
+        let body = git(tmp.path(), &["log", "-1", "--format=%b", "main"]).unwrap();
         assert!(
             body.contains("Checkpoint: handle_result"),
             "commit body should contain Checkpoint trailer, got: {}",

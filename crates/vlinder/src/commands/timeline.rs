@@ -137,11 +137,23 @@ fn route(dir: &Path, session_id: &str) {
 /// state to the DAG store so that `agent run` resumes from it, and prints
 /// trailer information so the user knows where they are.
 fn checkout(dir: &Path, target: &str) {
-    let status = Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        .args(["checkout", target])
-        .status();
+    // If target looks like a commit hash, create a branch to avoid detached HEAD.
+    // Branch names and "main" pass through as-is.
+    let is_hash = target.len() >= 7 && target.chars().all(|c| c.is_ascii_hexdigit());
+    let status = if is_hash {
+        let branch_name = format!("explore-{}", &target[..7]);
+        Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(["checkout", "-b", &branch_name, target])
+            .status()
+    } else {
+        Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(["checkout", target])
+            .status()
+    };
 
     match status {
         Ok(s) if !s.success() => {
@@ -290,11 +302,9 @@ fn repair(dir: &Path, path: Option<PathBuf>) {
     }
 
     // Insert timeline row (ADR 093)
+    let session_id = session_trailer.as_deref().unwrap_or("");
     let timeline_id = if let Some(ref store) = dag_store {
-        if let Err(e) = store.ensure_main_timeline() {
-            eprintln!("Warning: failed to ensure main timeline: {}", e);
-        }
-        match store.create_timeline(&branch_name, Some(1), Some(&head_sha)) {
+        match store.create_timeline(&branch_name, session_id, None, Some(&head_sha)) {
             Ok(id) => {
                 println!("Timeline {} created for branch '{}'.", id, branch_name);
                 Some(id)
@@ -412,8 +422,6 @@ fn promote(dir: &Path) {
 
     // Update timeline rows (ADR 093): seal old main, rename both
     if let Some(store) = open_dag_store(&CliConfig::load()) {
-        let _ = store.ensure_main_timeline();
-
         if let Ok(Some(old_main)) = store.get_timeline_by_branch("main") {
             if let Err(e) = store.seal_timeline(old_main.id) {
                 eprintln!("Warning: failed to seal old main timeline: {}", e);

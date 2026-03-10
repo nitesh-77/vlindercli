@@ -466,11 +466,9 @@ mod tests {
             fn set_checkout_state(&self, _: &str, _: &str) -> Result<(), String> {
                 Ok(())
             }
-            fn ensure_main_timeline(&self) -> Result<i64, String> {
-                Ok(1)
-            }
             fn create_timeline(
                 &self,
+                _: &str,
                 _: &str,
                 _: Option<i64>,
                 _: Option<&str>,

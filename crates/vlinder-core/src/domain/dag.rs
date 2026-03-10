@@ -134,6 +134,7 @@ pub struct SessionSummary {
 pub struct Timeline {
     pub id: i64,
     pub branch_name: String,
+    pub session_id: String,
     pub parent_timeline_id: Option<i64>,
     /// Submission hash at the fork point (if forked from a parent).
     pub fork_point: Option<String>,
@@ -194,13 +195,11 @@ pub trait DagStore: Send + Sync {
     // Timeline methods (ADR 093)
     // -------------------------------------------------------------------------
 
-    /// Ensure timeline row 1 ("main") exists. Returns its ID (always 1).
-    fn ensure_main_timeline(&self) -> Result<i64, String>;
-
     /// Create a new timeline. Returns the auto-generated ID.
     fn create_timeline(
         &self,
         branch_name: &str,
+        session_id: &str,
         parent_id: Option<i64>,
         fork_point: Option<&str>,
     ) -> Result<i64, String>;
@@ -338,24 +337,10 @@ impl DagStore for InMemoryDagStore {
         Ok(())
     }
 
-    fn ensure_main_timeline(&self) -> Result<i64, String> {
-        let mut timelines = self.timelines.lock().unwrap();
-        if !timelines.iter().any(|t| t.id == 1) {
-            timelines.push(Timeline {
-                id: 1,
-                branch_name: "main".to_string(),
-                parent_timeline_id: None,
-                fork_point: None,
-                created_at: Utc::now(),
-                broken_at: None,
-            });
-        }
-        Ok(1)
-    }
-
     fn create_timeline(
         &self,
         branch_name: &str,
+        session_id: &str,
         parent_id: Option<i64>,
         fork_point: Option<&str>,
     ) -> Result<i64, String> {
@@ -364,6 +349,7 @@ impl DagStore for InMemoryDagStore {
         timelines.push(Timeline {
             id,
             branch_name: branch_name.to_string(),
+            session_id: session_id.to_string(),
             parent_timeline_id: parent_id,
             fork_point: fork_point.map(|s| s.to_string()),
             created_at: Utc::now(),
