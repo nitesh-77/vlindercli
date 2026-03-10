@@ -137,11 +137,23 @@ fn route(dir: &Path, session_id: &str) {
 /// state to the DAG store so that `agent run` resumes from it, and prints
 /// trailer information so the user knows where they are.
 fn checkout(dir: &Path, target: &str) {
-    let status = Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        .args(["checkout", target])
-        .status();
+    // If target looks like a commit hash, create a branch to avoid detached HEAD.
+    // Branch names and "main" pass through as-is.
+    let is_hash = target.len() >= 7 && target.chars().all(|c| c.is_ascii_hexdigit());
+    let status = if is_hash {
+        let branch_name = format!("explore-{}", &target[..7]);
+        Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(["checkout", "-b", &branch_name, target])
+            .status()
+    } else {
+        Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(["checkout", target])
+            .status()
+    };
 
     match status {
         Ok(s) if !s.success() => {

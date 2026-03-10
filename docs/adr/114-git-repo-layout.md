@@ -104,25 +104,31 @@ timeline file stays as the record of what failed.
 
 `diff timelines/main timelines/retry-1` shows exactly what diverged.
 
-### No git branches for repair
+### Commits follow HEAD
 
-Everything stays on `main`. No git branches, no merge conflicts. SQL drives
-the fork/repair/promote logic. The `timelines/` folder is the git-side
-projection of SQL timeline rows.
+The GitDagWorker writes to `HEAD`, not a hardcoded `refs/heads/main`. By
+default HEAD is on `main`, so normal operation commits there. When the user
+checks out an older commit (via `vlinder timeline checkout <hash>`), a branch
+is auto-created (`explore-<short-hash>`) so the agent writes to that branch
+instead of advancing main.
 
-`git log -p -- todoapp/ses-xyz/timelines/` tells the complete story of every
-fork, repair, and promote for that session.
+This means:
+- `checkout main` always returns to the latest state
+- Exploring old states creates branches, preserving main
+- `git log --all --graph` shows the full branch structure
 
 ### No orphan chains
 
-All sessions commit to `main`. No `refs/sessions/` refs. Standard git commands
-work:
+No `refs/sessions/` refs. Standard git commands work:
 
 - `git log` — full history across all agents and sessions
 - `git log -- todoapp/` — history for one agent
 - `git log -- todoapp/ses-xyz/` — history for one session
 - `git checkout main` — back to latest
 - `git diff HEAD~1` — what the last message added
+
+`git log -p -- todoapp/ses-xyz/timelines/` tells the complete story of every
+fork, repair, and promote for that session.
 
 ### Metadata at agent level
 
@@ -151,6 +157,7 @@ use cases, then deprecated.
 - `diff timelines/a timelines/b` compares any two paths
 - `git log -p -- timelines/` shows the full fork/repair history
 - No platform-specific ref naming to learn
-- No git branches needed for repair — linear history on main
+- Checking out old commits auto-creates branches — main is never corrupted
+- Working tree always populated — `ls` shows folder structure
 - Supersedes the orphan-chain approach from the sessions-as-islands implementation
 - `vlinder timeline` kept as git passthrough until `vlinder session` is complete
