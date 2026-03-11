@@ -1,40 +1,25 @@
 # VlinderCLI
 
-AI agents that can time travel.
+**Debug and repair AI agents.**
 
-### The Inversion
+### The Problem
 
-The traditional software lifecycle is a funnel that eliminates non-determinism.
-Development is chaotic, staging narrows the space, and production is the most
-controlled substrate — known inputs, tested paths, bounded behavior. Decades of
-tooling (CI, observability, canary deploys) exist to keep it that way.
+Traditional software gets more deterministic toward production — CI, observability, and canary deploys exist to keep it that way. AI agents invert this. The model is stochastic: same input, different output. Human input is unconstrained. State accumulates unpredictably. Production becomes the *most* non-deterministic stage in the lifecycle — the exact opposite of what every existing tool assumes.
 
-LLMs invert this. The model is stochastic: same input, different output. Human
-input is unconstrained: no schema, no validation, infinite variety. State
-accumulates unpredictably: context windows, conversation history, tool results
-feeding back into prompts. Production becomes the *most* non-deterministic stage
-in the lifecycle — the exact opposite of what every existing tool assumes.
+Developers can detect AI failures. They cannot easily replay and repair them.
 
-Current observability is built for the old model. Metrics, traces, and logs
-assume that if something worked in staging, it works in production. That
-assumption breaks when the system's behavior is fundamentally unbounded. We are
-building for the new reality: infrastructure where non-determinism isn't a bug
-to eliminate, but a property to observe, navigate, and reason about.
+Today: agent fails → inspect logs → reconstruct prompt → rerun locally → test new prompt → redeploy.
 
-### The Bet
+With VlinderCLI: agent fails → rewind to failure → inspect state → test fix → replay.
 
-Agent systems are opaque. Something went wrong three turns ago and you'll never
-know what. VlinderCLI makes every side effect (inference calls, storage writes,
-delegation results) a content-addressed snapshot in a Merkle DAG. Fork a
-timeline, replay from any point, diff what changed.
+### The Solution
 
-### Why It Matters
+VlinderCLI captures every side effect (inference calls, storage writes, delegation results) as a content-addressed snapshot. Fork a session, replay from any point, diff what changed.
 
-- **Reason**: A domain model that maps to how you think about agent infrastructure.
-- **Debug**: Something broke. Travel back, see exactly what the agent saw, what it did, and why. 
-- **Experiment**: Fork a timeline, try a different prompt or model, compare the outcomes.
-- **Prove**: Every side effect has a hash. Auditable by construction, not by convention.
-- **Time Travel**: Checkout any point in history, repair what is broken, keep everything else, and promote the fixed timeline.
+- **Rewind** — go back to the exact step where the failure happened
+- **Experiment** — branch execution and test alternative prompts, models, or code
+- **Repair** — correct downstream actions and replay the workflow
+- **Deploy** — works with existing agent frameworks and cloud infrastructure
 
 ### Domain Model
 
@@ -42,22 +27,18 @@ The system is built around a few core concepts:
 
 - **Agent**: A unit of behavior with declared requirements (models, services, mounts)
 - **Model**: An inference or embedding capability (e.g., claude-sonnet, nomic-embed)
-- **Fleet**: A deployment configuration for a collection of agents
-- **Runtime**: Executes agents via queue-based message passing
+- **Fleet**: A group of cooperating agents with delegation
+- **Session**: An independent conversation with content-addressed history
 - **Services**: Infrastructure capabilities exposed to agents (infer, embed, storage)
-- **Timeline**: A git repository of every side effect — each message is a commit, forkable and diffable
-- **State**: Versioned agent state (values, snapshots, state commits) linked to the timeline via content-addressed hashes
-- **Route**: The full protocol trace through a fleet — every agent stop from user input to user output
+- **State**: Versioned agent state linked to the session via content-addressed hashes
 
 For the complete domain vocabulary, see [`DOMAIN_MODEL.md`](DOMAIN_MODEL.md).
 
 ### Who It's For
 
-Developers who want to understand what their agents are doing, and prove it.
-- Teams building AI features that need reproducibility and auditability
-- Startups who need to control inference costs and infrastructure
+- Teams building AI agents that need to debug failures quickly
+- Developers who want to understand exactly what their agents did, and why
 - Anyone who's debugged an agent by staring at logs and wants something better
-
 
 ---
 

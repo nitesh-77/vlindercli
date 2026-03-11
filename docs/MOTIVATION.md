@@ -1,7 +1,9 @@
 # Why VlinderCLI Exists
 
-AI is often presented as magic: emergent, inexplicable, beyond reach. Scratch the surface: it's engineering. Good engineering, but engineering. Understandable. Deconstructable. Buildable.
+When AI agents fail in production, teams spend hours reconstructing what happened — manually tracing prompts, logs, and external actions to find the root cause. Current observability tools can detect that something went wrong. They cannot help you replay and repair it.
 
-Well-engineered systems evoke mechanical sympathy. A beautifully made car makes you want to learn more about engines, buy a classic, spend weekends in the garage. The mental models reveal themselves. You understand by using.
+Traditional software gets more controlled toward production. AI agents get less. The model is non-deterministic, human input is unconstrained, and state accumulates unpredictably. Every existing debugging tool assumes the opposite.
 
-VlinderCLI is an attempt to bring that to Agentic Infrastructure. Reason about them with a clean domain model. Debug them by rewinding to any point. Experiment by forking a timeline and trying something different. Prove what happened, because every step is auditable and reproducible.
+VlinderCLI is infrastructure built for this new reality. Every decision your agent makes is captured as a content-addressed snapshot. When something goes wrong, rewind to the exact failure, inspect the state, test a fix, and replay. No log reconstruction. No guesswork.
+
+Debug and repair, not just observe.
