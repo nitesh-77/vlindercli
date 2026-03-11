@@ -149,7 +149,7 @@ A composition boundary for agents: name, entry-point agent, agents map.
 
 ## Protocol Types
 
-Five typed messages flow through the queue (ADR 018, 044). Every message carries `protocol_version`, `submission`, and `session` for traceability.
+Six typed messages flow through the queue (ADR 018, 044). Every message carries `protocol_version`, `submission`, and `session` for traceability.
 
 ### Message Flow
 
@@ -159,6 +159,7 @@ Harness --InvokeMessage--> Runtime --RequestMessage--> Service
         <--CompleteMessage--
 
 Agent --DelegateMessage--> Agent (via runtime)
+Harness --ForkMessage--> Runtime (session fork)
 ```
 
 ### InvokeMessage
@@ -181,6 +182,10 @@ Runtime -> Harness. Submission finished. Carries final `state` hash and `Contain
 
 Agent -> Agent (via runtime). One agent invoking another. Carries `caller_agent`, `target_agent`, `reply_subject`, and `DelegateDiagnostics`.
 
+### ForkMessage
+
+Harness -> Runtime. Creates a session branch from a specified state. Carries `source_session`, `source_state`, and `branch_name`.
+
 Location: `domain/message/` (one file per message type)
 
 ### ExpectsReply Trait
@@ -189,7 +194,7 @@ Type-level enforcement of request-response pairing. Terminal messages (`Complete
 
 ### ObservableMessage
 
-Unified enum wrapping all five message types for polymorphic handling (e.g., DAG recording).
+Unified enum wrapping all six message types for polymorphic handling (e.g., DAG recording).
 
 ### HarnessType
 
@@ -419,7 +424,7 @@ Each leaf crate implements one or more domain traits.
 |------|------|-------------|
 | `ContainerRuntime` | `Runtime` impl | Executes OCI agents via Podman pods |
 
-Tick-loop orchestrator: polls invoke/delegate queues, dispatches to containers via HTTP POST `/handle`, manages the request-response lifecycle.
+Tick-loop orchestrator: polls invoke/delegate queues, dispatches to containers via HTTP POST `/invoke`, manages the request-response lifecycle.
 
 ## Inference (`vlinder-ollama`, `vlinder-infer-openrouter`)
 

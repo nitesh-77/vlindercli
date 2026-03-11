@@ -1,16 +1,19 @@
-# System Timeline: How It Works
+# Sessions and State: How It Works
 
-Two storage systems, both git-shaped, linked at turn boundaries.
+Two storage systems, both content-addressed, linked at turn boundaries.
 
-## The Two Repos
+## The Two Stores
 
-**Conversation store** (`~/.vlinder/conversations/`): a real git repo.
-Each commit is a user message or agent response. `timeline log` and
-`timeline fork` operate here.
+**Merkle DAG** (SQL database): the primary store. Every side effect
+(invocations, service requests, responses, completions) is a
+content-addressed node in a Merkle chain. `session list`, `session fork`,
+and `session promote` operate here.
 
-**State store** (`agents/<name>/data/state.db`) SQLite implementing the
-git object model. `kv_put`/`kv_get` data lives here. Explained in detail
-below.
+**Conversations repo** (`~/.vlinder/conversations/`): a read-only git
+projection of the DAG. Useful for inspection with standard git tools.
+
+**State store** (`agents/<name>/data/state.db`): SQL database implementing
+git's object model. `kv_put`/`kv_get` data lives here.
 
 They link via the `State:` trailer on agent response commits:
 
@@ -28,17 +31,17 @@ State: sc1              <-- points into the state store
 ## Walkthrough
 
 See [TIMELINE_WALKTHROUGH.md](TIMELINE_WALKTHROUGH.md) for a step-by-step
-grocery list example showing the `git log` at every turn, through forking
+grocery list example showing state at every turn, through forking
 and switching back.
 
 ## Sequence: Normal Run With State Continuity
 
 ```
-   User              CLI                ConversationStore        StateStore         Agent
+   User              CLI                DAG / ConvStore          StateStore         Agent
     │                 │                       │                      │                │
     │  agent run      │                       │                      │                │
     │────────────────>│                       │                      │                │
-    │                 │  git log *_agent_*    │                      │                │
+    │                 │  find latest state    │                      │                │
     │                 │──────────────────────>│                      │                │
     │                 │  State: sc1           │                      │                │
     │                 │<─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ │                      │                │
@@ -48,8 +51,8 @@ and switching back.
     │                 │                       │                      │                │
     │  "add buy milk" │                       │                      │                │
     │────────────────>│                       │                      │                │
-    │                 │  commit: user input   │                      │                │
-    │                 │──────────────────────>│  (commit aaa1111)    │                │
+    │                 │  record: user input   │                      │                │
+    │                 │──────────────────────>│                      │                │
     │                 │                       │                      │                │
     │                 │  invoke(input, state=sc1)                    │                │
     │                 │─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ >│
@@ -62,45 +65,47 @@ and switching back.
     │                 │                  response: "Added: buy milk" │                │
     │                 │<─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ │
     │                 │                       │                      │                │
-    │                 │  commit: agent resp   │                      │                │
+    │                 │  record: agent resp   │                      │                │
     │                 │  + State: sc2         │                      │                │
-    │                 │──────────────────────>│  (commit aaa2222)    │                │
+    │                 │──────────────────────>│                      │                │
     │                 │                       │                      │                │
     │  "Added: ..."   │                       │                      │                │
     │<────────────────│                       │                      │                │
 ```
 
-On the next `agent run`, the cycle starts again: `git log` finds `State: sc2`
-from commit `aaa2222`, and the agent picks up where it left off.
+On the next `agent run`, the cycle starts again: the platform finds
+`State: sc2` and the agent picks up where it left off.
 
-## Sequence: Timeline Fork
+## Sequence: Session Fork
 
 ```
-   User              CLI                ConversationStore
+   User              CLI                Session Store
     │                 │                       │
-    │  timeline log   │                       │
-    │────────────────>│  git log --reverse    │
+    │  session list   │                       │
+    │────────────────>│  query sessions       │
     │                 │──────────────────────>│
-    │                 │  all commits          │
+    │                 │  session history      │
     │                 │<─ ─ ─ ─ ─ ─ ─ ─ ─ ─  ─│
-    │  (shows timeline)                       │
+    │  (shows turns)  │                       │
     │<────────────────│                       │
     │                 │                       │
-    │  timeline fork  │                       │
-    │  aaa2222        │                       │
+    │  session fork   │                       │
+    │  ses-abc --from │                       │
+    │  sc2 --name fix │                       │
     │────────────────>│                       │
-    │                 │  git checkout -b      │
-    │                 │  fork-aaa22222 aaa2222│
+    │                 │  create branch "fix"  │
+    │                 │  from state sc2       │
     │                 │──────────────────────>│
-    │                 │                       │  HEAD moves to new branch
-    │                 │                       │  at commit aaa2222
+    │                 │                       │
     │  "Forked..."    │                       │
     │<────────────────│                       │
     │                 │                       │
     │  agent run      │                       │
-    │────────────────>│  git log *_agent_*    │
-    │                 │──────────────────────>│  (follows fork branch)
-    │                 │  State: sc1           │  (from aaa2222, not later)
+    │  todoapp        │                       │
+    │  --branch fix   │                       │
+    │────────────────>│  find state for "fix" │
+    │                 │──────────────────────>│  (follows fix branch)
+    │                 │  State: sc2           │  (not sc3)
     │                 │<─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ │
     │                 │                       │
     │                 │  Agent sees state     │
@@ -108,33 +113,22 @@ from commit `aaa2222`, and the agent picks up where it left off.
     │                 │                       │
 ```
 
-After the fork, the conversation store has two branches:
+After the fork, the session has two branches:
 
 ```
-main:          ... → aaa2222 → bbb1111 → bbb2222 → bbb3333 → bbb4444
-                         │
-fork-aaa22222:           └→ (new commits land here)
+main:       ... → sc1 → sc2 → sc3 → sc4
+                          │
+fix:                      └→ (new state commits land here)
 ```
 
-`git log` on each branch only sees its own history. `latest_state_for_agent()`
-follows whatever branch HEAD points to; no branch-awareness in Rust code.
+Both branches share the same state store. The fork just reads from
+a different point in the same append-only store. No data is copied.
 
-## The State Store: Git's Object Model in SQLite
+## The State Store: Git's Object Model in SQL
 
-The state store doesn't use git. It uses git's *model*; the same three
-object types, the same content-addressing, the same append-only semantics
-implemented as three SQLite tables.
-
-### Why not just use git?
-
-Agent state is hot data: many small writes per invocation, read on every
-`kv_get`. Git's on-disk format (loose objects, packfiles, index) adds
-overhead that makes no sense for this access pattern. SQLite gives us the
-same guarantees with better performance for small transactional writes.
-
-The conversation store (one commit per user/agent turn) is a natural fit
-for real git. The state store (many writes per turn) is a natural fit for
-SQLite with git's model.
+The state store uses git's *model* — the same three object types,
+the same content-addressing, the same append-only semantics —
+implemented as SQL tables.
 
 ### The Three Object Types
 
@@ -147,7 +141,7 @@ Git has blobs, trees, and commits. The state store mirrors this exactly:
 │  blob   = raw content    →   Value    = raw bytes (JSON, etc.)  │
 │  tree   = path→blob map  →   Snapshot = path→value_hash map     │
 │  commit = tree + parent  →   StateCommit = snapshot + parent    │
-│  HEAD   = mutable ref    →   State trailer in conversation git  │
+│  HEAD   = mutable ref    →   State ref in DAG node              │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -206,10 +200,6 @@ Step 6: Store the state commit (idempotent)
 Step 7: Return "sc2..." to the caller
 ```
 
-The caller (ObjectServiceWorker) returns this hash to the harness, which
-threads it through subsequent operations and eventually records it as the
-`State:` trailer on the agent response commit.
-
 ### How a Read Works
 
 When an agent calls `kv_get("/todos.json")` with state `sc2`:
@@ -233,46 +223,16 @@ Step 4: Load value
 
 Three hops: commit → snapshot → value. Each hop is a primary key lookup.
 
-### How Writes Chain
-
-Multiple writes in one invocation form a chain:
-
-```
-kv_put("/todos.json", v1)     state="" (root)
-   → value v1, snapshot s1{todos→v1}, commit sc1(s1, "")
-
-kv_put("/config.json", v2)    state="sc1"
-   → value v2, snapshot s2{todos→v1, config→v2}, commit sc2(s2, sc1)
-
-kv_put("/todos.json", v3)     state="sc2"
-   → value v3, snapshot s3{todos→v3, config→v2}, commit sc3(s3, sc2)
-```
-
-Each write creates a new snapshot that includes all paths from the parent
-plus the changed one. Old values and snapshots remain in the database —
-they're never deleted, only shadowed by newer commits.
-
-```
-sc1 → s1 → {todos→v1}
- │
-sc2 → s2 → {todos→v1, config→v2}
- │
-sc3 → s3 → {todos→v3, config→v2}
-
-v1, v2, v3 all still exist. s1, s2, s3 all still exist.
-Only the pointer (which state commit the platform uses) changes.
-```
-
 ### Why This Matters for Forking
 
-The state store is shared across timelines. When you fork:
+The state store is shared across branches. When you fork:
 
 ```
 main branch:          ... → agent(State: sc3) → ...
-fork branch:          ... → agent(State: sc1) → ...
+fix branch:           ... → agent(State: sc1) → ...
 ```
 
-Both branches reference hashes in the *same* `state.db`. The fork branch
+Both branches reference hashes in the *same* state database. The fix branch
 reads from `sc1`, which resolves to snapshot `s1`, which only has `todos→v1`.
 The main branch reads from `sc3`, which resolves to `s3`, which has both
 updated todos and config.
@@ -282,10 +242,10 @@ different point in the same append-only store.
 
 ## Key Insight
 
-The conversation store is a real git repo. Branches, log, and checkout
-are not reimplemented, they are actual git operations. The platform
-delegates timeline semantics to git rather than building its own.
+The primary store is a content-addressed Merkle DAG in a SQL database.
+The conversations repo is a read-only git projection — useful for
+inspection with standard git tools, but not a system component.
 
 The state store uses git's *model* (content-addressed objects, snapshots,
-commits) but not git's *tool*, SQLite is a better fit for the access
-pattern. The two systems link at turn boundaries via the `State:` trailer.
+commits) but not git's *tool* — SQL is a better fit for the access
+pattern. The two systems link at turn boundaries via the `State:` ref.

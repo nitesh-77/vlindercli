@@ -91,13 +91,13 @@ llama_level = "error"    # suppress llama.cpp noise
 **Environment variable** (overrides config):
 
 ```bash
-VLINDER_LOGGING_LEVEL=debug vlinder agent run -p agents/echo-agent/
+VLINDER_LOGGING_LEVEL=debug vlinder agent run echo-agent
 ```
 
 **`RUST_LOG` env filter** (overrides everything, full tracing-subscriber syntax):
 
 ```bash
-RUST_LOG=vlindercli::runtime=trace vlinder agent run -p agents/echo-agent/
+RUST_LOG=vlindercli::runtime=trace vlinder agent run echo-agent
 ```
 
 ### File (JSONL)
@@ -212,8 +212,8 @@ SHA "a1b2c3d4"
     ├── Logs:          grep a1b2c3d4 ~/.vlinder/logs/*.jsonl
     │                  (full execution trace)
     │
-    ├── Timeline:      cd ~/.vlinder/conversations/<agent> && git show a1b2c3d4
-    │                  (what the user said, what the agent replied)
+    ├── Conversations: cd ~/.vlinder/conversations/<agent> && git show a1b2c3d4
+    │                  (read-only git projection of the session)
     │
     ├── State:         git log --format='%s%n%b' | grep -A1 'Submission: a1b2c3d4'
     │                  (State: trailer → state commit hash in agent's state.db)
@@ -266,5 +266,5 @@ it broke.
 
 - [ADR 058](adr/058-structured-logging.md): Design decision for structured logging
 - [ADR 057](adr/057-support-fleet.md): Support fleet and log-analyst agent
-- [Timeline](TIMELINE.md): How SHAs connect to the conversation store
+- [Sessions and State](TIMELINE.md): How SHAs connect to the session store
 - [Request Flow](REQUEST_FLOW.md): How requests travel through the system

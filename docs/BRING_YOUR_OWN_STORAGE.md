@@ -33,7 +33,7 @@ With external backends, the responsibility splits.
 │                                                        │
 │  - Provides the current state hash at invocation start │
 │  - Records the final state hash at invocation end      │
-│  - Manages the conversation store (git)                │
+│  - Manages session branches (fork/promote)             │
 │  - Does NOT touch the agent's data                     │
 └──────────────────────┬─────────────────────────────────┘
                        │ state hash
@@ -139,9 +139,9 @@ gives you connection pooling, replication, and MVCC for free.
 
 ### What forking looks like
 
-When the user runs `vlinder timeline fork`, the platform switches git
-branches. The next invocation receives the state hash from the fork
-point. The agent's Postgres tables don't change; the agent just starts
+When the user runs `vlinder session fork`, the platform creates a
+new branch in the session. The next invocation receives the state
+hash from the fork point. The agent's Postgres tables don't change; the agent just starts
 reading from an older state commit. Since everything is append-only, the
 old data is still there.
 
@@ -219,7 +219,7 @@ Regardless of backend, the contract between agent and platform is:
 |----------------|-------|
 | Provide current state hash at invocation start | Platform |
 | Record final state hash at invocation end | Platform |
-| Manage git branches (timeline fork/log) | Platform |
+| Manage session branches (fork/promote) | Platform |
 | Store and retrieve data | Agent |
 | Ensure append-only writes | Agent |
 | Compute deterministic hashes | Agent |

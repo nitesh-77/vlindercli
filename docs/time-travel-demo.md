@@ -1,8 +1,8 @@
 # Time Travel Demo
 
-AI agents that can time travel.
+Debug and repair AI agents.
 
-This walkthrough uses vlinder's todoapp agent to build a grocery list, simulates a service failure mid-conversation, then repairs the timeline.
+This walkthrough uses vlinder's todoapp agent to build a grocery list, simulates a service failure mid-conversation, then repairs the session.
 
 Every step below uses real commands. Every side effect is recorded.
 Nothing is hidden.
@@ -10,7 +10,7 @@ Nothing is hidden.
 ## Clone and build
 
 ```bash
-git clone https://github.com/anthropics/vlindercli.git
+git clone https://github.com/vlindercli/vlindercli.git
 cd vlindercli
 just build
 ```
@@ -37,23 +37,22 @@ just build-todoapp
 
 ## What happens when you "add milk"
 
-The todoapp is a state machine. Each service call is a separate
-round-trip with the platform — and each one becomes a git commit.
+The todoapp calls platform services via sidecar DNS hostnames. Each
+service call is a separate round-trip — and each one is recorded
+in the session's Merkle DAG.
 
 ```mermaid
 sequenceDiagram
     participant User
     participant CLI as cli
     participant Agent as todoapp
-    participant Infer as infer (openrouter)
     participant KV as kv (sqlite)
+    participant Infer as infer (openrouter)
     participant Embed as embed (ollama)
     participant Vec as vector (sqlite)
 
     User->>CLI: "add milk"
     CLI->>Agent: invoke
-    Agent->>Infer: infer "parse intent"
-    Infer-->>Agent: {cmd: add, item: "milk"}
     Agent->>KV: kv_get /todos.json
     KV-->>Agent: []
     Agent->>KV: kv_put /todos.json
@@ -66,8 +65,6 @@ sequenceDiagram
     CLI-->>User: Added: milk
 ```
 
-Ten commits. One user interaction. Every arrow is recorded.
-
 ---
 
 ## The plan
@@ -75,19 +72,20 @@ Ten commits. One user interaction. Every arrow is recorded.
 ```
   main:  milk ── bread ── ERROR
                     │
-                    │  checkout here, then repair
+                    │  fork here, then repair
                     │
-  repair:           └── eggs
+  fix:              └── eggs
                           │
                           └── promoted to main
 ```
 
 ---
 
-## Step 1: Add two items
+## Step 1: Deploy and add two items
 
 ```bash
-$VLINDER agent run -p agents/todoapp
+$VLINDER agent deploy -p agents/todoapp
+$VLINDER agent run todoapp
 ```
 
 ```
@@ -97,9 +95,6 @@ Added: milk
 > add bread
 Added: bread
 ```
-
-Each turn produces several git commits in `~/.vlinder/conversations/` —
-one per side effect (invoke, service request, response, complete).
 
 ---
 
@@ -123,7 +118,7 @@ Error: embedding failed — connection refused
 ```
 
 The agent needs Ollama for embedding. With Ollama down, the
-request fails. The error is recorded in the timeline.
+request fails. The error is recorded in the session.
 
 ```
 > exit
@@ -141,100 +136,58 @@ Refresh the browser — "Ollama is running" again.
 
 ---
 
-## Step 4: Inspect the timeline
-
-Every side effect is a commit. Filter by message type to see
-the conversation as you experienced it — just the inputs and outputs:
+## Step 4: Inspect the session
 
 ```bash
-$VLINDER timeline log --oneline --grep="^invoke:" --grep="^complete:"
+$VLINDER session list todoapp
 ```
 
-```
-7d8e9f0 complete: todoapp → cli    ← error recorded here
-f6a7b8c invoke: cli → todoapp
-b3c4d5e complete: todoapp → cli
-9c0d1e2 invoke: cli → todoapp
-f1a2b3c complete: todoapp → cli
-3e4f5a6 invoke: cli → todoapp
-```
-
-Six commits — three invoke/complete pairs. The first complete is the
-failed turn. Now drill into that specific invocation to see why:
-
-```bash
-$VLINDER timeline log --oneline --grep="Submission: sub-003"
-```
-
-```
-7d8e9f0 complete: todoapp → cli
-8b9c0d1 response: embed.ollama → todoapp       ← embedding failed
-2e3f4a5 request: todoapp → embed.ollama
-a0b1c2d response: infer.openrouter → todoapp
-d4e5f6a request: todoapp → infer.openrouter
-f6a7b8c invoke: cli → todoapp
-```
-
-There it is. The inference request to OpenRouter succeeded, but the
-embedding request to Ollama failed. Every service call is a commit.
-
-> **Curious?** The conversation repo is a real git repo. Go look:
-> `ls ~/.vlinder/conversations/`
-> Every message is a directory. Every field is a file. `git log` works.
+Find the session ID and inspect its history. Identify the last
+successful turn — the one where bread was added.
 
 ---
 
-## Step 5: Travel back
-
-Note the bread complete SHA (`b3c4d5e`) — that's the last good point.
+## Step 5: Fork from the last good turn
 
 ```bash
-$VLINDER timeline checkout b3c4d5e
+$VLINDER session fork <session-id> --from <bread-state-hash> --name fix-eggs
 ```
 
-```
-Checked out: complete: todoapp → cli
-  Session:    ses-...
-  Submission: sub-002
-  State:      <state-hash>
-```
-
-HEAD is now at bread. The error is still on `main` but no longer here.
+This creates a new branch from the state after bread was added.
+The error turn is on `main`, not on the fork.
 
 ---
 
-## Step 6: Repair the timeline
+## Step 6: Repair — re-add the failed item
 
 ```bash
-$VLINDER timeline repair -p agents/todoapp
+$VLINDER agent run todoapp --branch fix-eggs
 ```
 
-Creates a `repair-2026-02-13` branch and drops into a REPL with
-the agent's state restored to the bread commit.
-
 ```
+Resuming from state <bread-state-hash>…
+> list
+1. milk
+2. bread
+
 > add eggs
 Added: eggs
 
 > exit
 ```
 
-Eggs are now cleanly recorded. Ollama is back, embedding succeeds.
-
-> **Curious?** The agent's state was restored from a `State:` trailer
-> on the git commit. See `docs/adr/055-state-store-model.md`.
+Eggs are now cleanly recorded on the `fix-eggs` branch.
 
 ---
 
 ## Step 7: Promote
 
 ```bash
-$VLINDER timeline promote
+$VLINDER session promote fix-eggs
 ```
 
 ```
-Labeled old main as: broken-2026-02-13
-Promoted repair-2026-02-13 → main
+Old main sealed as broken-2026-03-11.
 ```
 
 ---
@@ -242,27 +195,20 @@ Promoted repair-2026-02-13 → main
 ## Step 8: Verify
 
 ```bash
-$VLINDER timeline log --oneline --grep="^invoke:" --grep="^complete:"
+$VLINDER agent run todoapp
 ```
 
 ```
-4e5f6a7 complete: todoapp → cli
-l7m8n9o invoke: cli → todoapp
-b3c4d5e complete: todoapp → cli
-9c0d1e2 invoke: cli → todoapp
-f1a2b3c complete: todoapp → cli
-3e4f5a6 invoke: cli → todoapp
+> list
+1. milk
+2. bread
+3. eggs
 ```
 
-Three invoke/complete pairs. No error. Clean history.
+Three items. No error. Clean history.
 
-The broken timeline is still there:
-
-```bash
-$VLINDER timeline log --oneline --grep="^invoke:" --grep="^complete:" broken-2026-02-13
-```
-
-Both timelines share milk and bread. They diverge where Ollama went down.
+The broken session is still there — sealed, never deleted. Both
+timelines coexist. You chose which one is canonical.
 
 ---
 
@@ -270,9 +216,10 @@ Both timelines share milk and bread. They diverge where Ollama went down.
 
 | Step | Command | What it does |
 |------|---------|-------------|
-| Checkout | `timeline checkout` | Move HEAD to a known-good point |
-| Repair | `timeline repair` | Branch off, restore agent state, re-enter REPL |
-| Promote | `timeline promote` | Make the repair branch `main`, label the old one `broken-*` |
+| Inspect | `session list` | See all sessions for an agent |
+| Fork | `session fork --from --name` | Branch from a known-good state |
+| Run on branch | `agent run --branch` | Resume agent from fork point |
+| Promote | `session promote` | Make the fix branch canonical, seal the old one |
 
 No data was lost. Both timelines exist. You chose which one is canonical.
 
@@ -280,17 +227,11 @@ No data was lost. Both timelines exist. You chose which one is canonical.
 
 ## How it works
 
-Every agent interaction produces a git commit with trailers
-(`Session`, `Submission`, `State`) and per-field files in a timestamped
-directory. Fork is `git checkout -b`. Promote is `git branch -f main`.
-The entire conversation history is a content-addressed Merkle DAG
-that happens to be a git repo.
+Every agent interaction is captured as a content-addressed snapshot in
+a Merkle DAG. Fork creates a new branch from any completed turn.
+Promote makes that branch canonical and seals the old one.
 
 The engineering is the product. Start here:
 
 - `docs/MOTIVATION.md` — why this exists
-- `docs/adr/054-two-store-model.md` — conversation store + state store
-- `docs/adr/055-state-store-model.md` — git-like versioned state
-- `docs/adr/081-time-travel-ux.md` — checkout, repair, promote
-- `src/domain/workers/git_dag.rs` — how commits are built
-- `src/commands/timeline.rs` — the timeline commands you just used
+- `docs/VISION.md` — what VlinderCLI is and who it's for

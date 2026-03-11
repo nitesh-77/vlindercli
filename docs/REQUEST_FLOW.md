@@ -18,17 +18,17 @@ User ─► CLI ─► Harness ─► Registry ─► Queue ─► Runtime ─�
 
 ## Step-by-Step Flow
 
-### 1. User runs an agent
+### 1. User deploys and runs an agent
 
 ```bash
-vlinder agent run -p agents/pensieve/
+vlinder agent deploy -p agents/todoapp/
+vlinder agent run todoapp
 ```
 
 ### 2. CLI → Harness
 
-- CLI parses arguments, calls `Daemon::run()`
-- Daemon owns Harness, which provides the API surface
-- Harness calls `deploy_from_path("agents/pensieve/")`
+- CLI parses arguments, connects to the Harness via gRPC
+- Harness manages sessions, submission chaining, and state tracking
 
 ### 3. Harness → Registry
 
@@ -39,55 +39,50 @@ vlinder agent run -p agents/pensieve/
 
 ### 4. Harness → Queue
 
-- Harness queues message to agent's input queue
-- Message contains: payload, reply_to queue, request ID
-
-```
-Queue: "file:///path/to/agent.wasm"
-Message: { payload: "user input", reply_to: "job-xyz-reply", id: 123 }
-```
+- Harness publishes an `InvokeMessage` to the agent's NATS subject
+- Message contains: payload, session, submission, timeline, state hash
 
 ### 5. Runtime → Agent
 
-- `WasmRuntime.tick()` polls Registry for WASM agents
-- Finds message in agent's queue
-- Spawns WASM execution in background thread
-- Provides host functions: `send()`, `get_prompts()`
+- `ContainerRuntime.tick()` polls the invoke queue
+- Finds message, dispatches to the agent's container via HTTP `POST /invoke`
+- The agent runs as an OCI container with a sidecar for service access
 
-### 6. Agent → Workers (via Queue)
+### 6. Agent → Workers (via sidecar DNS)
 
-When agent needs inference, embedding, or storage:
+When the agent needs inference, embedding, or storage:
 
 ```
-Agent calls send({ op: "infer", model: "phi3", prompt: "..." })
+Agent calls http://ollama.vlinder.local:3544/v1/chat/completions
          │
          ▼
-    Queue: "infer"
+    Sidecar intercepts, publishes RequestMessage to NATS
          │
          ▼
-    InferenceServiceWorker.tick()
+    OllamaWorker.tick() picks up the request
          │
          ├── Validates agent declared this model
-         ├── Gets/loads engine from cache
-         └── Runs inference, sends response to reply queue
+         ├── Runs inference via Ollama HTTP API
+         └── Publishes ResponseMessage to reply subject
 ```
 
-**Queue names by service:**
+**NATS subjects by service type:**
 
-| Service | Queue(s) |
-|---------|----------|
-| Inference | `infer` |
-| Embedding | `embed` |
-| Object Storage | `kv-get`, `kv-put`, `kv-delete`, `kv-list` |
-| Vector Storage | `vector-store`, `vector-search`, `vector-delete` |
+| Service | Subject pattern |
+|---------|----------------|
+| Inference (Ollama) | `request.infer.ollama` |
+| Inference (OpenRouter) | `request.infer.openrouter` |
+| Embedding | `request.embed.ollama` |
+| Object Storage | `request.kv.sqlite` |
+| Vector Storage | `request.vec.sqlite` |
 
 ### 7. Response Flow
 
 ```
-Worker ─► reply queue ─► Agent (resumes) ─► Agent output
-                                               │
-                                               ▼
-Runtime ─► job reply queue ─► Harness ─► updates job status ─► User sees result
+Worker ─► ResponseMessage ─► Sidecar ─► Agent (resumes)
+                                              │
+                                              ▼
+Runtime ─► CompleteMessage ─► Harness ─► updates job status ─► User sees result
 ```
 
 ---
@@ -98,25 +93,25 @@ Runtime ─► job reply queue ─► Harness ─► updates job status ─► U
 User        CLI       Harness     Registry      Queue       Runtime      Worker
  │           │           │           │            │            │            │
  │──run─────►│           │           │            │            │            │
- │           │──deploy──►│           │            │            │            │
+ │           │──gRPC────►│           │            │            │            │
  │           │           │─register─►│            │            │            │
  │           │           │◄──ok──────│            │            │            │
  │           │           │create_job►│            │            │            │
  │           │           │◄──job_id──│            │            │            │
- │           │           │─────────send_message──►│            │            │
+ │           │           │──InvokeMessage────────►│            │            │
  │           │           │           │            │            │            │
  │           │           │           │     [tick] │◄──poll─────│            │
  │           │           │           │            │──message──►│            │
- │           │           │           │            │            │──execute───►
+ │           │           │           │            │            │─POST /invoke─►
  │           │           │           │            │            │            │
- │           │           │           │            │   [agent calls send()]  │
+ │           │           │           │            │  [agent calls sidecar]  │
  │           │           │           │            │◄───────────│            │
  │           │           │           │            │────────────────────────►│
  │           │           │           │            │◄────────────────────────│
  │           │           │           │            │───────────►│            │
  │           │           │           │            │            │◄───────────│
  │           │           │           │            │            │            │
- │           │           │           │            │◄──response─│            │
+ │           │           │           │            │◄──Complete──│            │
  │           │◄─────────poll_result──│            │            │            │
  │◄──result──│           │           │            │            │            │
 ```
@@ -125,11 +120,11 @@ User        CLI       Harness     Registry      Queue       Runtime      Worker
 
 ## Key Points
 
-1. **Everything is async via queues:** no direct function calls between components
-2. **Registry is source of truth:** agents, jobs, capabilities all tracked there
+1. **Everything flows through NATS:** no direct function calls between components
+2. **Registry is source of truth:** agents, models, jobs, capabilities all tracked there
 3. **Workers lazy-load backends:** first request triggers engine/storage initialization
 4. **Agent isolation:** each agent has its own storage, keyed by agent_id
-5. **Reply queues:** every request includes a reply_to for the response
+5. **Sidecar DNS:** agents access services via `*.vlinder.local:3544` hostnames
 
 ---
 
