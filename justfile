@@ -106,13 +106,16 @@ reset:
         echo "  - No vlinder processes running"
     fi
 
-    # 2. Podman: nuke everything (this machine only uses Podman for Vlinder)
+    # 2. Podman: remove containers and locally-built images (localhost/*)
+    #    Preserves pulled base images (rust, debian, python, etc.)
     echo "  Cleaning Podman..."
     podman pod rm -a -f 2>/dev/null || true
     podman rm -a -f 2>/dev/null || true
-    podman rmi -a -f 2>/dev/null || true
-    podman system prune -a -f --volumes 2>/dev/null || true
-    echo "  ✓ Podman clean"
+    podman images --format '{{"{{"}}.Repository{{"}}"}}:{{"{{"}}.Tag{{"}}"}}' \
+        | grep '^localhost/' \
+        | while read -r img; do podman rmi -f "$img" 2>/dev/null || true; done
+    podman volume prune -f 2>/dev/null || true
+    echo "  ✓ Podman clean (base images preserved)"
 
     # 3. NATS JetStream streams
     if command -v nats >/dev/null 2>&1 && nc -z localhost 4222 2>/dev/null; then
