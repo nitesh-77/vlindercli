@@ -1,3 +1,0 @@
-# Placeholder WASM file for testing
-# This fixture only needs to exist for Agent::load() validation
-# The actual WASM bytecode is never executed

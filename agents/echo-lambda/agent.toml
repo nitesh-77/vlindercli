@@ -1,6 +1,0 @@
-name = "echo-lambda"
-description = "Test agent that echoes input (Lambda + Web Adapter)"
-runtime = "lambda"
-executable = "282979161612.dkr.ecr.eu-central-1.amazonaws.com/vlinder:echo-lambda"
-
-[requirements]

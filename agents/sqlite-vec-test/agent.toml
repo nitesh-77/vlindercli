@@ -1,7 +1,0 @@
-name = "sqlite-vec-test"
-description = "Minimal agent exercising vector storage only"
-runtime = "container"
-executable = "localhost/sqlite-vec-test:latest"
-vector_storage = "sqlite://data/vectors.db"
-
-[requirements]

@@ -83,18 +83,3 @@ jobs:
           aws s3 cp target/release/vlinderd "s3://${{ secrets.ARTIFACTS_BUCKET }}/latest/vlinderd"
           aws s3 cp target/release/vlinder-lambda-adapter "s3://${{ secrets.ARTIFACTS_BUCKET }}/${{ github.sha }}/vlinder-lambda-adapter"
           aws s3 cp target/release/vlinder-lambda-adapter "s3://${{ secrets.ARTIFACTS_BUCKET }}/latest/vlinder-lambda-adapter"
-      - name: Build and push Lambda agent images to ECR
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.CI_AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.CI_AWS_SECRET_ACCESS_KEY }}
-          AWS_REGION: eu-west-1
-        run: |
-          aws ecr get-login-password --region eu-west-1 | docker login --username AWS --password-stdin ${{ secrets.ECR_REPO_URL }}
-          cp target/release/vlinder-lambda-adapter agents/echo-lambda/
-          docker build -t "${{ secrets.ECR_REPO_URL }}:echo-lambda-${{ github.sha }}" -t "${{ secrets.ECR_REPO_URL }}:echo-lambda-latest" agents/echo-lambda/
-          docker push "${{ secrets.ECR_REPO_URL }}:echo-lambda-${{ github.sha }}"
-          docker push "${{ secrets.ECR_REPO_URL }}:echo-lambda-latest"
-          cp target/release/vlinder-lambda-adapter agents/todoapp/
-          docker build -t "${{ secrets.ECR_REPO_URL }}:todoapp-${{ github.sha }}" -t "${{ secrets.ECR_REPO_URL }}:todoapp-latest" agents/todoapp/
-          docker push "${{ secrets.ECR_REPO_URL }}:todoapp-${{ github.sha }}"
-          docker push "${{ secrets.ECR_REPO_URL }}:todoapp-latest"

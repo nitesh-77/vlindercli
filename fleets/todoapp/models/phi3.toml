@@ -1,4 +1,0 @@
-name = "phi3"
-type = "inference"
-provider = "ollama"
-model_path = "ollama://phi3:latest"

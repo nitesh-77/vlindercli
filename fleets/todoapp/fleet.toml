@@ -1,8 +1,0 @@
-name = "todoapp-fleet"
-entry = "todoapp-orchestrator"
-
-[agents.todoapp-orchestrator]
-path = "agents/todoapp-orchestrator"
-
-[agents.echo-container]
-path = "agents/echo-container"

@@ -1,9 +1,0 @@
-name = "support"
-description = "Grounded support orchestrator that retrieves docs via code-analyst and runtime data via log-analyst, then answers questions or diagnoses problems using a single LLM call."
-runtime = "container"
-executable = "localhost/support-agent:latest"
-
-[requirements]
-
-[requirements.models]
-default = "phi3:latest"

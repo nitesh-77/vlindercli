@@ -1,6 +1,0 @@
-name = "echo"
-description = "Test agent that echoes whatever is sent to it"
-runtime = "lambda"
-executable = "282979161612.dkr.ecr.eu-central-1.amazonaws.com/vlinder:echo"
-
-[requirements]

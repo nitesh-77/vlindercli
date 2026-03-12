@@ -1,6 +1,0 @@
-name = "echo-container"
-description = "Test agent that echoes input (OCI container)"
-runtime = "container"
-executable = "localhost/echo-container:latest"
-
-[requirements]

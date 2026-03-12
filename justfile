@@ -7,60 +7,11 @@ build-sidecar:
     podman build -t localhost/vlinder-podman-sidecar:latest -f crates/vlinder-podman-sidecar/Dockerfile .
 
 # =============================================================================
-# Agent & Fleet Builds
-# =============================================================================
-# Convention: directory name = image name (localhost/<dir-name>:latest)
-
-# Build a standalone agent image (usage: just build-agent echo)
-build-agent name:
-    podman build -t localhost/{{name}}:latest agents/{{name}}/
-
-# Build all standalone agent images
-build-agents:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    for dir in agents/*/; do
-        [ -f "$dir/Dockerfile" ] || continue
-        name=$(basename "$dir")
-        echo "Building agent: $name"
-        podman build -t "localhost/$name:latest" "$dir"
-    done
-
-# Build a fleet agent image (usage: just build-fleet-agent support support-agent)
-build-fleet-agent fleet name:
-    podman build -t localhost/{{name}}:latest fleets/{{fleet}}/agents/{{name}}/
-
-# Build all agent images in a fleet (usage: just build-fleet support)
-build-fleet fleet:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    for dir in fleets/{{fleet}}/agents/*/; do
-        [ -f "$dir/Dockerfile" ] || continue
-        name=$(basename "$dir")
-        echo "Building fleet agent: {{fleet}}/$name"
-        podman build -t "localhost/$name:latest" "$dir"
-    done
-
-# Build all fleet agent images
-build-fleets:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    for fleet_dir in fleets/*/; do
-        fleet=$(basename "$fleet_dir")
-        for dir in "$fleet_dir"agents/*/; do
-            [ -f "$dir/Dockerfile" ] || continue
-            name=$(basename "$dir")
-            echo "Building fleet agent: $fleet/$name"
-            podman build -t "localhost/$name:latest" "$dir"
-        done
-    done
-
-# =============================================================================
 # Main Commands
 # =============================================================================
 
 # Build what's needed for local testing
-build-everything: build build-sidecar (build-agent "todoapp") (build-agent "ollama-test") (build-agent "openrouter-test") (build-agent "sqlite-kv-test") (build-agent "sqlite-vec-test") (build-agent "echo-checkpoint")
+build-everything: build build-sidecar
 
 # Run tests
 test:
@@ -77,16 +28,12 @@ build:
 # Clean all build artifacts
 clean:
     cargo clean
-    rm -rf agents/*/target
 
 # Clean data plane (DBs, WAL files, state pointers, conversations)
 clean-data:
     rm -f ~/.vlinder/*.db ~/.vlinder/*.db-shm ~/.vlinder/*.db-wal
     rm -rf ~/.vlinder/conversations
     rm -rf ~/.vlinder/state
-    find agents fleets -name "*.db" -path "*/data/*" -delete
-    find agents fleets -name "*.db-shm" -path "*/data/*" -delete
-    find agents fleets -name "*.db-wal" -path "*/data/*" -delete
 
 # Full reset: clean slate for testing. Preserves config, credentials, and nats.conf.
 reset:
@@ -137,15 +84,9 @@ reset:
     rm -rf ~/.vlinder/nats-data
     echo "  ✓ Data plane clean"
 
-    # 5. Agent-local data directories
-    echo "  Cleaning agent data..."
-    find agents fleets -name "data" -type d -exec rm -rf {} + 2>/dev/null || true
-    echo "  ✓ Agent data clean"
-
-    # 6. Rust build artifacts
+    # 5. Rust build artifacts
     echo "  Cleaning build artifacts..."
     cargo clean 2>/dev/null || true
-    rm -rf agents/*/target fleets/*/agents/*/target
     echo "  ✓ Build artifacts clean"
 
     echo ""
@@ -153,7 +94,7 @@ reset:
     echo "Preserved: ~/.vlinder/config.toml, ~/.vlinder/client.toml, ~/.vlinder/nats.conf, ~/.vlinder/*.creds"
     echo ""
     echo "Next steps:"
-    echo "  1. Rebuild:  just build-everything"
+    echo "  1. Rebuild:  just build"
     echo "  2. Daemon:   cargo run -p vlinderd -- daemon"
 
 # Check license compliance (fails on GPL/copyleft)

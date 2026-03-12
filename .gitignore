@@ -1,20 +1,7 @@
 TODO.md
 /target
-agents/*/target/
 .vlinder/
 test_content/
-
-# WASM binaries (build artifacts)
-agents/*/*.wasm
-
-# Only these 3 fixture agents have real WASM copied from builds
-# (other fixtures use placeholder text files that are tracked)
-tests/fixtures/agents/echo-agent/echo-agent.wasm
-tests/fixtures/agents/upper-agent/upper-agent.wasm
-tests/fixtures/agents/reverse-agent/reverse-agent.wasm
-
-# Agent runtime data directories
-agents/*/data/
 
 # Python bytecode
 __pycache__/

@@ -1,6 +1,0 @@
-name = "log-analyst"
-description = "Runtime behavior specialist that searches vlinder logs for relevant entries, correlates timestamps, and identifies error patterns."
-runtime = "container"
-executable = "localhost/log-analyst:latest"
-
-[requirements]
