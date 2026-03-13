@@ -6,7 +6,7 @@ mod model;
 mod repl;
 mod secret;
 mod session;
-mod timeline;
+
 mod turn;
 
 use clap::{Parser, Subcommand};
@@ -48,11 +48,6 @@ pub enum Command {
         #[command(subcommand)]
         cmd: session::SessionCommand,
     },
-    /// Explore agent conversations via git
-    Timeline {
-        #[command(subcommand)]
-        cmd: timeline::TimelineCommand,
-    },
     /// Inspect individual turns within a session
     Turn {
         #[command(subcommand)]
@@ -70,7 +65,6 @@ pub fn run() {
         Command::Model { cmd } => model::execute(cmd),
         Command::Secret { cmd } => secret::execute(cmd),
         Command::Session { cmd } => session::execute(cmd),
-        Command::Timeline { cmd } => timeline::execute(cmd),
         Command::Turn { cmd } => turn::execute(cmd),
     }
 }
@@ -160,33 +154,6 @@ mod tests {
             cli.command,
             Command::Agent {
                 cmd: agent::AgentCommand::List
-            }
-        );
-    }
-
-    #[test]
-    fn cli_timeline_route() {
-        let cli = Cli::try_parse_from(["vlinder", "timeline", "route", "sess-1"]).unwrap();
-        assert_eq!(
-            cli.command,
-            Command::Timeline {
-                cmd: timeline::TimelineCommand::Route {
-                    session_id: "sess-1".to_string(),
-                }
-            }
-        );
-    }
-
-    #[test]
-    fn cli_timeline_passthrough() {
-        let cli = Cli::try_parse_from(["vlinder", "timeline", "log", "--oneline"]).unwrap();
-        assert_eq!(
-            cli.command,
-            Command::Timeline {
-                cmd: timeline::TimelineCommand::Git(vec![
-                    "log".to_string(),
-                    "--oneline".to_string(),
-                ])
             }
         );
     }
@@ -358,55 +325,6 @@ mod tests {
                     language: agent::Language::Dotnet,
                     name: "net-agent".to_string(),
                 }
-            }
-        );
-    }
-
-    #[test]
-    fn cli_timeline_checkout() {
-        let cli = Cli::try_parse_from(["vlinder", "timeline", "checkout", "abc123"]).unwrap();
-        assert_eq!(
-            cli.command,
-            Command::Timeline {
-                cmd: timeline::TimelineCommand::Checkout {
-                    target: "abc123".to_string(),
-                }
-            }
-        );
-    }
-
-    #[test]
-    fn cli_timeline_repair_default_path() {
-        let cli = Cli::try_parse_from(["vlinder", "timeline", "repair"]).unwrap();
-        assert_eq!(
-            cli.command,
-            Command::Timeline {
-                cmd: timeline::TimelineCommand::Repair { path: None }
-            }
-        );
-    }
-
-    #[test]
-    fn cli_timeline_repair_with_path() {
-        let cli =
-            Cli::try_parse_from(["vlinder", "timeline", "repair", "-p", "/tmp/agent"]).unwrap();
-        assert_eq!(
-            cli.command,
-            Command::Timeline {
-                cmd: timeline::TimelineCommand::Repair {
-                    path: Some(PathBuf::from("/tmp/agent")),
-                }
-            }
-        );
-    }
-
-    #[test]
-    fn cli_timeline_promote() {
-        let cli = Cli::try_parse_from(["vlinder", "timeline", "promote"]).unwrap();
-        assert_eq!(
-            cli.command,
-            Command::Timeline {
-                cmd: timeline::TimelineCommand::Promote,
             }
         );
     }

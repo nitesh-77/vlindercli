@@ -151,10 +151,6 @@ pub fn vlinder_dir() -> PathBuf {
         })
 }
 
-pub fn conversations_dir() -> PathBuf {
-    vlinder_dir().join("conversations")
-}
-
 pub fn logs_dir() -> PathBuf {
     vlinder_dir().join("logs")
 }
