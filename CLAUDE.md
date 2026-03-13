@@ -37,11 +37,14 @@ ADRs are records of validated decisions, not speculative ones.
 - Refactor: clean up if needed
 - Run tests to verify
 
-## Code Structure
+## Code Principles
 
 - Top-down ordering: main type first, then errors, then supporting types
 - Separate manifest (TOML deserialization) from value types (resolved data)
 - Each has its own file: `foo_manifest.rs` and `foo.rs`
+- **Value types over strings**: domain properties get their own types (SessionId, AgentId, SubmissionId, etc). Convert to/from String only at true boundaries (SQLite, protobuf, CLI input). Never detype a value back to String inside domain code.
+- **CQRS**: all writes happen by sending a message through the queue. All reads come from the store. No direct store writes from CLI or harness — if you're calling `store.write_something()` outside a queue listener, it's a violation.
+- **Compiler-driven refactoring**: change the type or signature, then build. Fix each error the compiler shows. Don't search the codebase manually for usages — the compiler finds them all.
 
 ## TODO.md
 
