@@ -44,7 +44,7 @@ ADRs are records of validated decisions, not speculative ones.
 - Each has its own file: `foo_manifest.rs` and `foo.rs`
 - **Value types over strings**: domain properties get their own types (SessionId, AgentId, SubmissionId, etc). Convert to/from String only at true boundaries (SQLite, protobuf, CLI input). Never detype a value back to String inside domain code.
 - **CQRS**: all writes happen by sending a message through the queue. All reads come from the store. No direct store writes from CLI or harness — if you're calling `store.write_something()` outside a queue listener, it's a violation.
-- **Compiler-driven refactoring**: change the type or signature, then build. Fix each error the compiler shows. Don't search the codebase manually for usages — the compiler finds them all.
+- **Compiler-driven refactoring**: change the type or signature, then build. Fix each error the compiler shows one at a time. Don't search the codebase manually for usages — the compiler finds them all. Never use `replace_all` to batch-fix compiler errors — each call site has different context. Never pre-read files to "understand the scope" of breakage. Build, read the error, fix that line, repeat.
 
 ## TODO.md
 
@@ -119,3 +119,7 @@ Claude should:
 - Body: explain *why*, not just *what*
 - If aligning with Vision/ADR, mention it
 - Keep it concise but meaningful
+
+## When changes are rejected
+
+When the user rejects a proposed change, explain your inner reasoning — what led you to that specific action, step by step. This helps the user understand how to guide you better. Don't just apologize and retry; expose the thinking so the failure mode becomes visible.
