@@ -8,7 +8,7 @@
 use chrono::Utc;
 
 use crate::domain::message::ObservableMessage;
-use crate::domain::{hash_dag_node, DagNode};
+use crate::domain::{hash_dag_node, DagNode, SubmissionId};
 
 // ============================================================================
 // ObservableMessage → DagNode conversion helpers
@@ -126,7 +126,7 @@ pub fn build_dag_node(msg: &ObservableMessage, parent_hash: &str) -> DagNode {
         from,
         to,
         session_id,
-        submission_id: msg.submission().as_str().to_string(),
+        submission_id: SubmissionId::from(msg.submission().as_str().to_string()),
         payload: payload.to_vec(),
         diagnostics,
         stderr,

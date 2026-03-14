@@ -75,7 +75,7 @@ pub struct DagNode {
     pub from: String,
     pub to: String,
     pub session_id: super::SessionId,
-    pub submission_id: String,
+    pub submission_id: super::SubmissionId,
     pub payload: Vec<u8>,
     /// JSON-serialized diagnostics for the message (ADR 071).
     /// Empty for messages captured before ADR 071.
@@ -479,7 +479,7 @@ impl DagStore for InMemoryDagStore {
         let nodes = self.nodes.lock().unwrap();
         let mut result: Vec<DagNode> = nodes
             .iter()
-            .filter(|n| n.submission_id == submission_id)
+            .filter(|n| n.submission_id.as_str() == submission_id)
             .cloned()
             .collect();
         result.sort_by(|a, b| a.created_at.cmp(&b.created_at));

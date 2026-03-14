@@ -5,7 +5,9 @@ use std::str::FromStr;
 use chrono::{DateTime, Utc};
 
 use super::proto;
-use vlinder_core::domain::{DagNode, MessageType, SessionId, SessionSummary, Timeline};
+use vlinder_core::domain::{
+    DagNode, MessageType, SessionId, SessionSummary, SubmissionId, Timeline,
+};
 
 // =============================================================================
 // DagNode → proto::DagNode
@@ -20,7 +22,7 @@ impl From<DagNode> for proto::DagNode {
             sender: node.from,
             receiver: node.to,
             session_id: node.session_id.as_str().to_string(),
-            submission_id: node.submission_id,
+            submission_id: node.submission_id.to_string(),
             payload: node.payload,
             diagnostics: node.diagnostics,
             stderr: node.stderr,
@@ -42,7 +44,7 @@ impl From<&DagNode> for proto::DagNode {
             sender: node.from.clone(),
             receiver: node.to.clone(),
             session_id: node.session_id.as_str().to_string(),
-            submission_id: node.submission_id.clone(),
+            submission_id: node.submission_id.to_string(),
             payload: node.payload.clone(),
             diagnostics: node.diagnostics.clone(),
             stderr: node.stderr.clone(),
@@ -78,7 +80,7 @@ impl TryFrom<proto::DagNode> for DagNode {
             from: node.sender,
             to: node.receiver,
             session_id: SessionId::try_from(node.session_id)?,
-            submission_id: node.submission_id,
+            submission_id: SubmissionId::from(node.submission_id),
             payload: node.payload,
             diagnostics: node.diagnostics,
             stderr: node.stderr,

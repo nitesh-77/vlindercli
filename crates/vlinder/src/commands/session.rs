@@ -138,9 +138,12 @@ fn get(session_id_or_name: &str) {
         std::collections::HashMap::new();
     for node in &nodes {
         if !turn_map.contains_key(node.submission_id.as_str()) {
-            turn_order.push(node.submission_id.clone());
+            turn_order.push(node.submission_id.to_string());
         }
-        turn_map.entry(&node.submission_id).or_default().push(node);
+        turn_map
+            .entry(node.submission_id.as_str())
+            .or_default()
+            .push(node);
     }
 
     for sub_id in &turn_order {

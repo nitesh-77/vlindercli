@@ -12,7 +12,9 @@ use rusqlite::Connection;
 use std::str::FromStr;
 
 use vlinder_core::domain::session::Session;
-use vlinder_core::domain::{DagNode, DagStore, MessageType, SessionId, SessionSummary, Timeline};
+use vlinder_core::domain::{
+    DagNode, DagStore, MessageType, SessionId, SessionSummary, SubmissionId, Timeline,
+};
 
 /// SQLite-backed DagStore.
 pub struct SqliteDagStore {
@@ -287,7 +289,7 @@ fn row_to_dag_node(row: &rusqlite::Row) -> Result<DagNode, rusqlite::Error> {
         session_id: SessionId::try_from(row.get::<_, String>(5)?).map_err(|e| {
             rusqlite::Error::FromSqlConversionFailure(5, rusqlite::types::Type::Text, e.into())
         })?,
-        submission_id: row.get(6)?,
+        submission_id: SubmissionId::from(row.get::<_, String>(6)?),
         payload: row.get(7)?,
         diagnostics: row.get(8)?,
         stderr: row.get(9)?,
@@ -312,7 +314,7 @@ impl DagStore for SqliteDagStore {
                 node.from,
                 node.to,
                 node.session_id.as_str(),
-                node.submission_id,
+                node.submission_id.as_str(),
                 node.payload,
                 node.diagnostics,
                 node.stderr,
