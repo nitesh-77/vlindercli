@@ -1,6 +1,6 @@
 //! DelegateMessage: Agent → Agent (via runtime).
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::super::diagnostics::DelegateDiagnostics;
 use super::super::routing_key::{AgentId, Nonce, RoutingKey};
@@ -11,7 +11,7 @@ use super::PROTOCOL_VERSION;
 ///
 /// One agent invoking another. The platform routes through the queue,
 /// dispatches the target, and sends the result to the reply subject.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DelegateMessage {
     pub id: MessageId,
     pub protocol_version: String,

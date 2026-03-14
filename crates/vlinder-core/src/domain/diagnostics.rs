@@ -38,7 +38,7 @@ pub struct InvokeDiagnostics {
 // ============================================================================
 
 /// Diagnostics emitted by the bridge when intercepting an agent SDK call.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct RequestDiagnostics {
     /// Sequence number within the submission.
     pub sequence: u32,
@@ -85,6 +85,12 @@ pub enum ServiceMetrics {
         operation: Operation,
         bytes_transferred: u64,
     },
+}
+
+impl Default for ServiceDiagnostics {
+    fn default() -> Self {
+        Self::placeholder()
+    }
 }
 
 impl ServiceDiagnostics {
@@ -168,6 +174,12 @@ pub enum RuntimeInfo {
         /// AWS region (e.g., "us-east-1").
         region: String,
     },
+}
+
+impl Default for RuntimeDiagnostics {
+    fn default() -> Self {
+        Self::placeholder(0)
+    }
 }
 
 impl RuntimeDiagnostics {
@@ -267,7 +279,7 @@ impl HealthWindow {
 // ============================================================================
 
 /// Diagnostics emitted when an agent delegates to another agent.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct DelegateDiagnostics {
     /// Delegation involves runtime execution — same diagnostics.
     pub runtime: RuntimeDiagnostics,

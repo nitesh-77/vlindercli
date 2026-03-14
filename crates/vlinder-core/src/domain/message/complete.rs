@@ -1,6 +1,6 @@
 //! CompleteMessage: Runtime → Harness (submission finished).
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::super::diagnostics::RuntimeDiagnostics;
 use super::super::routing_key::{AgentId, RoutingKey};
@@ -10,7 +10,7 @@ use super::PROTOCOL_VERSION;
 /// Complete message: Runtime → Harness
 ///
 /// Signals that a submission has finished.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CompleteMessage {
     pub id: MessageId,
     pub protocol_version: String,

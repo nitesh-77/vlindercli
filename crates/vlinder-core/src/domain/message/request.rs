@@ -1,6 +1,6 @@
 //! RequestMessage: Runtime → Service (agent calls a service).
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::super::diagnostics::RequestDiagnostics;
 use super::super::operation::Operation;
@@ -13,7 +13,7 @@ use super::{ExpectsReply, PROTOCOL_VERSION};
 ///
 /// Agent requests a service operation (kv, vec, infer, embed).
 /// Expects a ResponseMessage in response (enforced by ExpectsReply trait).
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RequestMessage {
     pub id: MessageId,
     pub protocol_version: String,

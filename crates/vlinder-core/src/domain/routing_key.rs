@@ -36,7 +36,7 @@ impl std::fmt::Display for AgentId {
 }
 
 /// Inference backend implementations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum InferenceBackendType {
     Ollama,
     OpenRouter,
@@ -64,7 +64,7 @@ impl std::str::FromStr for InferenceBackendType {
 }
 
 /// Embedding backend implementations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum EmbeddingBackendType {
     Ollama,
 }
@@ -92,7 +92,7 @@ impl std::str::FromStr for EmbeddingBackendType {
 ///
 /// Each service type scopes its own set of valid backends. Invalid
 /// combinations (e.g., Kv + Ollama) are unrepresentable.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum ServiceBackend {
     Kv(ObjectStorageType),
     Vec(VectorStorageType),
@@ -154,7 +154,7 @@ impl std::fmt::Display for ServiceBackend {
 ///
 /// Prevents routing key collisions when the same caller delegates to the
 /// same target multiple times within a submission.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(transparent)]
 pub struct Nonce(String);
 

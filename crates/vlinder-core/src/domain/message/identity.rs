@@ -263,7 +263,7 @@ impl From<i64> for TimelineId {
 ///
 /// Starts at 1 and increments for each service request.
 /// Used to reconstruct the order of events when debugging.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct Sequence(u32);
 

@@ -1,6 +1,6 @@
 //! ResponseMessage: Service → Runtime (service replies).
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::super::diagnostics::ServiceDiagnostics;
 use super::super::operation::Operation;
@@ -12,7 +12,7 @@ use super::PROTOCOL_VERSION;
 /// Response message: Service → Runtime
 ///
 /// Service responds to a request, echoing all dimensions for traceability.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ResponseMessage {
     pub id: MessageId,
     pub protocol_version: String,

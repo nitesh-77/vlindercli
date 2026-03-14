@@ -27,7 +27,7 @@ use super::response::ResponseMessage;
 ///
 /// Used for polymorphic handling when the specific message type isn't known
 /// at compile time (e.g., receiving from a queue).
-#[derive(Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub enum ObservableMessage {
     Invoke(InvokeMessage),
     Request(RequestMessage),

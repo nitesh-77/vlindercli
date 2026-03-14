@@ -19,7 +19,7 @@ use super::PROTOCOL_VERSION;
 ///
 /// This is a control plane message — there is no reply. The CLI confirms
 /// success by querying the DagStore after the message is processed.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct ForkMessage {
     pub id: MessageId,
     pub protocol_version: String,

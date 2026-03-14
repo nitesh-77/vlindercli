@@ -18,7 +18,7 @@ use super::PROTOCOL_VERSION;
 /// this call).
 ///
 /// Reply type: CompleteMessage (same as InvokeMessage).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct RepairMessage {
     pub id: MessageId,
     pub protocol_version: String,
