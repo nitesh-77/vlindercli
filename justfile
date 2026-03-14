@@ -60,7 +60,8 @@ reset:
     podman rm -a -f 2>/dev/null || true
     podman images --format '{{"{{"}}.Repository{{"}}"}}:{{"{{"}}.Tag{{"}}"}}' \
         | grep '^localhost/' \
-        | while read -r img; do podman rmi -f "$img" 2>/dev/null || true; done
+        | while read -r img; do podman rmi -f "$img" 2>/dev/null || true; done \
+        || true
     podman volume prune -f 2>/dev/null || true
     echo "  ✓ Podman clean (base images preserved)"
 
