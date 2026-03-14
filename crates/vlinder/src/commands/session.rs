@@ -121,18 +121,22 @@ fn get(session_id: &str) {
         return;
     }
 
-    // Group by submission_id (turns), preserving order
-    let mut turns: Vec<(String, Vec<&vlinder_core::domain::DagNode>)> = Vec::new();
+    // Sort nodes in causal order by walking the parent_hash chain
+    let nodes = causal_sort(&nodes);
+
+    // Group by submission_id (turns), preserving causal order
+    let mut turn_order: Vec<String> = Vec::new();
+    let mut turn_map: std::collections::HashMap<&str, Vec<&vlinder_core::domain::DagNode>> =
+        std::collections::HashMap::new();
     for node in &nodes {
-        if let Some((_sub_id, group)) = turns.last_mut().filter(|(id, _)| *id == node.submission_id)
-        {
-            group.push(node);
-        } else {
-            turns.push((node.submission_id.clone(), vec![node]));
+        if !turn_map.contains_key(node.submission_id.as_str()) {
+            turn_order.push(node.submission_id.clone());
         }
+        turn_map.entry(&node.submission_id).or_default().push(node);
     }
 
-    for (sub_id, messages) in &turns {
+    for sub_id in &turn_order {
+        let messages = &turn_map[sub_id.as_str()];
         println!("Turn {}", sub_id);
         for node in messages {
             let ts = node.created_at.format("%H:%M:%S%.3f");
@@ -395,6 +399,40 @@ fn branches(session_id: &str) {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// Sort nodes in causal order by walking the parent_hash Merkle chain.
+///
+/// Finds the root (empty parent_hash) and follows children to produce
+/// a linear ordering that respects causality regardless of wall-clock time.
+fn causal_sort(nodes: &[vlinder_core::domain::DagNode]) -> Vec<vlinder_core::domain::DagNode> {
+    let by_parent: std::collections::HashMap<&str, &vlinder_core::domain::DagNode> =
+        nodes.iter().map(|n| (n.parent_hash.as_str(), n)).collect();
+
+    // Find the root node (empty parent_hash)
+    let mut sorted = Vec::with_capacity(nodes.len());
+    let Some(root) = nodes.iter().find(|n| n.parent_hash.is_empty()) else {
+        // No root found — fall back to input order
+        return nodes.to_vec();
+    };
+
+    sorted.push(root.clone());
+    let mut current_hash = root.hash.as_str();
+    while let Some(next) = by_parent.get(current_hash) {
+        sorted.push((*next).clone());
+        current_hash = &next.hash;
+    }
+
+    // Append any nodes not in the chain (orphans from forks, etc.)
+    let in_chain: std::collections::HashSet<String> =
+        sorted.iter().map(|n| n.hash.clone()).collect();
+    for node in nodes {
+        if !in_chain.contains(&node.hash) {
+            sorted.push(node.clone());
+        }
+    }
+
+    sorted
+}
 
 /// Parse "infer.ollama" into ServiceBackend::Infer(Ollama).
 fn parse_service_backend(s: &str) -> Option<ServiceBackend> {
