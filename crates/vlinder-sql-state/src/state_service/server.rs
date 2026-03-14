@@ -4,10 +4,11 @@ use std::sync::Arc;
 use tonic::{Request, Response, Status};
 
 use super::proto::{
-    self, state_service_server::StateService, CreateTimelineRequest, CreateTimelineResponse,
-    GetChildrenRequest, GetChildrenResponse, GetNodeByPrefixRequest, GetNodeRequest,
-    GetNodeResponse, GetNodesBySubmissionRequest, GetNodesBySubmissionResponse,
-    GetSessionNodesRequest, GetSessionNodesResponse, GetTimelineByBranchRequest,
+    self, state_service_server::StateService, CreateSessionRequest, CreateSessionResponse,
+    CreateTimelineRequest, CreateTimelineResponse, GetChildrenRequest, GetChildrenResponse,
+    GetNodeByPrefixRequest, GetNodeRequest, GetNodeResponse, GetNodesBySubmissionRequest,
+    GetNodesBySubmissionResponse, GetSessionByNameRequest, GetSessionNodesRequest,
+    GetSessionNodesResponse, GetSessionRequest, GetSessionResponse, GetTimelineByBranchRequest,
     GetTimelineByIdRequest, GetTimelineHeadRequest, GetTimelineHeadResponse, GetTimelineResponse,
     GetTimelinesForSessionRequest, GetTimelinesForSessionResponse, InsertNodeRequest,
     InsertNodeResponse, IsTimelineSealedRequest, IsTimelineSealedResponse, LatestNodeHashRequest,
@@ -16,7 +17,7 @@ use super::proto::{
     SealTimelineRequest, SealTimelineResponse, SemVer, SetCheckoutStateRequest,
     SetCheckoutStateResponse, UpdateTimelineHeadRequest, UpdateTimelineHeadResponse,
 };
-use vlinder_core::domain::DagStore;
+use vlinder_core::domain::{DagStore, SessionId};
 
 /// gRPC server that wraps a DagStore implementation.
 pub struct StateServiceServer {
@@ -92,7 +93,9 @@ impl StateService for StateServiceServer {
 
         let nodes = self
             .store
-            .get_session_nodes(&req.session_id)
+            .get_session_nodes(
+                &SessionId::try_from(req.session_id).map_err(Status::invalid_argument)?,
+            )
             .map_err(Status::internal)?
             .into_iter()
             .map(|n| n.into())
@@ -140,7 +143,9 @@ impl StateService for StateServiceServer {
 
         let hash = self
             .store
-            .latest_node_hash(&req.session_id)
+            .latest_node_hash(
+                &SessionId::try_from(req.session_id).map_err(Status::invalid_argument)?,
+            )
             .map_err(Status::internal)?;
 
         Ok(Response::new(LatestNodeHashResponse { hash }))
@@ -177,7 +182,7 @@ impl StateService for StateServiceServer {
             .store
             .create_timeline(
                 &req.branch_name,
-                &req.session_id,
+                &SessionId::try_from(req.session_id).map_err(Status::invalid_argument)?,
                 req.parent_id,
                 req.fork_point.as_deref(),
             )
@@ -310,12 +315,80 @@ impl StateService for StateServiceServer {
         let req = request.into_inner();
         let timelines = self
             .store
-            .get_timelines_for_session(&req.session_id)
+            .get_timelines_for_session(
+                &SessionId::try_from(req.session_id).map_err(Status::invalid_argument)?,
+            )
             .map_err(Status::internal)?
             .into_iter()
             .map(|t| t.into())
             .collect();
         Ok(Response::new(GetTimelinesForSessionResponse { timelines }))
+    }
+
+    // -------------------------------------------------------------------------
+    // Session CRUD RPCs
+    // -------------------------------------------------------------------------
+
+    async fn create_session(
+        &self,
+        request: Request<CreateSessionRequest>,
+    ) -> Result<Response<CreateSessionResponse>, Status> {
+        let req = request.into_inner();
+        let session_proto = req
+            .session
+            .ok_or_else(|| Status::invalid_argument("missing session"))?;
+        let session_id = SessionId::try_from(session_proto.id).map_err(Status::invalid_argument)?;
+        let session = vlinder_core::domain::Session::new(session_id, &session_proto.agent_name);
+        match self.store.create_session(&vlinder_core::domain::Session {
+            name: session_proto.name,
+            ..session
+        }) {
+            Ok(()) => Ok(Response::new(CreateSessionResponse {
+                success: true,
+                error: None,
+            })),
+            Err(e) => Ok(Response::new(CreateSessionResponse {
+                success: false,
+                error: Some(e),
+            })),
+        }
+    }
+
+    async fn get_session(
+        &self,
+        request: Request<GetSessionRequest>,
+    ) -> Result<Response<GetSessionResponse>, Status> {
+        let req = request.into_inner();
+        let session_id = SessionId::try_from(req.session_id).map_err(Status::invalid_argument)?;
+        let session = self
+            .store
+            .get_session(&session_id)
+            .map_err(Status::internal)?;
+        Ok(Response::new(GetSessionResponse {
+            session: session.map(|s| proto::SessionProto {
+                id: s.session.as_str().to_string(),
+                name: s.name,
+                agent_name: s.agent,
+            }),
+        }))
+    }
+
+    async fn get_session_by_name(
+        &self,
+        request: Request<GetSessionByNameRequest>,
+    ) -> Result<Response<GetSessionResponse>, Status> {
+        let req = request.into_inner();
+        let session = self
+            .store
+            .get_session_by_name(&req.name)
+            .map_err(Status::internal)?;
+        Ok(Response::new(GetSessionResponse {
+            session: session.map(|s| proto::SessionProto {
+                id: s.session.as_str().to_string(),
+                name: s.name,
+                agent_name: s.agent,
+            }),
+        }))
     }
 
     // -------------------------------------------------------------------------

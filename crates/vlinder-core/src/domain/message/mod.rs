@@ -8,6 +8,7 @@
 //! - `DelegateMessage`: Agent → Agent (via runtime)
 //! - `RepairMessage`: Platform → Sidecar (replay a failed service call, ADR 113)
 //! - `ForkMessage`: CLI → Platform (create a timeline fork)
+//! - `SessionStartMessage`: CLI → Platform (create a conversation session)
 
 pub mod complete;
 pub mod delegate;
@@ -18,6 +19,7 @@ pub mod observable;
 pub mod repair;
 pub mod request;
 pub mod response;
+pub mod session_start;
 
 // Re-export everything at the module level for backwards compatibility.
 pub use complete::CompleteMessage;
@@ -31,6 +33,7 @@ pub use observable::{ObservableMessage, ObservableMessageHeaders};
 pub use repair::RepairMessage;
 pub use request::RequestMessage;
 pub use response::ResponseMessage;
+pub use session_start::SessionStartMessage;
 
 /// Protocol version stamped on every message at construction time.
 pub const PROTOCOL_VERSION: &str = env!("CARGO_PKG_VERSION");

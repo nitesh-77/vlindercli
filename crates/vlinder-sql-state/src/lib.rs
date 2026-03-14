@@ -21,7 +21,7 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 
 #[cfg(feature = "server")]
-use vlinder_core::domain::{DagStore, MessageType};
+use vlinder_core::domain::{DagStore, MessageType, SessionId};
 
 /// A running session viewer server.
 ///
@@ -111,12 +111,29 @@ fn handle_request(request: tiny_http::Request, store: &dyn DagStore) {
     if url == "/" {
         let body = render_index(store);
         let _ = request.respond(html_response(200, &body));
-    } else if let Some(session_id) = url.strip_prefix("/session/") {
-        match render_session(store, session_id) {
-            Ok(body) => {
-                let _ = request.respond(html_response(200, &body));
-            }
-            Err(_) => {
+    } else if let Some(raw_id) = url.strip_prefix("/session/") {
+        if raw_id.contains("..") || raw_id.contains('/') || raw_id.contains('\\') {
+            let body = html_page("Not Found", "<h1>Invalid session id</h1>");
+            let _ = request.respond(html_response(404, &body));
+            return;
+        }
+        let session = SessionId::try_from(raw_id.to_string())
+            .ok()
+            .and_then(|sid| store.get_session(&sid).ok().flatten());
+        match session {
+            Some(session) => match render_session(store, &session) {
+                Ok(body) => {
+                    let _ = request.respond(html_response(200, &body));
+                }
+                Err(_) => {
+                    let body = html_page(
+                        "Not Found",
+                        "<h1>Session not found</h1><p><a href=\"/\">&larr; Back</a></p>",
+                    );
+                    let _ = request.respond(html_response(404, &body));
+                }
+            },
+            None => {
                 let body = html_page(
                     "Not Found",
                     "<h1>Session not found</h1><p><a href=\"/\">&larr; Back</a></p>",
@@ -167,7 +184,7 @@ fn render_index(store: &dyn DagStore) -> String {
              <strong>{agent}</strong>\
              <span class=\"meta\">{datetime} &middot; {turns} messages {status}</span>\
              </a></li>\n",
-            session_id = html_escape(&s.session_id),
+            session_id = html_escape(s.session_id.as_str()),
             agent = html_escape(&s.agent_name),
             datetime = html_escape(&datetime),
             turns = s.message_count,
@@ -185,22 +202,16 @@ fn render_index(store: &dyn DagStore) -> String {
 }
 
 #[cfg(feature = "server")]
-fn render_session(store: &dyn DagStore, session_id: &str) -> Result<String, String> {
-    // Security: reject path traversal attempts
-    if session_id.contains("..") || session_id.contains('/') || session_id.contains('\\') {
-        return Err("invalid session id".to_string());
-    }
-
-    let nodes = store.get_session_nodes(session_id)?;
+fn render_session(
+    store: &dyn DagStore,
+    session: &vlinder_core::domain::Session,
+) -> Result<String, String> {
+    let nodes = store.get_session_nodes(&session.session)?;
     if nodes.is_empty() {
         return Err("session not found".to_string());
     }
 
-    let agent_name = nodes
-        .iter()
-        .find(|n| n.message_type == MessageType::Invoke)
-        .map(|n| n.to.clone())
-        .unwrap_or_default();
+    let agent_name = &session.agent;
 
     let is_open = nodes
         .last()
@@ -255,12 +266,7 @@ fn render_session(store: &dyn DagStore, session_id: &str) -> Result<String, Stri
         }
     }
 
-    let short_id = if session_id.len() > 12 {
-        &session_id[..12]
-    } else {
-        session_id
-    };
-    let title = format!("{} / {}", agent_name, short_id);
+    let title = format!("{} / {}", agent_name, session.name);
 
     Ok(html_page(
         &title,

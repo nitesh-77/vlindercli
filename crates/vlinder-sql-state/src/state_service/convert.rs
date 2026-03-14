@@ -5,7 +5,7 @@ use std::str::FromStr;
 use chrono::{DateTime, Utc};
 
 use super::proto;
-use vlinder_core::domain::{DagNode, MessageType, SessionSummary, Timeline};
+use vlinder_core::domain::{DagNode, MessageType, SessionId, SessionSummary, Timeline};
 
 // =============================================================================
 // DagNode → proto::DagNode
@@ -19,7 +19,7 @@ impl From<DagNode> for proto::DagNode {
             message_type: node.message_type.as_str().to_string(),
             sender: node.from,
             receiver: node.to,
-            session_id: node.session_id,
+            session_id: node.session_id.as_str().to_string(),
             submission_id: node.submission_id,
             payload: node.payload,
             diagnostics: node.diagnostics,
@@ -41,7 +41,7 @@ impl From<&DagNode> for proto::DagNode {
             message_type: node.message_type.as_str().to_string(),
             sender: node.from.clone(),
             receiver: node.to.clone(),
-            session_id: node.session_id.clone(),
+            session_id: node.session_id.as_str().to_string(),
             submission_id: node.submission_id.clone(),
             payload: node.payload.clone(),
             diagnostics: node.diagnostics.clone(),
@@ -77,7 +77,7 @@ impl TryFrom<proto::DagNode> for DagNode {
             message_type,
             from: node.sender,
             to: node.receiver,
-            session_id: node.session_id,
+            session_id: SessionId::try_from(node.session_id)?,
             submission_id: node.submission_id,
             payload: node.payload,
             diagnostics: node.diagnostics,
@@ -100,7 +100,7 @@ impl From<Timeline> for proto::Timeline {
         Self {
             id: tl.id,
             branch_name: tl.branch_name,
-            session_id: tl.session_id,
+            session_id: tl.session_id.as_str().to_string(),
             parent_timeline_id: tl.parent_timeline_id,
             fork_point: tl.fork_point,
             created_at: tl.created_at.to_rfc3339(),
@@ -131,7 +131,7 @@ impl TryFrom<proto::Timeline> for Timeline {
         Ok(Self {
             id: tl.id,
             branch_name: tl.branch_name,
-            session_id: tl.session_id,
+            session_id: SessionId::try_from(tl.session_id)?,
             parent_timeline_id: tl.parent_timeline_id,
             fork_point: tl.fork_point,
             created_at,
@@ -148,7 +148,7 @@ impl TryFrom<proto::Timeline> for Timeline {
 impl From<SessionSummary> for proto::SessionSummary {
     fn from(s: SessionSummary) -> Self {
         Self {
-            session_id: s.session_id,
+            session_id: s.session_id.as_str().to_string(),
             agent_name: s.agent_name,
             started_at: s.started_at.to_rfc3339(),
             message_count: s.message_count as u64,
@@ -171,7 +171,7 @@ impl TryFrom<proto::SessionSummary> for SessionSummary {
             .map_err(|e| format!("invalid started_at: {}", e))?;
 
         Ok(Self {
-            session_id: s.session_id,
+            session_id: SessionId::try_from(s.session_id)?,
             agent_name: s.agent_name,
             started_at,
             message_count: s.message_count as usize,
@@ -192,7 +192,7 @@ mod tests {
             message_type: MessageType::Invoke,
             from: "cli".to_string(),
             to: "agent-echo".to_string(),
-            session_id: "sess-001".to_string(),
+            session_id: SessionId::new(),
             submission_id: "sub-001".to_string(),
             payload: b"hello".to_vec(),
             diagnostics: b"{\"version\":\"0.1.0\"}".to_vec(),

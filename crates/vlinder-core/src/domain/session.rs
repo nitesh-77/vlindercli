@@ -3,8 +3,6 @@
 //! A session groups multiple submissions into a conversation. The harness
 //! wraps history into the payload so agents receive context automatically.
 
-use std::time::SystemTime;
-
 use serde::{Deserialize, Serialize};
 
 use super::{SessionId, SubmissionId};
@@ -14,15 +12,14 @@ use super::{SessionId, SubmissionId};
 pub struct Session {
     /// Current unanswered question, or None when conversation is at rest.
     pub open: Option<String>,
-    /// Session identifier grouping all turns.
+    /// Session identifier (UUID).
     pub session: SessionId,
+    /// Human-friendly name (petname, unique).
+    pub name: String,
     /// Agent name this session is with.
     pub agent: String,
     /// Completed conversation turns.
     pub history: Vec<HistoryEntry>,
-    /// Stable filename, computed once at creation time.
-    #[serde(skip)]
-    filename: String,
 }
 
 /// A single entry in the conversation history.
@@ -44,16 +41,16 @@ pub enum HistoryEntry {
 }
 
 impl Session {
-    /// Create a new empty session.
+    /// Create a new empty session with a generated petname.
     pub fn new(session: SessionId, agent: impl Into<String>) -> Self {
+        let name = session.petname();
         let agent = agent.into();
-        let filename = make_filename(&session, &agent);
         Self {
             open: None,
             session,
+            name,
             agent,
             history: Vec::new(),
-            filename,
         }
     }
 
@@ -86,7 +83,7 @@ impl Session {
         self.history.push(HistoryEntry::User {
             user: input.to_string(),
             submission,
-            at: format_utc_now(),
+            at: String::new(),
         });
     }
 
@@ -95,79 +92,9 @@ impl Session {
         self.open = None;
         self.history.push(HistoryEntry::Agent {
             agent: response.to_string(),
-            at: format_utc_now(),
+            at: String::new(),
         });
     }
-
-    /// The stable filename for this session's JSON file.
-    ///
-    /// Format: `{datetime}_{agent}_{short_id}.json`
-    /// Datetime uses filesystem-safe format: `2026-02-08T14-30-05Z`.
-    /// Computed once at creation time — never changes.
-    pub fn filename(&self) -> &str {
-        &self.filename
-    }
-}
-
-/// Format current time as UTC ISO 8601 string without external dependencies.
-fn format_utc_now() -> String {
-    let now = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default();
-    format_unix_timestamp(now.as_secs())
-}
-
-/// Format a unix timestamp as UTC ISO 8601 string.
-fn format_unix_timestamp(secs: u64) -> String {
-    // Manual UTC formatting to avoid chrono dependency
-    let days = secs / 86400;
-    let time_secs = secs % 86400;
-    let hours = time_secs / 3600;
-    let minutes = (time_secs % 3600) / 60;
-    let seconds = time_secs % 60;
-
-    // Civil date from days since epoch (algorithm from Howard Hinnant)
-    let z = days as i64 + 719468;
-    let era = if z >= 0 { z } else { z - 146096 } / 146097;
-    let doe = (z - era * 146097) as u64;
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-    let y = yoe as i64 + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = if m <= 2 { y + 1 } else { y };
-
-    format!(
-        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
-        y, m, d, hours, minutes, seconds
-    )
-}
-
-/// Compute the filename for a session. Called once at creation time.
-fn make_filename(session: &SessionId, agent: &str) -> String {
-    let datetime = format_utc_datetime_filesafe();
-    let short_id = session
-        .as_str()
-        .strip_prefix("ses-")
-        .unwrap_or(session.as_str());
-    let short_id = if short_id.len() > 8 {
-        &short_id[..8]
-    } else {
-        short_id
-    };
-    format!("{}_{}_{}.json", datetime, agent, short_id)
-}
-
-/// Format current UTC datetime for filenames.
-///
-/// Colons are invalid in filenames on Windows/macOS, so we replace them
-/// with hyphens: `2026-02-08T14-30-05Z`.
-fn format_utc_datetime_filesafe() -> String {
-    let now = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default();
-    format_unix_timestamp(now.as_secs()).replace(':', "-")
 }
 
 #[cfg(test)]
@@ -303,34 +230,5 @@ mod tests {
         assert!(history[0]["at"].is_string());
         assert!(history[1]["agent"].is_string());
         assert!(history[1]["at"].is_string());
-    }
-
-    #[test]
-    fn filename_format() {
-        let session = test_session();
-        let filename = session.filename();
-
-        // Format: {datetime}_{agent}_{short_id}.json
-        // e.g. 2026-02-08T14-30-05Z_pensieve_abc12345.json
-        assert!(filename.contains("_pensieve_"));
-        assert!(filename.contains("abc12345"));
-        assert!(filename.ends_with(".json"));
-        // Datetime should include T and Z but no colons
-        let datetime_part = filename.split('_').next().unwrap();
-        assert!(datetime_part.contains('T'));
-        assert!(datetime_part.ends_with('Z'));
-        assert!(!datetime_part.contains(':'));
-    }
-
-    #[test]
-    fn format_unix_timestamp_epoch() {
-        assert_eq!(format_unix_timestamp(0), "1970-01-01T00:00:00Z");
-    }
-
-    #[test]
-    fn format_unix_timestamp_known_date() {
-        // 2026-02-08T23:30:05Z = 1770593405 seconds since epoch
-        let ts = format_unix_timestamp(1770593405);
-        assert_eq!(ts, "2026-02-08T23:30:05Z");
     }
 }

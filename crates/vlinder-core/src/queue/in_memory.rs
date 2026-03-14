@@ -278,6 +278,14 @@ impl MessageQueue for InMemoryQueue {
         // RecordingQueue intercepts and records the DagNode before this is called.
         Ok(())
     }
+
+    fn send_session_start(
+        &self,
+        _msg: crate::domain::SessionStartMessage,
+    ) -> Result<(), QueueError> {
+        // Session creation is fire-and-forget — RecordingQueue persists it.
+        Ok(())
+    }
 }
 
 // ============================================================================

@@ -16,6 +16,8 @@
 use chrono::{DateTime, Utc};
 use sha2::{Digest, Sha256};
 
+use super::session::Session;
+
 /// The message types in the Vlinder protocol (ADR 044, 113).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MessageType {
@@ -72,7 +74,7 @@ pub struct DagNode {
     pub message_type: MessageType,
     pub from: String,
     pub to: String,
-    pub session_id: String,
+    pub session_id: super::SessionId,
     pub submission_id: String,
     pub payload: Vec<u8>,
     /// JSON-serialized diagnostics for the message (ADR 071).
@@ -108,21 +110,21 @@ pub fn hash_dag_node(
     parent_hash: &str,
     message_type: &MessageType,
     diagnostics: &[u8],
-    session_id: &str,
+    session_id: &super::SessionId,
 ) -> String {
     let mut hasher = Sha256::new();
     hasher.update(payload);
     hasher.update(parent_hash.as_bytes());
     hasher.update(message_type.as_str().as_bytes());
     hasher.update(diagnostics);
-    hasher.update(session_id.as_bytes());
+    hasher.update(session_id.as_str().as_bytes());
     format!("{:x}", hasher.finalize())
 }
 
 /// Summary of a session for the viewer index page.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SessionSummary {
-    pub session_id: String,
+    pub session_id: super::SessionId,
     pub agent_name: String,
     pub started_at: DateTime<Utc>,
     pub message_count: usize,
@@ -137,7 +139,7 @@ pub struct SessionSummary {
 pub struct Timeline {
     pub id: i64,
     pub branch_name: String,
-    pub session_id: String,
+    pub session_id: super::SessionId,
     pub parent_timeline_id: Option<i64>,
     /// Submission hash at the fork point (if forked from a parent).
     pub fork_point: Option<String>,
@@ -173,7 +175,7 @@ pub trait DagStore: Send + Sync {
     }
 
     /// Get all nodes in a session, ordered by `created_at`.
-    fn get_session_nodes(&self, session_id: &str) -> Result<Vec<DagNode>, String>;
+    fn get_session_nodes(&self, session_id: &super::SessionId) -> Result<Vec<DagNode>, String>;
 
     /// Get all children of a given parent hash.
     fn get_children(&self, parent_hash: &str) -> Result<Vec<DagNode>, String>;
@@ -188,7 +190,7 @@ pub trait DagStore: Send + Sync {
     ///
     /// Used by the transactional outbox to resume Merkle chaining
     /// when a session spans multiple process lifetimes.
-    fn latest_node_hash(&self, session_id: &str) -> Result<Option<String>, String>;
+    fn latest_node_hash(&self, session_id: &super::SessionId) -> Result<Option<String>, String>;
 
     /// Set an override state for timeline checkout (ADR 081).
     ///
@@ -205,7 +207,7 @@ pub trait DagStore: Send + Sync {
     fn create_timeline(
         &self,
         branch_name: &str,
-        session_id: &str,
+        session_id: &super::SessionId,
         parent_id: Option<i64>,
         fork_point: Option<&str>,
     ) -> Result<i64, String>;
@@ -232,13 +234,29 @@ pub trait DagStore: Send + Sync {
     fn get_nodes_by_submission(&self, submission_id: &str) -> Result<Vec<DagNode>, String>;
 
     /// Get all timelines whose fork point belongs to the given session.
-    fn get_timelines_for_session(&self, session_id: &str) -> Result<Vec<Timeline>, String>;
+    fn get_timelines_for_session(
+        &self,
+        session_id: &super::SessionId,
+    ) -> Result<Vec<Timeline>, String>;
 
     /// Get the head hash for a timeline (the latest recorded DagNode hash).
     fn get_timeline_head(&self, timeline_id: i64) -> Result<Option<String>, String>;
 
     /// Advance the head pointer of a timeline to the given hash.
     fn update_timeline_head(&self, timeline_id: i64, hash: &str) -> Result<(), String>;
+
+    // -------------------------------------------------------------------------
+    // Session CRUD
+    // -------------------------------------------------------------------------
+
+    /// Persist a new session. Idempotent (ignores if ID already exists).
+    fn create_session(&self, session: &Session) -> Result<(), String>;
+
+    /// Look up a session by its ID.
+    fn get_session(&self, session_id: &super::SessionId) -> Result<Option<Session>, String>;
+
+    /// Look up a session by its friendly name.
+    fn get_session_by_name(&self, name: &str) -> Result<Option<Session>, String>;
 }
 
 // ============================================================================
@@ -250,6 +268,7 @@ pub struct InMemoryDagStore {
     nodes: std::sync::Mutex<Vec<DagNode>>,
     timelines: std::sync::Mutex<Vec<Timeline>>,
     checkout_states: std::sync::Mutex<std::collections::HashMap<String, String>>,
+    sessions: std::sync::Mutex<Vec<Session>>,
 }
 
 impl InMemoryDagStore {
@@ -258,6 +277,7 @@ impl InMemoryDagStore {
             nodes: std::sync::Mutex::new(Vec::new()),
             timelines: std::sync::Mutex::new(Vec::new()),
             checkout_states: std::sync::Mutex::new(std::collections::HashMap::new()),
+            sessions: std::sync::Mutex::new(Vec::new()),
         }
     }
 }
@@ -296,11 +316,11 @@ impl DagStore for InMemoryDagStore {
         }
     }
 
-    fn get_session_nodes(&self, session_id: &str) -> Result<Vec<DagNode>, String> {
+    fn get_session_nodes(&self, session_id: &super::SessionId) -> Result<Vec<DagNode>, String> {
         let nodes = self.nodes.lock().unwrap();
         let mut result: Vec<DagNode> = nodes
             .iter()
-            .filter(|n| n.session_id == session_id)
+            .filter(|n| n.session_id == *session_id)
             .cloned()
             .collect();
         result.sort_by(|a, b| a.created_at.cmp(&b.created_at));
@@ -332,12 +352,12 @@ impl DagStore for InMemoryDagStore {
             .find_map(|n| n.state.clone()))
     }
 
-    fn latest_node_hash(&self, session_id: &str) -> Result<Option<String>, String> {
+    fn latest_node_hash(&self, session_id: &super::SessionId) -> Result<Option<String>, String> {
         let nodes = self.nodes.lock().unwrap();
         Ok(nodes
             .iter()
             .rev()
-            .find(|n| n.session_id == session_id)
+            .find(|n| n.session_id == *session_id)
             .map(|n| n.hash.clone()))
     }
 
@@ -352,7 +372,7 @@ impl DagStore for InMemoryDagStore {
     fn create_timeline(
         &self,
         branch_name: &str,
-        session_id: &str,
+        session_id: &super::SessionId,
         parent_id: Option<i64>,
         fork_point: Option<&str>,
     ) -> Result<i64, String> {
@@ -361,7 +381,7 @@ impl DagStore for InMemoryDagStore {
         timelines.push(Timeline {
             id,
             branch_name: branch_name.to_string(),
-            session_id: session_id.to_string(),
+            session_id: session_id.clone(),
             parent_timeline_id: parent_id,
             fork_point: fork_point.map(|s| s.to_string()),
             created_at: Utc::now(),
@@ -411,7 +431,7 @@ impl DagStore for InMemoryDagStore {
 
     fn list_sessions(&self) -> Result<Vec<SessionSummary>, String> {
         let nodes = self.nodes.lock().unwrap();
-        let mut sessions: std::collections::HashMap<String, Vec<&DagNode>> =
+        let mut sessions: std::collections::HashMap<super::SessionId, Vec<&DagNode>> =
             std::collections::HashMap::new();
         for node in nodes.iter() {
             sessions
@@ -466,11 +486,14 @@ impl DagStore for InMemoryDagStore {
         Ok(result)
     }
 
-    fn get_timelines_for_session(&self, session_id: &str) -> Result<Vec<Timeline>, String> {
+    fn get_timelines_for_session(
+        &self,
+        session_id: &super::SessionId,
+    ) -> Result<Vec<Timeline>, String> {
         let nodes = self.nodes.lock().unwrap();
         let session_hashes: std::collections::HashSet<&str> = nodes
             .iter()
-            .filter(|n| n.session_id == session_id)
+            .filter(|n| n.session_id == *session_id)
             .map(|n| n.hash.as_str())
             .collect();
 
@@ -501,6 +524,28 @@ impl DagStore for InMemoryDagStore {
             t.head = Some(hash.to_string());
         }
         Ok(())
+    }
+
+    fn create_session(&self, session: &Session) -> Result<(), String> {
+        let mut sessions = self.sessions.lock().unwrap();
+        if sessions
+            .iter()
+            .any(|s| s.session.as_str() == session.session.as_str())
+        {
+            return Ok(());
+        }
+        sessions.push(session.clone());
+        Ok(())
+    }
+
+    fn get_session(&self, session_id: &super::SessionId) -> Result<Option<Session>, String> {
+        let sessions = self.sessions.lock().unwrap();
+        Ok(sessions.iter().find(|s| s.session == *session_id).cloned())
+    }
+
+    fn get_session_by_name(&self, name: &str) -> Result<Option<Session>, String> {
+        let sessions = self.sessions.lock().unwrap();
+        Ok(sessions.iter().find(|s| s.name == name).cloned())
     }
 }
 

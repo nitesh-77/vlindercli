@@ -145,6 +145,12 @@ pub trait MessageQueue {
     /// react to this message.
     fn send_fork(&self, msg: ForkMessage) -> Result<(), QueueError>;
 
+    /// Send a SessionStartMessage (CLI → Platform).
+    ///
+    /// Creates a new conversation session. Must be sent before the first
+    /// InvokeMessage in a session (FK: dag_nodes.session_id → sessions.id).
+    fn send_session_start(&self, msg: super::SessionStartMessage) -> Result<(), QueueError>;
+
     // -------------------------------------------------------------------------
     // Request-reply facades (ADR 092)
     // -------------------------------------------------------------------------

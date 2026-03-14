@@ -5,7 +5,7 @@ use clap::Subcommand;
 use crate::config::CliConfig;
 use vlinder_core::domain::{
     AgentId, DagStore, ForkParams, MessageType, Operation, RepairParams, Sequence, ServiceBackend,
-    ServiceType,
+    ServiceType, SessionId,
 };
 
 use super::connect::{connect_harness, open_dag_store};
@@ -92,13 +92,20 @@ fn list(agent_name: &str) {
     }
 
     println!(
-        "{:<40} {:<24} {:>8} STATUS",
-        "SESSION_ID", "STARTED", "MESSAGES"
+        "{:<28} {:<40} {:<24} {:>8} STATUS",
+        "NAME", "SESSION_ID", "STARTED", "MESSAGES"
     );
     for s in &filtered {
         let status = if s.is_open { "open" } else { "closed" };
+        let name = store
+            .get_session(&s.session_id)
+            .ok()
+            .flatten()
+            .map(|sess| sess.name)
+            .unwrap_or_default();
         println!(
-            "{:<40} {:<24} {:>8} {}",
+            "{:<28} {:<40} {:<24} {:>8} {}",
+            name,
             s.session_id,
             s.started_at.format("%Y-%m-%d %H:%M:%S"),
             s.message_count,
@@ -107,11 +114,12 @@ fn list(agent_name: &str) {
     }
 }
 
-fn get(session_id: &str) {
+fn get(session_id_or_name: &str) {
     let config = CliConfig::load();
     let store = require_dag_store(&config);
 
-    let nodes = store.get_session_nodes(session_id).unwrap_or_else(|e| {
+    let session_id = resolve_session_id(&*store, session_id_or_name);
+    let nodes = store.get_session_nodes(&session_id).unwrap_or_else(|e| {
         eprintln!("Failed to query session: {}", e);
         std::process::exit(1);
     });
@@ -159,9 +167,10 @@ fn get(session_id: &str) {
     }
 }
 
-fn fork(session_id: &str, from_hash: &str, branch_name: &str) {
+fn fork(session_id_or_name: &str, from_hash: &str, branch_name: &str) {
     let config = CliConfig::load();
     let store = require_dag_store(&config);
+    let session_id = resolve_session_id(&*store, session_id_or_name);
 
     // Verify the node exists and belongs to this session
     let node = store
@@ -184,7 +193,7 @@ fn fork(session_id: &str, from_hash: &str, branch_name: &str) {
     }
 
     // Derive agent name from the session's Invoke message
-    let agent_name = find_agent_name(&*store, session_id).unwrap_or_else(|| {
+    let agent_name = find_agent_name(&*store, &session_id).unwrap_or_else(|| {
         eprintln!("Cannot determine agent name for session {}", session_id);
         std::process::exit(1);
     });
@@ -354,12 +363,13 @@ fn promote(branch: &str) {
     );
 }
 
-fn branches(session_id: &str) {
+fn branches(session_id_or_name: &str) {
     let config = CliConfig::load();
     let store = require_dag_store(&config);
+    let session_id = resolve_session_id(&*store, session_id_or_name);
 
     let timelines = store
-        .get_timelines_for_session(session_id)
+        .get_timelines_for_session(&session_id)
         .unwrap_or_else(|e| {
             eprintln!("Failed to query timelines: {}", e);
             std::process::exit(1);
@@ -456,8 +466,22 @@ fn extract_sequence(diagnostics: &[u8]) -> Sequence {
     }
 }
 
+/// Resolve a user-provided string (UUID or petname) to a SessionId.
+fn resolve_session_id(store: &dyn DagStore, id_or_name: &str) -> SessionId {
+    // If it's a valid UUID, use it directly
+    if let Ok(session_id) = SessionId::try_from(id_or_name.to_string()) {
+        return session_id;
+    }
+    // Try by petname
+    if let Some(session) = store.get_session_by_name(id_or_name).ok().flatten() {
+        return session.session;
+    }
+    eprintln!("Session '{}' not found", id_or_name);
+    std::process::exit(1);
+}
+
 /// Find the agent name from the Invoke message in a session.
-fn find_agent_name(store: &dyn DagStore, session_id: &str) -> Option<String> {
+fn find_agent_name(store: &dyn DagStore, session_id: &SessionId) -> Option<String> {
     let nodes = store.get_session_nodes(session_id).ok()?;
     nodes
         .iter()

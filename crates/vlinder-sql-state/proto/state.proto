@@ -27,6 +27,11 @@ service StateService {
   rpc RenameTimeline(RenameTimelineRequest) returns (RenameTimelineResponse);
   rpc IsTimelineSealed(IsTimelineSealedRequest) returns (IsTimelineSealedResponse);
 
+  // Session CRUD
+  rpc CreateSession(CreateSessionRequest) returns (CreateSessionResponse);
+  rpc GetSession(GetSessionRequest) returns (GetSessionResponse);
+  rpc GetSessionByName(GetSessionByNameRequest) returns (GetSessionResponse);
+
   // Session queries (ADR 113)
   rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
   rpc GetNodesBySubmission(GetNodesBySubmissionRequest) returns (GetNodesBySubmissionResponse);
@@ -138,6 +143,23 @@ message RenameTimelineResponse { bool success = 1; optional string error = 2; }
 
 message IsTimelineSealedRequest { int64 id = 1; }
 message IsTimelineSealedResponse { bool sealed = 1; }
+
+// =============================================================================
+// Session CRUD
+// =============================================================================
+
+message SessionProto {
+  string id = 1;
+  string name = 2;
+  string agent_name = 3;
+}
+
+message CreateSessionRequest { SessionProto session = 1; }
+message CreateSessionResponse { bool success = 1; optional string error = 2; }
+
+message GetSessionRequest { string session_id = 1; }
+message GetSessionByNameRequest { string name = 1; }
+message GetSessionResponse { optional SessionProto session = 1; }
 
 // =============================================================================
 // Session Queries (ADR 113)

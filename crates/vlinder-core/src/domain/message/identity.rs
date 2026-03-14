@@ -114,32 +114,44 @@ impl From<String> for SubmissionId {
 
 /// Unique identifier for a conversation session.
 ///
-/// Format: `ses-{uuid}`. Groups multiple submissions into a conversation.
+/// Format: UUID. Groups multiple submissions into a conversation.
 /// Created by the CLI when the REPL starts.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct SessionId(String);
 
 impl SessionId {
-    /// Create a new session ID as a human-readable petname.
-    ///
-    /// Generates Docker-style names like "elegant-knuth-a3f2".
-    /// Readable in CLI output and git refs (`refs/sessions/elegant-knuth-a3f2/main`).
+    /// Create a new session ID as a UUID.
     pub fn new() -> Self {
+        Self(Uuid::new_v4().to_string())
+    }
+
+    /// Derive a human-readable petname from this session's UUID.
+    ///
+    /// Uses the first 4 hex chars of the UUID as a suffix:
+    /// `a3f2b1c4-...` → `elegant-knuth-a3f2`
+    pub fn petname(&self) -> String {
         use petname::{Generator, Petnames};
-        use rand::Rng;
+
+        let id = self.as_str();
+        let suffix = &id[..4.min(id.len())];
 
         let petnames = Petnames::default();
         let mut rng = rand::thread_rng();
         let name = petnames
             .generate(&mut rng, 2, "-")
-            .unwrap_or_else(|| format!("ses-{}", Uuid::new_v4()));
-        let suffix: u16 = rng.gen();
-        Self(format!("{}-{:04x}", name, suffix))
+            .unwrap_or_else(|| "unnamed-session".to_string());
+        format!("{}-{}", name, suffix)
     }
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+impl PartialEq<&str> for SessionId {
+    fn eq(&self, other: &&str) -> bool {
+        self.0 == *other
     }
 }
 
@@ -155,9 +167,12 @@ impl fmt::Display for SessionId {
     }
 }
 
-impl From<String> for SessionId {
-    fn from(s: String) -> Self {
-        Self(s)
+impl TryFrom<String> for SessionId {
+    type Error = String;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        Uuid::parse_str(&s).map_err(|_| format!("invalid session ID (expected UUID): {}", s))?;
+        Ok(Self(s))
     }
 }
 
@@ -420,23 +435,28 @@ mod tests {
     }
 
     #[test]
-    fn session_id_is_petname_with_suffix() {
+    fn session_id_is_uuid() {
         let id = SessionId::new();
         let s = id.as_str();
-        // Format: "adjective-noun-hex4" e.g. "elegant-knuth-a3f2"
-        let parts: Vec<&str> = s.split('-').collect();
+        // Should be a valid UUID (8-4-4-4-12 hex with dashes)
+        assert_eq!(s.len(), 36, "UUID should be 36 chars, got: {}", s);
         assert!(
-            parts.len() >= 3,
-            "expected at least 3 parts in '{}', got {}",
-            s,
-            parts.len()
+            uuid::Uuid::parse_str(s).is_ok(),
+            "should be a valid UUID: {}",
+            s
         );
-        // Last part is 4 hex digits
-        let suffix = parts.last().unwrap();
-        assert_eq!(suffix.len(), 4, "suffix '{}' should be 4 hex chars", suffix);
+    }
+
+    #[test]
+    fn session_petname_uses_uuid_prefix() {
+        let id = SessionId::new();
+        let name = id.petname();
+        // Format: "adjective-noun-hex4" e.g. "elegant-knuth-a3f2"
+        let suffix = &id.as_str()[..4];
         assert!(
-            suffix.chars().all(|c| c.is_ascii_hexdigit()),
-            "suffix '{}' should be hex",
+            name.ends_with(suffix),
+            "petname '{}' should end with UUID prefix '{}'",
+            name,
             suffix
         );
     }

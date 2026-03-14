@@ -13,7 +13,7 @@ use crate::domain::Session;
 use crate::domain::{
     AgentId, ForkMessage, HarnessType, InvokeDiagnostics, InvokeMessage, JobId, JobStatus,
     MessageQueue, Operation, Registry, RepairMessage, ResourceId, Sequence, ServiceBackend,
-    SessionId, SubmissionId, TimelineId,
+    SessionId, SessionStartMessage, SubmissionId, TimelineId,
 };
 
 /// Common harness operations shared across all harness types.
@@ -250,7 +250,13 @@ impl Harness for CoreHarness {
 
     fn start_session(&mut self, agent_name: &str) {
         let session_id = SessionId::new();
-        let session = Session::new(session_id, agent_name);
+        let session = Session::new(session_id.clone(), agent_name);
+
+        let msg =
+            SessionStartMessage::new(self.timeline.clone(), session_id, agent_name.to_string());
+        if let Err(e) = self.queue.send_session_start(msg) {
+            tracing::warn!(error = %e, "Failed to send session start message");
+        }
 
         self.session = Some(session);
     }

@@ -35,7 +35,7 @@ mod routing_key;
 mod runtime;
 mod secret_store;
 mod service_type;
-mod session;
+pub mod session;
 mod storage;
 pub mod workers;
 
@@ -62,8 +62,8 @@ pub use diagnostics::{
 pub use message::{
     CompleteMessage, DelegateMessage, ExpectsReply, ForkMessage, HarnessType, InvokeMessage,
     MessageId, ObservableMessage, ObservableMessageHeaders, RepairMessage, RequestMessage,
-    ResponseMessage, Sequence, SequenceCounter, SessionId, SubmissionId, TimelineId,
-    PROTOCOL_VERSION,
+    ResponseMessage, Sequence, SequenceCounter, SessionId, SessionStartMessage, SubmissionId,
+    TimelineId, PROTOCOL_VERSION,
 };
 pub use message_queue::{agent_routing_key, Acknowledgement, MessageQueue, QueueError};
 pub use routing_key::{

@@ -398,7 +398,8 @@ impl MessageQueue for NatsQueue {
                     .map(TimelineId::from)
                     .unwrap_or_else(|_| TimelineId::main()),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
-                session: SessionId::from(get_header(headers, "session-id")?),
+                session: SessionId::try_from(get_header(headers, "session-id")?)
+                    .map_err(QueueError::ReceiveFailed)?,
                 harness: HarnessType::from_str(&get_header(headers, "harness")?)
                     .map_err(|_| QueueError::ReceiveFailed("unknown harness type".to_string()))?,
                 runtime: RuntimeType::from_str(&get_header(headers, "runtime")?)
@@ -452,7 +453,8 @@ impl MessageQueue for NatsQueue {
                     .map(TimelineId::from)
                     .unwrap_or_else(|_| TimelineId::main()),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
-                session: SessionId::from(get_header(headers, "session-id")?),
+                session: SessionId::try_from(get_header(headers, "session-id")?)
+                    .map_err(QueueError::ReceiveFailed)?,
                 agent_id: AgentId::new(get_header(headers, "agent-id")?),
                 service: ServiceBackend::from_parts(
                     ServiceType::from_str(&get_header(headers, "service")?).map_err(|_| {
@@ -514,7 +516,8 @@ impl MessageQueue for NatsQueue {
                     .map(TimelineId::from)
                     .unwrap_or_else(|_| TimelineId::main()),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
-                session: SessionId::from(get_header(headers, "session-id")?),
+                session: SessionId::try_from(get_header(headers, "session-id")?)
+                    .map_err(QueueError::ReceiveFailed)?,
                 agent_id: AgentId::new(get_header(headers, "agent-id")?),
                 service: ServiceBackend::from_parts(
                     ServiceType::from_str(&get_header(headers, "service")?).map_err(|_| {
@@ -568,7 +571,8 @@ impl MessageQueue for NatsQueue {
                     .map(TimelineId::from)
                     .unwrap_or_else(|_| TimelineId::main()),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
-                session: SessionId::from(get_header(headers, "session-id")?),
+                session: SessionId::try_from(get_header(headers, "session-id")?)
+                    .map_err(QueueError::ReceiveFailed)?,
                 agent_id: AgentId::new(get_header(headers, "agent-id")?),
                 harness: HarnessType::from_str(&get_header(headers, "harness")?)
                     .map_err(|_| QueueError::ReceiveFailed("unknown harness type".to_string()))?,
@@ -641,7 +645,8 @@ impl MessageQueue for NatsQueue {
                     .map(TimelineId::from)
                     .unwrap_or_else(|_| TimelineId::main()),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
-                session: SessionId::from(get_header(headers, "session-id")?),
+                session: SessionId::try_from(get_header(headers, "session-id")?)
+                    .map_err(QueueError::ReceiveFailed)?,
                 caller: AgentId::new(get_header(headers, "caller-agent")?),
                 target: AgentId::new(get_header(headers, "target-agent")?),
                 payload: js_msg.payload.to_vec(),
@@ -715,7 +720,8 @@ impl MessageQueue for NatsQueue {
                     .map(TimelineId::from)
                     .unwrap_or_else(|_| TimelineId::main()),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
-                session: SessionId::from(get_header(headers, "session-id")?),
+                session: SessionId::try_from(get_header(headers, "session-id")?)
+                    .map_err(QueueError::ReceiveFailed)?,
                 agent_id: AgentId::new(get_header(headers, "agent-id")?),
                 harness: HarnessType::from_str(&get_header(headers, "harness")?)
                     .map_err(|_| QueueError::ReceiveFailed("unknown harness type".to_string()))?,
@@ -784,7 +790,8 @@ impl MessageQueue for NatsQueue {
                     .map(TimelineId::from)
                     .unwrap_or_else(|_| TimelineId::main()),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
-                session: SessionId::from(get_header(headers, "session-id")?),
+                session: SessionId::try_from(get_header(headers, "session-id")?)
+                    .map_err(QueueError::ReceiveFailed)?,
                 agent_id: AgentId::new(get_header(headers, "agent-id")?),
                 harness: HarnessType::from_str(&get_header(headers, "harness")?)
                     .map_err(|_| QueueError::ReceiveFailed("unknown harness type".to_string()))?,
@@ -839,6 +846,14 @@ impl MessageQueue for NatsQueue {
 
             Ok(())
         })
+    }
+
+    fn send_session_start(
+        &self,
+        _msg: vlinder_core::domain::SessionStartMessage,
+    ) -> Result<(), QueueError> {
+        // Session creation is fire-and-forget — RecordingQueue persists it.
+        Ok(())
     }
 }
 
@@ -1161,7 +1176,7 @@ pub fn from_nats_headers(
     // Common fields shared by all variants.
     let id = MessageId::from(headers.get("msg-id")?.clone());
     let protocol_version = headers.get("protocol-version").cloned().unwrap_or_default();
-    let session = SessionId::from(headers.get("session-id")?.clone());
+    let session = SessionId::try_from(headers.get("session-id")?.clone()).ok()?;
     let state = headers.get("state").cloned();
 
     match key {

@@ -190,10 +190,9 @@ impl MessageQueue for RecordingQueue {
         self.record(&msg.clone().into());
 
         // Create the timeline row so `--branch` and `session repair` can find it.
-        let session_id = msg.session.as_str();
         match self.store.create_timeline(
             &msg.branch_name,
-            session_id,
+            &msg.session,
             Some(msg.parent_timeline_id),
             Some(&msg.fork_point),
         ) {
@@ -227,6 +226,21 @@ impl MessageQueue for RecordingQueue {
         }
 
         self.inner.send_fork(msg)
+    }
+
+    fn send_session_start(
+        &self,
+        msg: crate::domain::SessionStartMessage,
+    ) -> Result<(), QueueError> {
+        let session = crate::domain::Session::new(msg.session.clone(), &msg.agent_name);
+        if let Err(e) = self.store.create_session(&session) {
+            tracing::warn!(
+                error = %e,
+                session = %msg.session.as_str(),
+                "Failed to persist session"
+            );
+        }
+        self.inner.send_session_start(msg)
     }
 }
 
@@ -556,6 +570,18 @@ mod tests {
             }
             fn update_timeline_head(&self, _: i64, _: &str) -> Result<(), String> {
                 Ok(())
+            }
+            fn create_session(&self, _: &crate::domain::Session) -> Result<(), String> {
+                Ok(())
+            }
+            fn get_session(&self, _: &str) -> Result<Option<crate::domain::Session>, String> {
+                Ok(None)
+            }
+            fn get_session_by_name(
+                &self,
+                _: &str,
+            ) -> Result<Option<crate::domain::Session>, String> {
+                Ok(None)
             }
         }
 

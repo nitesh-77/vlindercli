@@ -110,7 +110,7 @@ pub fn build_dag_node(msg: &ObservableMessage, parent_hash: &str) -> DagNode {
     let checkpoint = observable_checkpoint(msg);
     let operation = observable_operation(msg);
     let payload = msg.payload();
-    let session_id = msg.session().as_str().to_string();
+    let session_id = msg.session().clone();
     let hash = hash_dag_node(
         payload,
         parent_hash,

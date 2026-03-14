@@ -66,7 +66,12 @@ impl HarnessService for HarnessServiceServer {
         request: Request<StartSessionRequest>,
     ) -> Result<Response<StartSessionResponse>, Status> {
         let req = request.into_inner();
-        self.harness.lock().unwrap().start_session(&req.agent_name);
+        let harness = Arc::clone(&self.harness);
+        tokio::task::spawn_blocking(move || {
+            harness.lock().unwrap().start_session(&req.agent_name);
+        })
+        .await
+        .map_err(|e| Status::internal(format!("spawn_blocking failed: {}", e)))?;
         Ok(Response::new(StartSessionResponse {}))
     }
 

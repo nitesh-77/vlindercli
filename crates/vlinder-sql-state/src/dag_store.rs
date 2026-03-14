@@ -11,7 +11,8 @@ use rusqlite::Connection;
 
 use std::str::FromStr;
 
-use vlinder_core::domain::{DagNode, DagStore, MessageType, SessionSummary, Timeline};
+use vlinder_core::domain::session::Session;
+use vlinder_core::domain::{DagNode, DagStore, MessageType, SessionId, SessionSummary, Timeline};
 
 /// SQLite-backed DagStore.
 pub struct SqliteDagStore {
@@ -67,7 +68,13 @@ impl SqliteDagStore {
                  FOREIGN KEY (parent_timeline_id) REFERENCES timelines(id)
              );
              CREATE INDEX IF NOT EXISTS idx_timelines_session
-                 ON timelines (session_id);",
+                 ON timelines (session_id);
+             CREATE TABLE IF NOT EXISTS sessions (
+                 id TEXT PRIMARY KEY,
+                 name TEXT NOT NULL UNIQUE,
+                 agent_name TEXT NOT NULL,
+                 created_at TEXT NOT NULL
+             );",
         )
         .map_err(|e| format!("failed to initialize dag store: {}", e))?;
 
@@ -242,7 +249,9 @@ fn row_to_timeline(row: &rusqlite::Row) -> Result<Timeline, rusqlite::Error> {
     Ok(Timeline {
         id: row.get(0)?,
         branch_name: row.get(1)?,
-        session_id: row.get(2)?,
+        session_id: SessionId::try_from(row.get::<_, String>(2)?).map_err(|e| {
+            rusqlite::Error::FromSqlConversionFailure(2, rusqlite::types::Type::Text, e.into())
+        })?,
         parent_timeline_id: row.get(3)?,
         fork_point: row.get(4)?,
         created_at,
@@ -275,7 +284,9 @@ fn row_to_dag_node(row: &rusqlite::Row) -> Result<DagNode, rusqlite::Error> {
         message_type,
         from: row.get(3)?,
         to: row.get(4)?,
-        session_id: row.get(5)?,
+        session_id: SessionId::try_from(row.get::<_, String>(5)?).map_err(|e| {
+            rusqlite::Error::FromSqlConversionFailure(5, rusqlite::types::Type::Text, e.into())
+        })?,
         submission_id: row.get(6)?,
         payload: row.get(7)?,
         diagnostics: row.get(8)?,
@@ -300,7 +311,7 @@ impl DagStore for SqliteDagStore {
                 node.message_type.as_str(),
                 node.from,
                 node.to,
-                node.session_id,
+                node.session_id.as_str(),
                 node.submission_id,
                 node.payload,
                 node.diagnostics,
@@ -372,7 +383,7 @@ impl DagStore for SqliteDagStore {
         }
     }
 
-    fn get_session_nodes(&self, session_id: &str) -> Result<Vec<DagNode>, String> {
+    fn get_session_nodes(&self, session_id: &SessionId) -> Result<Vec<DagNode>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state, protocol_version, checkpoint, operation
@@ -380,7 +391,7 @@ impl DagStore for SqliteDagStore {
         ).map_err(|e| format!("get_session_nodes prepare failed: {}", e))?;
 
         let rows = stmt
-            .query_map(rusqlite::params![session_id], row_to_dag_node)
+            .query_map(rusqlite::params![session_id.as_str()], row_to_dag_node)
             .map_err(|e| format!("get_session_nodes query failed: {}", e))?;
 
         let mut nodes = Vec::new();
@@ -408,7 +419,7 @@ impl DagStore for SqliteDagStore {
         Ok(nodes)
     }
 
-    fn latest_node_hash(&self, session_id: &str) -> Result<Option<String>, String> {
+    fn latest_node_hash(&self, session_id: &SessionId) -> Result<Option<String>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
             .prepare(
@@ -420,7 +431,7 @@ impl DagStore for SqliteDagStore {
             .map_err(|e| format!("latest_node_hash prepare failed: {}", e))?;
 
         let result: Option<String> = stmt
-            .query_row(rusqlite::params![session_id], |row| row.get(0))
+            .query_row(rusqlite::params![session_id.as_str()], |row| row.get(0))
             .optional()
             .map_err(|e| format!("latest_node_hash query failed: {}", e))?;
 
@@ -480,7 +491,7 @@ impl DagStore for SqliteDagStore {
     fn create_timeline(
         &self,
         branch_name: &str,
-        session_id: &str,
+        session_id: &SessionId,
         parent_id: Option<i64>,
         fork_point: Option<&str>,
     ) -> Result<i64, String> {
@@ -488,7 +499,7 @@ impl DagStore for SqliteDagStore {
         conn.execute(
             "INSERT INTO timelines (branch_name, session_id, parent_timeline_id, fork_point, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5)",
-            rusqlite::params![branch_name, session_id, parent_id, fork_point, Utc::now().to_rfc3339()],
+            rusqlite::params![branch_name, session_id.as_str(), parent_id, fork_point, Utc::now().to_rfc3339()],
         )
         .map_err(|e| format!("create_timeline failed: {}", e))?;
         Ok(conn.last_insert_rowid())
@@ -589,7 +600,13 @@ impl DagStore for SqliteDagStore {
                 let is_open = last_type.as_deref() != Some("complete");
 
                 Ok(SessionSummary {
-                    session_id,
+                    session_id: SessionId::try_from(session_id).map_err(|e| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            0,
+                            rusqlite::types::Type::Text,
+                            e.into(),
+                        )
+                    })?,
                     agent_name: agent_name.unwrap_or_default(),
                     started_at,
                     message_count,
@@ -629,7 +646,7 @@ impl DagStore for SqliteDagStore {
         Ok(nodes)
     }
 
-    fn get_timelines_for_session(&self, session_id: &str) -> Result<Vec<Timeline>, String> {
+    fn get_timelines_for_session(&self, session_id: &SessionId) -> Result<Vec<Timeline>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
             .prepare(
@@ -643,7 +660,7 @@ impl DagStore for SqliteDagStore {
             .map_err(|e| format!("get_timelines_for_session prepare failed: {}", e))?;
 
         let rows = stmt
-            .query_map(rusqlite::params![session_id], row_to_timeline)
+            .query_map(rusqlite::params![session_id.as_str()], row_to_timeline)
             .map_err(|e| format!("get_timelines_for_session query failed: {}", e))?;
 
         let mut timelines = Vec::new();
@@ -677,6 +694,82 @@ impl DagStore for SqliteDagStore {
         )
         .map_err(|e| format!("update_timeline_head failed: {}", e))?;
         Ok(())
+    }
+
+    // -------------------------------------------------------------------------
+    // Session CRUD
+    // -------------------------------------------------------------------------
+
+    fn create_session(&self, session: &Session) -> Result<(), String> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT OR IGNORE INTO sessions (id, name, agent_name, created_at)
+             VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![
+                session.session.as_str(),
+                session.name,
+                session.agent,
+                Utc::now().to_rfc3339(),
+            ],
+        )
+        .map_err(|e| format!("create_session failed: {}", e))?;
+        Ok(())
+    }
+
+    fn get_session(&self, session_id: &SessionId) -> Result<Option<Session>, String> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare("SELECT id, name, agent_name FROM sessions WHERE id = ?1")
+            .map_err(|e| format!("get_session prepare failed: {}", e))?;
+
+        stmt.query_row(rusqlite::params![session_id.as_str()], |row| {
+            let id: String = row.get(0)?;
+            let name: String = row.get(1)?;
+            let agent: String = row.get(2)?;
+            Ok(Session {
+                open: None,
+                session: SessionId::try_from(id).map_err(|e| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        0,
+                        rusqlite::types::Type::Text,
+                        e.into(),
+                    )
+                })?,
+                name,
+                agent,
+                history: Vec::new(),
+            })
+        })
+        .optional()
+        .map_err(|e| format!("get_session query failed: {}", e))
+    }
+
+    fn get_session_by_name(&self, name: &str) -> Result<Option<Session>, String> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare("SELECT id, name, agent_name FROM sessions WHERE name = ?1")
+            .map_err(|e| format!("get_session_by_name prepare failed: {}", e))?;
+
+        stmt.query_row(rusqlite::params![name], |row| {
+            let id: String = row.get(0)?;
+            let name: String = row.get(1)?;
+            let agent: String = row.get(2)?;
+            Ok(Session {
+                open: None,
+                session: SessionId::try_from(id).map_err(|e| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        0,
+                        rusqlite::types::Type::Text,
+                        e.into(),
+                    )
+                })?,
+                name,
+                agent,
+                history: Vec::new(),
+            })
+        })
+        .optional()
+        .map_err(|e| format!("get_session_by_name query failed: {}", e))
     }
 }
 
@@ -1125,6 +1218,60 @@ mod tests {
         let store = test_store();
         // Non-existent timeline → not sealed (no row → broken_at is None)
         assert!(!store.is_timeline_sealed(999).unwrap());
+    }
+
+    // ========================================================================
+    // Session CRUD tests
+    // ========================================================================
+
+    #[test]
+    fn create_and_get_session() {
+        let store = test_store();
+        let session = Session::new(SessionId::from("abc-123".to_string()), "pensieve");
+
+        store.create_session(&session).unwrap();
+
+        let retrieved = store.get_session("abc-123").unwrap().unwrap();
+        assert_eq!(retrieved.session.as_str(), "abc-123");
+        assert_eq!(retrieved.agent, "pensieve");
+        assert_eq!(retrieved.name, session.name);
+    }
+
+    #[test]
+    fn get_session_by_name() {
+        let store = test_store();
+        let session = Session::new(SessionId::from("abc-123".to_string()), "pensieve");
+        let name = session.name.clone();
+
+        store.create_session(&session).unwrap();
+
+        let retrieved = store.get_session_by_name(&name).unwrap().unwrap();
+        assert_eq!(retrieved.session.as_str(), "abc-123");
+        assert_eq!(retrieved.agent, "pensieve");
+    }
+
+    #[test]
+    fn get_session_returns_none_for_unknown() {
+        let store = test_store();
+        assert!(store.get_session("nonexistent").unwrap().is_none());
+    }
+
+    #[test]
+    fn get_session_by_name_returns_none_for_unknown() {
+        let store = test_store();
+        assert!(store.get_session_by_name("nonexistent").unwrap().is_none());
+    }
+
+    #[test]
+    fn create_session_is_idempotent() {
+        let store = test_store();
+        let session = Session::new(SessionId::from("abc-123".to_string()), "pensieve");
+
+        store.create_session(&session).unwrap();
+        store.create_session(&session).unwrap(); // No error
+
+        let retrieved = store.get_session("abc-123").unwrap().unwrap();
+        assert_eq!(retrieved.agent, "pensieve");
     }
 
     #[test]

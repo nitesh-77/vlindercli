@@ -83,9 +83,12 @@ impl DagStore for GrpcStateClient {
         }
     }
 
-    fn get_session_nodes(&self, session_id: &str) -> Result<Vec<DagNode>, String> {
+    fn get_session_nodes(
+        &self,
+        session_id: &vlinder_core::domain::SessionId,
+    ) -> Result<Vec<DagNode>, String> {
         let request = proto::GetSessionNodesRequest {
-            session_id: session_id.to_string(),
+            session_id: session_id.as_str().to_string(),
         };
 
         let mut client = self.client.clone();
@@ -135,9 +138,12 @@ impl DagStore for GrpcStateClient {
         Ok(response.into_inner().state)
     }
 
-    fn latest_node_hash(&self, session_id: &str) -> Result<Option<String>, String> {
+    fn latest_node_hash(
+        &self,
+        session_id: &vlinder_core::domain::SessionId,
+    ) -> Result<Option<String>, String> {
         let request = proto::LatestNodeHashRequest {
-            session_id: session_id.to_string(),
+            session_id: session_id.as_str().to_string(),
         };
 
         let mut client = self.client.clone();
@@ -176,13 +182,13 @@ impl DagStore for GrpcStateClient {
     fn create_timeline(
         &self,
         branch_name: &str,
-        session_id: &str,
+        session_id: &vlinder_core::domain::SessionId,
         parent_id: Option<i64>,
         fork_point: Option<&str>,
     ) -> Result<i64, String> {
         let request = proto::CreateTimelineRequest {
             branch_name: branch_name.to_string(),
-            session_id: session_id.to_string(),
+            session_id: session_id.as_str().to_string(),
             parent_id,
             fork_point: fork_point.map(|s| s.to_string()),
         };
@@ -322,10 +328,10 @@ impl DagStore for GrpcStateClient {
 
     fn get_timelines_for_session(
         &self,
-        session_id: &str,
+        session_id: &vlinder_core::domain::SessionId,
     ) -> Result<Vec<vlinder_core::domain::Timeline>, String> {
         let request = proto::GetTimelinesForSessionRequest {
-            session_id: session_id.to_string(),
+            session_id: session_id.as_str().to_string(),
         };
 
         let mut client = self.client.clone();
@@ -368,6 +374,83 @@ impl DagStore for GrpcStateClient {
             Ok(())
         } else {
             Err(resp.error.unwrap_or_else(|| "unknown error".to_string()))
+        }
+    }
+
+    fn create_session(&self, session: &vlinder_core::domain::Session) -> Result<(), String> {
+        let mut client = self.client.clone();
+        let req = proto::CreateSessionRequest {
+            session: Some(proto::SessionProto {
+                id: session.session.as_str().to_string(),
+                name: session.name.clone(),
+                agent_name: session.agent.clone(),
+            }),
+        };
+        let resp = self
+            .runtime
+            .block_on(async { client.create_session(req).await })
+            .map_err(|e| e.to_string())?
+            .into_inner();
+        if resp.success {
+            Ok(())
+        } else {
+            Err(resp.error.unwrap_or_else(|| "unknown error".to_string()))
+        }
+    }
+
+    fn get_session(
+        &self,
+        session_id: &vlinder_core::domain::SessionId,
+    ) -> Result<Option<vlinder_core::domain::Session>, String> {
+        let mut client = self.client.clone();
+        let req = proto::GetSessionRequest {
+            session_id: session_id.as_str().to_string(),
+        };
+        let resp = self
+            .runtime
+            .block_on(async { client.get_session(req).await })
+            .map_err(|e| e.to_string())?
+            .into_inner();
+        match resp.session {
+            Some(s) => {
+                let sid = vlinder_core::domain::SessionId::try_from(s.id)?;
+                Ok(Some(vlinder_core::domain::Session {
+                    open: None,
+                    session: sid,
+                    name: s.name,
+                    agent: s.agent_name,
+                    history: Vec::new(),
+                }))
+            }
+            None => Ok(None),
+        }
+    }
+
+    fn get_session_by_name(
+        &self,
+        name: &str,
+    ) -> Result<Option<vlinder_core::domain::Session>, String> {
+        let mut client = self.client.clone();
+        let req = proto::GetSessionByNameRequest {
+            name: name.to_string(),
+        };
+        let resp = self
+            .runtime
+            .block_on(async { client.get_session_by_name(req).await })
+            .map_err(|e| e.to_string())?
+            .into_inner();
+        match resp.session {
+            Some(s) => {
+                let sid = vlinder_core::domain::SessionId::try_from(s.id)?;
+                Ok(Some(vlinder_core::domain::Session {
+                    open: None,
+                    session: sid,
+                    name: s.name,
+                    agent: s.agent_name,
+                    history: Vec::new(),
+                }))
+            }
+            None => Ok(None),
         }
     }
 }
