@@ -18,9 +18,9 @@ use tokio::runtime::Runtime;
 use std::str::FromStr;
 
 use vlinder_core::domain::{
-    Acknowledgement, AgentId, CompleteMessage, DelegateDiagnostics, DelegateMessage, HarnessType,
-    InvokeDiagnostics, InvokeMessage, MessageId, MessageQueue, Nonce, Operation, QueueError,
-    RepairMessage, RequestDiagnostics, RequestMessage, ResponseMessage, RoutingKey,
+    Acknowledgement, AgentId, CompleteMessage, DagNodeId, DelegateDiagnostics, DelegateMessage,
+    HarnessType, InvokeDiagnostics, InvokeMessage, MessageId, MessageQueue, Nonce, Operation,
+    QueueError, RepairMessage, RequestDiagnostics, RequestMessage, ResponseMessage, RoutingKey,
     RuntimeDiagnostics, RuntimeType, Sequence, ServiceBackend, ServiceDiagnostics, ServiceType,
     SessionId, SubmissionId, TimelineId,
 };
@@ -408,7 +408,7 @@ impl MessageQueue for NatsQueue {
                 payload: js_msg.payload.to_vec(),
                 state: get_header(headers, "state").ok(),
                 diagnostics,
-                dag_parent: get_header(headers, "dag-parent").unwrap_or_default(),
+                dag_parent: DagNodeId::from(get_header(headers, "dag-parent").unwrap_or_default()),
             };
 
             Ok((msg, ack_fn))
@@ -795,7 +795,7 @@ impl MessageQueue for NatsQueue {
                 agent_id: AgentId::new(get_header(headers, "agent-id")?),
                 harness: HarnessType::from_str(&get_header(headers, "harness")?)
                     .map_err(|_| QueueError::ReceiveFailed("unknown harness type".to_string()))?,
-                dag_parent: get_header(headers, "dag-parent")?,
+                dag_parent: DagNodeId::from(get_header(headers, "dag-parent")?),
                 checkpoint: get_header(headers, "checkpoint")?,
                 service: ServiceBackend::from_parts(
                     ServiceType::from_str(&get_header(headers, "service")?).map_err(|_| {
@@ -1065,7 +1065,7 @@ pub fn invoke_to_nats_headers(msg: &InvokeMessage) -> HashMap<String, String> {
         h.insert("diagnostics".to_string(), diag_json);
     }
     if !msg.dag_parent.is_empty() {
-        h.insert("dag-parent".to_string(), msg.dag_parent.clone());
+        h.insert("dag-parent".to_string(), msg.dag_parent.to_string());
     }
     h
 }
@@ -1146,7 +1146,7 @@ pub fn repair_to_nats_headers(msg: &RepairMessage) -> HashMap<String, String> {
     h.insert("msg-id".to_string(), msg.id.as_str().to_string());
     h.insert("protocol-version".to_string(), msg.protocol_version.clone());
     h.insert("session-id".to_string(), msg.session.as_str().to_string());
-    h.insert("dag-parent".to_string(), msg.dag_parent.clone());
+    h.insert("dag-parent".to_string(), msg.dag_parent.to_string());
     h.insert("checkpoint".to_string(), msg.checkpoint.clone());
     h.insert(
         "service".to_string(),
@@ -1195,7 +1195,8 @@ pub fn from_nats_headers(
                     history_turns: 0,
                 });
 
-            let dag_parent = headers.get("dag-parent").cloned().unwrap_or_default();
+            let dag_parent =
+                DagNodeId::from(headers.get("dag-parent").cloned().unwrap_or_default());
 
             Some(ObservableMessageHeaders::Invoke {
                 id,
@@ -1340,7 +1341,7 @@ pub fn from_nats_headers(
             harness,
             agent,
         } => {
-            let dag_parent = headers.get("dag-parent").cloned()?;
+            let dag_parent = DagNodeId::from(headers.get("dag-parent").cloned()?);
             let checkpoint = headers.get("checkpoint").cloned()?;
             let service = ServiceBackend::from_parts(
                 ServiceType::from_str(headers.get("service")?).ok()?,
@@ -1371,7 +1372,7 @@ pub fn from_nats_headers(
             agent_name,
         } => {
             let branch_name = headers.get("branch-name").cloned()?;
-            let fork_point = headers.get("fork-point").cloned()?;
+            let fork_point = DagNodeId::from(headers.get("fork-point").cloned()?);
             let parent_timeline_id = headers
                 .get("parent-timeline-id")
                 .and_then(|s| s.parse::<i64>().ok())?;

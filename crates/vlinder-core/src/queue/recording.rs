@@ -11,9 +11,9 @@ use std::sync::Arc;
 
 use crate::domain::workers::dag::build_dag_node;
 use crate::domain::{
-    Acknowledgement, CompleteMessage, DagStore, DelegateMessage, ForkMessage, InvokeMessage,
-    MessageQueue, ObservableMessage, QueueError, RepairMessage, RequestMessage, ResponseMessage,
-    SubmissionId,
+    Acknowledgement, CompleteMessage, DagNodeId, DagStore, DelegateMessage, ForkMessage,
+    InvokeMessage, MessageQueue, ObservableMessage, QueueError, RepairMessage, RequestMessage,
+    ResponseMessage, SubmissionId,
 };
 
 /// A `MessageQueue` decorator that synchronously records DAG nodes on send.
@@ -43,34 +43,34 @@ impl RecordingQueue {
         let timeline_id: i64 = timeline_id_str.parse().unwrap_or(1);
 
         // Explicit dag_parent on Invoke/Fork overrides timeline head.
-        let dag_parent_override = match observable {
+        let dag_parent_override: Option<DagNodeId> = match observable {
             ObservableMessage::Invoke(m) if !m.dag_parent.is_empty() => Some(m.dag_parent.clone()),
             ObservableMessage::Fork(m) => Some(m.fork_point.clone()),
             _ => None,
         };
 
-        // Look up parent hash: dag_parent override → timeline head
-        let parent_hash = dag_parent_override.unwrap_or_else(|| {
+        // Look up parent ID: dag_parent override → timeline head
+        let parent_id = dag_parent_override.unwrap_or_else(|| {
             self.store
                 .get_timeline_head(timeline_id)
                 .unwrap_or_else(|e| {
                     tracing::warn!(error = %e, timeline = timeline_id, "Failed to read timeline head");
                     None
                 })
-                .unwrap_or_default()
+                .unwrap_or_else(DagNodeId::root)
         });
 
-        let node = build_dag_node(observable, &parent_hash);
-        let node_hash = node.hash.clone();
+        let node = build_dag_node(observable, &parent_id);
+        let node_id = node.id.clone();
 
         if let Err(e) = self.store.insert_node(&node) {
-            tracing::warn!(error = %e, hash = %node_hash, "Failed to record DAG node (outbox)");
+            tracing::warn!(error = %node_id, "Failed to record DAG node (outbox): {}", e);
         }
 
         // Advance the timeline head — both sidecar and daemon update
         // the same row, giving a single Merkle chain per timeline.
-        if let Err(e) = self.store.update_timeline_head(timeline_id, &node_hash) {
-            tracing::warn!(error = %e, hash = %node_hash, "Failed to update timeline head");
+        if let Err(e) = self.store.update_timeline_head(timeline_id, &node_id) {
+            tracing::warn!(error = %node_id, "Failed to update timeline head: {}", e);
         }
     }
 }

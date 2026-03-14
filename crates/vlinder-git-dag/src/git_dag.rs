@@ -48,7 +48,7 @@ use chrono::{DateTime, Utc};
 use git2::{FileMode, Oid, Repository, RepositoryInitOptions, Signature, TreeBuilder};
 
 use vlinder_core::domain::workers::dag::build_dag_node;
-use vlinder_core::domain::{DagWorker, ObservableMessage, Registry};
+use vlinder_core::domain::{DagNodeId, DagWorker, ObservableMessage, Registry};
 
 /// DAG worker that writes commits to a git repository.
 ///
@@ -186,7 +186,7 @@ impl GitDagWorker {
         &self,
         msg: &ObservableMessage,
         created_at: DateTime<Utc>,
-        canonical_parent: &str,
+        canonical_parent: &DagNodeId,
     ) -> Result<(Oid, String), String> {
         let mut tb = self
             .repo
@@ -287,7 +287,7 @@ impl GitDagWorker {
                 self.insert_field(&mut tb, "operation", m.operation.as_str())?;
                 self.insert_field(&mut tb, "sequence", &m.sequence.as_u32().to_string())?;
                 self.insert_field(&mut tb, "checkpoint", &m.checkpoint)?;
-                self.insert_field(&mut tb, "dag_parent", &m.dag_parent)?;
+                self.insert_field(&mut tb, "dag_parent", m.dag_parent.as_str())?;
                 if let Some(ref state) = m.state {
                     self.insert_field(&mut tb, "state", state)?;
                 }
@@ -295,7 +295,7 @@ impl GitDagWorker {
             ObservableMessage::Fork(m) => {
                 self.insert_field(&mut tb, "type", "fork")?;
                 self.insert_field(&mut tb, "branch_name", &m.branch_name)?;
-                self.insert_field(&mut tb, "fork_point", &m.fork_point)?;
+                self.insert_field(&mut tb, "fork_point", m.fork_point.as_str())?;
                 self.insert_field(
                     &mut tb,
                     "parent_timeline_id",
@@ -306,12 +306,12 @@ impl GitDagWorker {
 
         // Compute canonical hash and store it in the subtree
         let dag_node = build_dag_node(msg, canonical_parent);
-        self.insert_field(&mut tb, "hash", &dag_node.hash)?;
+        self.insert_field(&mut tb, "hash", dag_node.id.as_str())?;
 
         let tree_oid = tb
             .write()
             .map_err(|e| format!("write message subtree failed: {}", e))?;
-        Ok((tree_oid, dag_node.hash))
+        Ok((tree_oid, dag_node.id.to_string()))
     }
 
     /// Build the accumulated tree: nested under `<agent>/<session>/` with timeline
@@ -325,7 +325,7 @@ impl GitDagWorker {
         _to: &str,
         msg_type: &str,
         parent_commit: Option<Oid>,
-        canonical_parent: &str,
+        canonical_parent: &DagNodeId,
     ) -> Result<(Oid, String), String> {
         let agent_name = message_agent_name(msg);
         let session_id = msg.session().as_str().to_string();
@@ -559,9 +559,13 @@ impl DagWorker for GitDagWorker {
                     let tree = commit
                         .tree()
                         .map_err(|e| format!("tree lookup failed: {}", e))?;
-                    self.session_canonical_hash_from_tree(&tree, &agent_name, &session_id)
+                    DagNodeId::from(self.session_canonical_hash_from_tree(
+                        &tree,
+                        &agent_name,
+                        &session_id,
+                    ))
                 }
-                None => String::new(),
+                None => DagNodeId::root(),
             };
 
             // 2. Build accumulated tree (nested under agent/session)

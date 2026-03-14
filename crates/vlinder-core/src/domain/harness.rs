@@ -11,9 +11,9 @@ use std::sync::Arc;
 
 use crate::domain::Session;
 use crate::domain::{
-    AgentId, ForkMessage, HarnessType, InvokeDiagnostics, InvokeMessage, JobId, JobStatus,
-    MessageQueue, Operation, Registry, RepairMessage, ResourceId, Sequence, ServiceBackend,
-    SessionId, SessionStartMessage, SubmissionId, TimelineId,
+    AgentId, DagNodeId, ForkMessage, HarnessType, InvokeDiagnostics, InvokeMessage, JobId,
+    JobStatus, MessageQueue, Operation, Registry, RepairMessage, ResourceId, Sequence,
+    ServiceBackend, SessionId, SessionStartMessage, SubmissionId, TimelineId,
 };
 
 /// Common harness operations shared across all harness types.
@@ -47,7 +47,7 @@ pub trait Harness {
     /// uses it as the parent for the invoke commit instead of its cached
     /// last_commit. For normal invokes this is the current DAG tip; for
     /// repair it will be the checked-out commit.
-    fn set_dag_parent(&mut self, hash: String);
+    fn set_dag_parent(&mut self, id: DagNodeId);
 
     /// Run an agent to completion synchronously.
     ///
@@ -78,7 +78,7 @@ pub trait Harness {
 /// The harness adds timeline, session, submission, and harness type.
 pub struct RepairParams {
     pub agent_id: AgentId,
-    pub dag_parent: String,
+    pub dag_parent: DagNodeId,
     pub checkpoint: String,
     pub service: ServiceBackend,
     pub operation: Operation,
@@ -94,7 +94,7 @@ pub struct RepairParams {
 pub struct ForkParams {
     pub agent_name: String,
     pub branch_name: String,
-    pub fork_point: String,
+    pub fork_point: DagNodeId,
     pub parent_timeline_id: i64,
 }
 
@@ -126,8 +126,8 @@ pub struct CoreHarness {
     /// Whether the current timeline is sealed (ADR 093).
     /// Sealed timelines reject new invocations.
     timeline_sealed: bool,
-    /// DAG commit hash to parent the next invoke on.
-    dag_parent: String,
+    /// DagNode to parent the next invoke on.
+    dag_parent: DagNodeId,
 }
 
 impl CoreHarness {
@@ -146,7 +146,7 @@ impl CoreHarness {
             pending_state: None,
             timeline: TimelineId::main(),
             timeline_sealed: false,
-            dag_parent: String::new(),
+            dag_parent: DagNodeId::root(),
         }
     }
 
@@ -265,8 +265,8 @@ impl Harness for CoreHarness {
         self.last_state = Some(state);
     }
 
-    fn set_dag_parent(&mut self, hash: String) {
-        self.dag_parent = hash;
+    fn set_dag_parent(&mut self, id: DagNodeId) {
+        self.dag_parent = id;
     }
 
     fn run_agent(&mut self, agent_id: &ResourceId, input: &str) -> Result<String, String> {

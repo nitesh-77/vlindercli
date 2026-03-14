@@ -4,7 +4,7 @@ use tonic::transport::Channel;
 
 use super::proto::{self, harness_client::HarnessClient};
 use vlinder_core::domain::{
-    ForkParams, Harness, HarnessType, RepairParams, ResourceId, TimelineId,
+    DagNodeId, ForkParams, Harness, HarnessType, RepairParams, ResourceId, TimelineId,
 };
 
 /// Ping a harness service at the given address, returning its protocol version.
@@ -80,8 +80,10 @@ impl Harness for GrpcHarnessClient {
             .block_on(async { client.set_initial_state(request).await });
     }
 
-    fn set_dag_parent(&mut self, hash: String) {
-        let request = proto::SetDagParentRequest { hash };
+    fn set_dag_parent(&mut self, hash: DagNodeId) {
+        let request = proto::SetDagParentRequest {
+            hash: hash.to_string(),
+        };
 
         let mut client = self.client.clone();
         let _ = self
@@ -112,7 +114,7 @@ impl Harness for GrpcHarnessClient {
     fn repair_agent(&mut self, params: RepairParams) -> Result<String, String> {
         let request = proto::RepairAgentRequest {
             agent_id: params.agent_id.as_str().to_string(),
-            dag_parent: params.dag_parent,
+            dag_parent: params.dag_parent.to_string(),
             checkpoint: params.checkpoint,
             service: params.service.service_type().as_str().to_string(),
             backend: params.service.backend_str().to_string(),
@@ -140,7 +142,7 @@ impl Harness for GrpcHarnessClient {
         let request = proto::ForkTimelineRequest {
             agent_name: params.agent_name,
             branch_name: params.branch_name,
-            fork_point: params.fork_point,
+            fork_point: params.fork_point.to_string(),
             parent_timeline_id: params.parent_timeline_id,
         };
 

@@ -372,7 +372,7 @@ fn html_response(status: u16, body: &str) -> tiny_http::Response<std::io::Cursor
 mod tests {
     use super::*;
     use chrono::{TimeZone, Utc};
-    use vlinder_core::domain::{hash_dag_node, DagNode, InMemoryDagStore};
+    use vlinder_core::domain::{hash_dag_node, DagNode, DagNodeId, InMemoryDagStore, SubmissionId};
 
     fn make_node(
         payload: &[u8],
@@ -383,14 +383,16 @@ mod tests {
         session_id: &str,
         created_at: chrono::DateTime<Utc>,
     ) -> DagNode {
+        let parent_id = DagNodeId::from(parent_hash.to_string());
+        let sid = SessionId::try_from(session_id.to_string()).unwrap();
         DagNode {
-            hash: hash_dag_node(payload, parent_hash, &message_type, &[], session_id),
-            parent_hash: parent_hash.to_string(),
+            id: hash_dag_node(payload, &parent_id, &message_type, &[], &sid),
+            parent_id,
             message_type,
             from: from.to_string(),
             to: to.to_string(),
-            session_id: session_id.to_string(),
-            submission_id: "sub-1".to_string(),
+            session_id: sid,
+            submission_id: SubmissionId::from("sub-1".to_string()),
             payload: payload.to_vec(),
             diagnostics: Vec::new(),
             stderr: Vec::new(),
@@ -415,7 +417,7 @@ mod tests {
         );
         let complete = make_node(
             b"This article discusses several topics.",
-            &invoke.hash,
+            invoke.id.as_str(),
             MessageType::Complete,
             "pensieve",
             "cli",

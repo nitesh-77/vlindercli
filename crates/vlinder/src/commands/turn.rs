@@ -39,8 +39,8 @@ fn get(submission_id: &str) {
     }
 
     for node in &nodes {
-        println!("Hash:       {}", node.hash);
-        println!("Parent:     {}", node.parent_hash);
+        println!("Hash:       {}", node.id);
+        println!("Parent:     {}", node.parent_id);
         println!("Type:       {}", node.message_type.as_str());
         println!("From:       {}", node.from);
         println!("To:         {}", node.to);

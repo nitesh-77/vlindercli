@@ -7,8 +7,8 @@
 use std::time::Duration;
 
 use vlinder_core::domain::{
-    AgentId, ContainerId, HarnessType, HealthWindow, ImageDigest, ImageRef, InvokeDiagnostics,
-    InvokeMessage, RuntimeType,
+    AgentId, ContainerId, DagNodeId, HarnessType, HealthWindow, ImageDigest, ImageRef,
+    InvokeDiagnostics, InvokeMessage, RuntimeType,
 };
 
 use vlinder_provider_server::factory;
@@ -167,7 +167,7 @@ impl Sidecar {
                         harness_version: env!("CARGO_PKG_VERSION").to_string(),
                         history_turns: 0,
                     },
-                    String::new(),
+                    DagNodeId::root(),
                 );
                 let reply_key = Some(delegate.reply_routing_key());
                 match dispatch::handle_invoke(&self.dispatch, &mut self.health, &invoke, &reply_key)

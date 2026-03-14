@@ -13,7 +13,7 @@ use std::str::FromStr;
 
 use vlinder_core::domain::session::Session;
 use vlinder_core::domain::{
-    DagNode, DagStore, MessageType, SessionId, SessionSummary, SubmissionId, Timeline,
+    DagNode, DagNodeId, DagStore, MessageType, SessionId, SessionSummary, SubmissionId, Timeline,
 };
 
 /// SQLite-backed DagStore.
@@ -255,10 +255,10 @@ fn row_to_timeline(row: &rusqlite::Row) -> Result<Timeline, rusqlite::Error> {
             rusqlite::Error::FromSqlConversionFailure(2, rusqlite::types::Type::Text, e.into())
         })?,
         parent_timeline_id: row.get(3)?,
-        fork_point: row.get(4)?,
+        fork_point: row.get::<_, Option<String>>(4)?.map(DagNodeId::from),
         created_at,
         broken_at,
-        head: row.get(7)?,
+        head: row.get::<_, Option<String>>(7)?.map(DagNodeId::from),
     })
 }
 
@@ -281,8 +281,8 @@ fn row_to_dag_node(row: &rusqlite::Row) -> Result<DagNode, rusqlite::Error> {
         .map(|dt| dt.with_timezone(&Utc))
         .unwrap_or_default();
     Ok(DagNode {
-        hash: row.get(0)?,
-        parent_hash: row.get(1)?,
+        id: DagNodeId::from(row.get::<_, String>(0)?),
+        parent_id: DagNodeId::from(row.get::<_, String>(1)?),
         message_type,
         from: row.get(3)?,
         to: row.get(4)?,
@@ -308,8 +308,8 @@ impl DagStore for SqliteDagStore {
             "INSERT OR IGNORE INTO dag_nodes (hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state, protocol_version, checkpoint, operation)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
             rusqlite::params![
-                node.hash,
-                node.parent_hash,
+                node.id.as_str(),
+                node.parent_id.as_str(),
                 node.message_type.as_str(),
                 node.from,
                 node.to,
@@ -339,7 +339,7 @@ impl DagStore for SqliteDagStore {
         Ok(())
     }
 
-    fn get_node(&self, hash: &str) -> Result<Option<DagNode>, String> {
+    fn get_node(&self, hash: &DagNodeId) -> Result<Option<DagNode>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state, protocol_version, checkpoint, operation
@@ -347,7 +347,7 @@ impl DagStore for SqliteDagStore {
         ).map_err(|e| format!("get_node prepare failed: {}", e))?;
 
         let result = stmt
-            .query_row(rusqlite::params![hash], row_to_dag_node)
+            .query_row(rusqlite::params![hash.as_str()], row_to_dag_node)
             .optional()
             .map_err(|e| format!("get_node query failed: {}", e))?;
 
@@ -403,7 +403,7 @@ impl DagStore for SqliteDagStore {
         Ok(nodes)
     }
 
-    fn get_children(&self, parent_hash: &str) -> Result<Vec<DagNode>, String> {
+    fn get_children(&self, parent_hash: &DagNodeId) -> Result<Vec<DagNode>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state, protocol_version, checkpoint, operation
@@ -411,7 +411,7 @@ impl DagStore for SqliteDagStore {
         ).map_err(|e| format!("get_children prepare failed: {}", e))?;
 
         let rows = stmt
-            .query_map(rusqlite::params![parent_hash], row_to_dag_node)
+            .query_map(rusqlite::params![parent_hash.as_str()], row_to_dag_node)
             .map_err(|e| format!("get_children query failed: {}", e))?;
 
         let mut nodes = Vec::new();
@@ -421,7 +421,7 @@ impl DagStore for SqliteDagStore {
         Ok(nodes)
     }
 
-    fn latest_node_hash(&self, session_id: &SessionId) -> Result<Option<String>, String> {
+    fn latest_node_hash(&self, session_id: &SessionId) -> Result<Option<DagNodeId>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
             .prepare(
@@ -437,7 +437,7 @@ impl DagStore for SqliteDagStore {
             .optional()
             .map_err(|e| format!("latest_node_hash query failed: {}", e))?;
 
-        Ok(result)
+        Ok(result.map(DagNodeId::from))
     }
 
     fn latest_state(&self, agent_name: &str) -> Result<Option<String>, String> {
@@ -495,13 +495,13 @@ impl DagStore for SqliteDagStore {
         branch_name: &str,
         session_id: &SessionId,
         parent_id: Option<i64>,
-        fork_point: Option<&str>,
+        fork_point: Option<&DagNodeId>,
     ) -> Result<i64, String> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "INSERT INTO timelines (branch_name, session_id, parent_timeline_id, fork_point, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5)",
-            rusqlite::params![branch_name, session_id.as_str(), parent_id, fork_point, Utc::now().to_rfc3339()],
+            rusqlite::params![branch_name, session_id.as_str(), parent_id, fork_point.map(|fp| fp.as_str()), Utc::now().to_rfc3339()],
         )
         .map_err(|e| format!("create_timeline failed: {}", e))?;
         Ok(conn.last_insert_rowid())
@@ -673,7 +673,7 @@ impl DagStore for SqliteDagStore {
         Ok(timelines)
     }
 
-    fn get_timeline_head(&self, timeline_id: i64) -> Result<Option<String>, String> {
+    fn get_timeline_head(&self, timeline_id: i64) -> Result<Option<DagNodeId>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
             .prepare("SELECT head FROM timelines WHERE id = ?1")
@@ -685,14 +685,14 @@ impl DagStore for SqliteDagStore {
             .map_err(|e| format!("get_timeline_head query failed: {}", e))?
             .flatten();
 
-        Ok(result)
+        Ok(result.map(DagNodeId::from))
     }
 
-    fn update_timeline_head(&self, timeline_id: i64, hash: &str) -> Result<(), String> {
+    fn update_timeline_head(&self, timeline_id: i64, hash: &DagNodeId) -> Result<(), String> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "UPDATE timelines SET head = ?1 WHERE id = ?2",
-            rusqlite::params![hash, timeline_id],
+            rusqlite::params![hash.as_str(), timeline_id],
         )
         .map_err(|e| format!("update_timeline_head failed: {}", e))?;
         Ok(())
@@ -803,14 +803,22 @@ mod tests {
 
     fn test_node(payload: &[u8], parent_hash: &str, message_type: MessageType) -> DagNode {
         let diagnostics = Vec::new();
+        let parent_id = DagNodeId::from(parent_hash.to_string());
+        let session_id = SessionId::try_from("sess-1".to_string()).unwrap();
         DagNode {
-            hash: hash_dag_node(payload, parent_hash, &message_type, &diagnostics, "sess-1"),
-            parent_hash: parent_hash.to_string(),
+            id: hash_dag_node(
+                payload,
+                &parent_id,
+                &message_type,
+                &diagnostics,
+                &session_id,
+            ),
+            parent_id,
             message_type,
             from: "cli".to_string(),
             to: "agent-a".to_string(),
-            session_id: "sess-1".to_string(),
-            submission_id: "sub-1".to_string(),
+            session_id,
+            submission_id: SubmissionId::from("sub-1".to_string()),
             payload: payload.to_vec(),
             diagnostics,
             stderr: Vec::new(),
@@ -828,7 +836,7 @@ mod tests {
         let node = test_node(b"hello", "", MessageType::Invoke);
 
         store.insert_node(&node).unwrap();
-        let retrieved = store.get_node(&node.hash).unwrap().unwrap();
+        let retrieved = store.get_node(&node.id).unwrap().unwrap();
 
         assert_eq!(retrieved, node);
     }
@@ -838,14 +846,22 @@ mod tests {
         let store = test_store();
         let diagnostics = b"{\"container\":{\"duration_ms\":50}}".to_vec();
         let stderr = b"WARN: something".to_vec();
+        let parent_id = DagNodeId::root();
+        let session_id = SessionId::try_from("sess-99".to_string()).unwrap();
         let node = DagNode {
-            hash: hash_dag_node(b"pay", "", &MessageType::Delegate, &diagnostics, "sess-99"),
-            parent_hash: "".to_string(),
+            id: hash_dag_node(
+                b"pay",
+                &parent_id,
+                &MessageType::Delegate,
+                &diagnostics,
+                &session_id,
+            ),
+            parent_id,
             message_type: MessageType::Delegate,
             from: "coordinator".to_string(),
             to: "summarizer".to_string(),
-            session_id: "sess-99".to_string(),
-            submission_id: "sub-42".to_string(),
+            session_id,
+            submission_id: SubmissionId::from("sub-42".to_string()),
             payload: b"delegate this".to_vec(),
             diagnostics,
             stderr,
@@ -857,18 +873,26 @@ mod tests {
         };
 
         store.insert_node(&node).unwrap();
-        let retrieved = store.get_node(&node.hash).unwrap().unwrap();
+        let retrieved = store.get_node(&node.id).unwrap().unwrap();
 
         assert_eq!(retrieved.message_type, MessageType::Delegate);
         assert_eq!(retrieved.from, "coordinator");
         assert_eq!(retrieved.to, "summarizer");
-        assert_eq!(retrieved.submission_id, "sub-42");
+        assert_eq!(
+            retrieved.submission_id,
+            SubmissionId::from("sub-42".to_string())
+        );
     }
 
     #[test]
     fn get_node_returns_none_for_unknown() {
         let store = test_store();
-        assert_eq!(store.get_node("nonexistent").unwrap(), None);
+        assert_eq!(
+            store
+                .get_node(&DagNodeId::from("nonexistent".to_string()))
+                .unwrap(),
+            None
+        );
     }
 
     #[test]
@@ -879,7 +903,7 @@ mod tests {
         store.insert_node(&node).unwrap();
         store.insert_node(&node).unwrap(); // No error
 
-        let retrieved = store.get_node(&node.hash).unwrap().unwrap();
+        let retrieved = store.get_node(&node.id).unwrap().unwrap();
         assert_eq!(retrieved, node);
     }
 
@@ -890,17 +914,18 @@ mod tests {
         let mut node1 = test_node(b"first", "", MessageType::Invoke);
         node1.created_at = Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
 
-        let mut node2 = test_node(b"second", &node1.hash, MessageType::Request);
+        let mut node2 = test_node(b"second", node1.id.as_str(), MessageType::Request);
         node2.created_at = Utc.with_ymd_and_hms(2025, 1, 1, 0, 1, 0).unwrap();
 
         // Insert out of order
         store.insert_node(&node2).unwrap();
         store.insert_node(&node1).unwrap();
 
-        let nodes = store.get_session_nodes("sess-1").unwrap();
+        let session_id = SessionId::try_from("sess-1".to_string()).unwrap();
+        let nodes = store.get_session_nodes(&session_id).unwrap();
         assert_eq!(nodes.len(), 2);
-        assert_eq!(nodes[0].hash, node1.hash);
-        assert_eq!(nodes[1].hash, node2.hash);
+        assert_eq!(nodes[0].id, node1.id);
+        assert_eq!(nodes[1].id, node2.id);
     }
 
     #[test]
@@ -909,20 +934,20 @@ mod tests {
 
         let parent = test_node(b"parent", "", MessageType::Invoke);
 
-        let mut child = test_node(b"child", &parent.hash, MessageType::Complete);
+        let mut child = test_node(b"child", parent.id.as_str(), MessageType::Complete);
         child.created_at = Utc.with_ymd_and_hms(2025, 1, 1, 0, 1, 0).unwrap();
 
         store.insert_node(&parent).unwrap();
         store.insert_node(&child).unwrap();
 
-        let children = store.get_children(&parent.hash).unwrap();
+        let children = store.get_children(&parent.id).unwrap();
         assert_eq!(children.len(), 1);
-        assert_eq!(children[0].hash, child.hash);
+        assert_eq!(children[0].id, child.id);
 
-        // Root has one child (the parent node, whose parent_hash is "")
-        let root_children = store.get_children("").unwrap();
+        // Root has one child (the parent node, whose parent_id is root)
+        let root_children = store.get_children(&DagNodeId::root()).unwrap();
         assert_eq!(root_children.len(), 1);
-        assert_eq!(root_children[0].hash, parent.hash);
+        assert_eq!(root_children[0].id, parent.id);
     }
 
     #[test]
@@ -930,23 +955,25 @@ mod tests {
         let store = test_store();
 
         let mut node_a = test_node(b"a", "", MessageType::Invoke);
-        node_a.session_id = "sess-1".to_string();
+        let sess1_id = SessionId::try_from("sess-1".to_string()).unwrap();
+        node_a.session_id = sess1_id.clone();
 
+        let sess2_id = SessionId::try_from("sess-2".to_string()).unwrap();
         let mut node_b = test_node(b"b", "", MessageType::Invoke);
-        node_b.session_id = "sess-2".to_string();
+        node_b.session_id = sess2_id.clone();
         node_b.from = "cli".to_string();
         node_b.to = "agent-b".to_string();
 
         store.insert_node(&node_a).unwrap();
         store.insert_node(&node_b).unwrap();
 
-        let sess1 = store.get_session_nodes("sess-1").unwrap();
+        let sess1 = store.get_session_nodes(&sess1_id).unwrap();
         assert_eq!(sess1.len(), 1);
-        assert_eq!(sess1[0].session_id, "sess-1");
+        assert_eq!(sess1[0].session_id, sess1_id);
 
-        let sess2 = store.get_session_nodes("sess-2").unwrap();
+        let sess2 = store.get_session_nodes(&sess2_id).unwrap();
         assert_eq!(sess2.len(), 1);
-        assert_eq!(sess2[0].session_id, "sess-2");
+        assert_eq!(sess2[0].session_id, sess2_id);
     }
 
     #[test]
@@ -958,7 +985,7 @@ mod tests {
         node1.state = Some("old-state".to_string());
         node1.created_at = Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
 
-        let mut node2 = test_node(b"second", &node1.hash, MessageType::Response);
+        let mut node2 = test_node(b"second", node1.id.as_str(), MessageType::Response);
         node2.state = Some("new-state".to_string());
         node2.created_at = Utc.with_ymd_and_hms(2025, 1, 1, 0, 1, 0).unwrap();
 
@@ -1031,10 +1058,11 @@ mod tests {
             let mut node = test_node(payload.as_bytes(), &parent_hash, *mt);
             node.created_at = Utc.with_ymd_and_hms(2025, 1, 1, 0, i as u32, 0).unwrap();
             store.insert_node(&node).unwrap();
-            parent_hash = node.hash;
+            parent_hash = node.id.to_string();
         }
 
-        let nodes = store.get_session_nodes("sess-1").unwrap();
+        let session_id = SessionId::try_from("sess-1".to_string()).unwrap();
+        let nodes = store.get_session_nodes(&session_id).unwrap();
         assert_eq!(nodes.len(), 5);
         assert_eq!(nodes[0].message_type, MessageType::Invoke);
         assert_eq!(nodes[1].message_type, MessageType::Request);
@@ -1050,20 +1078,22 @@ mod tests {
         let mut node1 = test_node(b"first", "", MessageType::Invoke);
         node1.created_at = Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
 
-        let mut node2 = test_node(b"second", &node1.hash, MessageType::Request);
+        let mut node2 = test_node(b"second", node1.id.as_str(), MessageType::Request);
         node2.created_at = Utc.with_ymd_and_hms(2025, 1, 1, 0, 1, 0).unwrap();
 
         store.insert_node(&node1).unwrap();
         store.insert_node(&node2).unwrap();
 
-        let hash = store.latest_node_hash("sess-1").unwrap();
-        assert_eq!(hash, Some(node2.hash));
+        let session_id = SessionId::try_from("sess-1".to_string()).unwrap();
+        let hash = store.latest_node_hash(&session_id).unwrap();
+        assert_eq!(hash, Some(node2.id));
     }
 
     #[test]
     fn latest_node_hash_returns_none_for_empty_session() {
         let store = test_store();
-        let hash = store.latest_node_hash("nonexistent").unwrap();
+        let session_id = SessionId::try_from("nonexistent".to_string()).unwrap();
+        let hash = store.latest_node_hash(&session_id).unwrap();
         assert_eq!(hash, None);
     }
 
@@ -1146,16 +1176,18 @@ mod tests {
     fn create_timeline_returns_auto_id() {
         let store = test_store();
 
+        let session_id = SessionId::try_from("sess-1".to_string()).unwrap();
+        let fork = DagNodeId::from("abc123".to_string());
         let id = store
-            .create_timeline("repair-1", "sess-1", None, Some("abc123"))
+            .create_timeline("repair-1", &session_id, None, Some(&fork))
             .unwrap();
         assert!(id >= 1);
 
         let tl = store.get_timeline(id).unwrap().unwrap();
         assert_eq!(tl.branch_name, "repair-1");
-        assert_eq!(tl.session_id, "sess-1");
+        assert_eq!(tl.session_id, session_id);
         assert!(tl.parent_timeline_id.is_none());
-        assert_eq!(tl.fork_point, Some("abc123".to_string()));
+        assert_eq!(tl.fork_point, Some(DagNodeId::from("abc123".to_string())));
         assert!(tl.broken_at.is_none());
     }
 
@@ -1163,9 +1195,13 @@ mod tests {
     fn create_timeline_with_parent() {
         let store = test_store();
 
-        let parent_id = store.create_timeline("main", "sess-1", None, None).unwrap();
+        let session_id = SessionId::try_from("sess-1".to_string()).unwrap();
+        let parent_id = store
+            .create_timeline("main", &session_id, None, None)
+            .unwrap();
+        let fork = DagNodeId::from("abc123".to_string());
         let fork_id = store
-            .create_timeline("repair-1", "sess-1", Some(parent_id), Some("abc123"))
+            .create_timeline("repair-1", &session_id, Some(parent_id), Some(&fork))
             .unwrap();
 
         let tl = store.get_timeline(fork_id).unwrap().unwrap();
@@ -1175,10 +1211,13 @@ mod tests {
     #[test]
     fn get_timeline_by_branch() {
         let store = test_store();
-        store.create_timeline("main", "sess-1", None, None).unwrap();
+        let session_id = SessionId::try_from("sess-1".to_string()).unwrap();
+        store
+            .create_timeline("main", &session_id, None, None)
+            .unwrap();
 
         let tl = store.get_timeline_by_branch("main").unwrap().unwrap();
-        assert_eq!(tl.session_id, "sess-1");
+        assert_eq!(tl.session_id, session_id);
 
         assert!(store
             .get_timeline_by_branch("nonexistent")
@@ -1189,7 +1228,10 @@ mod tests {
     #[test]
     fn seal_timeline_sets_broken_at() {
         let store = test_store();
-        let id = store.create_timeline("main", "sess-1", None, None).unwrap();
+        let session_id = SessionId::try_from("sess-1".to_string()).unwrap();
+        let id = store
+            .create_timeline("main", &session_id, None, None)
+            .unwrap();
 
         assert!(!store.is_timeline_sealed(id).unwrap());
 
@@ -1203,7 +1245,10 @@ mod tests {
     #[test]
     fn rename_timeline_updates_branch_name() {
         let store = test_store();
-        let id = store.create_timeline("main", "sess-1", None, None).unwrap();
+        let session_id = SessionId::try_from("sess-1".to_string()).unwrap();
+        let id = store
+            .create_timeline("main", &session_id, None, None)
+            .unwrap();
 
         store.rename_timeline(id, "broken-main-2026-01-01").unwrap();
 
@@ -1233,7 +1278,8 @@ mod tests {
 
         store.create_session(&session).unwrap();
 
-        let retrieved = store.get_session("abc-123").unwrap().unwrap();
+        let sid = SessionId::from("abc-123".to_string());
+        let retrieved = store.get_session(&sid).unwrap().unwrap();
         assert_eq!(retrieved.session.as_str(), "abc-123");
         assert_eq!(retrieved.agent, "pensieve");
         assert_eq!(retrieved.name, session.name);
@@ -1255,7 +1301,8 @@ mod tests {
     #[test]
     fn get_session_returns_none_for_unknown() {
         let store = test_store();
-        assert!(store.get_session("nonexistent").unwrap().is_none());
+        let sid = SessionId::from("nonexistent".to_string());
+        assert!(store.get_session(&sid).unwrap().is_none());
     }
 
     #[test]
@@ -1272,7 +1319,8 @@ mod tests {
         store.create_session(&session).unwrap();
         store.create_session(&session).unwrap(); // No error
 
-        let retrieved = store.get_session("abc-123").unwrap().unwrap();
+        let sid = SessionId::from("abc-123".to_string());
+        let retrieved = store.get_session(&sid).unwrap().unwrap();
         assert_eq!(retrieved.agent, "pensieve");
     }
 
@@ -1287,7 +1335,7 @@ mod tests {
         ).unwrap();
         drop(conn);
 
-        let result = store.get_node("h1");
+        let result = store.get_node(&DagNodeId::from("h1".to_string()));
         assert!(
             result.is_err(),
             "unknown message type should error, not silently default"

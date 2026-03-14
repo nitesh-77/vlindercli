@@ -6,7 +6,7 @@ use super::super::diagnostics::{InvokeDiagnostics, RuntimeDiagnostics};
 use super::super::routing_key::{AgentId, RoutingKey};
 use super::super::RuntimeType;
 use super::complete::CompleteMessage;
-use super::identity::{HarnessType, MessageId, SessionId, SubmissionId, TimelineId};
+use super::identity::{DagNodeId, HarnessType, MessageId, SessionId, SubmissionId, TimelineId};
 use super::{ExpectsReply, PROTOCOL_VERSION};
 
 /// Serde helper: encode Vec<u8> as a base64 string for JSON-friendly transport.
@@ -46,9 +46,9 @@ pub struct InvokeMessage {
     pub state: Option<String>,
     /// Diagnostics from the harness (ADR 071).
     pub diagnostics: InvokeDiagnostics,
-    /// Git commit hash to parent this invoke on in the DAG.
+    /// DagNode to parent this invoke on in the DAG.
     /// The harness populates this from the conversations repo HEAD.
-    pub dag_parent: String,
+    pub dag_parent: DagNodeId,
 }
 
 impl InvokeMessage {
@@ -63,7 +63,7 @@ impl InvokeMessage {
         payload: Vec<u8>,
         state: Option<String>,
         diagnostics: InvokeDiagnostics,
-        dag_parent: String,
+        dag_parent: DagNodeId,
     ) -> Self {
         Self {
             id: MessageId::new(),

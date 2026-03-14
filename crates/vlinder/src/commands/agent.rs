@@ -208,13 +208,13 @@ fn apply_branch(config: &CliConfig, harness: &mut dyn Harness, agent_name: &str,
     // Find the tip of the branch — head pointer, falling back to fork_point
     let tip_hash = timeline
         .head
-        .as_deref()
-        .or(timeline.fork_point.as_deref())
+        .as_ref()
+        .or(timeline.fork_point.as_ref())
         .unwrap_or_else(|| {
             eprintln!("Branch '{}' has no head or fork point", branch);
             std::process::exit(1);
         })
-        .to_string();
+        .clone();
 
     // Read state from the tip node and set checkout state
     if let Ok(Some(node)) = store.get_node(&tip_hash) {

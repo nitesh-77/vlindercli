@@ -2,7 +2,9 @@
 
 use super::super::operation::Operation;
 use super::super::routing_key::{AgentId, RoutingKey, ServiceBackend};
-use super::identity::{HarnessType, MessageId, Sequence, SessionId, SubmissionId, TimelineId};
+use super::identity::{
+    DagNodeId, HarnessType, MessageId, Sequence, SessionId, SubmissionId, TimelineId,
+};
 use super::PROTOCOL_VERSION;
 
 /// Repair message: Platform → Sidecar
@@ -25,8 +27,8 @@ pub struct RepairMessage {
     pub session: SessionId,
     pub agent_id: AgentId,
     pub harness: HarnessType,
-    /// Canonical hash of the fork point in the DAG (required).
-    pub dag_parent: String,
+    /// The fork point in the DAG (required).
+    pub dag_parent: DagNodeId,
     /// Checkpoint handler name on the agent (required).
     pub checkpoint: String,
     pub service: ServiceBackend,
@@ -45,7 +47,7 @@ impl RepairMessage {
         session: SessionId,
         agent_id: AgentId,
         harness: HarnessType,
-        dag_parent: String,
+        dag_parent: DagNodeId,
         checkpoint: String,
         service: ServiceBackend,
         operation: Operation,

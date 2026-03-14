@@ -17,7 +17,7 @@ use super::proto::{
     SealTimelineRequest, SealTimelineResponse, SemVer, SetCheckoutStateRequest,
     SetCheckoutStateResponse, UpdateTimelineHeadRequest, UpdateTimelineHeadResponse,
 };
-use vlinder_core::domain::{DagStore, SessionId};
+use vlinder_core::domain::{DagNodeId, DagStore, SessionId};
 
 /// gRPC server that wraps a DagStore implementation.
 pub struct StateServiceServer {
@@ -78,7 +78,7 @@ impl StateService for StateServiceServer {
 
         let node = self
             .store
-            .get_node(&req.hash)
+            .get_node(&DagNodeId::from(req.hash))
             .map_err(Status::internal)?
             .map(|n| n.into());
 
@@ -112,7 +112,7 @@ impl StateService for StateServiceServer {
 
         let nodes = self
             .store
-            .get_children(&req.parent_hash)
+            .get_children(&DagNodeId::from(req.parent_hash))
             .map_err(Status::internal)?
             .into_iter()
             .map(|n| n.into())
@@ -146,7 +146,8 @@ impl StateService for StateServiceServer {
             .latest_node_hash(
                 &SessionId::try_from(req.session_id).map_err(Status::invalid_argument)?,
             )
-            .map_err(Status::internal)?;
+            .map_err(Status::internal)?
+            .map(|id| id.to_string());
 
         Ok(Response::new(LatestNodeHashResponse { hash }))
     }
@@ -178,13 +179,14 @@ impl StateService for StateServiceServer {
         request: Request<CreateTimelineRequest>,
     ) -> Result<Response<CreateTimelineResponse>, Status> {
         let req = request.into_inner();
+        let fork_point = req.fork_point.map(DagNodeId::from);
         let id = self
             .store
             .create_timeline(
                 &req.branch_name,
                 &SessionId::try_from(req.session_id).map_err(Status::invalid_argument)?,
                 req.parent_id,
-                req.fork_point.as_deref(),
+                fork_point.as_ref(),
             )
             .map_err(Status::internal)?;
         Ok(Response::new(CreateTimelineResponse { id }))
@@ -403,7 +405,8 @@ impl StateService for StateServiceServer {
         let hash = self
             .store
             .get_timeline_head(req.timeline_id)
-            .map_err(Status::internal)?;
+            .map_err(Status::internal)?
+            .map(|id| id.to_string());
         Ok(Response::new(GetTimelineHeadResponse { hash }))
     }
 
@@ -412,7 +415,8 @@ impl StateService for StateServiceServer {
         request: Request<UpdateTimelineHeadRequest>,
     ) -> Result<Response<UpdateTimelineHeadResponse>, Status> {
         let req = request.into_inner();
-        match self.store.update_timeline_head(req.timeline_id, &req.hash) {
+        let hash = DagNodeId::from(req.hash);
+        match self.store.update_timeline_head(req.timeline_id, &hash) {
             Ok(()) => Ok(Response::new(UpdateTimelineHeadResponse {
                 success: true,
                 error: None,

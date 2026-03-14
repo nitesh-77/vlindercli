@@ -153,7 +153,7 @@ fn get(session_id_or_name: &str) {
             let ts = node.created_at.format("%H:%M:%S%.3f");
             let mut parts = vec![
                 format!("{}", ts),
-                node.hash[..8].to_string(),
+                node.id.as_str()[..8].to_string(),
                 node.message_type.as_str().to_string(),
                 node.from.clone(),
                 format!("-> {}", node.to),
@@ -208,7 +208,7 @@ fn fork(session_id_or_name: &str, from_hash: &str, branch_name: &str) {
     let params = ForkParams {
         agent_name,
         branch_name: branch_name.to_string(),
-        fork_point: node.hash.clone(),
+        fork_point: node.id.clone(),
         parent_timeline_id: 1, // main timeline
     };
 
@@ -220,7 +220,7 @@ fn fork(session_id_or_name: &str, from_hash: &str, branch_name: &str) {
     println!(
         "Created timeline '{}' forked from {}",
         branch_name,
-        &node.hash[..8]
+        &node.id.as_str()[..8]
     );
 }
 
@@ -304,7 +304,7 @@ fn repair(branch: &str) {
 
     let params = RepairParams {
         agent_id: AgentId::new(node.from.clone()),
-        dag_parent: node.hash.clone(),
+        dag_parent: node.id.clone(),
         checkpoint,
         service,
         operation,
@@ -319,7 +319,7 @@ fn repair(branch: &str) {
     if let Some(state) = &node.state {
         harness.set_initial_state(state.clone());
     }
-    harness.set_dag_parent(node.hash.clone());
+    harness.set_dag_parent(node.id.clone());
     harness.set_timeline(vlinder_core::domain::TimelineId::from(timeline.id), false);
 
     println!("Repairing: replaying {} on {}...", operation_str, node.to);
@@ -397,11 +397,13 @@ fn branches(session_id_or_name: &str) {
             .parent_timeline_id
             .map(|id| id.to_string())
             .unwrap_or_else(|| "-".to_string());
-        let fork = t
-            .fork_point
-            .as_deref()
-            .map(|h| &h[..8.min(h.len())])
-            .unwrap_or("-");
+        let fork = match &t.fork_point {
+            Some(h) => {
+                let s = h.as_str();
+                &s[..8.min(s.len())]
+            }
+            None => "-",
+        };
         println!(
             "{:<4} {:<24} {:<10} {:<10} {}",
             t.id, t.branch_name, parent, status, fork
@@ -415,31 +417,31 @@ fn branches(session_id_or_name: &str) {
 
 /// Sort nodes in causal order by walking the parent_hash Merkle chain.
 ///
-/// Finds the root (empty parent_hash) and follows children to produce
+/// Finds the root (empty parent_id) and follows children to produce
 /// a linear ordering that respects causality regardless of wall-clock time.
 fn causal_sort(nodes: &[vlinder_core::domain::DagNode]) -> Vec<vlinder_core::domain::DagNode> {
     let by_parent: std::collections::HashMap<&str, &vlinder_core::domain::DagNode> =
-        nodes.iter().map(|n| (n.parent_hash.as_str(), n)).collect();
+        nodes.iter().map(|n| (n.parent_id.as_str(), n)).collect();
 
-    // Find the root node (empty parent_hash)
+    // Find the root node (empty parent_id)
     let mut sorted = Vec::with_capacity(nodes.len());
-    let Some(root) = nodes.iter().find(|n| n.parent_hash.is_empty()) else {
+    let Some(root) = nodes.iter().find(|n| n.parent_id.is_empty()) else {
         // No root found — fall back to input order
         return nodes.to_vec();
     };
 
     sorted.push(root.clone());
-    let mut current_hash = root.hash.as_str();
+    let mut current_hash = root.id.as_str();
     while let Some(next) = by_parent.get(current_hash) {
         sorted.push((*next).clone());
-        current_hash = &next.hash;
+        current_hash = next.id.as_str();
     }
 
     // Append any nodes not in the chain (orphans from forks, etc.)
     let in_chain: std::collections::HashSet<String> =
-        sorted.iter().map(|n| n.hash.clone()).collect();
+        sorted.iter().map(|n| n.id.to_string()).collect();
     for node in nodes {
-        if !in_chain.contains(&node.hash) {
+        if !in_chain.contains(&node.id.to_string()) {
             sorted.push(node.clone());
         }
     }

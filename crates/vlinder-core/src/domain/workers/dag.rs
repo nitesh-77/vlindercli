@@ -8,7 +8,7 @@
 use chrono::Utc;
 
 use crate::domain::message::ObservableMessage;
-use crate::domain::{hash_dag_node, DagNode, SubmissionId};
+use crate::domain::{hash_dag_node, DagNode, DagNodeId, SubmissionId};
 
 // ============================================================================
 // ObservableMessage → DagNode conversion helpers
@@ -101,7 +101,7 @@ pub fn observable_state(msg: &ObservableMessage) -> Option<String> {
 ///
 /// `parent_hash` is the hash of the previous node in the same session
 /// (empty string for the first message).
-pub fn build_dag_node(msg: &ObservableMessage, parent_hash: &str) -> DagNode {
+pub fn build_dag_node(msg: &ObservableMessage, parent_id: &DagNodeId) -> DagNode {
     let message_type = msg.message_type();
     let (from, to) = observable_from_to(msg);
     let diagnostics = serialize_diagnostics(msg);
@@ -111,17 +111,11 @@ pub fn build_dag_node(msg: &ObservableMessage, parent_hash: &str) -> DagNode {
     let operation = observable_operation(msg);
     let payload = msg.payload();
     let session_id = msg.session().clone();
-    let hash = hash_dag_node(
-        payload,
-        parent_hash,
-        &message_type,
-        &diagnostics,
-        &session_id,
-    );
+    let id = hash_dag_node(payload, parent_id, &message_type, &diagnostics, &session_id);
 
     DagNode {
-        hash,
-        parent_hash: parent_hash.to_string(),
+        id,
+        parent_id: parent_id.clone(),
         message_type,
         from,
         to,

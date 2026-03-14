@@ -42,6 +42,45 @@ impl From<String> for MessageId {
     }
 }
 
+// --- DagNodeId (ADR 067) ---
+
+/// Content-addressed hash identifying a single DAG node.
+///
+/// Value is SHA-256(payload || parent_hash || message_type || diagnostics).
+/// Used as the primary key of the Merkle chain — every node's `parent_hash`
+/// references another DagNodeId (or is empty for the root).
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct DagNodeId(String);
+
+impl DagNodeId {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// Returns true if this is the empty/root sentinel (no parent).
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// The empty sentinel used for root nodes (no parent).
+    pub fn root() -> Self {
+        Self(String::new())
+    }
+}
+
+impl fmt::Display for DagNodeId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<String> for DagNodeId {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
+
 // --- SubmissionId (ADR 044, ADR 054) ---
 
 /// Unique identifier for a user-initiated submission.

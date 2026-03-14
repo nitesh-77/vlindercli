@@ -8,7 +8,7 @@
 //! Unlike service messages, ForkMessage carries no payload — the fork point
 //! hash and branch name are all that's needed to define the topology change.
 
-use super::identity::{MessageId, SessionId, SubmissionId, TimelineId};
+use super::identity::{DagNodeId, MessageId, SessionId, SubmissionId, TimelineId};
 use super::PROTOCOL_VERSION;
 
 /// Fork message: CLI → Platform
@@ -30,8 +30,8 @@ pub struct ForkMessage {
     pub agent_name: String,
     /// Branch name for the new timeline (e.g., "repair-infer-3").
     pub branch_name: String,
-    /// Canonical hash of the DagNode to fork from.
-    pub fork_point: String,
+    /// The DagNode to fork from.
+    pub fork_point: DagNodeId,
     /// ID of the parent timeline being forked.
     pub parent_timeline_id: i64,
 }
@@ -43,7 +43,7 @@ impl ForkMessage {
         session: SessionId,
         agent_name: String,
         branch_name: String,
-        fork_point: String,
+        fork_point: DagNodeId,
         parent_timeline_id: i64,
     ) -> Self {
         Self {

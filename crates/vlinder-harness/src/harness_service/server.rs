@@ -13,8 +13,8 @@ use super::proto::{
 };
 use std::str::FromStr;
 use vlinder_core::domain::{
-    AgentId, ForkParams, Harness, Operation, RepairParams, ResourceId, Sequence, ServiceBackend,
-    ServiceType, TimelineId,
+    AgentId, DagNodeId, ForkParams, Harness, Operation, RepairParams, ResourceId, Sequence,
+    ServiceBackend, ServiceType, TimelineId,
 };
 
 /// gRPC server that wraps a Harness implementation.
@@ -89,7 +89,10 @@ impl HarnessService for HarnessServiceServer {
         request: Request<SetDagParentRequest>,
     ) -> Result<Response<SetDagParentResponse>, Status> {
         let req = request.into_inner();
-        self.harness.lock().unwrap().set_dag_parent(req.hash);
+        self.harness
+            .lock()
+            .unwrap()
+            .set_dag_parent(DagNodeId::from(req.hash));
         Ok(Response::new(SetDagParentResponse {}))
     }
 
@@ -143,7 +146,7 @@ impl HarnessService for HarnessServiceServer {
 
             let params = RepairParams {
                 agent_id: AgentId::new(&req.agent_id),
-                dag_parent: req.dag_parent,
+                dag_parent: DagNodeId::from(req.dag_parent),
                 checkpoint: req.checkpoint,
                 service,
                 operation,
@@ -180,7 +183,7 @@ impl HarnessService for HarnessServiceServer {
             let params = ForkParams {
                 agent_name: req.agent_name,
                 branch_name: req.branch_name,
-                fork_point: req.fork_point,
+                fork_point: DagNodeId::from(req.fork_point),
                 parent_timeline_id: req.parent_timeline_id,
             };
             harness.lock().unwrap().fork_timeline(params)

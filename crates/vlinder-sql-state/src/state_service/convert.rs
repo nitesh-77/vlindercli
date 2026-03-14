@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 
 use super::proto;
 use vlinder_core::domain::{
-    DagNode, MessageType, SessionId, SessionSummary, SubmissionId, Timeline,
+    DagNode, DagNodeId, MessageType, SessionId, SessionSummary, SubmissionId, Timeline,
 };
 
 // =============================================================================
@@ -16,8 +16,8 @@ use vlinder_core::domain::{
 impl From<DagNode> for proto::DagNode {
     fn from(node: DagNode) -> Self {
         Self {
-            hash: node.hash,
-            parent_hash: node.parent_hash,
+            hash: node.id.to_string(),
+            parent_hash: node.parent_id.to_string(),
             message_type: node.message_type.as_str().to_string(),
             sender: node.from,
             receiver: node.to,
@@ -38,8 +38,8 @@ impl From<DagNode> for proto::DagNode {
 impl From<&DagNode> for proto::DagNode {
     fn from(node: &DagNode) -> Self {
         Self {
-            hash: node.hash.clone(),
-            parent_hash: node.parent_hash.clone(),
+            hash: node.id.to_string(),
+            parent_hash: node.parent_id.to_string(),
             message_type: node.message_type.as_str().to_string(),
             sender: node.from.clone(),
             receiver: node.to.clone(),
@@ -74,8 +74,8 @@ impl TryFrom<proto::DagNode> for DagNode {
             .map_err(|e| format!("invalid created_at: {}", e))?;
 
         Ok(Self {
-            hash: node.hash,
-            parent_hash: node.parent_hash,
+            id: DagNodeId::from(node.hash),
+            parent_id: DagNodeId::from(node.parent_hash),
             message_type,
             from: node.sender,
             to: node.receiver,
@@ -104,10 +104,10 @@ impl From<Timeline> for proto::Timeline {
             branch_name: tl.branch_name,
             session_id: tl.session_id.as_str().to_string(),
             parent_timeline_id: tl.parent_timeline_id,
-            fork_point: tl.fork_point,
+            fork_point: tl.fork_point.map(|fp| fp.to_string()),
             created_at: tl.created_at.to_rfc3339(),
             broken_at: tl.broken_at.map(|dt| dt.to_rfc3339()),
-            head: tl.head,
+            head: tl.head.map(|h| h.to_string()),
         }
     }
 }
@@ -135,10 +135,10 @@ impl TryFrom<proto::Timeline> for Timeline {
             branch_name: tl.branch_name,
             session_id: SessionId::try_from(tl.session_id)?,
             parent_timeline_id: tl.parent_timeline_id,
-            fork_point: tl.fork_point,
+            fork_point: tl.fork_point.map(DagNodeId::from),
             created_at,
             broken_at,
-            head: tl.head,
+            head: tl.head.map(DagNodeId::from),
         })
     }
 }
@@ -189,13 +189,13 @@ mod tests {
 
     fn sample_dag_node() -> DagNode {
         DagNode {
-            hash: "abc123".to_string(),
-            parent_hash: "parent456".to_string(),
+            id: DagNodeId::from("abc123".to_string()),
+            parent_id: DagNodeId::from("parent456".to_string()),
             message_type: MessageType::Invoke,
             from: "cli".to_string(),
             to: "agent-echo".to_string(),
             session_id: SessionId::new(),
-            submission_id: "sub-001".to_string(),
+            submission_id: SubmissionId::from("sub-001".to_string()),
             payload: b"hello".to_vec(),
             diagnostics: b"{\"version\":\"0.1.0\"}".to_vec(),
             stderr: b"some stderr".to_vec(),
@@ -213,8 +213,8 @@ mod tests {
         let proto_node: proto::DagNode = original.clone().into();
         let recovered: DagNode = proto_node.try_into().unwrap();
 
-        assert_eq!(recovered.hash, original.hash);
-        assert_eq!(recovered.parent_hash, original.parent_hash);
+        assert_eq!(recovered.id, original.id);
+        assert_eq!(recovered.parent_id, original.parent_id);
         assert_eq!(recovered.message_type, original.message_type);
         assert_eq!(recovered.from, original.from);
         assert_eq!(recovered.to, original.to);

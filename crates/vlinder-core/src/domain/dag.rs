@@ -69,8 +69,8 @@ impl std::str::FromStr for MessageType {
 /// meaningful in the protocol trace.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DagNode {
-    pub hash: String,
-    pub parent_hash: String,
+    pub id: super::DagNodeId,
+    pub parent_id: super::DagNodeId,
     pub message_type: MessageType,
     pub from: String,
     pub to: String,
@@ -107,18 +107,18 @@ pub struct DagNode {
 /// INSERT OR IGNORE from silently dropping cross-session duplicates).
 pub fn hash_dag_node(
     payload: &[u8],
-    parent_hash: &str,
+    parent_id: &super::DagNodeId,
     message_type: &MessageType,
     diagnostics: &[u8],
     session_id: &super::SessionId,
-) -> String {
+) -> super::DagNodeId {
     let mut hasher = Sha256::new();
     hasher.update(payload);
-    hasher.update(parent_hash.as_bytes());
+    hasher.update(parent_id.as_str().as_bytes());
     hasher.update(message_type.as_str().as_bytes());
     hasher.update(diagnostics);
     hasher.update(session_id.as_str().as_bytes());
-    format!("{:x}", hasher.finalize())
+    super::DagNodeId::from(format!("{:x}", hasher.finalize()))
 }
 
 /// Summary of a session for the viewer index page.
@@ -141,14 +141,14 @@ pub struct Timeline {
     pub branch_name: String,
     pub session_id: super::SessionId,
     pub parent_timeline_id: Option<i64>,
-    /// Submission hash at the fork point (if forked from a parent).
-    pub fork_point: Option<String>,
+    /// DagNode at the fork point (if forked from a parent).
+    pub fork_point: Option<super::DagNodeId>,
     pub created_at: DateTime<Utc>,
     /// When this timeline was sealed (broken). None = still active.
     pub broken_at: Option<DateTime<Utc>>,
-    /// Hash of the latest DagNode recorded on this timeline.
+    /// The latest DagNode recorded on this timeline.
     /// Moves forward with each recorded message. None before any messages.
-    pub head: Option<String>,
+    pub head: Option<super::DagNodeId>,
 }
 
 /// A worker that persists observable messages to a DAG structure.
@@ -165,20 +165,20 @@ pub trait DagStore: Send + Sync {
     /// Insert a node. Idempotent (content-addressed, INSERT OR IGNORE).
     fn insert_node(&self, node: &DagNode) -> Result<(), String>;
 
-    /// Retrieve a node by its content hash.
-    fn get_node(&self, hash: &str) -> Result<Option<DagNode>, String>;
+    /// Retrieve a node by its content-addressed ID.
+    fn get_node(&self, id: &super::DagNodeId) -> Result<Option<DagNode>, String>;
 
-    /// Retrieve a node by hash prefix. Returns an error if ambiguous.
+    /// Retrieve a node by ID prefix. Returns an error if ambiguous.
     fn get_node_by_prefix(&self, prefix: &str) -> Result<Option<DagNode>, String> {
         // Default: try exact match first, then scan is left to implementors.
-        self.get_node(prefix)
+        self.get_node(&super::DagNodeId::from(prefix.to_string()))
     }
 
     /// Get all nodes in a session, ordered by `created_at`.
     fn get_session_nodes(&self, session_id: &super::SessionId) -> Result<Vec<DagNode>, String>;
 
-    /// Get all children of a given parent hash.
-    fn get_children(&self, parent_hash: &str) -> Result<Vec<DagNode>, String>;
+    /// Get all children of a given parent ID.
+    fn get_children(&self, parent_id: &super::DagNodeId) -> Result<Vec<DagNode>, String>;
 
     /// Get the most recent state hash associated with an agent (ADR 079).
     ///
@@ -190,7 +190,10 @@ pub trait DagStore: Send + Sync {
     ///
     /// Used by the transactional outbox to resume Merkle chaining
     /// when a session spans multiple process lifetimes.
-    fn latest_node_hash(&self, session_id: &super::SessionId) -> Result<Option<String>, String>;
+    fn latest_node_hash(
+        &self,
+        session_id: &super::SessionId,
+    ) -> Result<Option<super::DagNodeId>, String>;
 
     /// Set an override state for timeline checkout (ADR 081).
     ///
@@ -209,7 +212,7 @@ pub trait DagStore: Send + Sync {
         branch_name: &str,
         session_id: &super::SessionId,
         parent_id: Option<i64>,
-        fork_point: Option<&str>,
+        fork_point: Option<&super::DagNodeId>,
     ) -> Result<i64, String>;
 
     /// Look up a timeline by its branch name.
@@ -239,11 +242,11 @@ pub trait DagStore: Send + Sync {
         session_id: &super::SessionId,
     ) -> Result<Vec<Timeline>, String>;
 
-    /// Get the head hash for a timeline (the latest recorded DagNode hash).
-    fn get_timeline_head(&self, timeline_id: i64) -> Result<Option<String>, String>;
+    /// Get the head for a timeline (the latest recorded DagNode ID).
+    fn get_timeline_head(&self, timeline_id: i64) -> Result<Option<super::DagNodeId>, String>;
 
-    /// Advance the head pointer of a timeline to the given hash.
-    fn update_timeline_head(&self, timeline_id: i64, hash: &str) -> Result<(), String>;
+    /// Advance the head pointer of a timeline to the given DagNode ID.
+    fn update_timeline_head(&self, timeline_id: i64, id: &super::DagNodeId) -> Result<(), String>;
 
     // -------------------------------------------------------------------------
     // Session CRUD
@@ -291,28 +294,28 @@ impl Default for InMemoryDagStore {
 impl DagStore for InMemoryDagStore {
     fn insert_node(&self, node: &DagNode) -> Result<(), String> {
         let mut nodes = self.nodes.lock().unwrap();
-        // Idempotent: skip if hash already exists
-        if !nodes.iter().any(|n| n.hash == node.hash) {
+        // Idempotent: skip if ID already exists
+        if !nodes.iter().any(|n| n.id == node.id) {
             nodes.push(node.clone());
         }
         Ok(())
     }
 
-    fn get_node(&self, hash: &str) -> Result<Option<DagNode>, String> {
+    fn get_node(&self, id: &super::DagNodeId) -> Result<Option<DagNode>, String> {
         let nodes = self.nodes.lock().unwrap();
-        Ok(nodes.iter().find(|n| n.hash == hash).cloned())
+        Ok(nodes.iter().find(|n| n.id == *id).cloned())
     }
 
     fn get_node_by_prefix(&self, prefix: &str) -> Result<Option<DagNode>, String> {
         let nodes = self.nodes.lock().unwrap();
         let matches: Vec<_> = nodes
             .iter()
-            .filter(|n| n.hash.starts_with(prefix))
+            .filter(|n| n.id.as_str().starts_with(prefix))
             .collect();
         match matches.len() {
             0 => Ok(None),
             1 => Ok(Some(matches[0].clone())),
-            n => Err(format!("ambiguous hash prefix '{}': {} matches", prefix, n)),
+            n => Err(format!("ambiguous ID prefix '{}': {} matches", prefix, n)),
         }
     }
 
@@ -327,11 +330,11 @@ impl DagStore for InMemoryDagStore {
         Ok(result)
     }
 
-    fn get_children(&self, parent_hash: &str) -> Result<Vec<DagNode>, String> {
+    fn get_children(&self, parent_id: &super::DagNodeId) -> Result<Vec<DagNode>, String> {
         let nodes = self.nodes.lock().unwrap();
         Ok(nodes
             .iter()
-            .filter(|n| n.parent_hash == parent_hash)
+            .filter(|n| n.parent_id == *parent_id)
             .cloned()
             .collect())
     }
@@ -352,13 +355,16 @@ impl DagStore for InMemoryDagStore {
             .find_map(|n| n.state.clone()))
     }
 
-    fn latest_node_hash(&self, session_id: &super::SessionId) -> Result<Option<String>, String> {
+    fn latest_node_hash(
+        &self,
+        session_id: &super::SessionId,
+    ) -> Result<Option<super::DagNodeId>, String> {
         let nodes = self.nodes.lock().unwrap();
         Ok(nodes
             .iter()
             .rev()
             .find(|n| n.session_id == *session_id)
-            .map(|n| n.hash.clone()))
+            .map(|n| n.id.clone()))
     }
 
     fn set_checkout_state(&self, agent_name: &str, state: &str) -> Result<(), String> {
@@ -374,7 +380,7 @@ impl DagStore for InMemoryDagStore {
         branch_name: &str,
         session_id: &super::SessionId,
         parent_id: Option<i64>,
-        fork_point: Option<&str>,
+        fork_point: Option<&super::DagNodeId>,
     ) -> Result<i64, String> {
         let mut timelines = self.timelines.lock().unwrap();
         let id = timelines.len() as i64 + 1;
@@ -383,7 +389,7 @@ impl DagStore for InMemoryDagStore {
             branch_name: branch_name.to_string(),
             session_id: session_id.clone(),
             parent_timeline_id: parent_id,
-            fork_point: fork_point.map(|s| s.to_string()),
+            fork_point: fork_point.cloned(),
             created_at: Utc::now(),
             broken_at: None,
             head: None,
@@ -494,7 +500,7 @@ impl DagStore for InMemoryDagStore {
         let session_hashes: std::collections::HashSet<&str> = nodes
             .iter()
             .filter(|n| n.session_id == *session_id)
-            .map(|n| n.hash.as_str())
+            .map(|n| n.id.as_str())
             .collect();
 
         let timelines = self.timelines.lock().unwrap();
@@ -502,15 +508,15 @@ impl DagStore for InMemoryDagStore {
             .iter()
             .filter(|t| {
                 t.fork_point
-                    .as_deref()
-                    .map(|fp| session_hashes.contains(fp))
+                    .as_ref()
+                    .map(|fp| session_hashes.contains(fp.as_str()))
                     .unwrap_or(false)
             })
             .cloned()
             .collect())
     }
 
-    fn get_timeline_head(&self, timeline_id: i64) -> Result<Option<String>, String> {
+    fn get_timeline_head(&self, timeline_id: i64) -> Result<Option<super::DagNodeId>, String> {
         let timelines = self.timelines.lock().unwrap();
         Ok(timelines
             .iter()
@@ -518,10 +524,10 @@ impl DagStore for InMemoryDagStore {
             .and_then(|t| t.head.clone()))
     }
 
-    fn update_timeline_head(&self, timeline_id: i64, hash: &str) -> Result<(), String> {
+    fn update_timeline_head(&self, timeline_id: i64, id: &super::DagNodeId) -> Result<(), String> {
         let mut timelines = self.timelines.lock().unwrap();
         if let Some(t) = timelines.iter_mut().find(|t| t.id == timeline_id) {
-            t.head = Some(hash.to_string());
+            t.head = Some(id.clone());
         }
         Ok(())
     }

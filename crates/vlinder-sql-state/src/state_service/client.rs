@@ -3,7 +3,7 @@
 use tonic::transport::Channel;
 
 use super::proto::{self, state_service_client::StateServiceClient};
-use vlinder_core::domain::{DagNode, DagStore, Timeline};
+use vlinder_core::domain::{DagNode, DagNodeId, DagStore, Timeline};
 
 /// DagStore implementation that makes gRPC calls to a remote State Service.
 pub struct GrpcStateClient {
@@ -63,7 +63,7 @@ impl DagStore for GrpcStateClient {
         }
     }
 
-    fn get_node(&self, hash: &str) -> Result<Option<DagNode>, String> {
+    fn get_node(&self, hash: &DagNodeId) -> Result<Option<DagNode>, String> {
         let request = proto::GetNodeRequest {
             hash: hash.to_string(),
         };
@@ -105,7 +105,7 @@ impl DagStore for GrpcStateClient {
             .collect()
     }
 
-    fn get_children(&self, parent_hash: &str) -> Result<Vec<DagNode>, String> {
+    fn get_children(&self, parent_hash: &DagNodeId) -> Result<Vec<DagNode>, String> {
         let request = proto::GetChildrenRequest {
             parent_hash: parent_hash.to_string(),
         };
@@ -141,7 +141,7 @@ impl DagStore for GrpcStateClient {
     fn latest_node_hash(
         &self,
         session_id: &vlinder_core::domain::SessionId,
-    ) -> Result<Option<String>, String> {
+    ) -> Result<Option<DagNodeId>, String> {
         let request = proto::LatestNodeHashRequest {
             session_id: session_id.as_str().to_string(),
         };
@@ -152,7 +152,7 @@ impl DagStore for GrpcStateClient {
             .block_on(async { client.latest_node_hash(request).await })
             .map_err(|e| e.to_string())?;
 
-        Ok(response.into_inner().hash)
+        Ok(response.into_inner().hash.map(DagNodeId::from))
     }
 
     fn set_checkout_state(&self, agent_name: &str, state: &str) -> Result<(), String> {
@@ -184,13 +184,13 @@ impl DagStore for GrpcStateClient {
         branch_name: &str,
         session_id: &vlinder_core::domain::SessionId,
         parent_id: Option<i64>,
-        fork_point: Option<&str>,
+        fork_point: Option<&DagNodeId>,
     ) -> Result<i64, String> {
         let request = proto::CreateTimelineRequest {
             branch_name: branch_name.to_string(),
             session_id: session_id.as_str().to_string(),
             parent_id,
-            fork_point: fork_point.map(|s| s.to_string()),
+            fork_point: fork_point.map(|fp| fp.to_string()),
         };
         let mut client = self.client.clone();
         let response = self
@@ -348,17 +348,17 @@ impl DagStore for GrpcStateClient {
             .collect()
     }
 
-    fn get_timeline_head(&self, timeline_id: i64) -> Result<Option<String>, String> {
+    fn get_timeline_head(&self, timeline_id: i64) -> Result<Option<DagNodeId>, String> {
         let request = proto::GetTimelineHeadRequest { timeline_id };
         let mut client = self.client.clone();
         let response = self
             .runtime
             .block_on(async { client.get_timeline_head(request).await })
             .map_err(|e| e.to_string())?;
-        Ok(response.into_inner().hash)
+        Ok(response.into_inner().hash.map(DagNodeId::from))
     }
 
-    fn update_timeline_head(&self, timeline_id: i64, hash: &str) -> Result<(), String> {
+    fn update_timeline_head(&self, timeline_id: i64, hash: &DagNodeId) -> Result<(), String> {
         let request = proto::UpdateTimelineHeadRequest {
             timeline_id,
             hash: hash.to_string(),

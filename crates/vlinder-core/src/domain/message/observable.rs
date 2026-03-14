@@ -15,7 +15,9 @@ use super::super::RuntimeType;
 use super::complete::CompleteMessage;
 use super::delegate::DelegateMessage;
 use super::fork::ForkMessage;
-use super::identity::{HarnessType, MessageId, Sequence, SessionId, SubmissionId, TimelineId};
+use super::identity::{
+    DagNodeId, HarnessType, MessageId, Sequence, SessionId, SubmissionId, TimelineId,
+};
 use super::invoke::InvokeMessage;
 use super::repair::RepairMessage;
 use super::request::RequestMessage;
@@ -57,7 +59,7 @@ pub enum ObservableMessageHeaders {
         agent_id: AgentId,
         state: Option<String>,
         diagnostics: InvokeDiagnostics,
-        dag_parent: String,
+        dag_parent: DagNodeId,
     },
     Request {
         id: MessageId,
@@ -120,7 +122,7 @@ pub enum ObservableMessageHeaders {
         session: SessionId,
         agent_id: AgentId,
         harness: HarnessType,
-        dag_parent: String,
+        dag_parent: DagNodeId,
         checkpoint: String,
         service: ServiceBackend,
         operation: Operation,
@@ -135,7 +137,7 @@ pub enum ObservableMessageHeaders {
         session: SessionId,
         agent_name: String,
         branch_name: String,
-        fork_point: String,
+        fork_point: DagNodeId,
         parent_timeline_id: i64,
     },
 }
