@@ -2016,7 +2016,7 @@ mod tests {
         InvokeMessage::new(
             timeline(),
             submission(),
-            SessionId::from("ses-test".to_string()),
+            SessionId::try_from("d4761d76-dee4-4ebf-9df4-43b52efa4f78".to_string()).unwrap(),
             HarnessType::Cli,
             RuntimeType::Container,
             agent(),
@@ -2026,7 +2026,7 @@ mod tests {
                 harness_version: "0.1.0".to_string(),
                 history_turns: 0,
             },
-            String::new(),
+            DagNodeId::root(),
         )
     }
 
@@ -2111,7 +2111,7 @@ mod tests {
         let original = RequestMessage::new(
             timeline(),
             submission(),
-            SessionId::from("ses-test".to_string()),
+            SessionId::try_from("d4761d76-dee4-4ebf-9df4-43b52efa4f78".to_string()).unwrap(),
             agent(),
             ServiceBackend::Kv(ObjectStorageType::Sqlite),
             Operation::Get,
@@ -2158,7 +2158,7 @@ mod tests {
         let request = RequestMessage::new(
             timeline(),
             submission(),
-            SessionId::from("ses-test".to_string()),
+            SessionId::try_from("d4761d76-dee4-4ebf-9df4-43b52efa4f78".to_string()).unwrap(),
             agent(),
             ServiceBackend::Infer(InferenceBackendType::Ollama),
             Operation::Run,
@@ -2207,7 +2207,7 @@ mod tests {
         let original = CompleteMessage::new(
             timeline(),
             submission(),
-            SessionId::from("ses-test".to_string()),
+            SessionId::try_from("d4761d76-dee4-4ebf-9df4-43b52efa4f78".to_string()).unwrap(),
             agent(),
             HarnessType::Grpc,
             b"done".to_vec(),
@@ -2245,7 +2245,7 @@ mod tests {
         let original = DelegateMessage::new(
             timeline(),
             submission(),
-            SessionId::from("ses-test".to_string()),
+            SessionId::try_from("d4761d76-dee4-4ebf-9df4-43b52efa4f78".to_string()).unwrap(),
             agent(),
             agent_alt(),
             b"task-data".to_vec(),

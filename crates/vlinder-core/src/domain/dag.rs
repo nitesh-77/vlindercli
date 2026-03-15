@@ -65,37 +65,33 @@ impl std::str::FromStr for MessageType {
 
 /// A single node in the runtime-captured DAG.
 ///
-/// One node per NATS message. No pairing — each message is independently
-/// meaningful in the protocol trace.
+/// Wraps the full `ObservableMessage` with DAG metadata:
+/// content-addressed ID, Merkle parent pointer, and insertion timestamp.
+/// Everything else lives on the message itself.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DagNode {
     pub id: super::DagNodeId,
     pub parent_id: super::DagNodeId,
-    pub message_type: MessageType,
-    pub from: String,
-    pub to: String,
-    pub session_id: super::SessionId,
-    pub submission_id: super::SubmissionId,
-    pub payload: Vec<u8>,
-    /// JSON-serialized diagnostics for the message (ADR 071).
-    /// Empty for messages captured before ADR 071.
-    pub diagnostics: Vec<u8>,
-    /// Raw stderr from container execution (Complete/Delegate only, ADR 071).
-    /// Empty for non-container messages or messages captured before ADR 071.
-    pub stderr: Vec<u8>,
     pub created_at: DateTime<Utc>,
-    /// State hash from the state store (ADR 055).
-    /// Present when the message carries state context (e.g. after kv_put).
-    pub state: Option<String>,
-    /// Protocol version of the sender (semver from Cargo.toml).
-    /// Empty for messages captured before protocol versioning was added.
-    pub protocol_version: String,
-    /// Checkpoint handler name for durable execution (ADR 111).
-    /// Present on Request and Response messages when the agent uses checkpoints.
-    pub checkpoint: Option<String>,
-    /// Operation for Request/Response/Repair messages (ADR 113).
-    /// E.g., "run", "get", "put". None for Invoke/Complete/Delegate.
-    pub operation: Option<String>,
+    pub message: super::ObservableMessage,
+}
+
+impl DagNode {
+    pub fn message_type(&self) -> MessageType {
+        self.message.message_type()
+    }
+    pub fn session_id(&self) -> &super::SessionId {
+        self.message.session()
+    }
+    pub fn submission_id(&self) -> &super::SubmissionId {
+        self.message.submission()
+    }
+    pub fn payload(&self) -> &[u8] {
+        self.message.payload()
+    }
+    pub fn protocol_version(&self) -> &str {
+        self.message.protocol_version()
+    }
 }
 
 /// Compute the content-addressed hash for a DAG node.
@@ -323,7 +319,7 @@ impl DagStore for InMemoryDagStore {
         let nodes = self.nodes.lock().unwrap();
         let mut result: Vec<DagNode> = nodes
             .iter()
-            .filter(|n| n.session_id == *session_id)
+            .filter(|n| *n.session_id() == *session_id)
             .cloned()
             .collect();
         result.sort_by(|a, b| a.created_at.cmp(&b.created_at));
@@ -351,8 +347,11 @@ impl DagStore for InMemoryDagStore {
         Ok(nodes
             .iter()
             .rev()
-            .filter(|n| n.from == agent_name || n.to == agent_name)
-            .find_map(|n| n.state.clone()))
+            .filter(|n| {
+                let (from, to) = n.message.from_to();
+                from == agent_name || to == agent_name
+            })
+            .find_map(|n| n.message.state().map(|s| s.to_string())))
     }
 
     fn latest_node_hash(
@@ -363,7 +362,7 @@ impl DagStore for InMemoryDagStore {
         Ok(nodes
             .iter()
             .rev()
-            .find(|n| n.session_id == *session_id)
+            .find(|n| *n.session_id() == *session_id)
             .map(|n| n.id.clone()))
     }
 
@@ -441,7 +440,7 @@ impl DagStore for InMemoryDagStore {
             std::collections::HashMap::new();
         for node in nodes.iter() {
             sessions
-                .entry(node.session_id.clone())
+                .entry(node.session_id().clone())
                 .or_default()
                 .push(node);
         }
@@ -452,20 +451,20 @@ impl DagStore for InMemoryDagStore {
                 nodes.sort_by(|a, b| a.created_at.cmp(&b.created_at));
                 let agent_name = nodes
                     .iter()
-                    .find(|n| n.message_type == MessageType::Invoke)
-                    .map(|n| n.to.clone())
+                    .find(|n| n.message_type() == MessageType::Invoke)
+                    .map(|n| n.message.from_to().1)
                     .unwrap_or_default();
                 let started_at = nodes.first().map(|n| n.created_at).unwrap_or_default();
                 let message_count = nodes
                     .iter()
                     .filter(|n| {
-                        n.message_type == MessageType::Invoke
-                            || n.message_type == MessageType::Complete
+                        n.message_type() == MessageType::Invoke
+                            || n.message_type() == MessageType::Complete
                     })
                     .count();
                 let is_open = nodes
                     .last()
-                    .map(|n| n.message_type != MessageType::Complete)
+                    .map(|n| n.message_type() != MessageType::Complete)
                     .unwrap_or(false);
                 SessionSummary {
                     session_id,
@@ -485,7 +484,7 @@ impl DagStore for InMemoryDagStore {
         let nodes = self.nodes.lock().unwrap();
         let mut result: Vec<DagNode> = nodes
             .iter()
-            .filter(|n| n.submission_id.as_str() == submission_id)
+            .filter(|n| n.submission_id().as_str() == submission_id)
             .cloned()
             .collect();
         result.sort_by(|a, b| a.created_at.cmp(&b.created_at));
@@ -499,7 +498,7 @@ impl DagStore for InMemoryDagStore {
         let nodes = self.nodes.lock().unwrap();
         let session_hashes: std::collections::HashSet<&str> = nodes
             .iter()
-            .filter(|n| n.session_id == *session_id)
+            .filter(|n| *n.session_id() == *session_id)
             .map(|n| n.id.as_str())
             .collect();
 
@@ -584,57 +583,89 @@ mod tests {
 
     // --- hash_dag_node tests ---
 
+    use crate::domain::{DagNodeId, SessionId};
+
+    fn did(s: &str) -> DagNodeId {
+        DagNodeId::from(s.to_string())
+    }
+
+    fn sid(s: &str) -> SessionId {
+        SessionId::try_from(s.to_string()).unwrap()
+    }
+
+    // Valid UUIDs for testing
+    const SES_1: &str = "d4761d76-dee4-4ebf-9df4-43b52efa4f78";
+    const SES_2: &str = "e2660cff-33d6-4428-acca-2d297dcc1cad";
+
     #[test]
     fn hash_is_valid_sha256() {
-        let hash = hash_dag_node(b"hello", "", &MessageType::Invoke, b"", "sess-1");
-        assert_eq!(hash.len(), 64);
-        assert!(hash.chars().all(|c| c.is_ascii_hexdigit()));
+        let hash = hash_dag_node(b"hello", &did(""), &MessageType::Invoke, b"", &sid(SES_1));
+        assert_eq!(hash.as_str().len(), 64);
+        assert!(hash.as_str().chars().all(|c| c.is_ascii_hexdigit()));
     }
 
     #[test]
     fn hash_changes_with_parent() {
-        let h1 = hash_dag_node(b"payload", "", &MessageType::Invoke, b"", "sess-1");
+        let h1 = hash_dag_node(b"payload", &did(""), &MessageType::Invoke, b"", &sid(SES_1));
         let h2 = hash_dag_node(
             b"payload",
-            "parent-abc",
+            &did("parent-abc"),
             &MessageType::Invoke,
             b"",
-            "sess-1",
+            &sid(SES_1),
         );
         assert_ne!(h1, h2, "Merkle property: different parent → different hash");
     }
 
     #[test]
     fn hash_changes_with_payload() {
-        let h1 = hash_dag_node(b"payload-a", "", &MessageType::Invoke, b"", "sess-1");
-        let h2 = hash_dag_node(b"payload-b", "", &MessageType::Invoke, b"", "sess-1");
+        let h1 = hash_dag_node(
+            b"payload-a",
+            &did(""),
+            &MessageType::Invoke,
+            b"",
+            &sid(SES_1),
+        );
+        let h2 = hash_dag_node(
+            b"payload-b",
+            &did(""),
+            &MessageType::Invoke,
+            b"",
+            &sid(SES_1),
+        );
         assert_ne!(h1, h2);
     }
 
     #[test]
     fn hash_changes_with_message_type() {
-        let h1 = hash_dag_node(b"payload", "", &MessageType::Invoke, b"", "sess-1");
-        let h2 = hash_dag_node(b"payload", "", &MessageType::Complete, b"", "sess-1");
+        let h1 = hash_dag_node(b"payload", &did(""), &MessageType::Invoke, b"", &sid(SES_1));
+        let h2 = hash_dag_node(
+            b"payload",
+            &did(""),
+            &MessageType::Complete,
+            b"",
+            &sid(SES_1),
+        );
         assert_ne!(h1, h2, "same payload, different type → different hash");
     }
 
     #[test]
     fn hash_changes_with_diagnostics() {
-        let h1 = hash_dag_node(b"payload", "", &MessageType::Invoke, b"", "sess-1");
+        let h1 = hash_dag_node(b"payload", &did(""), &MessageType::Invoke, b"", &sid(SES_1));
         let h2 = hash_dag_node(
             b"payload",
-            "",
+            &did(""),
             &MessageType::Invoke,
             b"{\"duration_ms\":100}",
-            "sess-1",
+            &sid(SES_1),
         );
         assert_ne!(h1, h2, "different diagnostics → different hash");
     }
 
     #[test]
     fn hash_changes_with_session_id() {
-        let h1 = hash_dag_node(b"payload", "", &MessageType::Invoke, b"", "sess-1");
-        let h2 = hash_dag_node(b"payload", "", &MessageType::Invoke, b"", "sess-2");
+        let h1 = hash_dag_node(b"payload", &did(""), &MessageType::Invoke, b"", &sid(SES_1));
+        let h2 = hash_dag_node(b"payload", &did(""), &MessageType::Invoke, b"", &sid(SES_2));
         assert_ne!(
             h1, h2,
             "same payload in different sessions → different hash"
@@ -643,8 +674,20 @@ mod tests {
 
     #[test]
     fn hash_is_deterministic() {
-        let h1 = hash_dag_node(b"same", "p", &MessageType::Request, b"diag", "sess-1");
-        let h2 = hash_dag_node(b"same", "p", &MessageType::Request, b"diag", "sess-1");
+        let h1 = hash_dag_node(
+            b"same",
+            &did("p"),
+            &MessageType::Request,
+            b"diag",
+            &sid(SES_1),
+        );
+        let h2 = hash_dag_node(
+            b"same",
+            &did("p"),
+            &MessageType::Request,
+            b"diag",
+            &sid(SES_1),
+        );
         assert_eq!(h1, h2);
     }
 }

@@ -739,8 +739,8 @@ mod tests {
     use super::*;
     use std::process::Command;
     use vlinder_core::domain::{
-        Agent, AgentId, CompleteMessage, ContainerId, DelegateDiagnostics, DelegateMessage,
-        HarnessType, InMemoryRegistry, InMemorySecretStore, InferenceBackendType,
+        Agent, AgentId, CompleteMessage, ContainerId, DagNodeId, DelegateDiagnostics,
+        DelegateMessage, HarnessType, InMemoryRegistry, InMemorySecretStore, InferenceBackendType,
         InvokeDiagnostics, InvokeMessage, Nonce, ObservableMessage, Operation, RequestDiagnostics,
         RequestMessage, ResponseMessage, RuntimeDiagnostics, RuntimeInfo, RuntimeType, SecretStore,
         Sequence, ServiceBackend, ServiceDiagnostics, ServiceMetrics, ServiceType, SessionId,
@@ -755,7 +755,7 @@ mod tests {
         let msg = InvokeMessage::new(
             TimelineId::main(),
             SubmissionId::from("sub-1".to_string()),
-            SessionId::from("sess-1".to_string()),
+            SessionId::try_from(SESSION.to_string()).unwrap(),
             HarnessType::Cli,
             RuntimeType::Container,
             test_agent_id(),
@@ -765,7 +765,7 @@ mod tests {
                 harness_version: "0.1.0".to_string(),
                 history_turns: 3,
             },
-            String::new(),
+            DagNodeId::root(),
         );
         let created_at = DateTime::from_timestamp(epoch_secs, 0).unwrap();
         (ObservableMessage::Invoke(msg), created_at)
@@ -775,7 +775,7 @@ mod tests {
         let msg = RequestMessage::new(
             TimelineId::main(),
             SubmissionId::from("sub-1".to_string()),
-            SessionId::from("sess-1".to_string()),
+            SessionId::try_from(SESSION.to_string()).unwrap(),
             test_agent_id(),
             ServiceBackend::Infer(InferenceBackendType::Ollama),
             Operation::Run,
@@ -797,7 +797,7 @@ mod tests {
         let request = RequestMessage::new(
             TimelineId::main(),
             SubmissionId::from("sub-1".to_string()),
-            SessionId::from("sess-1".to_string()),
+            SessionId::try_from(SESSION.to_string()).unwrap(),
             test_agent_id(),
             ServiceBackend::Infer(InferenceBackendType::Ollama),
             Operation::Run,
@@ -833,7 +833,7 @@ mod tests {
         let msg = CompleteMessage::new(
             TimelineId::main(),
             SubmissionId::from("sub-1".to_string()),
-            SessionId::from("sess-1".to_string()),
+            SessionId::try_from(SESSION.to_string()).unwrap(),
             test_agent_id(),
             HarnessType::Cli,
             payload.to_vec(),
@@ -848,7 +848,7 @@ mod tests {
         let msg = DelegateMessage::new(
             TimelineId::main(),
             SubmissionId::from("sub-1".to_string()),
-            SessionId::from("sess-1".to_string()),
+            SessionId::try_from(SESSION.to_string()).unwrap(),
             AgentId::new("coordinator"),
             AgentId::new("summarizer"),
             payload.to_vec(),
@@ -902,7 +902,8 @@ mod tests {
 
     /// Agent/session path prefix for the default test session.
     const AGENT: &str = "support-agent";
-    const SESSION: &str = "sess-1";
+    const SESSION: &str = "d4761d76-dee4-4ebf-9df4-43b52efa4f78";
+    const SESSION2: &str = "e2660cff-33d6-4428-acca-2d297dcc1cad";
 
     /// Run a git command against the test repo.
     fn git(repo_path: &Path, args: &[&str]) -> Result<String, String> {
@@ -973,7 +974,11 @@ mod tests {
         worker.on_observable_message(&msg, ts);
 
         let body = git(tmp.path(), &["log", "-1", "--format=%b", "main"]).unwrap();
-        assert!(body.contains("Session: sess-1"), "body: {}", body);
+        assert!(
+            body.contains(&format!("Session: {}", SESSION)),
+            "body: {}",
+            body
+        );
         assert!(body.contains("Submission: sub-1"), "body: {}", body);
     }
 
@@ -987,7 +992,7 @@ mod tests {
         let complete = CompleteMessage::new(
             TimelineId::main(),
             SubmissionId::from("sub-1".to_string()),
-            SessionId::from("sess-1".to_string()),
+            SessionId::try_from(SESSION.to_string()).unwrap(),
             test_agent_id(),
             HarnessType::Cli,
             b"answer".to_vec(),
@@ -1018,7 +1023,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(session.trim(), "sess-1");
+        assert_eq!(session.trim(), SESSION);
         assert_eq!(state.trim(), "state-abc123");
     }
 
@@ -1068,7 +1073,7 @@ mod tests {
         let show = |field: &str| show_session_file(tmp.path(), dir, field);
 
         assert_eq!(show("type").unwrap(), "invoke");
-        assert_eq!(show("session_id").unwrap(), "sess-1");
+        assert_eq!(show("session_id").unwrap(), SESSION);
         assert_eq!(show("submission_id").unwrap(), "sub-1");
         assert_eq!(show("harness").unwrap(), "cli");
         assert_eq!(show("runtime").unwrap(), "container");
@@ -1129,7 +1134,7 @@ mod tests {
         let msg_inner = CompleteMessage::new(
             TimelineId::main(),
             SubmissionId::from("sub-1".to_string()),
-            SessionId::from("sess-1".to_string()),
+            SessionId::try_from(SESSION.to_string()).unwrap(),
             test_agent_id(),
             HarnessType::Cli,
             b"done".to_vec(),
@@ -1173,7 +1178,7 @@ mod tests {
 
         worker.on_observable_message(&msg, ts);
 
-        // Delegate agent is "summarizer" (target), so folder is summarizer/sess-1/
+        // Delegate agent is "summarizer" (target), so folder is summarizer/<session>/
         let dir = "001-coordinator-delegate";
         let path = format!("main:summarizer/{}/{}", SESSION, dir);
         let show = |field: &str| git(tmp.path(), &["show", &format!("{}/{}", path, field)]);
@@ -1190,7 +1195,7 @@ mod tests {
         let invoke = InvokeMessage::new(
             TimelineId::main(),
             SubmissionId::from("sub-1".to_string()),
-            SessionId::from("sess-1".to_string()),
+            SessionId::try_from(SESSION.to_string()).unwrap(),
             HarnessType::Cli,
             RuntimeType::Container,
             test_agent_id(),
@@ -1200,7 +1205,7 @@ mod tests {
                 harness_version: "0.1.0".to_string(),
                 history_turns: 0,
             },
-            String::new(),
+            DagNodeId::root(),
         );
         let msg = ObservableMessage::Invoke(invoke);
         let ts = DateTime::from_timestamp(1000, 0).unwrap();
@@ -1365,7 +1370,7 @@ mod tests {
         let msg = InvokeMessage::new(
             TimelineId::main(),
             SubmissionId::from("sub-1".to_string()),
-            SessionId::from(session.to_string()),
+            SessionId::try_from(session.to_string()).unwrap(),
             HarnessType::Cli,
             RuntimeType::Container,
             test_agent_id(),
@@ -1375,7 +1380,7 @@ mod tests {
                 harness_version: "0.1.0".to_string(),
                 history_turns: 0,
             },
-            String::new(),
+            DagNodeId::root(),
         );
         let created_at = DateTime::from_timestamp(epoch_secs, 0).unwrap();
         (ObservableMessage::Invoke(msg), created_at)
@@ -1385,10 +1390,10 @@ mod tests {
     fn sessions_share_main_branch() {
         let (mut worker, tmp) = test_worker();
 
-        let (m1, t1) = test_invoke_session(b"sess1", 1000, "sess-1");
+        let (m1, t1) = test_invoke_session(b"sess1", 1000, SESSION);
         worker.on_observable_message(&m1, t1);
 
-        let (m2, t2) = test_invoke_session(b"sess2", 1001, "sess-2");
+        let (m2, t2) = test_invoke_session(b"sess2", 1001, SESSION2);
         worker.on_observable_message(&m2, t2);
 
         // Both commits on main, 3 total (initial + 2 messages)
@@ -1407,10 +1412,10 @@ mod tests {
     fn sessions_isolated_by_folder() {
         let (mut worker, tmp) = test_worker();
 
-        let (m1, t1) = test_invoke_session(b"sess1-msg", 1000, "sess-1");
+        let (m1, t1) = test_invoke_session(b"sess1-msg", 1000, SESSION);
         worker.on_observable_message(&m1, t1);
 
-        let (m2, t2) = test_invoke_session(b"sess2-msg", 1001, "sess-2");
+        let (m2, t2) = test_invoke_session(b"sess2-msg", 1001, SESSION2);
         worker.on_observable_message(&m2, t2);
 
         // Each session has its own folder under the agent
@@ -1419,20 +1424,28 @@ mod tests {
             &["ls-tree", "--name-only", &format!("main:{}", AGENT)],
         )
         .unwrap();
-        assert!(ls.contains("sess-1"), "ls: {}", ls);
-        assert!(ls.contains("sess-2"), "ls: {}", ls);
+        assert!(ls.contains(SESSION), "ls: {}", ls);
+        assert!(ls.contains(SESSION2), "ls: {}", ls);
 
         // Each session folder has its own message
         let ls1 = git(
             tmp.path(),
-            &["ls-tree", "--name-only", &format!("main:{}/sess-1", AGENT)],
+            &[
+                "ls-tree",
+                "--name-only",
+                &format!("main:{}/{}", AGENT, SESSION),
+            ],
         )
         .unwrap();
         assert!(ls1.contains("001-cli-invoke"), "ls1: {}", ls1);
 
         let ls2 = git(
             tmp.path(),
-            &["ls-tree", "--name-only", &format!("main:{}/sess-2", AGENT)],
+            &[
+                "ls-tree",
+                "--name-only",
+                &format!("main:{}/{}", AGENT, SESSION2),
+            ],
         )
         .unwrap();
         assert!(ls2.contains("001-cli-invoke"), "ls2: {}", ls2);
@@ -1554,13 +1567,15 @@ mod tests {
         let (mut worker, tmp) = test_worker();
         let (msg, ts) = test_invoke(b"my-payload", 1000);
 
-        let expected_node = vlinder_core::domain::workers::dag::build_dag_node(&msg, "");
+        let expected_node =
+            vlinder_core::domain::workers::dag::build_dag_node(&msg, &DagNodeId::root());
 
         worker.on_observable_message(&msg, ts);
 
         let hash = show_session_file(tmp.path(), "001-cli-invoke", "hash").unwrap();
         assert_eq!(
-            hash, expected_node.hash,
+            hash,
+            expected_node.id.to_string(),
             "hash file should contain canonical hash"
         );
     }
@@ -1570,18 +1585,25 @@ mod tests {
         let (mut worker, tmp) = test_worker();
 
         let (m1, t1) = test_invoke(b"first", 1000);
-        let expected1 = vlinder_core::domain::workers::dag::build_dag_node(&m1, "");
+        let expected1 = vlinder_core::domain::workers::dag::build_dag_node(&m1, &DagNodeId::root());
         worker.on_observable_message(&m1, t1);
 
         let hash1 = show_session_file(tmp.path(), "001-cli-invoke", "hash").unwrap();
-        assert_eq!(hash1, expected1.hash);
+        assert_eq!(hash1, expected1.id.to_string());
 
         let (m2, t2) = test_request(b"second", 1001);
-        let expected2 = vlinder_core::domain::workers::dag::build_dag_node(&m2, &hash1);
+        let expected2 = vlinder_core::domain::workers::dag::build_dag_node(
+            &m2,
+            &DagNodeId::from(hash1.clone()),
+        );
         worker.on_observable_message(&m2, t2);
 
         let hash2 = show_session_file(tmp.path(), "002-support-agent-request", "hash").unwrap();
-        assert_eq!(hash2, expected2.hash, "second hash should chain from first");
+        assert_eq!(
+            hash2,
+            expected2.id.to_string(),
+            "second hash should chain from first"
+        );
         assert_ne!(hash1, hash2);
     }
 
@@ -1651,10 +1673,10 @@ mod tests {
         let msg = ForkMessage::new(
             TimelineId::main(),
             SubmissionId::from("sub-fork".to_string()),
-            SessionId::from("sess-1".to_string()),
+            SessionId::try_from(SESSION.to_string()).unwrap(),
             agent_name.to_string(),
             branch_name.to_string(),
-            fork_point.to_string(),
+            DagNodeId::from(fork_point.to_string()),
             1,
         );
         let created_at = DateTime::from_timestamp(epoch_secs, 0).unwrap();
@@ -1710,7 +1732,9 @@ mod tests {
         worker.on_observable_message(&fork, ft);
 
         // The timelines/ dir should have both 'main' and 'repair-branch' index files
-        let session_path = tmp.path().join("support-agent/sess-1/timelines");
+        let session_path = tmp
+            .path()
+            .join(format!("support-agent/{}/timelines", SESSION));
         assert!(
             session_path.join("main").exists(),
             "main timeline index should exist"

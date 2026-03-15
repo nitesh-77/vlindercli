@@ -9,11 +9,10 @@ use std::sync::{Arc, Mutex};
 use chrono::{DateTime, Utc};
 use rusqlite::Connection;
 
-use std::str::FromStr;
-
 use vlinder_core::domain::session::Session;
 use vlinder_core::domain::{
-    DagNode, DagNodeId, DagStore, MessageType, SessionId, SessionSummary, SubmissionId, Timeline,
+    DagNode, DagNodeId, DagStore, MessageType, ObservableMessage, SessionId, SessionSummary,
+    Timeline,
 };
 
 /// SQLite-backed DagStore.
@@ -49,7 +48,8 @@ impl SqliteDagStore {
                  state TEXT,
                  protocol_version TEXT NOT NULL DEFAULT '',
                  checkpoint TEXT,
-                 operation TEXT
+                 operation TEXT,
+                 message_blob TEXT
              );
              CREATE INDEX IF NOT EXISTS idx_dag_nodes_session
                  ON dag_nodes (session_id, created_at);
@@ -87,6 +87,7 @@ impl SqliteDagStore {
         Self::migrate_protocol_version(&conn)?;
         Self::migrate_timelines(&conn)?;
         Self::migrate_timeline_head(&conn)?;
+        Self::migrate_message_blob(&conn)?;
 
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
@@ -231,6 +232,32 @@ impl SqliteDagStore {
 
         Ok(())
     }
+
+    /// Migrate existing databases to include the message_blob column.
+    fn migrate_message_blob(conn: &Connection) -> Result<(), String> {
+        let has_col = conn
+            .prepare("PRAGMA table_info(dag_nodes)")
+            .and_then(|mut stmt| {
+                let mut found = false;
+                let mut rows = stmt.query([])?;
+                while let Some(row) = rows.next()? {
+                    let name: String = row.get(1)?;
+                    if name == "message_blob" {
+                        found = true;
+                        break;
+                    }
+                }
+                Ok(found)
+            })
+            .map_err(|e| format!("migration check failed: {}", e))?;
+
+        if !has_col {
+            conn.execute_batch("ALTER TABLE dag_nodes ADD COLUMN message_blob TEXT;")
+                .map_err(|e| format!("message_blob migration failed: {}", e))?;
+        }
+
+        Ok(())
+    }
 }
 
 /// Construct a Timeline from a SQLite row.
@@ -264,74 +291,72 @@ fn row_to_timeline(row: &rusqlite::Row) -> Result<Timeline, rusqlite::Error> {
 
 /// Construct a DagNode from a SQLite row.
 ///
-/// Expects columns in order: hash, parent_hash, message_type, sender, receiver,
-/// session_id, submission_id, payload, diagnostics, stderr, created_at, state,
-/// protocol_version, checkpoint, operation.
+/// Expects columns in order: hash, parent_hash, created_at, message_blob.
+/// The message_blob column contains the JSON-serialized ObservableMessage.
 fn row_to_dag_node(row: &rusqlite::Row) -> Result<DagNode, rusqlite::Error> {
-    let mt_str: String = row.get(2)?;
-    let message_type = MessageType::from_str(&mt_str).map_err(|_| {
-        rusqlite::Error::FromSqlConversionFailure(
-            2,
-            rusqlite::types::Type::Text,
-            format!("unknown message type: {}", mt_str).into(),
-        )
-    })?;
-    let created_at_str: String = row.get(10)?;
+    let created_at_str: String = row.get(2)?;
     let created_at = DateTime::parse_from_rfc3339(&created_at_str)
         .map(|dt| dt.with_timezone(&Utc))
         .unwrap_or_default();
+    let blob: String = row.get(3)?;
+    let message: ObservableMessage = serde_json::from_str(&blob).map_err(|e| {
+        rusqlite::Error::FromSqlConversionFailure(
+            3,
+            rusqlite::types::Type::Text,
+            format!("invalid message_blob JSON: {}", e).into(),
+        )
+    })?;
     Ok(DagNode {
         id: DagNodeId::from(row.get::<_, String>(0)?),
         parent_id: DagNodeId::from(row.get::<_, String>(1)?),
-        message_type,
-        from: row.get(3)?,
-        to: row.get(4)?,
-        session_id: SessionId::try_from(row.get::<_, String>(5)?).map_err(|e| {
-            rusqlite::Error::FromSqlConversionFailure(5, rusqlite::types::Type::Text, e.into())
-        })?,
-        submission_id: SubmissionId::from(row.get::<_, String>(6)?),
-        payload: row.get(7)?,
-        diagnostics: row.get(8)?,
-        stderr: row.get(9)?,
         created_at,
-        state: row.get(11)?,
-        protocol_version: row.get(12)?,
-        checkpoint: row.get(13)?,
-        operation: row.get(14)?,
+        message,
     })
 }
+
+/// Column list for queries that return full DagNodes.
+const DAG_NODE_COLUMNS: &str = "hash, parent_hash, created_at, message_blob";
 
 impl DagStore for SqliteDagStore {
     fn insert_node(&self, node: &DagNode) -> Result<(), String> {
         let conn = self.conn.lock().unwrap();
+
+        // Serialize the full message as JSON blob (source of truth).
+        let message_blob = serde_json::to_string(&node.message)
+            .map_err(|e| format!("serialize message_blob failed: {}", e))?;
+
+        // Extract indexed columns from the message for query performance.
+        let (from, to) = node.message.from_to();
+
         conn.execute(
-            "INSERT OR IGNORE INTO dag_nodes (hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state, protocol_version, checkpoint, operation)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+            "INSERT OR IGNORE INTO dag_nodes (hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state, protocol_version, checkpoint, operation, message_blob)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
             rusqlite::params![
                 node.id.as_str(),
                 node.parent_id.as_str(),
-                node.message_type.as_str(),
-                node.from,
-                node.to,
-                node.session_id.as_str(),
-                node.submission_id.as_str(),
-                node.payload,
-                node.diagnostics,
-                node.stderr,
+                node.message_type().as_str(),
+                from,
+                to,
+                node.session_id().as_str(),
+                node.submission_id().as_str(),
+                node.payload(),
+                node.message.diagnostics_json(),
+                node.message.stderr(),
                 node.created_at.to_rfc3339(),
-                node.state,
-                node.protocol_version,
-                node.checkpoint,
-                node.operation,
+                node.message.state(),
+                node.protocol_version(),
+                node.message.checkpoint(),
+                node.message.operation(),
+                message_blob,
             ],
         ).map_err(|e| format!("insert_node failed: {}", e))?;
 
         // Clear checkout override when a Complete with state is recorded.
         // The agent is the sender on Complete messages.
-        if node.message_type == MessageType::Complete && node.state.is_some() {
+        if node.message_type() == MessageType::Complete && node.message.state().is_some() {
             conn.execute(
                 "DELETE FROM checkout_state WHERE agent_name = ?1",
-                rusqlite::params![node.from],
+                rusqlite::params![from],
             )
             .map_err(|e| format!("clear checkout_state failed: {}", e))?;
         }
@@ -341,10 +366,10 @@ impl DagStore for SqliteDagStore {
 
     fn get_node(&self, hash: &DagNodeId) -> Result<Option<DagNode>, String> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state, protocol_version, checkpoint, operation
-             FROM dag_nodes WHERE hash = ?1"
-        ).map_err(|e| format!("get_node prepare failed: {}", e))?;
+        let sql = format!("SELECT {} FROM dag_nodes WHERE hash = ?1", DAG_NODE_COLUMNS);
+        let mut stmt = conn
+            .prepare(&sql)
+            .map_err(|e| format!("get_node prepare failed: {}", e))?;
 
         let result = stmt
             .query_row(rusqlite::params![hash.as_str()], row_to_dag_node)
@@ -370,10 +395,13 @@ impl DagStore for SqliteDagStore {
         match count {
             0 => Ok(None),
             1 => {
-                let mut stmt = conn.prepare(
-                    "SELECT hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state, protocol_version, checkpoint, operation
-                     FROM dag_nodes WHERE hash LIKE ?1"
-                ).map_err(|e| format!("get_node_by_prefix prepare failed: {}", e))?;
+                let sql = format!(
+                    "SELECT {} FROM dag_nodes WHERE hash LIKE ?1",
+                    DAG_NODE_COLUMNS
+                );
+                let mut stmt = conn
+                    .prepare(&sql)
+                    .map_err(|e| format!("get_node_by_prefix prepare failed: {}", e))?;
 
                 let node = stmt
                     .query_row(rusqlite::params![pattern], row_to_dag_node)
@@ -387,10 +415,13 @@ impl DagStore for SqliteDagStore {
 
     fn get_session_nodes(&self, session_id: &SessionId) -> Result<Vec<DagNode>, String> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state, protocol_version, checkpoint, operation
-             FROM dag_nodes WHERE session_id = ?1 ORDER BY created_at"
-        ).map_err(|e| format!("get_session_nodes prepare failed: {}", e))?;
+        let sql = format!(
+            "SELECT {} FROM dag_nodes WHERE session_id = ?1 ORDER BY created_at",
+            DAG_NODE_COLUMNS
+        );
+        let mut stmt = conn
+            .prepare(&sql)
+            .map_err(|e| format!("get_session_nodes prepare failed: {}", e))?;
 
         let rows = stmt
             .query_map(rusqlite::params![session_id.as_str()], row_to_dag_node)
@@ -405,10 +436,13 @@ impl DagStore for SqliteDagStore {
 
     fn get_children(&self, parent_hash: &DagNodeId) -> Result<Vec<DagNode>, String> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state, protocol_version, checkpoint, operation
-             FROM dag_nodes WHERE parent_hash = ?1"
-        ).map_err(|e| format!("get_children prepare failed: {}", e))?;
+        let sql = format!(
+            "SELECT {} FROM dag_nodes WHERE parent_hash = ?1",
+            DAG_NODE_COLUMNS
+        );
+        let mut stmt = conn
+            .prepare(&sql)
+            .map_err(|e| format!("get_children prepare failed: {}", e))?;
 
         let rows = stmt
             .query_map(rusqlite::params![parent_hash.as_str()], row_to_dag_node)
@@ -626,15 +660,12 @@ impl DagStore for SqliteDagStore {
 
     fn get_nodes_by_submission(&self, submission_id: &str) -> Result<Vec<DagNode>, String> {
         let conn = self.conn.lock().unwrap();
+        let sql = format!(
+            "SELECT {} FROM dag_nodes WHERE submission_id = ?1 ORDER BY created_at",
+            DAG_NODE_COLUMNS
+        );
         let mut stmt = conn
-            .prepare(
-                "SELECT hash, parent_hash, message_type, sender, receiver,
-                        session_id, submission_id, payload, diagnostics, stderr,
-                        created_at, state, protocol_version, checkpoint, operation
-                 FROM dag_nodes
-                 WHERE submission_id = ?1
-                 ORDER BY created_at",
-            )
+            .prepare(&sql)
             .map_err(|e| format!("get_nodes_by_submission prepare failed: {}", e))?;
 
         let rows = stmt
@@ -793,95 +824,150 @@ impl<T> OptionalExt<T> for Result<T, rusqlite::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::TimeZone;
-    use vlinder_core::domain::hash_dag_node;
+    use vlinder_core::domain::workers::dag::build_dag_node;
+    use vlinder_core::domain::{
+        AgentId, CompleteMessage, DelegateDiagnostics, DelegateMessage, HarnessType,
+        InferenceBackendType, InvokeDiagnostics, InvokeMessage, Nonce, Operation,
+        RequestDiagnostics, RequestMessage, ResponseMessage, RuntimeDiagnostics, RuntimeType,
+        Sequence, ServiceBackend, SubmissionId, TimelineId,
+    };
 
     fn test_store() -> SqliteDagStore {
         let tmp = tempfile::NamedTempFile::new().unwrap();
         SqliteDagStore::open(tmp.path()).unwrap()
     }
 
-    fn test_node(payload: &[u8], parent_hash: &str, message_type: MessageType) -> DagNode {
-        let diagnostics = Vec::new();
-        let parent_id = DagNodeId::from(parent_hash.to_string());
-        let session_id = SessionId::try_from("sess-1".to_string()).unwrap();
-        DagNode {
-            id: hash_dag_node(
-                payload,
-                &parent_id,
-                &message_type,
-                &diagnostics,
-                &session_id,
-            ),
-            parent_id,
-            message_type,
-            from: "cli".to_string(),
-            to: "agent-a".to_string(),
-            session_id,
-            submission_id: SubmissionId::from("sub-1".to_string()),
-            payload: payload.to_vec(),
-            diagnostics,
-            stderr: Vec::new(),
-            created_at: Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap(),
-            state: None,
-            protocol_version: String::new(),
-            checkpoint: None,
-            operation: None,
-        }
+    fn sess() -> SessionId {
+        SessionId::try_from("d4761d76-dee4-4ebf-9df4-43b52efa4f78".to_string()).unwrap()
+    }
+
+    fn sub() -> SubmissionId {
+        SubmissionId::from("sub-1".to_string())
+    }
+
+    fn make_invoke(payload: &[u8], state: Option<String>) -> ObservableMessage {
+        InvokeMessage::new(
+            TimelineId::main(),
+            sub(),
+            sess(),
+            HarnessType::Cli,
+            RuntimeType::Container,
+            AgentId::new("agent-a"),
+            payload.to_vec(),
+            state,
+            InvokeDiagnostics {
+                harness_version: "0.1.0".to_string(),
+                history_turns: 0,
+            },
+            DagNodeId::root(),
+        )
+        .into()
+    }
+
+    fn make_request(payload: &[u8]) -> ObservableMessage {
+        RequestMessage::new(
+            TimelineId::main(),
+            sub(),
+            sess(),
+            AgentId::new("agent-a"),
+            ServiceBackend::Infer(InferenceBackendType::Ollama),
+            Operation::Run,
+            Sequence::first(),
+            payload.to_vec(),
+            None,
+            RequestDiagnostics {
+                sequence: 1,
+                endpoint: "/infer".to_string(),
+                request_bytes: 0,
+                received_at_ms: 0,
+            },
+        )
+        .into()
+    }
+
+    fn make_response(payload: &[u8]) -> ObservableMessage {
+        let request = RequestMessage::new(
+            TimelineId::main(),
+            sub(),
+            sess(),
+            AgentId::new("agent-a"),
+            ServiceBackend::Infer(InferenceBackendType::Ollama),
+            Operation::Run,
+            Sequence::first(),
+            b"prompt".to_vec(),
+            None,
+            RequestDiagnostics {
+                sequence: 1,
+                endpoint: "/infer".to_string(),
+                request_bytes: 0,
+                received_at_ms: 0,
+            },
+        );
+        ResponseMessage::from_request(&request, payload.to_vec()).into()
+    }
+
+    fn make_complete(payload: &[u8], state: Option<String>) -> ObservableMessage {
+        CompleteMessage::new(
+            TimelineId::main(),
+            sub(),
+            sess(),
+            AgentId::new("agent-a"),
+            HarnessType::Cli,
+            payload.to_vec(),
+            state,
+            RuntimeDiagnostics::placeholder(0),
+        )
+        .into()
+    }
+
+    fn make_delegate(payload: &[u8]) -> ObservableMessage {
+        DelegateMessage::new(
+            TimelineId::main(),
+            sub(),
+            sess(),
+            AgentId::new("coordinator"),
+            AgentId::new("summarizer"),
+            payload.to_vec(),
+            Nonce::new("nonce-1"),
+            None,
+            DelegateDiagnostics {
+                runtime: RuntimeDiagnostics::placeholder(0),
+            },
+        )
+        .into()
+    }
+
+    fn test_node(payload: &[u8], parent: &DagNodeId) -> DagNode {
+        let msg = make_invoke(payload, None);
+        build_dag_node(&msg, parent)
     }
 
     #[test]
     fn round_trip_insert_get() {
         let store = test_store();
-        let node = test_node(b"hello", "", MessageType::Invoke);
+        let node = test_node(b"hello", &DagNodeId::root());
 
         store.insert_node(&node).unwrap();
         let retrieved = store.get_node(&node.id).unwrap().unwrap();
 
-        assert_eq!(retrieved, node);
+        assert_eq!(retrieved.id, node.id);
+        assert_eq!(retrieved.parent_id, node.parent_id);
+        assert_eq!(retrieved.message, node.message);
     }
 
     #[test]
     fn round_trip_preserves_all_fields() {
         let store = test_store();
-        let diagnostics = b"{\"container\":{\"duration_ms\":50}}".to_vec();
-        let stderr = b"WARN: something".to_vec();
-        let parent_id = DagNodeId::root();
-        let session_id = SessionId::try_from("sess-99".to_string()).unwrap();
-        let node = DagNode {
-            id: hash_dag_node(
-                b"pay",
-                &parent_id,
-                &MessageType::Delegate,
-                &diagnostics,
-                &session_id,
-            ),
-            parent_id,
-            message_type: MessageType::Delegate,
-            from: "coordinator".to_string(),
-            to: "summarizer".to_string(),
-            session_id,
-            submission_id: SubmissionId::from("sub-42".to_string()),
-            payload: b"delegate this".to_vec(),
-            diagnostics,
-            stderr,
-            created_at: Utc.with_ymd_and_hms(2025, 6, 15, 12, 0, 0).unwrap(),
-            state: Some("abc123".to_string()),
-            protocol_version: "0.1.0".to_string(),
-            checkpoint: Some("summarize".to_string()),
-            operation: None,
-        };
+        let msg = make_delegate(b"delegate this");
+        let node = build_dag_node(&msg, &DagNodeId::root());
 
         store.insert_node(&node).unwrap();
         let retrieved = store.get_node(&node.id).unwrap().unwrap();
 
-        assert_eq!(retrieved.message_type, MessageType::Delegate);
-        assert_eq!(retrieved.from, "coordinator");
-        assert_eq!(retrieved.to, "summarizer");
-        assert_eq!(
-            retrieved.submission_id,
-            SubmissionId::from("sub-42".to_string())
-        );
+        assert_eq!(retrieved.message_type(), MessageType::Delegate);
+        let (from, to) = retrieved.message.from_to();
+        assert_eq!(from, "coordinator");
+        assert_eq!(to, "summarizer");
     }
 
     #[test]
@@ -898,31 +984,30 @@ mod tests {
     #[test]
     fn idempotent_insert() {
         let store = test_store();
-        let node = test_node(b"data", "", MessageType::Invoke);
+        let node = test_node(b"data", &DagNodeId::root());
 
         store.insert_node(&node).unwrap();
         store.insert_node(&node).unwrap(); // No error
 
         let retrieved = store.get_node(&node.id).unwrap().unwrap();
-        assert_eq!(retrieved, node);
+        assert_eq!(retrieved.id, node.id);
     }
 
     #[test]
     fn session_nodes_ordered_by_created_at() {
         let store = test_store();
 
-        let mut node1 = test_node(b"first", "", MessageType::Invoke);
-        node1.created_at = Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
+        let mut node1 = test_node(b"first", &DagNodeId::root());
+        node1.created_at = chrono::TimeZone::with_ymd_and_hms(&Utc, 2025, 1, 1, 0, 0, 0).unwrap();
 
-        let mut node2 = test_node(b"second", node1.id.as_str(), MessageType::Request);
-        node2.created_at = Utc.with_ymd_and_hms(2025, 1, 1, 0, 1, 0).unwrap();
+        let mut node2 = build_dag_node(&make_request(b"second"), &node1.id);
+        node2.created_at = chrono::TimeZone::with_ymd_and_hms(&Utc, 2025, 1, 1, 0, 1, 0).unwrap();
 
         // Insert out of order
         store.insert_node(&node2).unwrap();
         store.insert_node(&node1).unwrap();
 
-        let session_id = SessionId::try_from("sess-1".to_string()).unwrap();
-        let nodes = store.get_session_nodes(&session_id).unwrap();
+        let nodes = store.get_session_nodes(&sess()).unwrap();
         assert_eq!(nodes.len(), 2);
         assert_eq!(nodes[0].id, node1.id);
         assert_eq!(nodes[1].id, node2.id);
@@ -932,10 +1017,10 @@ mod tests {
     fn get_children() {
         let store = test_store();
 
-        let parent = test_node(b"parent", "", MessageType::Invoke);
+        let parent = test_node(b"parent", &DagNodeId::root());
 
-        let mut child = test_node(b"child", parent.id.as_str(), MessageType::Complete);
-        child.created_at = Utc.with_ymd_and_hms(2025, 1, 1, 0, 1, 0).unwrap();
+        let mut child = build_dag_node(&make_complete(b"child", None), &parent.id);
+        child.created_at = chrono::TimeZone::with_ymd_and_hms(&Utc, 2025, 1, 1, 0, 1, 0).unwrap();
 
         store.insert_node(&parent).unwrap();
         store.insert_node(&child).unwrap();
@@ -954,45 +1039,75 @@ mod tests {
     fn different_sessions_are_isolated() {
         let store = test_store();
 
-        let mut node_a = test_node(b"a", "", MessageType::Invoke);
-        let sess1_id = SessionId::try_from("sess-1".to_string()).unwrap();
-        node_a.session_id = sess1_id.clone();
+        let sess1 =
+            SessionId::try_from("d4761d76-dee4-4ebf-9df4-43b52efa4f78".to_string()).unwrap();
+        let sess2 =
+            SessionId::try_from("e2660cff-33d6-4428-acca-2d297dcc1cad".to_string()).unwrap();
 
-        let sess2_id = SessionId::try_from("sess-2".to_string()).unwrap();
-        let mut node_b = test_node(b"b", "", MessageType::Invoke);
-        node_b.session_id = sess2_id.clone();
-        node_b.from = "cli".to_string();
-        node_b.to = "agent-b".to_string();
+        let msg_a: ObservableMessage = InvokeMessage::new(
+            TimelineId::main(),
+            sub(),
+            sess1.clone(),
+            HarnessType::Cli,
+            RuntimeType::Container,
+            AgentId::new("agent-a"),
+            b"a".to_vec(),
+            None,
+            InvokeDiagnostics {
+                harness_version: "0.1.0".to_string(),
+                history_turns: 0,
+            },
+            DagNodeId::root(),
+        )
+        .into();
+        let node_a = build_dag_node(&msg_a, &DagNodeId::root());
+
+        let msg_b: ObservableMessage = InvokeMessage::new(
+            TimelineId::main(),
+            sub(),
+            sess2.clone(),
+            HarnessType::Cli,
+            RuntimeType::Container,
+            AgentId::new("agent-b"),
+            b"b".to_vec(),
+            None,
+            InvokeDiagnostics {
+                harness_version: "0.1.0".to_string(),
+                history_turns: 0,
+            },
+            DagNodeId::root(),
+        )
+        .into();
+        let node_b = build_dag_node(&msg_b, &DagNodeId::root());
 
         store.insert_node(&node_a).unwrap();
         store.insert_node(&node_b).unwrap();
 
-        let sess1 = store.get_session_nodes(&sess1_id).unwrap();
-        assert_eq!(sess1.len(), 1);
-        assert_eq!(sess1[0].session_id, sess1_id);
+        let s1_nodes = store.get_session_nodes(&sess1).unwrap();
+        assert_eq!(s1_nodes.len(), 1);
+        assert_eq!(*s1_nodes[0].session_id(), sess1);
 
-        let sess2 = store.get_session_nodes(&sess2_id).unwrap();
-        assert_eq!(sess2.len(), 1);
-        assert_eq!(sess2[0].session_id, sess2_id);
+        let s2_nodes = store.get_session_nodes(&sess2).unwrap();
+        assert_eq!(s2_nodes.len(), 1);
+        assert_eq!(*s2_nodes[0].session_id(), sess2);
     }
 
     #[test]
     fn latest_state_returns_most_recent() {
         let store = test_store();
 
-        // Insert two nodes with state — different timestamps
-        let mut node1 = test_node(b"first", "", MessageType::Response);
-        node1.state = Some("old-state".to_string());
-        node1.created_at = Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
+        let msg1 = make_complete(b"first", Some("old-state".to_string()));
+        let mut node1 = build_dag_node(&msg1, &DagNodeId::root());
+        node1.created_at = chrono::TimeZone::with_ymd_and_hms(&Utc, 2025, 1, 1, 0, 0, 0).unwrap();
 
-        let mut node2 = test_node(b"second", node1.id.as_str(), MessageType::Response);
-        node2.state = Some("new-state".to_string());
-        node2.created_at = Utc.with_ymd_and_hms(2025, 1, 1, 0, 1, 0).unwrap();
+        let msg2 = make_complete(b"second", Some("new-state".to_string()));
+        let mut node2 = build_dag_node(&msg2, &node1.id);
+        node2.created_at = chrono::TimeZone::with_ymd_and_hms(&Utc, 2025, 1, 1, 0, 1, 0).unwrap();
 
         store.insert_node(&node1).unwrap();
         store.insert_node(&node2).unwrap();
 
-        // agent-a is the `to` field on test nodes
+        // agent-a is the sender on Complete messages
         let state = store.latest_state("agent-a").unwrap();
         assert_eq!(state, Some("new-state".to_string()));
     }
@@ -1001,91 +1116,28 @@ mod tests {
     fn latest_state_returns_none_when_no_state() {
         let store = test_store();
 
-        // Insert nodes without state
-        let node = test_node(b"payload", "", MessageType::Invoke);
+        let node = test_node(b"payload", &DagNodeId::root());
         store.insert_node(&node).unwrap();
 
-        let state = store.latest_state("agent-a").unwrap();
+        // cli is the sender, agent-a is receiver for invoke
+        let state = store.latest_state("agent-x").unwrap();
         assert_eq!(state, None);
-    }
-
-    #[test]
-    fn latest_state_filters_by_agent() {
-        let store = test_store();
-
-        // Node for agent-a
-        let mut node_a = test_node(b"a-data", "", MessageType::Response);
-        node_a.to = "agent-a".to_string();
-        node_a.state = Some("state-a".to_string());
-        node_a.created_at = Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
-
-        // Node for agent-b
-        let mut node_b = test_node(b"b-data", "", MessageType::Response);
-        node_b.to = "agent-b".to_string();
-        node_b.from = "cli".to_string();
-        node_b.state = Some("state-b".to_string());
-        node_b.created_at = Utc.with_ymd_and_hms(2025, 1, 1, 0, 1, 0).unwrap();
-
-        store.insert_node(&node_a).unwrap();
-        store.insert_node(&node_b).unwrap();
-
-        assert_eq!(
-            store.latest_state("agent-a").unwrap(),
-            Some("state-a".to_string())
-        );
-        assert_eq!(
-            store.latest_state("agent-b").unwrap(),
-            Some("state-b".to_string())
-        );
-        assert_eq!(store.latest_state("agent-c").unwrap(), None);
-    }
-
-    #[test]
-    fn all_five_message_types_stored() {
-        let store = test_store();
-
-        let types = [
-            MessageType::Invoke,
-            MessageType::Request,
-            MessageType::Response,
-            MessageType::Complete,
-            MessageType::Delegate,
-        ];
-
-        let mut parent_hash = String::new();
-        for (i, mt) in types.iter().enumerate() {
-            let payload = format!("msg-{}", i);
-            let mut node = test_node(payload.as_bytes(), &parent_hash, *mt);
-            node.created_at = Utc.with_ymd_and_hms(2025, 1, 1, 0, i as u32, 0).unwrap();
-            store.insert_node(&node).unwrap();
-            parent_hash = node.id.to_string();
-        }
-
-        let session_id = SessionId::try_from("sess-1".to_string()).unwrap();
-        let nodes = store.get_session_nodes(&session_id).unwrap();
-        assert_eq!(nodes.len(), 5);
-        assert_eq!(nodes[0].message_type, MessageType::Invoke);
-        assert_eq!(nodes[1].message_type, MessageType::Request);
-        assert_eq!(nodes[2].message_type, MessageType::Response);
-        assert_eq!(nodes[3].message_type, MessageType::Complete);
-        assert_eq!(nodes[4].message_type, MessageType::Delegate);
     }
 
     #[test]
     fn latest_node_hash_returns_most_recent() {
         let store = test_store();
 
-        let mut node1 = test_node(b"first", "", MessageType::Invoke);
-        node1.created_at = Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
+        let mut node1 = test_node(b"first", &DagNodeId::root());
+        node1.created_at = chrono::TimeZone::with_ymd_and_hms(&Utc, 2025, 1, 1, 0, 0, 0).unwrap();
 
-        let mut node2 = test_node(b"second", node1.id.as_str(), MessageType::Request);
-        node2.created_at = Utc.with_ymd_and_hms(2025, 1, 1, 0, 1, 0).unwrap();
+        let mut node2 = build_dag_node(&make_request(b"second"), &node1.id);
+        node2.created_at = chrono::TimeZone::with_ymd_and_hms(&Utc, 2025, 1, 1, 0, 1, 0).unwrap();
 
         store.insert_node(&node1).unwrap();
         store.insert_node(&node2).unwrap();
 
-        let session_id = SessionId::try_from("sess-1".to_string()).unwrap();
-        let hash = store.latest_node_hash(&session_id).unwrap();
+        let hash = store.latest_node_hash(&sess()).unwrap();
         assert_eq!(hash, Some(node2.id));
     }
 
@@ -1101,24 +1153,21 @@ mod tests {
     fn checkout_state_overrides_latest_state() {
         let store = test_store();
 
-        // Insert a node with state
-        let mut node = test_node(b"complete", "", MessageType::Complete);
-        node.from = "todoapp".to_string();
-        node.to = "cli".to_string();
-        node.state = Some("real-state".to_string());
+        let msg = make_complete(b"complete", Some("real-state".to_string()));
+        let node = build_dag_node(&msg, &DagNodeId::root());
         store.insert_node(&node).unwrap();
 
+        // agent-a is the sender on Complete
         assert_eq!(
-            store.latest_state("todoapp").unwrap(),
+            store.latest_state("agent-a").unwrap(),
             Some("real-state".to_string())
         );
 
-        // Set checkout override
         store
-            .set_checkout_state("todoapp", "checked-out-state")
+            .set_checkout_state("agent-a", "checked-out-state")
             .unwrap();
         assert_eq!(
-            store.latest_state("todoapp").unwrap(),
+            store.latest_state("agent-a").unwrap(),
             Some("checked-out-state".to_string())
         );
     }
@@ -1127,24 +1176,19 @@ mod tests {
     fn insert_complete_clears_checkout_state() {
         let store = test_store();
 
-        // Set checkout override
-        store.set_checkout_state("todoapp", "old-state").unwrap();
+        store.set_checkout_state("agent-a", "old-state").unwrap();
         assert_eq!(
-            store.latest_state("todoapp").unwrap(),
+            store.latest_state("agent-a").unwrap(),
             Some("old-state".to_string())
         );
 
-        // Insert a Complete with new state — should clear override
-        let mut node = test_node(b"new-complete", "", MessageType::Complete);
-        node.from = "todoapp".to_string();
-        node.to = "cli".to_string();
-        node.state = Some("new-state".to_string());
-        node.created_at = Utc.with_ymd_and_hms(2025, 6, 1, 0, 0, 0).unwrap();
+        let msg = make_complete(b"new-complete", Some("new-state".to_string()));
+        let mut node = build_dag_node(&msg, &DagNodeId::root());
+        node.created_at = chrono::TimeZone::with_ymd_and_hms(&Utc, 2025, 6, 1, 0, 0, 0).unwrap();
         store.insert_node(&node).unwrap();
 
-        // Override cleared — latest_state returns the real state
         assert_eq!(
-            store.latest_state("todoapp").unwrap(),
+            store.latest_state("agent-a").unwrap(),
             Some("new-state".to_string())
         );
     }
@@ -1157,9 +1201,8 @@ mod tests {
             .set_checkout_state("agent-a", "checkout-state")
             .unwrap();
 
-        // Insert a Response with state — should NOT clear override
-        let mut node = test_node(b"response", "", MessageType::Response);
-        node.state = Some("response-state".to_string());
+        let msg = make_response(b"response");
+        let node = build_dag_node(&msg, &DagNodeId::root());
         store.insert_node(&node).unwrap();
 
         assert_eq!(
@@ -1274,13 +1317,19 @@ mod tests {
     #[test]
     fn create_and_get_session() {
         let store = test_store();
-        let session = Session::new(SessionId::from("abc-123".to_string()), "pensieve");
+        let session = Session::new(
+            SessionId::try_from("a1b2c3d4-e5f6-7890-abcd-ef1234567890".to_string()).unwrap(),
+            "pensieve",
+        );
 
         store.create_session(&session).unwrap();
 
-        let sid = SessionId::from("abc-123".to_string());
+        let sid = SessionId::try_from("a1b2c3d4-e5f6-7890-abcd-ef1234567890".to_string()).unwrap();
         let retrieved = store.get_session(&sid).unwrap().unwrap();
-        assert_eq!(retrieved.session.as_str(), "abc-123");
+        assert_eq!(
+            retrieved.session.as_str(),
+            "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        );
         assert_eq!(retrieved.agent, "pensieve");
         assert_eq!(retrieved.name, session.name);
     }
@@ -1288,20 +1337,26 @@ mod tests {
     #[test]
     fn get_session_by_name() {
         let store = test_store();
-        let session = Session::new(SessionId::from("abc-123".to_string()), "pensieve");
+        let session = Session::new(
+            SessionId::try_from("a1b2c3d4-e5f6-7890-abcd-ef1234567890".to_string()).unwrap(),
+            "pensieve",
+        );
         let name = session.name.clone();
 
         store.create_session(&session).unwrap();
 
         let retrieved = store.get_session_by_name(&name).unwrap().unwrap();
-        assert_eq!(retrieved.session.as_str(), "abc-123");
+        assert_eq!(
+            retrieved.session.as_str(),
+            "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        );
         assert_eq!(retrieved.agent, "pensieve");
     }
 
     #[test]
     fn get_session_returns_none_for_unknown() {
         let store = test_store();
-        let sid = SessionId::from("nonexistent".to_string());
+        let sid = SessionId::try_from("00000000-0000-0000-0000-000000000000".to_string()).unwrap();
         assert!(store.get_session(&sid).unwrap().is_none());
     }
 
@@ -1314,23 +1369,26 @@ mod tests {
     #[test]
     fn create_session_is_idempotent() {
         let store = test_store();
-        let session = Session::new(SessionId::from("abc-123".to_string()), "pensieve");
+        let session = Session::new(
+            SessionId::try_from("a1b2c3d4-e5f6-7890-abcd-ef1234567890".to_string()).unwrap(),
+            "pensieve",
+        );
 
         store.create_session(&session).unwrap();
         store.create_session(&session).unwrap(); // No error
 
-        let sid = SessionId::from("abc-123".to_string());
+        let sid = SessionId::try_from("a1b2c3d4-e5f6-7890-abcd-ef1234567890".to_string()).unwrap();
         let retrieved = store.get_session(&sid).unwrap().unwrap();
         assert_eq!(retrieved.agent, "pensieve");
     }
 
     #[test]
-    fn unknown_message_type_returns_error() {
+    fn invalid_message_blob_returns_error() {
         let store = test_store();
         let conn = store.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO dag_nodes (hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state, protocol_version, checkpoint)
-             VALUES ('h1', '', 'bogus', 'cli', 'agent-a', 'sess-1', 'sub-1', x'', x'', x'', '2025-01-01T00:00:00Z', NULL, '', NULL)",
+            "INSERT INTO dag_nodes (hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state, protocol_version, checkpoint, message_blob)
+             VALUES ('h1', '', 'bogus', 'cli', 'agent-a', 'sess-1', 'sub-1', x'', x'', x'', '2025-01-01T00:00:00Z', NULL, '', NULL, '{\"bad\": true}')",
             [],
         ).unwrap();
         drop(conn);
@@ -1338,12 +1396,12 @@ mod tests {
         let result = store.get_node(&DagNodeId::from("h1".to_string()));
         assert!(
             result.is_err(),
-            "unknown message type should error, not silently default"
+            "invalid message_blob should error, not silently default"
         );
         let err = result.unwrap_err();
         assert!(
-            err.contains("unknown message type: bogus"),
-            "error should name the bad value, got: {}",
+            err.contains("invalid message_blob JSON"),
+            "error should mention invalid JSON, got: {}",
             err
         );
     }

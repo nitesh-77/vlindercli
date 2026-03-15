@@ -26,11 +26,17 @@ fn checkout_shows_trailers_and_state() {
     let mut worker = test_conversations_worker(&vlinder_dir);
 
     // Write invoke (no state) + complete (with state)
-    let (invoke, t1) = make_invoke("sess-1", "sub-1", b"question", None, 1000);
+    let (invoke, t1) = make_invoke(
+        "d4761d76-dee4-4ebf-9df4-43b52efa4f78",
+        "sub-1",
+        b"question",
+        None,
+        1000,
+    );
     worker.on_observable_message(&invoke, t1);
 
     let (complete, t2) = make_complete(
-        "sess-1",
+        "d4761d76-dee4-4ebf-9df4-43b52efa4f78",
         "sub-1",
         b"answer",
         Some("state-abc123".to_string()),
@@ -42,7 +48,7 @@ fn checkout_shows_trailers_and_state() {
     let head = read_head_sha(&conv_dir).expect("HEAD should exist");
     assert_eq!(
         read_trailer(&conv_dir, &head, "Session").as_deref(),
-        Some("sess-1"),
+        Some("d4761d76-dee4-4ebf-9df4-43b52efa4f78"),
     );
     assert_eq!(
         read_trailer(&conv_dir, &head, "Submission").as_deref(),
@@ -62,7 +68,7 @@ fn checkout_shows_trailers_and_state() {
 
     assert_eq!(
         read_trailer(&conv_dir, first_commit, "Session").as_deref(),
-        Some("sess-1"),
+        Some("d4761d76-dee4-4ebf-9df4-43b52efa4f78"),
     );
     assert_eq!(
         read_trailer(&conv_dir, first_commit, "Submission").as_deref(),
@@ -86,9 +92,21 @@ fn promote_moves_main_and_labels_old() {
     let mut worker = test_conversations_worker(&vlinder_dir);
 
     // Write invoke + complete
-    let (invoke, t1) = make_invoke("sess-1", "sub-1", b"q", None, 1000);
+    let (invoke, t1) = make_invoke(
+        "d4761d76-dee4-4ebf-9df4-43b52efa4f78",
+        "sub-1",
+        b"q",
+        None,
+        1000,
+    );
     worker.on_observable_message(&invoke, t1);
-    let (complete, t2) = make_complete("sess-1", "sub-1", b"a", Some("state-1".to_string()), 1001);
+    let (complete, t2) = make_complete(
+        "d4761d76-dee4-4ebf-9df4-43b52efa4f78",
+        "sub-1",
+        b"a",
+        Some("state-1".to_string()),
+        1001,
+    );
     worker.on_observable_message(&complete, t2);
 
     // Record original main SHA
@@ -140,10 +158,16 @@ fn fork_creates_independent_branch() {
     let mut worker = test_conversations_worker(&vlinder_dir);
 
     // Write invoke + complete on main
-    let (invoke, t1) = make_invoke("sess-1", "sub-1", b"question", None, 1000);
+    let (invoke, t1) = make_invoke(
+        "d4761d76-dee4-4ebf-9df4-43b52efa4f78",
+        "sub-1",
+        b"question",
+        None,
+        1000,
+    );
     worker.on_observable_message(&invoke, t1);
     let (complete, t2) = make_complete(
-        "sess-1",
+        "d4761d76-dee4-4ebf-9df4-43b52efa4f78",
         "sub-1",
         b"original-answer",
         Some("state-1".to_string()),
@@ -169,7 +193,7 @@ fn fork_creates_independent_branch() {
     // Re-open the worker on the repair branch
     let mut repair_worker = GitDagWorker::open(&conv_dir, "test.local:9000", None).unwrap();
     let (alt_complete, t3) = make_complete(
-        "sess-1",
+        "d4761d76-dee4-4ebf-9df4-43b52efa4f78",
         "sub-1",
         b"repaired-answer",
         Some("state-2".to_string()),
@@ -212,11 +236,17 @@ fn checkout_then_promote_full_workflow() {
     let mut worker = test_conversations_worker(&vlinder_dir);
 
     // Build a multi-turn conversation: invoke1 → complete1 → invoke2 → complete2
-    let (invoke1, t1) = make_invoke("sess-1", "sub-1", b"turn-1-question", None, 1000);
+    let (invoke1, t1) = make_invoke(
+        "d4761d76-dee4-4ebf-9df4-43b52efa4f78",
+        "sub-1",
+        b"turn-1-question",
+        None,
+        1000,
+    );
     worker.on_observable_message(&invoke1, t1);
 
     let (complete1, t2) = make_complete(
-        "sess-1",
+        "d4761d76-dee4-4ebf-9df4-43b52efa4f78",
         "sub-1",
         b"turn-1-answer",
         Some("state-after-turn-1".to_string()),
@@ -225,7 +255,7 @@ fn checkout_then_promote_full_workflow() {
     worker.on_observable_message(&complete1, t2);
 
     let (invoke2, t3) = make_invoke(
-        "sess-1",
+        "d4761d76-dee4-4ebf-9df4-43b52efa4f78",
         "sub-2",
         b"turn-2-question",
         Some("state-after-turn-1".to_string()),
@@ -234,7 +264,7 @@ fn checkout_then_promote_full_workflow() {
     worker.on_observable_message(&invoke2, t3);
 
     let (complete2, t4) = make_complete(
-        "sess-1",
+        "d4761d76-dee4-4ebf-9df4-43b52efa4f78",
         "sub-2",
         b"turn-2-answer",
         Some("state-after-turn-2".to_string()),
@@ -270,7 +300,7 @@ fn checkout_then_promote_full_workflow() {
     // Write a new alternative complete (different answer for turn 1)
     let mut repair_worker = GitDagWorker::open(&conv_dir, "test.local:9000", None).unwrap();
     let (alt_complete, t5) = make_complete(
-        "sess-1",
+        "d4761d76-dee4-4ebf-9df4-43b52efa4f78",
         "sub-1",
         b"turn-1-repaired-answer",
         Some("state-repaired".to_string()),

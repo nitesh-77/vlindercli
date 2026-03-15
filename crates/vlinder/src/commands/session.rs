@@ -137,13 +137,11 @@ fn get(session_id_or_name: &str) {
     let mut turn_map: std::collections::HashMap<&str, Vec<&vlinder_core::domain::DagNode>> =
         std::collections::HashMap::new();
     for node in &nodes {
-        if !turn_map.contains_key(node.submission_id.as_str()) {
-            turn_order.push(node.submission_id.to_string());
+        let sub_str = node.submission_id().as_str();
+        if !turn_map.contains_key(sub_str) {
+            turn_order.push(sub_str.to_string());
         }
-        turn_map
-            .entry(node.submission_id.as_str())
-            .or_default()
-            .push(node);
+        turn_map.entry(sub_str).or_default().push(node);
     }
 
     for sub_id in &turn_order {
@@ -151,17 +149,18 @@ fn get(session_id_or_name: &str) {
         println!("Turn {}", sub_id);
         for node in messages {
             let ts = node.created_at.format("%H:%M:%S%.3f");
+            let (from, to) = node.message.from_to();
             let mut parts = vec![
                 format!("{}", ts),
                 node.id.as_str()[..8].to_string(),
-                node.message_type.as_str().to_string(),
-                node.from.clone(),
-                format!("-> {}", node.to),
+                node.message_type().as_str().to_string(),
+                from,
+                format!("-> {}", to),
             ];
-            if let Some(op) = &node.operation {
+            if let Some(op) = node.message.operation() {
                 parts.push(format!("op:{}", op));
             }
-            if let Some(ckpt) = &node.checkpoint {
+            if let Some(ckpt) = node.message.checkpoint() {
                 parts.push(format!("ckpt:{}", ckpt));
             }
             println!("  {}", parts.join(" "));
@@ -187,10 +186,12 @@ fn fork(session_id_or_name: &str, from_hash: &str, branch_name: &str) {
             std::process::exit(1);
         });
 
-    if node.session_id != session_id {
+    if *node.session_id() != session_id {
         eprintln!(
             "Node {} belongs to session {}, not {}",
-            from_hash, node.session_id, session_id
+            from_hash,
+            node.session_id(),
+            session_id
         );
         std::process::exit(1);
     }
@@ -257,72 +258,81 @@ fn repair(branch: &str) {
             std::process::exit(1);
         });
 
-    if node.message_type != MessageType::Request {
+    if node.message_type() != MessageType::Request {
         eprintln!(
             "Fork point {} is a {} message, expected request",
             fork_point,
-            node.message_type.as_str()
+            node.message_type().as_str()
         );
         std::process::exit(1);
     }
 
-    let checkpoint = node.checkpoint.clone().unwrap_or_else(|| {
-        eprintln!(
-            "Fork point {} has no checkpoint — repair requires a checkpoint handler",
-            fork_point
-        );
-        std::process::exit(1);
-    });
+    let checkpoint = node
+        .message
+        .checkpoint()
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| {
+            eprintln!(
+                "Fork point {} has no checkpoint — repair requires a checkpoint handler",
+                fork_point
+            );
+            std::process::exit(1);
+        });
 
-    // Parse service from node.to ("infer.ollama" -> ServiceBackend)
-    let service = parse_service_backend(&node.to).unwrap_or_else(|| {
-        eprintln!("Cannot parse service backend from '{}'", node.to);
+    // Parse service from node routing ("infer.ollama" -> ServiceBackend)
+    let (from, to) = node.message.from_to();
+    let service = parse_service_backend(&to).unwrap_or_else(|| {
+        eprintln!("Cannot parse service backend from '{}'", to);
         std::process::exit(1);
     });
 
     // Parse operation
-    let operation_str = node.operation.clone().unwrap_or_else(|| {
-        eprintln!("Fork point {} has no operation", fork_point);
-        std::process::exit(1);
-    });
+    let operation_str = node
+        .message
+        .operation()
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| {
+            eprintln!("Fork point {} has no operation", fork_point);
+            std::process::exit(1);
+        });
     let operation = Operation::from_str(&operation_str).unwrap_or_else(|e| {
         eprintln!("Invalid operation '{}': {}", operation_str, e);
         std::process::exit(1);
     });
 
     // Extract sequence from diagnostics
-    let sequence = extract_sequence(&node.diagnostics);
+    let sequence = extract_sequence(&node.message.diagnostics_json());
 
     // Derive agent name from the Invoke message in this session
-    let agent_name = find_agent_name(&*store, &node.session_id).unwrap_or_else(|| {
+    let agent_name = find_agent_name(&*store, node.session_id()).unwrap_or_else(|| {
         eprintln!(
             "Cannot determine agent name for session {}",
-            node.session_id
+            node.session_id()
         );
         std::process::exit(1);
     });
 
     let params = RepairParams {
-        agent_id: AgentId::new(node.from.clone()),
+        agent_id: AgentId::new(from.clone()),
         dag_parent: node.id.clone(),
         checkpoint,
         service,
         operation,
         sequence,
-        payload: node.payload.clone(),
-        state: node.state.clone(),
+        payload: node.payload().to_vec(),
+        state: node.message.state().map(|s| s.to_string()),
     };
 
     // Set up harness
     let mut harness = connect_harness(&config);
     harness.start_session(&agent_name);
-    if let Some(state) = &node.state {
-        harness.set_initial_state(state.clone());
+    if let Some(state) = node.message.state() {
+        harness.set_initial_state(state.to_string());
     }
     harness.set_dag_parent(node.id.clone());
     harness.set_timeline(vlinder_core::domain::TimelineId::from(timeline.id), false);
 
-    println!("Repairing: replaying {} on {}...", operation_str, node.to);
+    println!("Repairing: replaying {} on {}...", operation_str, to);
     match harness.repair_agent(params) {
         Ok(result) => {
             println!("Repair completed successfully.");
@@ -490,6 +500,6 @@ fn find_agent_name(store: &dyn DagStore, session_id: &SessionId) -> Option<Strin
     let nodes = store.get_session_nodes(session_id).ok()?;
     nodes
         .iter()
-        .find(|n| n.message_type == MessageType::Invoke)
-        .map(|n| n.to.clone())
+        .find(|n| n.message_type() == MessageType::Invoke)
+        .map(|n| n.message.from_to().1)
 }

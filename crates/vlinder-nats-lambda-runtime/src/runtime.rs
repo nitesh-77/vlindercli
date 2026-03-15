@@ -519,7 +519,8 @@ mod tests {
     #[test]
     fn invoke_dispatches_to_lambda_consumes_from_queue() {
         use vlinder_core::domain::{
-            HarnessType, InvokeDiagnostics, InvokeMessage, SessionId, SubmissionId, TimelineId,
+            DagNodeId, HarnessType, InvokeDiagnostics, InvokeMessage, SessionId, SubmissionId,
+            TimelineId,
         };
 
         let registry = test_registry();
@@ -554,7 +555,7 @@ mod tests {
                 harness_version: "test".to_string(),
                 history_turns: 0,
             },
-            String::new(),
+            DagNodeId::root(),
         );
         queue.send_invoke(invoke).unwrap();
 
@@ -573,7 +574,8 @@ mod tests {
     #[test]
     fn invoke_failure_sends_error_complete() {
         use vlinder_core::domain::{
-            HarnessType, InvokeDiagnostics, InvokeMessage, SessionId, SubmissionId, TimelineId,
+            DagNodeId, HarnessType, InvokeDiagnostics, InvokeMessage, SessionId, SubmissionId,
+            TimelineId,
         };
 
         let registry = test_registry();
@@ -610,7 +612,7 @@ mod tests {
                 harness_version: "test".to_string(),
                 history_turns: 0,
             },
-            String::new(),
+            DagNodeId::root(),
         );
         let submission = invoke.submission.clone();
         queue.send_invoke(invoke).unwrap();

@@ -215,7 +215,7 @@ fn render_session(
 
     let is_open = nodes
         .last()
-        .map(|n| n.message_type != MessageType::Complete)
+        .map(|n| n.message_type() != MessageType::Complete)
         .unwrap_or(false);
 
     let mut messages = String::new();
@@ -226,9 +226,9 @@ fn render_session(
         if let Some(last_invoke) = nodes
             .iter()
             .rev()
-            .find(|n| n.message_type == MessageType::Invoke)
+            .find(|n| n.message_type() == MessageType::Invoke)
         {
-            let payload = String::from_utf8_lossy(&last_invoke.payload);
+            let payload = String::from_utf8_lossy(last_invoke.payload());
             messages.push_str(&format!(
                 "<div class=\"open-indicator\">Pending: {}</div>\n",
                 html_escape(&payload)
@@ -237,9 +237,9 @@ fn render_session(
     }
 
     for node in &nodes {
-        match node.message_type {
+        match node.message_type() {
             MessageType::Invoke => {
-                let payload = String::from_utf8_lossy(&node.payload);
+                let payload = String::from_utf8_lossy(node.payload());
                 let ts = node.created_at.format("%Y-%m-%d %H:%M:%S").to_string();
                 messages.push_str(&format!(
                     "<div class=\"msg user\">\
@@ -251,7 +251,7 @@ fn render_session(
                 ));
             }
             MessageType::Complete => {
-                let payload = String::from_utf8_lossy(&node.payload);
+                let payload = String::from_utf8_lossy(node.payload());
                 let ts = node.created_at.format("%Y-%m-%d %H:%M:%S").to_string();
                 messages.push_str(&format!(
                     "<div class=\"msg agent\">\
@@ -372,60 +372,71 @@ fn html_response(status: u16, body: &str) -> tiny_http::Response<std::io::Cursor
 mod tests {
     use super::*;
     use chrono::{TimeZone, Utc};
-    use vlinder_core::domain::{hash_dag_node, DagNode, DagNodeId, InMemoryDagStore, SubmissionId};
+    use vlinder_core::domain::session::Session;
+    use vlinder_core::domain::workers::dag::build_dag_node;
+    use vlinder_core::domain::{
+        AgentId, CompleteMessage, DagNodeId, HarnessType, InMemoryDagStore, InvokeDiagnostics,
+        InvokeMessage, ObservableMessage, RuntimeDiagnostics, RuntimeType, SubmissionId,
+        TimelineId,
+    };
 
-    fn make_node(
-        payload: &[u8],
-        parent_hash: &str,
-        message_type: MessageType,
-        from: &str,
-        to: &str,
-        session_id: &str,
-        created_at: chrono::DateTime<Utc>,
-    ) -> DagNode {
-        let parent_id = DagNodeId::from(parent_hash.to_string());
-        let sid = SessionId::try_from(session_id.to_string()).unwrap();
-        DagNode {
-            id: hash_dag_node(payload, &parent_id, &message_type, &[], &sid),
-            parent_id,
-            message_type,
-            from: from.to_string(),
-            to: to.to_string(),
-            session_id: sid,
-            submission_id: SubmissionId::from("sub-1".to_string()),
-            payload: payload.to_vec(),
-            diagnostics: Vec::new(),
-            stderr: Vec::new(),
-            created_at,
-            state: None,
-            protocol_version: String::new(),
-            checkpoint: None,
-            operation: None,
-        }
+    fn sess_id() -> SessionId {
+        SessionId::try_from("d4761d76-dee4-4ebf-9df4-43b52efa4f78".to_string()).unwrap()
+    }
+
+    fn make_invoke_msg(payload: &[u8], agent: &str, session: SessionId) -> ObservableMessage {
+        InvokeMessage::new(
+            TimelineId::main(),
+            SubmissionId::from("sub-1".to_string()),
+            session,
+            HarnessType::Cli,
+            RuntimeType::Container,
+            AgentId::new(agent),
+            payload.to_vec(),
+            None,
+            InvokeDiagnostics {
+                harness_version: "0.1.0".to_string(),
+                history_turns: 0,
+            },
+            DagNodeId::root(),
+        )
+        .into()
+    }
+
+    fn make_complete_msg(payload: &[u8], agent: &str, session: SessionId) -> ObservableMessage {
+        CompleteMessage::new(
+            TimelineId::main(),
+            SubmissionId::from("sub-1".to_string()),
+            session,
+            AgentId::new(agent),
+            HarnessType::Cli,
+            payload.to_vec(),
+            None,
+            RuntimeDiagnostics::placeholder(0),
+        )
+        .into()
     }
 
     fn test_store_with_session() -> Arc<InMemoryDagStore> {
         let store = Arc::new(InMemoryDagStore::new());
-        let invoke = make_node(
-            b"summarize this article",
-            "",
-            MessageType::Invoke,
-            "cli",
-            "pensieve",
-            "ses-abc12345",
-            Utc.with_ymd_and_hms(2026, 2, 8, 14, 30, 5).unwrap(),
-        );
-        let complete = make_node(
-            b"This article discusses several topics.",
-            invoke.id.as_str(),
-            MessageType::Complete,
-            "pensieve",
-            "cli",
-            "ses-abc12345",
-            Utc.with_ymd_and_hms(2026, 2, 8, 14, 30, 10).unwrap(),
-        );
+        let sid = sess_id();
+
+        let invoke_msg = make_invoke_msg(b"summarize this article", "pensieve", sid.clone());
+        let mut invoke = build_dag_node(&invoke_msg, &DagNodeId::root());
+        invoke.created_at = Utc.with_ymd_and_hms(2026, 2, 8, 14, 30, 5).unwrap();
+
+        let complete_msg =
+            make_complete_msg(b"This article discusses several topics.", "pensieve", sid);
+        let mut complete = build_dag_node(&complete_msg, &invoke.id);
+        complete.created_at = Utc.with_ymd_and_hms(2026, 2, 8, 14, 30, 10).unwrap();
+
         store.insert_node(&invoke).unwrap();
         store.insert_node(&complete).unwrap();
+
+        // Create a session so the viewer can look it up
+        let session = Session::new(sess_id(), "pensieve");
+        store.create_session(&session).unwrap();
+
         store
     }
 
@@ -483,7 +494,7 @@ mod tests {
         let server = SessionServer::start(store, 0).unwrap();
         let port = server.port();
 
-        let (status, body) = get_body(port, "/session/ses-abc12345");
+        let (status, body) = get_body(port, "/session/d4761d76-dee4-4ebf-9df4-43b52efa4f78");
         assert_eq!(status, 200);
         assert!(body.contains("summarize this article"));
         assert!(body.contains("This article discusses"));
@@ -532,18 +543,16 @@ mod tests {
     #[test]
     fn render_session_with_open_question() {
         let store = InMemoryDagStore::new();
-        let invoke = make_node(
-            b"what next?",
-            "",
-            MessageType::Invoke,
-            "cli",
-            "todoapp",
-            "ses-def67890",
-            Utc.with_ymd_and_hms(2026, 2, 8, 14, 30, 5).unwrap(),
-        );
+        let sid = SessionId::try_from("e2660cff-33d6-4428-acca-2d297dcc1cad".to_string()).unwrap();
+        let msg = make_invoke_msg(b"what next?", "todoapp", sid.clone());
+        let mut invoke = build_dag_node(&msg, &DagNodeId::root());
+        invoke.created_at = Utc.with_ymd_and_hms(2026, 2, 8, 14, 30, 5).unwrap();
         store.insert_node(&invoke).unwrap();
 
-        let html = render_session(&store, "ses-def67890").unwrap();
+        let session = Session::new(sid, "todoapp");
+        store.create_session(&session).unwrap();
+
+        let html = render_session(&store, &session).unwrap();
         assert!(html.contains("Pending"));
         assert!(html.contains("what next?"));
     }

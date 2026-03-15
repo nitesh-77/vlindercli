@@ -11,7 +11,7 @@ use super::PROTOCOL_VERSION;
 ///
 /// One agent invoking another. The platform routes through the queue,
 /// dispatches the target, and sends the result to the reply subject.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DelegateMessage {
     pub id: MessageId,
     pub protocol_version: String,

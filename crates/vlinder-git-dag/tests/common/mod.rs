@@ -9,8 +9,8 @@ use std::process::Command;
 use chrono::{DateTime, Utc};
 
 use vlinder_core::domain::{
-    AgentId, CompleteMessage, HarnessType, InvokeDiagnostics, InvokeMessage, ObservableMessage,
-    RuntimeDiagnostics, RuntimeType, SessionId, SubmissionId, TimelineId,
+    AgentId, CompleteMessage, DagNodeId, HarnessType, InvokeDiagnostics, InvokeMessage,
+    ObservableMessage, RuntimeDiagnostics, RuntimeType, SessionId, SubmissionId, TimelineId,
 };
 use vlinder_git_dag::GitDagWorker;
 
@@ -98,7 +98,7 @@ pub fn make_invoke(
     let msg = InvokeMessage::new(
         TimelineId::main(),
         SubmissionId::from(submission.to_string()),
-        SessionId::from(session.to_string()),
+        SessionId::try_from(session.to_string()).unwrap(),
         HarnessType::Cli,
         RuntimeType::Container,
         test_agent_id(),
@@ -108,7 +108,7 @@ pub fn make_invoke(
             harness_version: "0.1.0".to_string(),
             history_turns: 0,
         },
-        String::new(),
+        DagNodeId::root(),
     );
     let created_at = DateTime::from_timestamp(epoch_secs, 0).unwrap();
     (ObservableMessage::Invoke(msg), created_at)
@@ -125,7 +125,7 @@ pub fn make_complete(
     let msg = CompleteMessage::new(
         TimelineId::main(),
         SubmissionId::from(submission.to_string()),
-        SessionId::from(session.to_string()),
+        SessionId::try_from(session.to_string()).unwrap(),
         test_agent_id(),
         HarnessType::Cli,
         payload.to_vec(),

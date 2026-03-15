@@ -27,7 +27,7 @@ use super::response::ResponseMessage;
 ///
 /// Used for polymorphic handling when the specific message type isn't known
 /// at compile time (e.g., receiving from a queue).
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum ObservableMessage {
     Invoke(InvokeMessage),
     Request(RequestMessage),
@@ -416,6 +416,86 @@ impl ObservableMessage {
             ObservableMessage::Delegate(m) => &m.payload,
             ObservableMessage::Repair(m) => &m.payload,
             ObservableMessage::Fork(_) => &[],
+        }
+    }
+
+    /// Extract (from, to) routing pair.
+    pub fn from_to(&self) -> (String, String) {
+        match self {
+            ObservableMessage::Invoke(m) => {
+                (m.harness.as_str().to_string(), m.agent_id.to_string())
+            }
+            ObservableMessage::Request(m) => (
+                m.agent_id.to_string(),
+                format!("{}.{}", m.service.service_type(), m.service.backend_str()),
+            ),
+            ObservableMessage::Response(m) => (
+                format!("{}.{}", m.service.service_type(), m.service.backend_str()),
+                m.agent_id.to_string(),
+            ),
+            ObservableMessage::Complete(m) => {
+                (m.agent_id.to_string(), m.harness.as_str().to_string())
+            }
+            ObservableMessage::Delegate(m) => (m.caller.to_string(), m.target.to_string()),
+            ObservableMessage::Repair(m) => {
+                (m.harness.as_str().to_string(), m.agent_id.to_string())
+            }
+            ObservableMessage::Fork(m) => ("platform".to_string(), m.agent_name.clone()),
+        }
+    }
+
+    /// State hash (ADR 055).
+    pub fn state(&self) -> Option<&str> {
+        match self {
+            ObservableMessage::Invoke(m) => m.state.as_deref(),
+            ObservableMessage::Request(m) => m.state.as_deref(),
+            ObservableMessage::Response(m) => m.state.as_deref(),
+            ObservableMessage::Complete(m) => m.state.as_deref(),
+            ObservableMessage::Delegate(m) => m.state.as_deref(),
+            ObservableMessage::Repair(m) => m.state.as_deref(),
+            ObservableMessage::Fork(_) => None,
+        }
+    }
+
+    /// Checkpoint handler name (ADR 111).
+    pub fn checkpoint(&self) -> Option<&str> {
+        match self {
+            ObservableMessage::Request(m) => m.checkpoint.as_deref(),
+            ObservableMessage::Response(m) => m.checkpoint.as_deref(),
+            ObservableMessage::Repair(m) => Some(&m.checkpoint),
+            _ => None,
+        }
+    }
+
+    /// Operation name (ADR 113).
+    pub fn operation(&self) -> Option<&str> {
+        match self {
+            ObservableMessage::Request(m) => Some(m.operation.as_str()),
+            ObservableMessage::Response(m) => Some(m.operation.as_str()),
+            ObservableMessage::Repair(m) => Some(m.operation.as_str()),
+            _ => None,
+        }
+    }
+
+    /// Serialize diagnostics to JSON bytes.
+    pub fn diagnostics_json(&self) -> Vec<u8> {
+        let json = match self {
+            ObservableMessage::Invoke(m) => serde_json::to_vec(&m.diagnostics),
+            ObservableMessage::Request(m) => serde_json::to_vec(&m.diagnostics),
+            ObservableMessage::Response(m) => serde_json::to_vec(&m.diagnostics),
+            ObservableMessage::Complete(m) => serde_json::to_vec(&m.diagnostics),
+            ObservableMessage::Delegate(m) => serde_json::to_vec(&m.diagnostics),
+            ObservableMessage::Repair(_) | ObservableMessage::Fork(_) => return Vec::new(),
+        };
+        json.unwrap_or_default()
+    }
+
+    /// Raw stderr from container execution (Complete/Delegate only).
+    pub fn stderr(&self) -> &[u8] {
+        match self {
+            ObservableMessage::Complete(m) => &m.diagnostics.stderr,
+            ObservableMessage::Delegate(m) => &m.diagnostics.runtime.stderr,
+            _ => &[],
         }
     }
 }

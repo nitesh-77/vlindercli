@@ -502,9 +502,9 @@ mod tests {
 
     #[test]
     fn session_id_equality_and_hashing() {
-        let id1 = SessionId::from("ses-abc123".to_string());
-        let id2 = SessionId::from("ses-abc123".to_string());
-        let id3 = SessionId::from("ses-def456".to_string());
+        let id1 = SessionId::try_from("d4761d76-dee4-4ebf-9df4-43b52efa4f78".to_string()).unwrap();
+        let id2 = SessionId::try_from("d4761d76-dee4-4ebf-9df4-43b52efa4f78".to_string()).unwrap();
+        let id3 = SessionId::try_from("e2660cff-33d6-4428-acca-2d297dcc1cad".to_string()).unwrap();
 
         assert_eq!(id1, id2);
         assert_ne!(id1, id3);
@@ -517,14 +517,14 @@ mod tests {
 
     #[test]
     fn session_id_from_string() {
-        let id = SessionId::from("ses-custom".to_string());
-        assert_eq!(id.as_str(), "ses-custom");
+        let id = SessionId::try_from("d4761d76-dee4-4ebf-9df4-43b52efa4f78".to_string()).unwrap();
+        assert_eq!(id.as_str(), "d4761d76-dee4-4ebf-9df4-43b52efa4f78");
     }
 
     #[test]
     fn session_id_display() {
-        let id = SessionId::from("ses-abc123".to_string());
-        assert_eq!(format!("{}", id), "ses-abc123");
+        let id = SessionId::try_from("d4761d76-dee4-4ebf-9df4-43b52efa4f78".to_string()).unwrap();
+        assert_eq!(format!("{}", id), "d4761d76-dee4-4ebf-9df4-43b52efa4f78");
     }
 
     // --- TimelineId tests (ADR 093) ---

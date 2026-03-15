@@ -28,7 +28,7 @@ mod base64_serde {
 ///
 /// Starts a submission by invoking an agent.
 /// Expects a CompleteMessage in response (enforced by ExpectsReply trait).
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct InvokeMessage {
     pub id: MessageId,
     pub protocol_version: String,
@@ -156,7 +156,7 @@ mod tests {
         let msg = InvokeMessage::new(
             TimelineId::main(),
             SubmissionId::from("sub-1".to_string()),
-            SessionId::from("ses-1".to_string()),
+            SessionId::new(),
             HarnessType::Cli,
             RuntimeType::Container,
             AgentId::new("echo"),
@@ -166,7 +166,7 @@ mod tests {
                 harness_version: "0.1.0".to_string(),
                 history_turns: 3,
             },
-            String::new(),
+            DagNodeId::root(),
         );
 
         let json = serde_json::to_string(&msg).unwrap();
@@ -190,7 +190,7 @@ mod tests {
         let msg = InvokeMessage::new(
             TimelineId::main(),
             SubmissionId::from("sub-1".to_string()),
-            SessionId::from("ses-1".to_string()),
+            SessionId::new(),
             HarnessType::Cli,
             RuntimeType::Container,
             AgentId::new("echo"),
@@ -200,7 +200,7 @@ mod tests {
                 harness_version: "0.1.0".to_string(),
                 history_turns: 0,
             },
-            String::new(),
+            DagNodeId::root(),
         );
 
         let json = serde_json::to_string(&msg).unwrap();

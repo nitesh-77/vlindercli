@@ -105,7 +105,7 @@ mod tests {
             b"hello".to_vec(),
             None,
             test_invoke_diag(),
-            String::new(),
+            DagNodeId::root(),
         );
 
         assert_eq!(msg.submission, submission);
@@ -210,7 +210,7 @@ mod tests {
             b"input".to_vec(),
             None,
             test_invoke_diag(),
-            String::new(),
+            DagNodeId::root(),
         );
 
         let complete: CompleteMessage = invoke.create_reply(b"output".to_vec());
@@ -263,7 +263,7 @@ mod tests {
             b"test".to_vec(),
             None,
             test_invoke_diag(),
-            String::new(),
+            DagNodeId::root(),
         );
         let id = invoke.id.clone();
         let submission = invoke.submission.clone();
@@ -311,7 +311,7 @@ mod tests {
             b"payload".to_vec(),
             None,
             test_invoke_diag(),
-            String::new(),
+            DagNodeId::root(),
         );
 
         let observable: ObservableMessage = invoke.into();
@@ -335,7 +335,7 @@ mod tests {
             b"test".to_vec(),
             None,
             test_invoke_diag(),
-            String::new(),
+            DagNodeId::root(),
         );
 
         let key = msg.routing_key();
@@ -557,7 +557,7 @@ mod tests {
             b"input".to_vec(),
             None,
             test_invoke_diag(),
-            String::new(),
+            DagNodeId::root(),
         );
         let complete = invoke.create_reply(b"output".to_vec());
 
@@ -594,13 +594,13 @@ mod tests {
             protocol_version: "0.1.0".to_string(),
             timeline: TimelineId::main(),
             submission: test_submission(),
-            session: SessionId::from("ses-1".to_string()),
+            session: SessionId::new(),
             harness: HarnessType::Cli,
             runtime: RuntimeType::Container,
             agent_id: test_agent_id(),
             state: Some("state-abc".to_string()),
             diagnostics: test_invoke_diag(),
-            dag_parent: String::new(),
+            dag_parent: DagNodeId::root(),
         };
 
         let msg = headers.assemble(b"hello".to_vec());

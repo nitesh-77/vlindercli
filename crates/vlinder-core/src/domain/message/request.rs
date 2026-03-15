@@ -13,7 +13,7 @@ use super::{ExpectsReply, PROTOCOL_VERSION};
 ///
 /// Agent requests a service operation (kv, vec, infer, embed).
 /// Expects a ResponseMessage in response (enforced by ExpectsReply trait).
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RequestMessage {
     pub id: MessageId,
     pub protocol_version: String,

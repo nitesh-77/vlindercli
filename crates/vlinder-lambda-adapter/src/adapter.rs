@@ -57,7 +57,8 @@ pub fn build_error_body(message: &str) -> String {
 mod tests {
     use super::*;
     use vlinder_core::domain::{
-        AgentId, HarnessType, InvokeDiagnostics, RuntimeType, SessionId, SubmissionId, TimelineId,
+        AgentId, DagNodeId, HarnessType, InvokeDiagnostics, RuntimeType, SessionId, SubmissionId,
+        TimelineId,
     };
 
     /// Build a test InvokeMessage and serialize it to JSON, simulating what
@@ -66,7 +67,7 @@ mod tests {
         let invoke = InvokeMessage::new(
             TimelineId::main(),
             SubmissionId::from("sub-test".to_string()),
-            SessionId::from("ses-test".to_string()),
+            SessionId::try_from("d4761d76-dee4-4ebf-9df4-43b52efa4f78".to_string()).unwrap(),
             HarnessType::Cli,
             RuntimeType::Lambda,
             AgentId::new("echo-lambda"),
@@ -76,7 +77,7 @@ mod tests {
                 harness_version: "0.1.0".to_string(),
                 history_turns: 0,
             },
-            String::new(),
+            DagNodeId::root(),
         );
         serde_json::to_vec(&invoke).unwrap()
     }

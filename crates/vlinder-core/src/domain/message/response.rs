@@ -12,7 +12,7 @@ use super::PROTOCOL_VERSION;
 /// Response message: Service → Runtime
 ///
 /// Service responds to a request, echoing all dimensions for traceability.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResponseMessage {
     pub id: MessageId,
     pub protocol_version: String,

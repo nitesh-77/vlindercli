@@ -75,6 +75,7 @@ message DagNode {
   string protocol_version = 13;
   optional string checkpoint = 14;
   optional string operation = 15;
+  optional string message_blob = 16;  // JSON-serialized ObservableMessage (source of truth)
 }
 
 // =============================================================================

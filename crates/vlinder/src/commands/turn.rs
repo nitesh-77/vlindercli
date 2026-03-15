@@ -39,26 +39,28 @@ fn get(submission_id: &str) {
     }
 
     for node in &nodes {
+        let (from, to) = node.message.from_to();
         println!("Hash:       {}", node.id);
         println!("Parent:     {}", node.parent_id);
-        println!("Type:       {}", node.message_type.as_str());
-        println!("From:       {}", node.from);
-        println!("To:         {}", node.to);
-        println!("Session:    {}", node.session_id);
-        if let Some(op) = &node.operation {
+        println!("Type:       {}", node.message_type().as_str());
+        println!("From:       {}", from);
+        println!("To:         {}", to);
+        println!("Session:    {}", node.session_id());
+        if let Some(op) = node.message.operation() {
             println!("Operation:  {}", op);
         }
-        if let Some(ckpt) = &node.checkpoint {
+        if let Some(ckpt) = node.message.checkpoint() {
             println!("Checkpoint: {}", ckpt);
         }
-        if let Some(state) = &node.state {
+        if let Some(state) = node.message.state() {
             println!("State:      {}", state);
         }
         println!("Created:    {}", node.created_at);
-        match std::str::from_utf8(&node.payload) {
+        let payload = node.payload();
+        match std::str::from_utf8(payload) {
             Ok(text) if !text.is_empty() => println!("Payload:    {}", text),
-            _ if !node.payload.is_empty() => {
-                println!("Payload:    <{} bytes binary>", node.payload.len())
+            _ if !payload.is_empty() => {
+                println!("Payload:    <{} bytes binary>", payload.len())
             }
             _ => {}
         }

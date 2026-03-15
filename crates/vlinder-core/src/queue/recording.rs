@@ -215,7 +215,7 @@ impl MessageQueue for RecordingQueue {
         // Restore agent state to the fork point so the next `agent run`
         // resumes from the correct KV/vec snapshot.
         if let Ok(Some(node)) = self.store.get_node(&msg.fork_point) {
-            let state = node.state.as_deref().unwrap_or("");
+            let state = node.message.state().unwrap_or("");
             if let Err(e) = self.store.set_checkout_state(&msg.agent_name, state) {
                 tracing::warn!(
                     error = %e,
@@ -258,7 +258,9 @@ mod tests {
     fn test_store() -> Arc<dyn DagStore> {
         let store = Arc::new(InMemoryDagStore::new());
         // Seed "main" timeline (id=1) — mirrors production setup.
-        store.create_timeline("main", "", None, None).unwrap();
+        store
+            .create_timeline("main", &test_session(), None, None)
+            .unwrap();
         store
     }
 
@@ -268,7 +270,7 @@ mod tests {
     }
 
     fn test_session() -> SessionId {
-        SessionId::from("ses-test-001".to_string())
+        SessionId::try_from("d4761d76-dee4-4ebf-9df4-43b52efa4f78".to_string()).unwrap()
     }
 
     fn test_submission() -> SubmissionId {
@@ -293,7 +295,7 @@ mod tests {
                 harness_version: "0.1.0".to_string(),
                 history_turns: 0,
             },
-            String::new(),
+            DagNodeId::root(),
         )
     }
 
@@ -360,14 +362,14 @@ mod tests {
         let queue = test_queue(Arc::clone(&store));
 
         let msg = test_invoke();
-        let session_id = msg.session.as_str().to_string();
+        let sid = msg.session.clone();
 
         queue.send_invoke(msg).unwrap();
 
-        let nodes = store.get_session_nodes(&session_id).unwrap();
+        let nodes = store.get_session_nodes(&sid).unwrap();
         assert_eq!(nodes.len(), 1);
-        assert_eq!(nodes[0].message_type, MessageType::Invoke);
-        assert_eq!(nodes[0].parent_hash, "");
+        assert_eq!(nodes[0].message_type(), MessageType::Invoke);
+        assert_eq!(nodes[0].parent_id, DagNodeId::root());
     }
 
     #[test]
@@ -376,13 +378,13 @@ mod tests {
         let queue = test_queue(Arc::clone(&store));
 
         let msg = test_request();
-        let session_id = msg.session.as_str().to_string();
+        let sid = msg.session.clone();
 
         queue.send_request(msg).unwrap();
 
-        let nodes = store.get_session_nodes(&session_id).unwrap();
+        let nodes = store.get_session_nodes(&sid).unwrap();
         assert_eq!(nodes.len(), 1);
-        assert_eq!(nodes[0].message_type, MessageType::Request);
+        assert_eq!(nodes[0].message_type(), MessageType::Request);
     }
 
     #[test]
@@ -392,13 +394,13 @@ mod tests {
 
         let request = test_request();
         let msg = test_response(&request);
-        let session_id = msg.session.as_str().to_string();
+        let sid = msg.session.clone();
 
         queue.send_response(msg).unwrap();
 
-        let nodes = store.get_session_nodes(&session_id).unwrap();
+        let nodes = store.get_session_nodes(&sid).unwrap();
         assert_eq!(nodes.len(), 1);
-        assert_eq!(nodes[0].message_type, MessageType::Response);
+        assert_eq!(nodes[0].message_type(), MessageType::Response);
     }
 
     #[test]
@@ -407,13 +409,13 @@ mod tests {
         let queue = test_queue(Arc::clone(&store));
 
         let msg = test_complete();
-        let session_id = msg.session.as_str().to_string();
+        let sid = msg.session.clone();
 
         queue.send_complete(msg).unwrap();
 
-        let nodes = store.get_session_nodes(&session_id).unwrap();
+        let nodes = store.get_session_nodes(&sid).unwrap();
         assert_eq!(nodes.len(), 1);
-        assert_eq!(nodes[0].message_type, MessageType::Complete);
+        assert_eq!(nodes[0].message_type(), MessageType::Complete);
     }
 
     #[test]
@@ -422,13 +424,13 @@ mod tests {
         let queue = test_queue(Arc::clone(&store));
 
         let msg = test_delegate();
-        let session_id = msg.session.as_str().to_string();
+        let sid = msg.session.clone();
 
         queue.send_delegate(msg).unwrap();
 
-        let nodes = store.get_session_nodes(&session_id).unwrap();
+        let nodes = store.get_session_nodes(&sid).unwrap();
         assert_eq!(nodes.len(), 1);
-        assert_eq!(nodes[0].message_type, MessageType::Delegate);
+        assert_eq!(nodes[0].message_type(), MessageType::Delegate);
     }
 
     #[test]
@@ -437,19 +439,19 @@ mod tests {
         let queue = test_queue(Arc::clone(&store));
 
         let invoke = test_invoke();
-        let session_id = invoke.session.as_str().to_string();
+        let sid = invoke.session.clone();
 
         let mut request = test_request();
         // Use same session
-        request.session = SessionId::from(session_id.clone());
+        request.session = sid.clone();
 
         queue.send_invoke(invoke).unwrap();
         queue.send_request(request).unwrap();
 
-        let nodes = store.get_session_nodes(&session_id).unwrap();
+        let nodes = store.get_session_nodes(&sid).unwrap();
         assert_eq!(nodes.len(), 2);
-        // Second node's parent should be first node's hash
-        assert_eq!(nodes[1].parent_hash, nodes[0].hash);
+        // Second node's parent should be first node's id
+        assert_eq!(nodes[1].parent_id, nodes[0].id);
     }
 
     #[test]
@@ -459,27 +461,30 @@ mod tests {
 
         // Two sessions on the same timeline chain sequentially via the
         // shared timeline head pointer.
+        let ses_aaa =
+            SessionId::try_from("e2660cff-33d6-4428-acca-2d297dcc1cad".to_string()).unwrap();
+        let ses_bbb =
+            SessionId::try_from("7897b0a7-937b-4457-87c3-07c4cab30c55".to_string()).unwrap();
+
         let mut invoke1 = test_invoke();
-        invoke1.session = SessionId::from("ses-aaa".to_string());
+        invoke1.session = ses_aaa.clone();
         invoke1.payload = b"hello-aaa".to_vec();
-        let session1 = invoke1.session.as_str().to_string();
 
         let mut invoke2 = test_invoke();
-        invoke2.session = SessionId::from("ses-bbb".to_string());
+        invoke2.session = ses_bbb.clone();
         invoke2.payload = b"hello-bbb".to_vec();
-        let session2 = invoke2.session.as_str().to_string();
 
         queue.send_invoke(invoke1).unwrap();
         queue.send_invoke(invoke2).unwrap();
 
-        let nodes1 = store.get_session_nodes(&session1).unwrap();
-        let nodes2 = store.get_session_nodes(&session2).unwrap();
+        let nodes1 = store.get_session_nodes(&ses_aaa).unwrap();
+        let nodes2 = store.get_session_nodes(&ses_bbb).unwrap();
 
         assert_eq!(nodes1.len(), 1);
         assert_eq!(nodes2.len(), 1);
         // First invoke is root, second chains off first via timeline head
-        assert_eq!(nodes1[0].parent_hash, "");
-        assert_eq!(nodes2[0].parent_hash, nodes1[0].hash);
+        assert_eq!(nodes1[0].parent_id, DagNodeId::root());
+        assert_eq!(nodes2[0].parent_id, nodes1[0].id);
     }
 
     #[test]
@@ -508,19 +513,25 @@ mod tests {
             fn insert_node(&self, _: &DagNode) -> Result<(), String> {
                 Err("simulated failure".to_string())
             }
-            fn get_node(&self, _: &str) -> Result<Option<DagNode>, String> {
+            fn get_node(&self, _: &crate::domain::DagNodeId) -> Result<Option<DagNode>, String> {
                 Ok(None)
             }
-            fn get_session_nodes(&self, _: &str) -> Result<Vec<DagNode>, String> {
+            fn get_session_nodes(
+                &self,
+                _: &crate::domain::SessionId,
+            ) -> Result<Vec<DagNode>, String> {
                 Ok(vec![])
             }
-            fn get_children(&self, _: &str) -> Result<Vec<DagNode>, String> {
+            fn get_children(&self, _: &crate::domain::DagNodeId) -> Result<Vec<DagNode>, String> {
                 Ok(vec![])
             }
             fn latest_state(&self, _: &str) -> Result<Option<String>, String> {
                 Ok(None)
             }
-            fn latest_node_hash(&self, _: &str) -> Result<Option<String>, String> {
+            fn latest_node_hash(
+                &self,
+                _: &crate::domain::SessionId,
+            ) -> Result<Option<crate::domain::DagNodeId>, String> {
                 Ok(None)
             }
             fn set_checkout_state(&self, _: &str, _: &str) -> Result<(), String> {
@@ -529,9 +540,9 @@ mod tests {
             fn create_timeline(
                 &self,
                 _: &str,
-                _: &str,
+                _: &crate::domain::SessionId,
                 _: Option<i64>,
-                _: Option<&str>,
+                _: Option<&crate::domain::DagNodeId>,
             ) -> Result<i64, String> {
                 Ok(0)
             }
@@ -561,20 +572,30 @@ mod tests {
             }
             fn get_timelines_for_session(
                 &self,
-                _: &str,
+                _: &crate::domain::SessionId,
             ) -> Result<Vec<crate::domain::Timeline>, String> {
                 Ok(vec![])
             }
-            fn get_timeline_head(&self, _: i64) -> Result<Option<String>, String> {
+            fn get_timeline_head(
+                &self,
+                _: i64,
+            ) -> Result<Option<crate::domain::DagNodeId>, String> {
                 Ok(None)
             }
-            fn update_timeline_head(&self, _: i64, _: &str) -> Result<(), String> {
+            fn update_timeline_head(
+                &self,
+                _: i64,
+                _: &crate::domain::DagNodeId,
+            ) -> Result<(), String> {
                 Ok(())
             }
             fn create_session(&self, _: &crate::domain::Session) -> Result<(), String> {
                 Ok(())
             }
-            fn get_session(&self, _: &str) -> Result<Option<crate::domain::Session>, String> {
+            fn get_session(
+                &self,
+                _: &crate::domain::SessionId,
+            ) -> Result<Option<crate::domain::Session>, String> {
                 Ok(None)
             }
             fn get_session_by_name(
@@ -601,33 +622,33 @@ mod tests {
 
         // Send a normal invoke first to populate the chain
         let invoke1 = test_invoke();
-        let session_id = invoke1.session.as_str().to_string();
+        let sid = invoke1.session.clone();
         queue.send_invoke(invoke1).unwrap();
 
-        let nodes = store.get_session_nodes(&session_id).unwrap();
+        let nodes = store.get_session_nodes(&sid).unwrap();
         assert_eq!(nodes.len(), 1);
-        let first_hash = nodes[0].hash.clone();
+        let first_id = nodes[0].id.clone();
 
         // Send a second invoke (same session) — normally chains off first
         let mut invoke2 = test_invoke();
         invoke2.payload = b"second".to_vec();
         queue.send_invoke(invoke2).unwrap();
 
-        let nodes = store.get_session_nodes(&session_id).unwrap();
+        let nodes = store.get_session_nodes(&sid).unwrap();
         assert_eq!(nodes.len(), 2);
-        assert_eq!(nodes[1].parent_hash, first_hash, "normal chaining");
+        assert_eq!(nodes[1].parent_id, first_id, "normal chaining");
 
         // Send a third invoke with explicit dag_parent pointing to first node,
         // bypassing the chain cache (which would point to second node)
         let mut invoke3 = test_invoke();
         invoke3.payload = b"forked".to_vec();
-        invoke3.dag_parent = first_hash.clone();
+        invoke3.dag_parent = first_id.clone();
         queue.send_invoke(invoke3).unwrap();
 
-        let nodes = store.get_session_nodes(&session_id).unwrap();
+        let nodes = store.get_session_nodes(&sid).unwrap();
         assert_eq!(nodes.len(), 3);
         assert_eq!(
-            nodes[2].parent_hash, first_hash,
+            nodes[2].parent_id, first_id,
             "dag_parent should override chain cache"
         );
     }

@@ -102,7 +102,10 @@ mod tests {
     use super::*;
 
     fn test_session() -> Session {
-        Session::new(SessionId::from("ses-abc12345".to_string()), "pensieve")
+        Session::new(
+            SessionId::try_from("d4761d76-dee4-4ebf-9df4-43b52efa4f78".to_string()).unwrap(),
+            "pensieve",
+        )
     }
 
     #[test]
@@ -112,7 +115,10 @@ mod tests {
         assert!(session.open.is_none());
         assert_eq!(session.agent, "pensieve");
         assert!(session.history.is_empty());
-        assert_eq!(session.session.as_str(), "ses-abc12345");
+        assert_eq!(
+            session.session.as_str(),
+            "d4761d76-dee4-4ebf-9df4-43b52efa4f78"
+        );
     }
 
     #[test]
@@ -220,7 +226,7 @@ mod tests {
 
         // Top-level fields
         assert!(value["open"].is_null());
-        assert_eq!(value["session"], "ses-abc12345");
+        assert_eq!(value["session"], "d4761d76-dee4-4ebf-9df4-43b52efa4f78");
         assert_eq!(value["agent"], "pensieve");
 
         // History entries are untagged

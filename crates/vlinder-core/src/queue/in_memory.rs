@@ -295,10 +295,10 @@ impl MessageQueue for InMemoryQueue {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::{DagNodeId, Sequence, SessionId, SubmissionId, TimelineId};
     use crate::domain::{
         InferenceBackendType, Nonce, ObjectStorageType, Operation, RuntimeType, VectorStorageType,
     };
-    use crate::domain::{Sequence, SessionId, SubmissionId, TimelineId};
 
     fn test_agent_id() -> AgentId {
         AgentId::new("echo-agent")
@@ -329,7 +329,7 @@ mod tests {
                 harness_version: String::new(),
                 history_turns: 0,
             },
-            String::new(),
+            DagNodeId::root(),
         );
         let original_id = invoke.id.clone();
 
@@ -366,7 +366,7 @@ mod tests {
                 harness_version: String::new(),
                 history_turns: 0,
             },
-            String::new(),
+            DagNodeId::root(),
         );
 
         queue.send_invoke(invoke).unwrap();

@@ -4155,6 +4155,7 @@ dependencies = [
  "chrono",
  "prost",
  "rusqlite",
+ "serde_json",
  "tempfile",
  "tiny_http",
  "tokio",

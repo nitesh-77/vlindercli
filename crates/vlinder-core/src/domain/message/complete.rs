@@ -10,7 +10,7 @@ use super::PROTOCOL_VERSION;
 /// Complete message: Runtime → Harness
 ///
 /// Signals that a submission has finished.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CompleteMessage {
     pub id: MessageId,
     pub protocol_version: String,

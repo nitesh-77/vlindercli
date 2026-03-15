@@ -8,127 +8,25 @@
 use chrono::Utc;
 
 use crate::domain::message::ObservableMessage;
-use crate::domain::{hash_dag_node, DagNode, DagNodeId, SubmissionId};
-
-// ============================================================================
-// ObservableMessage → DagNode conversion helpers
-// ============================================================================
-
-/// Extract (from, to) routing pair from a reconstructed message.
-pub fn observable_from_to(msg: &ObservableMessage) -> (String, String) {
-    match msg {
-        ObservableMessage::Invoke(m) => (m.harness.as_str().to_string(), m.agent_id.to_string()),
-        ObservableMessage::Request(m) => (
-            m.agent_id.to_string(),
-            format!("{}.{}", m.service.service_type(), m.service.backend_str()),
-        ),
-        ObservableMessage::Response(m) => (
-            format!("{}.{}", m.service.service_type(), m.service.backend_str()),
-            m.agent_id.to_string(),
-        ),
-        ObservableMessage::Complete(m) => (m.agent_id.to_string(), m.harness.as_str().to_string()),
-        ObservableMessage::Delegate(m) => (m.caller.to_string(), m.target.to_string()),
-        ObservableMessage::Repair(m) => (m.harness.as_str().to_string(), m.agent_id.to_string()),
-        ObservableMessage::Fork(m) => ("platform".to_string(), m.agent_name.clone()),
-    }
-}
-
-/// Serialize diagnostics from a reconstructed message to JSON bytes.
-pub fn serialize_diagnostics(msg: &ObservableMessage) -> Vec<u8> {
-    let json = match msg {
-        ObservableMessage::Invoke(m) => serde_json::to_vec(&m.diagnostics),
-        ObservableMessage::Request(m) => serde_json::to_vec(&m.diagnostics),
-        ObservableMessage::Response(m) => serde_json::to_vec(&m.diagnostics),
-        ObservableMessage::Complete(m) => serde_json::to_vec(&m.diagnostics),
-        ObservableMessage::Delegate(m) => serde_json::to_vec(&m.diagnostics),
-        ObservableMessage::Repair(_) | ObservableMessage::Fork(_) => return Vec::new(),
-    };
-    json.unwrap_or_default()
-}
-
-/// Extract stderr bytes from a Complete or Delegate message.
-///
-/// Stderr lives on `RuntimeDiagnostics` — only Complete and Delegate carry it.
-/// Returns empty for other message types.
-pub fn extract_typed_stderr(msg: &ObservableMessage) -> Vec<u8> {
-    match msg {
-        ObservableMessage::Complete(m) => m.diagnostics.stderr.clone(),
-        ObservableMessage::Delegate(m) => m.diagnostics.runtime.stderr.clone(),
-        _ => Vec::new(),
-    }
-}
-
-/// Extract checkpoint handler name from a reconstructed message.
-///
-/// Only Request and Response carry checkpoint (ADR 111). Returns None for
-/// other message types or when the agent doesn't use checkpoints.
-pub fn observable_checkpoint(msg: &ObservableMessage) -> Option<String> {
-    match msg {
-        ObservableMessage::Request(m) => m.checkpoint.clone(),
-        ObservableMessage::Response(m) => m.checkpoint.clone(),
-        ObservableMessage::Repair(m) => Some(m.checkpoint.clone()),
-        _ => None,
-    }
-}
-
-/// Extract operation from a reconstructed message.
-///
-/// Only Request, Response, and Repair carry an operation. Returns None for
-/// other message types.
-pub fn observable_operation(msg: &ObservableMessage) -> Option<String> {
-    match msg {
-        ObservableMessage::Request(m) => Some(m.operation.as_str().to_string()),
-        ObservableMessage::Response(m) => Some(m.operation.as_str().to_string()),
-        ObservableMessage::Repair(m) => Some(m.operation.as_str().to_string()),
-        _ => None,
-    }
-}
-
-/// Extract state from a reconstructed message.
-pub fn observable_state(msg: &ObservableMessage) -> Option<String> {
-    match msg {
-        ObservableMessage::Invoke(m) => m.state.clone(),
-        ObservableMessage::Request(m) => m.state.clone(),
-        ObservableMessage::Response(m) => m.state.clone(),
-        ObservableMessage::Complete(m) => m.state.clone(),
-        ObservableMessage::Delegate(m) => m.state.clone(),
-        ObservableMessage::Repair(m) => m.state.clone(),
-        ObservableMessage::Fork(_) => None,
-    }
-}
+use crate::domain::{hash_dag_node, DagNode, DagNodeId};
 
 /// Build a `DagNode` from an `ObservableMessage` and Merkle chain state.
 ///
-/// `parent_hash` is the hash of the previous node in the same session
-/// (empty string for the first message).
+/// Computes the content-addressed hash and wraps the message with DAG metadata.
 pub fn build_dag_node(msg: &ObservableMessage, parent_id: &DagNodeId) -> DagNode {
-    let message_type = msg.message_type();
-    let (from, to) = observable_from_to(msg);
-    let diagnostics = serialize_diagnostics(msg);
-    let stderr = extract_typed_stderr(msg);
-    let state = observable_state(msg);
-    let checkpoint = observable_checkpoint(msg);
-    let operation = observable_operation(msg);
-    let payload = msg.payload();
-    let session_id = msg.session().clone();
-    let id = hash_dag_node(payload, parent_id, &message_type, &diagnostics, &session_id);
+    let id = hash_dag_node(
+        msg.payload(),
+        parent_id,
+        &msg.message_type(),
+        &msg.diagnostics_json(),
+        msg.session(),
+    );
 
     DagNode {
         id,
         parent_id: parent_id.clone(),
-        message_type,
-        from,
-        to,
-        session_id,
-        submission_id: SubmissionId::from(msg.submission().as_str().to_string()),
-        payload: payload.to_vec(),
-        diagnostics,
-        stderr,
         created_at: Utc::now(),
-        state,
-        protocol_version: msg.protocol_version().to_string(),
-        checkpoint,
-        operation,
+        message: msg.clone(),
     }
 }
 
@@ -147,7 +45,7 @@ mod tests {
     };
 
     fn session() -> SessionId {
-        SessionId::from("sess-1".to_string())
+        SessionId::try_from("d4761d76-dee4-4ebf-9df4-43b52efa4f78".to_string()).unwrap()
     }
     fn submission() -> SubmissionId {
         SubmissionId::from("sub-1".to_string())
@@ -170,7 +68,7 @@ mod tests {
                 harness_version: "0.1.0".to_string(),
                 history_turns: 0,
             },
-            String::new(),
+            DagNodeId::root(),
         )
         .into()
     }
@@ -253,43 +151,51 @@ mod tests {
     #[test]
     fn build_dag_node_from_invoke() {
         let msg = test_invoke(b"invoke-payload");
-        let node = build_dag_node(&msg, "");
-        assert_eq!(node.message_type, MessageType::Invoke);
-        assert_eq!(node.from, "cli");
-        assert_eq!(node.to, "myagent");
-        assert_eq!(node.session_id, "sess-1");
-        assert_eq!(node.submission_id, "sub-1");
-        assert_eq!(node.payload, b"invoke-payload");
-        assert_eq!(node.parent_hash, "");
-        assert!(!node.hash.is_empty());
+        let root = DagNodeId::root();
+        let node = build_dag_node(&msg, &root);
+        assert_eq!(node.message_type(), MessageType::Invoke);
+        let (from, to) = node.message.from_to();
+        assert_eq!(from, "cli");
+        assert_eq!(to, "myagent");
+        assert_eq!(*node.session_id(), session());
+        assert_eq!(*node.submission_id(), submission());
+        assert_eq!(node.payload(), b"invoke-payload");
+        assert_eq!(node.parent_id, DagNodeId::root());
+        assert!(!node.id.as_str().is_empty());
     }
 
     #[test]
     fn build_dag_node_from_request() {
         let msg = test_request(b"request-payload");
-        let node = build_dag_node(&msg, "parent-abc");
-        assert_eq!(node.message_type, MessageType::Request);
-        assert_eq!(node.from, "myagent");
-        assert_eq!(node.to, "infer.ollama");
-        assert_eq!(node.parent_hash, "parent-abc");
+        let parent = DagNodeId::from("parent-abc".to_string());
+        let node = build_dag_node(&msg, &parent);
+        assert_eq!(node.message_type(), MessageType::Request);
+        let (from, to) = node.message.from_to();
+        assert_eq!(from, "myagent");
+        assert_eq!(to, "infer.ollama");
+        assert_eq!(node.parent_id, parent);
     }
 
     #[test]
     fn build_dag_node_from_response() {
         let msg = test_response(b"response-payload");
-        let node = build_dag_node(&msg, "");
-        assert_eq!(node.message_type, MessageType::Response);
-        assert_eq!(node.from, "infer.ollama");
-        assert_eq!(node.to, "myagent");
+        let root = DagNodeId::root();
+        let node = build_dag_node(&msg, &root);
+        assert_eq!(node.message_type(), MessageType::Response);
+        let (from, to) = node.message.from_to();
+        assert_eq!(from, "infer.ollama");
+        assert_eq!(to, "myagent");
     }
 
     #[test]
     fn build_dag_node_from_delegate() {
         let msg = test_delegate(b"delegate-payload");
-        let node = build_dag_node(&msg, "");
-        assert_eq!(node.message_type, MessageType::Delegate);
-        assert_eq!(node.from, "coordinator");
-        assert_eq!(node.to, "summarizer");
+        let root = DagNodeId::root();
+        let node = build_dag_node(&msg, &root);
+        assert_eq!(node.message_type(), MessageType::Delegate);
+        let (from, to) = node.message.from_to();
+        assert_eq!(from, "coordinator");
+        assert_eq!(to, "summarizer");
     }
 
     #[test]
@@ -298,22 +204,25 @@ mod tests {
         if let ObservableMessage::Request(ref mut m) = msg {
             m.checkpoint = Some("summarize".to_string());
         }
-        let node = build_dag_node(&msg, "");
-        assert_eq!(node.checkpoint, Some("summarize".to_string()));
+        let root = DagNodeId::root();
+        let node = build_dag_node(&msg, &root);
+        assert_eq!(node.message.checkpoint(), Some("summarize"));
     }
 
     #[test]
     fn build_dag_node_checkpoint_none_on_invoke() {
         let msg = test_invoke(b"payload");
-        let node = build_dag_node(&msg, "");
-        assert_eq!(node.checkpoint, None);
+        let root = DagNodeId::root();
+        let node = build_dag_node(&msg, &root);
+        assert_eq!(node.message.checkpoint(), None);
     }
 
     #[test]
     fn build_dag_node_state_preserved() {
         let msg = test_complete(b"done", Some("state-hash".to_string()));
-        let node = build_dag_node(&msg, "");
-        assert_eq!(node.state, Some("state-hash".to_string()));
+        let root = DagNodeId::root();
+        let node = build_dag_node(&msg, &root);
+        assert_eq!(node.message.state(), Some("state-hash"));
     }
 
     // --- Integration: ObservableMessage → DagNode → store round-trip ---
@@ -326,40 +235,42 @@ mod tests {
     fn store_invoke_dag_node() {
         let store = test_store();
         let msg = test_invoke(b"invoke-payload");
-        let node = build_dag_node(&msg, "");
+        let root = DagNodeId::root();
+        let node = build_dag_node(&msg, &root);
         store.insert_node(&node).unwrap();
 
-        let nodes = store.get_session_nodes("sess-1").unwrap();
+        let nodes = store.get_session_nodes(&session()).unwrap();
         assert_eq!(nodes.len(), 1);
-        assert_eq!(nodes[0].message_type, MessageType::Invoke);
-        assert_eq!(nodes[0].from, "cli");
-        assert_eq!(nodes[0].to, "myagent");
+        assert_eq!(nodes[0].message_type(), MessageType::Invoke);
+        let (from, to) = nodes[0].message.from_to();
+        assert_eq!(from, "cli");
+        assert_eq!(to, "myagent");
     }
 
     #[test]
     fn messages_chain_in_session() {
         let store = test_store();
-        let mut last_hash = String::new();
+        let mut last_id = DagNodeId::root();
 
         let msg1 = test_invoke(b"first");
-        let node1 = build_dag_node(&msg1, &last_hash);
-        last_hash = node1.hash.clone();
+        let node1 = build_dag_node(&msg1, &last_id);
+        last_id = node1.id.clone();
         store.insert_node(&node1).unwrap();
 
         let msg2 = test_request(b"second");
-        let node2 = build_dag_node(&msg2, &last_hash);
-        last_hash = node2.hash.clone();
+        let node2 = build_dag_node(&msg2, &last_id);
+        last_id = node2.id.clone();
         store.insert_node(&node2).unwrap();
 
         let msg3 = test_response(b"third");
-        let node3 = build_dag_node(&msg3, &last_hash);
+        let node3 = build_dag_node(&msg3, &last_id);
         store.insert_node(&node3).unwrap();
 
-        let nodes = store.get_session_nodes("sess-1").unwrap();
+        let nodes = store.get_session_nodes(&session()).unwrap();
         assert_eq!(nodes.len(), 3);
-        assert_eq!(nodes[0].parent_hash, "");
-        assert_eq!(nodes[1].parent_hash, nodes[0].hash);
-        assert_eq!(nodes[2].parent_hash, nodes[1].hash);
+        assert_eq!(nodes[0].parent_id, DagNodeId::root());
+        assert_eq!(nodes[1].parent_id, nodes[0].id);
+        assert_eq!(nodes[2].parent_id, nodes[1].id);
     }
 
     #[test]
@@ -367,14 +278,17 @@ mod tests {
         let store = test_store();
 
         let msg1 = test_invoke(b"sess1-first");
-        let node1 = build_dag_node(&msg1, "");
+        let root = DagNodeId::root();
+        let node1 = build_dag_node(&msg1, &root);
         store.insert_node(&node1).unwrap();
 
         // Different session
+        let sess2 =
+            SessionId::try_from("e2660cff-33d6-4428-acca-2d297dcc1cad".to_string()).unwrap();
         let msg2: ObservableMessage = InvokeMessage::new(
             TimelineId::main(),
             submission_alt(),
-            SessionId::from("sess-2".to_string()),
+            sess2.clone(),
             HarnessType::Cli,
             RuntimeType::Container,
             AgentId::new("agent-b"),
@@ -384,22 +298,22 @@ mod tests {
                 harness_version: "0.1.0".to_string(),
                 history_turns: 0,
             },
-            String::new(),
+            DagNodeId::root(),
         )
         .into();
-        let node2 = build_dag_node(&msg2, "");
+        let node2 = build_dag_node(&msg2, &root);
         store.insert_node(&node2).unwrap();
 
         let msg3 = test_complete(b"sess1-second", None);
-        let node3 = build_dag_node(&msg3, &node1.hash);
+        let node3 = build_dag_node(&msg3, &node1.id);
         store.insert_node(&node3).unwrap();
 
-        let sess1 = store.get_session_nodes("sess-1").unwrap();
-        let sess2 = store.get_session_nodes("sess-2").unwrap();
+        let sess1_nodes = store.get_session_nodes(&session()).unwrap();
+        let sess2_nodes = store.get_session_nodes(&sess2).unwrap();
 
-        assert_eq!(sess1.len(), 2);
-        assert_eq!(sess2.len(), 1);
-        assert_eq!(sess1[1].parent_hash, sess1[0].hash);
-        assert_eq!(sess2[0].parent_hash, "");
+        assert_eq!(sess1_nodes.len(), 2);
+        assert_eq!(sess2_nodes.len(), 1);
+        assert_eq!(sess1_nodes[1].parent_id, sess1_nodes[0].id);
+        assert_eq!(sess2_nodes[0].parent_id, DagNodeId::root());
     }
 }

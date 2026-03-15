@@ -218,7 +218,7 @@ fn apply_branch(config: &CliConfig, harness: &mut dyn Harness, agent_name: &str,
 
     // Read state from the tip node and set checkout state
     if let Ok(Some(node)) = store.get_node(&tip_hash) {
-        let state = node.state.as_deref().unwrap_or("");
+        let state = node.message.state().unwrap_or("");
         if !state.is_empty() {
             println!(
                 "Resuming '{}' from state {}…",

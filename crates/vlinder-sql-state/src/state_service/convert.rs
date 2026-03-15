@@ -1,59 +1,48 @@
 //! Conversions between domain DagNode and protobuf DagNode.
 
-use std::str::FromStr;
-
 use chrono::{DateTime, Utc};
 
 use super::proto;
 use vlinder_core::domain::{
-    DagNode, DagNodeId, MessageType, SessionId, SessionSummary, SubmissionId, Timeline,
+    DagNode, DagNodeId, ObservableMessage, SessionId, SessionSummary, Timeline,
 };
 
 // =============================================================================
 // DagNode → proto::DagNode
 // =============================================================================
 
+fn dag_node_to_proto(node: &DagNode) -> proto::DagNode {
+    let (from, to) = node.message.from_to();
+    let message_blob = serde_json::to_string(&node.message).ok();
+    proto::DagNode {
+        hash: node.id.to_string(),
+        parent_hash: node.parent_id.to_string(),
+        message_type: node.message_type().as_str().to_string(),
+        sender: from,
+        receiver: to,
+        session_id: node.session_id().as_str().to_string(),
+        submission_id: node.submission_id().to_string(),
+        payload: node.payload().to_vec(),
+        diagnostics: node.message.diagnostics_json(),
+        stderr: node.message.stderr().to_vec(),
+        created_at: node.created_at.to_rfc3339(),
+        state: node.message.state().map(|s| s.to_string()),
+        protocol_version: node.protocol_version().to_string(),
+        checkpoint: node.message.checkpoint().map(|s| s.to_string()),
+        operation: node.message.operation().map(|s| s.to_string()),
+        message_blob,
+    }
+}
+
 impl From<DagNode> for proto::DagNode {
     fn from(node: DagNode) -> Self {
-        Self {
-            hash: node.id.to_string(),
-            parent_hash: node.parent_id.to_string(),
-            message_type: node.message_type.as_str().to_string(),
-            sender: node.from,
-            receiver: node.to,
-            session_id: node.session_id.as_str().to_string(),
-            submission_id: node.submission_id.to_string(),
-            payload: node.payload,
-            diagnostics: node.diagnostics,
-            stderr: node.stderr,
-            created_at: node.created_at.to_rfc3339(),
-            state: node.state,
-            protocol_version: node.protocol_version,
-            checkpoint: node.checkpoint,
-            operation: node.operation,
-        }
+        dag_node_to_proto(&node)
     }
 }
 
 impl From<&DagNode> for proto::DagNode {
     fn from(node: &DagNode) -> Self {
-        Self {
-            hash: node.id.to_string(),
-            parent_hash: node.parent_id.to_string(),
-            message_type: node.message_type.as_str().to_string(),
-            sender: node.from.clone(),
-            receiver: node.to.clone(),
-            session_id: node.session_id.as_str().to_string(),
-            submission_id: node.submission_id.to_string(),
-            payload: node.payload.clone(),
-            diagnostics: node.diagnostics.clone(),
-            stderr: node.stderr.clone(),
-            created_at: node.created_at.to_rfc3339(),
-            state: node.state.clone(),
-            protocol_version: node.protocol_version.clone(),
-            checkpoint: node.checkpoint.clone(),
-            operation: node.operation.clone(),
-        }
+        dag_node_to_proto(node)
     }
 }
 
@@ -65,30 +54,24 @@ impl TryFrom<proto::DagNode> for DagNode {
     type Error = String;
 
     fn try_from(node: proto::DagNode) -> Result<Self, Self::Error> {
-        let message_type = MessageType::from_str(&node.message_type)
-            .map_err(|_| format!("unknown message type: {}", node.message_type))?;
-
         let created_at: DateTime<Utc> = node
             .created_at
             .parse()
             .map_err(|e| format!("invalid created_at: {}", e))?;
 
+        let message: ObservableMessage = node
+            .message_blob
+            .as_ref()
+            .ok_or_else(|| "missing message_blob".to_string())
+            .and_then(|blob| {
+                serde_json::from_str(blob).map_err(|e| format!("invalid message_blob JSON: {}", e))
+            })?;
+
         Ok(Self {
             id: DagNodeId::from(node.hash),
             parent_id: DagNodeId::from(node.parent_hash),
-            message_type,
-            from: node.sender,
-            to: node.receiver,
-            session_id: SessionId::try_from(node.session_id)?,
-            submission_id: SubmissionId::from(node.submission_id),
-            payload: node.payload,
-            diagnostics: node.diagnostics,
-            stderr: node.stderr,
             created_at,
-            state: node.state,
-            protocol_version: node.protocol_version,
-            checkpoint: node.checkpoint,
-            operation: node.operation,
+            message,
         })
     }
 }
@@ -186,25 +169,30 @@ impl TryFrom<proto::SessionSummary> for SessionSummary {
 mod tests {
     use super::*;
     use chrono::Utc;
+    use vlinder_core::domain::workers::dag::build_dag_node;
+    use vlinder_core::domain::{
+        AgentId, DagNodeId, HarnessType, InvokeDiagnostics, InvokeMessage, RuntimeType, SessionId,
+        SubmissionId, TimelineId,
+    };
 
     fn sample_dag_node() -> DagNode {
-        DagNode {
-            id: DagNodeId::from("abc123".to_string()),
-            parent_id: DagNodeId::from("parent456".to_string()),
-            message_type: MessageType::Invoke,
-            from: "cli".to_string(),
-            to: "agent-echo".to_string(),
-            session_id: SessionId::new(),
-            submission_id: SubmissionId::from("sub-001".to_string()),
-            payload: b"hello".to_vec(),
-            diagnostics: b"{\"version\":\"0.1.0\"}".to_vec(),
-            stderr: b"some stderr".to_vec(),
-            created_at: Utc::now(),
-            state: Some("state-hash-abc".to_string()),
-            protocol_version: "0.1.0".to_string(),
-            checkpoint: None,
-            operation: None,
-        }
+        let msg: ObservableMessage = InvokeMessage::new(
+            TimelineId::main(),
+            SubmissionId::from("sub-001".to_string()),
+            SessionId::new(),
+            HarnessType::Cli,
+            RuntimeType::Container,
+            AgentId::new("agent-echo"),
+            b"hello".to_vec(),
+            Some("state-hash-abc".to_string()),
+            InvokeDiagnostics {
+                harness_version: "0.1.0".to_string(),
+                history_turns: 0,
+            },
+            DagNodeId::root(),
+        )
+        .into();
+        build_dag_node(&msg, &DagNodeId::from("parent456".to_string()))
     }
 
     #[test]
@@ -215,54 +203,46 @@ mod tests {
 
         assert_eq!(recovered.id, original.id);
         assert_eq!(recovered.parent_id, original.parent_id);
-        assert_eq!(recovered.message_type, original.message_type);
-        assert_eq!(recovered.from, original.from);
-        assert_eq!(recovered.to, original.to);
-        assert_eq!(recovered.session_id, original.session_id);
-        assert_eq!(recovered.submission_id, original.submission_id);
-        assert_eq!(recovered.payload, original.payload);
-        assert_eq!(recovered.diagnostics, original.diagnostics);
-        assert_eq!(recovered.stderr, original.stderr);
-        assert_eq!(recovered.state, original.state);
-        assert_eq!(recovered.protocol_version, original.protocol_version);
+        assert_eq!(recovered.message_type(), original.message_type());
+        assert_eq!(recovered.session_id(), original.session_id());
+        assert_eq!(recovered.submission_id(), original.submission_id());
+        assert_eq!(recovered.payload(), original.payload());
+        assert_eq!(recovered.message.state(), original.message.state());
+        assert_eq!(recovered.protocol_version(), original.protocol_version());
     }
 
     #[test]
     fn dag_node_without_state_round_trips() {
-        let mut node = sample_dag_node();
-        node.state = None;
+        let msg: ObservableMessage = InvokeMessage::new(
+            TimelineId::main(),
+            SubmissionId::from("sub-001".to_string()),
+            SessionId::new(),
+            HarnessType::Cli,
+            RuntimeType::Container,
+            AgentId::new("agent-echo"),
+            b"hello".to_vec(),
+            None,
+            InvokeDiagnostics {
+                harness_version: "0.1.0".to_string(),
+                history_turns: 0,
+            },
+            DagNodeId::root(),
+        )
+        .into();
+        let node = build_dag_node(&msg, &DagNodeId::root());
 
         let proto_node: proto::DagNode = node.clone().into();
         let recovered: DagNode = proto_node.try_into().unwrap();
 
-        assert_eq!(recovered.state, None);
+        assert_eq!(recovered.message.state(), None);
     }
 
     #[test]
-    fn message_type_round_trip() {
-        for mt in [
-            MessageType::Invoke,
-            MessageType::Request,
-            MessageType::Response,
-            MessageType::Complete,
-            MessageType::Delegate,
-            MessageType::Repair,
-        ] {
-            let node = DagNode {
-                message_type: mt,
-                ..sample_dag_node()
-            };
-            let proto_node: proto::DagNode = node.into();
-            let recovered: DagNode = proto_node.try_into().unwrap();
-            assert_eq!(recovered.message_type, mt);
-        }
-    }
-
-    #[test]
-    fn invalid_message_type_fails() {
+    fn missing_message_blob_fails() {
         let proto_node = proto::DagNode {
-            message_type: "bogus".to_string(),
+            message_type: "invoke".to_string(),
             created_at: Utc::now().to_rfc3339(),
+            message_blob: None,
             ..Default::default()
         };
         assert!(DagNode::try_from(proto_node).is_err());
@@ -273,6 +253,7 @@ mod tests {
         let proto_node = proto::DagNode {
             message_type: "invoke".to_string(),
             created_at: "not-a-date".to_string(),
+            message_blob: Some("{}".to_string()),
             ..Default::default()
         };
         assert!(DagNode::try_from(proto_node).is_err());
