@@ -150,7 +150,7 @@ fn run(name: &str, branch: Option<&str>) {
 
     // Connect to harness via gRPC — the daemon's harness worker owns the
     // queue and registry connection. The CLI is now a pure gRPC client.
-    let mut harness = connect_harness(&config);
+    let harness = connect_harness(&config);
 
     // Resolve session context before starting (ADR 054, ADR 070)
     let (timeline, sealed, initial_state, dag_parent) = if let Some(branch_name) = branch {
@@ -159,13 +159,14 @@ fn run(name: &str, branch: Option<&str>) {
         resolve_default(&config, name)
     };
 
-    harness.start_session(name, timeline.clone());
+    let session_id = harness.start_session(name, timeline.clone());
 
     // Run REPL with synchronous run_agent (ADR 092)
     repl::run(|input| {
         match harness.run_agent(
             &agent_id,
             input,
+            session_id.clone(),
             timeline.clone(),
             sealed,
             initial_state.clone(),

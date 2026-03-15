@@ -203,9 +203,9 @@ fn fork(session_id_or_name: &str, from_hash: &str, branch_name: &str) {
     });
 
     // Send ForkMessage through the harness/queue (CQRS: both SQL and git react)
-    let mut harness = connect_harness(&config);
+    let harness = connect_harness(&config);
     let timeline = TimelineId::main();
-    harness.start_session(&agent_name, timeline.clone());
+    let session_id = harness.start_session(&agent_name, timeline.clone());
 
     let params = ForkParams {
         agent_name,
@@ -214,10 +214,12 @@ fn fork(session_id_or_name: &str, from_hash: &str, branch_name: &str) {
         parent_timeline_id: 1, // main timeline
     };
 
-    harness.fork_timeline(params, timeline).unwrap_or_else(|e| {
-        eprintln!("Failed to fork timeline: {}", e);
-        std::process::exit(1);
-    });
+    harness
+        .fork_timeline(params, session_id, timeline)
+        .unwrap_or_else(|e| {
+            eprintln!("Failed to fork timeline: {}", e);
+            std::process::exit(1);
+        });
 
     println!(
         "Created timeline '{}' forked from {}",
@@ -325,12 +327,12 @@ fn repair(branch: &str) {
     };
 
     // Set up harness
-    let mut harness = connect_harness(&config);
+    let harness = connect_harness(&config);
     let timeline = vlinder_core::domain::TimelineId::from(timeline.id);
-    harness.start_session(&agent_name, timeline.clone());
+    let session_id = harness.start_session(&agent_name, timeline.clone());
 
     println!("Repairing: replaying {} on {}...", operation_str, to);
-    match harness.repair_agent(params, timeline) {
+    match harness.repair_agent(params, session_id, timeline) {
         Ok(result) => {
             println!("Repair completed successfully.");
             println!("{}", result);

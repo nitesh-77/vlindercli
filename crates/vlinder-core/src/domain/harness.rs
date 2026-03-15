@@ -9,7 +9,6 @@
 
 use std::sync::Arc;
 
-use crate::domain::Session;
 use crate::domain::{
     AgentId, DagNodeId, DagStore, ForkMessage, HarnessType, InvokeDiagnostics, InvokeMessage,
     JobId, JobStatus, MessageQueue, MessageType, Operation, Registry, RepairMessage, ResourceId,
@@ -26,18 +25,20 @@ pub trait Harness {
 
     /// Start a conversation session for an agent.
     ///
-    /// Creates a session and sends a SessionStartMessage. Per-run context
-    /// (timeline, state, dag_parent) is passed to each command method.
-    fn start_session(&mut self, agent_name: &str, timeline: TimelineId);
+    /// Creates a session, sends a SessionStartMessage, and returns the
+    /// SessionId for the caller to pass to subsequent commands.
+    fn start_session(&self, agent_name: &str, timeline: TimelineId) -> SessionId;
 
     /// Run an agent to completion synchronously.
     ///
     /// Sends input to the agent and blocks until the response arrives.
     /// Returns the agent's output as a string.
+    #[allow(clippy::too_many_arguments)]
     fn run_agent(
-        &mut self,
+        &self,
         agent_id: &ResourceId,
         input: &str,
+        session_id: SessionId,
         timeline: TimelineId,
         sealed: bool,
         initial_state: Option<String>,
@@ -53,8 +54,9 @@ pub trait Harness {
     /// Returns the agent's output after the checkpoint handler processes
     /// the replayed service response.
     fn repair_agent(
-        &mut self,
+        &self,
         params: RepairParams,
+        session_id: SessionId,
         timeline: TimelineId,
     ) -> Result<String, String>;
 
@@ -62,7 +64,12 @@ pub trait Harness {
     ///
     /// Fire-and-forget: both SQL (via RecordingQueue) and git (via
     /// GitDagWorker) react to the message. No response is expected.
-    fn fork_timeline(&mut self, params: ForkParams, timeline: TimelineId) -> Result<(), String>;
+    fn fork_timeline(
+        &self,
+        params: ForkParams,
+        session_id: SessionId,
+        timeline: TimelineId,
+    ) -> Result<(), String>;
 }
 
 /// Parameters for `Harness::repair_agent()`.
@@ -125,7 +132,6 @@ pub struct CoreHarness {
     queue: Arc<dyn MessageQueue + Send + Sync>,
     registry: Arc<dyn Registry>,
     store: Arc<dyn DagStore>,
-    session: Option<Session>,
 }
 
 impl CoreHarness {
@@ -140,17 +146,18 @@ impl CoreHarness {
             queue,
             registry,
             store,
-            session: None,
         }
     }
 
     /// Build an InvokeMessage from session state and register a job.
     ///
     /// Returns the message and the job ID.
+    #[allow(clippy::too_many_arguments)]
     fn build_invoke(
-        &mut self,
+        &self,
         agent_id: &ResourceId,
         input: &str,
+        session_id: &SessionId,
         timeline: &TimelineId,
         sealed: bool,
         initial_state: Option<&str>,
@@ -173,51 +180,40 @@ impl CoreHarness {
             .select_runtime(&agent)
             .ok_or_else(|| format!("no runtime available for agent: {}", agent_id))?;
 
-        let (submission, session_id, payload, last_state) =
-            if let Some(session) = self.session.as_mut() {
-                let timeline_id: i64 = timeline.as_str().parse().unwrap_or(0);
-                let last_invoke_node = self
-                    .store
-                    .latest_node_on_timeline(timeline_id, Some(MessageType::Invoke))
-                    .unwrap_or(None);
-                let last_invoke_payload = last_invoke_node
-                    .as_ref()
-                    .map(|n| String::from_utf8_lossy(n.payload()).to_string());
-                let last_complete_node = self
-                    .store
-                    .latest_node_on_timeline(timeline_id, Some(MessageType::Complete))
-                    .unwrap_or(None);
-                let last_complete_payload = last_complete_node
-                    .as_ref()
-                    .map(|n| String::from_utf8_lossy(n.payload()).to_string());
-                let enriched_payload = build_payload(
-                    last_invoke_payload.as_deref(),
-                    last_complete_payload.as_deref(),
-                    input,
-                );
-                let parent_submission = last_invoke_node
-                    .as_ref()
-                    .map(|n| n.submission_id().as_str().to_string())
-                    .unwrap_or_default();
-                let submission = SubmissionId::content_addressed(
-                    enriched_payload.as_bytes(),
-                    session.session.as_str(),
-                    &parent_submission,
-                );
-                // State: prefer DAG's latest Complete, fall back to initial_state
-                let state = last_complete_node
-                    .as_ref()
-                    .and_then(|n| n.message.state().map(|s| s.to_string()))
-                    .or_else(|| initial_state.map(|s| s.to_string()));
-                (submission, session.session.clone(), enriched_payload, state)
-            } else {
-                (
-                    SubmissionId::new(),
-                    SessionId::new(),
-                    input.to_string(),
-                    initial_state.map(|s| s.to_string()),
-                )
-            };
+        let timeline_id: i64 = timeline.as_str().parse().unwrap_or(0);
+        let last_invoke_node = self
+            .store
+            .latest_node_on_timeline(timeline_id, Some(MessageType::Invoke))
+            .unwrap_or(None);
+        let last_invoke_payload = last_invoke_node
+            .as_ref()
+            .map(|n| String::from_utf8_lossy(n.payload()).to_string());
+        let last_complete_node = self
+            .store
+            .latest_node_on_timeline(timeline_id, Some(MessageType::Complete))
+            .unwrap_or(None);
+        let last_complete_payload = last_complete_node
+            .as_ref()
+            .map(|n| String::from_utf8_lossy(n.payload()).to_string());
+        let enriched_payload = build_payload(
+            last_invoke_payload.as_deref(),
+            last_complete_payload.as_deref(),
+            input,
+        );
+        let parent_submission = last_invoke_node
+            .as_ref()
+            .map(|n| n.submission_id().as_str().to_string())
+            .unwrap_or_default();
+        let submission = SubmissionId::content_addressed(
+            enriched_payload.as_bytes(),
+            session_id.as_str(),
+            &parent_submission,
+        );
+        // State: prefer DAG's latest Complete, fall back to initial_state
+        let last_state = last_complete_node
+            .as_ref()
+            .and_then(|n| n.message.state().map(|s| s.to_string()))
+            .or_else(|| initial_state.map(|s| s.to_string()));
 
         let job_id =
             self.registry
@@ -230,11 +226,11 @@ impl CoreHarness {
         let invoke = InvokeMessage::new(
             timeline.clone(),
             submission,
-            session_id,
+            session_id.clone(),
             self.harness_type(),
             runtime,
             crate::domain::agent_routing_key(agent_id),
-            payload.as_bytes().to_vec(),
+            enriched_payload.as_bytes().to_vec(),
             last_state,
             invoke_diag,
             dag_parent.clone(),
@@ -249,22 +245,22 @@ impl Harness for CoreHarness {
         self.harness_type
     }
 
-    fn start_session(&mut self, agent_name: &str, timeline: TimelineId) {
+    fn start_session(&self, agent_name: &str, timeline: TimelineId) -> SessionId {
         let session_id = SessionId::new();
-        let session = Session::new(session_id.clone(), agent_name);
 
-        let msg = SessionStartMessage::new(timeline, session_id, agent_name.to_string());
+        let msg = SessionStartMessage::new(timeline, session_id.clone(), agent_name.to_string());
         if let Err(e) = self.queue.send_session_start(msg) {
             tracing::warn!(error = %e, "Failed to send session start message");
         }
 
-        self.session = Some(session);
+        session_id
     }
 
     fn run_agent(
-        &mut self,
+        &self,
         agent_id: &ResourceId,
         input: &str,
+        session_id: SessionId,
         timeline: TimelineId,
         sealed: bool,
         initial_state: Option<String>,
@@ -273,6 +269,7 @@ impl Harness for CoreHarness {
         let (invoke_msg, job_id) = self.build_invoke(
             agent_id,
             input,
+            &session_id,
             &timeline,
             sealed,
             initial_state.as_deref(),
@@ -291,13 +288,12 @@ impl Harness for CoreHarness {
         Ok(result)
     }
 
-    fn fork_timeline(&mut self, params: ForkParams, timeline: TimelineId) -> Result<(), String> {
-        let session_id = self
-            .session
-            .as_ref()
-            .map(|s| s.session.clone())
-            .unwrap_or_default();
-
+    fn fork_timeline(
+        &self,
+        params: ForkParams,
+        session_id: SessionId,
+        timeline: TimelineId,
+    ) -> Result<(), String> {
         let submission = SubmissionId::new();
 
         let fork_msg = ForkMessage::new(
@@ -316,16 +312,11 @@ impl Harness for CoreHarness {
     }
 
     fn repair_agent(
-        &mut self,
+        &self,
         params: RepairParams,
+        session_id: SessionId,
         timeline: TimelineId,
     ) -> Result<String, String> {
-        let session_id = self
-            .session
-            .as_ref()
-            .map(|s| s.session.clone())
-            .unwrap_or_default();
-
         let parent_submission = self
             .store
             .get_node(&params.dag_parent)

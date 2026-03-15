@@ -45,7 +45,9 @@ message StartSessionRequest {
   string timeline_id = 2;
 }
 
-message StartSessionResponse {}
+message StartSessionResponse {
+  string session_id = 1;
+}
 
 message RunAgentRequest {
   string agent_id = 1;  // ResourceId URI
@@ -54,6 +56,7 @@ message RunAgentRequest {
   bool sealed = 4;
   optional string initial_state = 5;
   string dag_parent = 6;
+  string session_id = 7;
 }
 
 message RunAgentResponse {
@@ -72,6 +75,7 @@ message RepairAgentRequest {
   bytes payload = 8;          // original request payload
   optional string state = 9;  // state hash at original request
   string timeline_id = 10;    // timeline for this repair
+  string session_id = 11;     // session for this repair
 }
 
 message RepairAgentResponse {
@@ -85,6 +89,7 @@ message ForkTimelineRequest {
   string fork_point = 3;
   int64 parent_timeline_id = 4;
   string timeline_id = 5;
+  string session_id = 6;
 }
 
 message ForkTimelineResponse {

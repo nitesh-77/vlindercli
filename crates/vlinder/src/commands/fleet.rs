@@ -193,7 +193,7 @@ pub fn run(name: &str) {
     let fleet_context = build_fleet_context(&*registry, &fleet);
 
     // Connect harness via gRPC — the daemon owns queue and registry
-    let mut harness = connect_harness(&config);
+    let harness = connect_harness(&config);
 
     // Resolve session context before starting
     let initial_state = open_dag_store(&config)
@@ -202,7 +202,7 @@ pub fn run(name: &str) {
         println!("Resuming from state {}…", &state[..8.min(state.len())]);
     }
     let timeline = TimelineId::main();
-    harness.start_session(entry_agent_name.as_str(), timeline.clone());
+    let session_id = harness.start_session(entry_agent_name.as_str(), timeline.clone());
 
     tracing::debug!(fleet = %fleet.name, "Fleet session started");
 
@@ -217,6 +217,7 @@ pub fn run(name: &str) {
         match harness.run_agent(
             &entry_agent_id,
             &enriched_input,
+            session_id.clone(),
             timeline.clone(),
             false,
             initial_state.clone(),

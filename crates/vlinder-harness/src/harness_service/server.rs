@@ -1,6 +1,6 @@
 //! gRPC server wrapping the Harness trait.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use tonic::{Request, Response, Status};
 
@@ -12,21 +12,21 @@ use super::proto::{
 use std::str::FromStr;
 use vlinder_core::domain::{
     AgentId, DagNodeId, ForkParams, Harness, Operation, RepairParams, ResourceId, Sequence,
-    ServiceBackend, ServiceType, TimelineId,
+    ServiceBackend, ServiceType, SessionId, TimelineId,
 };
 
 /// gRPC server that wraps a Harness implementation.
 ///
-/// Uses `Arc<Mutex<…>>` so the harness can be shared into
+/// Uses `Arc<…>` so the harness can be shared into
 /// `spawn_blocking` for long-running calls like `run_agent`.
 pub struct HarnessServiceServer {
-    harness: Arc<Mutex<Box<dyn Harness + Send>>>,
+    harness: Arc<Box<dyn Harness + Send + Sync>>,
 }
 
 impl HarnessServiceServer {
-    pub fn new(harness: Box<dyn Harness + Send>) -> Self {
+    pub fn new(harness: Box<dyn Harness + Send + Sync>) -> Self {
         Self {
-            harness: Arc::new(Mutex::new(harness)),
+            harness: Arc::new(harness),
         }
     }
 
@@ -52,16 +52,15 @@ impl HarnessService for HarnessServiceServer {
     ) -> Result<Response<StartSessionResponse>, Status> {
         let req = request.into_inner();
         let harness = Arc::clone(&self.harness);
-        tokio::task::spawn_blocking(move || {
+        let session_id = tokio::task::spawn_blocking(move || {
             let timeline = TimelineId::from(req.timeline_id);
-            harness
-                .lock()
-                .unwrap()
-                .start_session(&req.agent_name, timeline);
+            harness.start_session(&req.agent_name, timeline)
         })
         .await
         .map_err(|e| Status::internal(format!("spawn_blocking failed: {}", e)))?;
-        Ok(Response::new(StartSessionResponse {}))
+        Ok(Response::new(StartSessionResponse {
+            session_id: session_id.as_str().to_string(),
+        }))
     }
 
     async fn run_agent(
@@ -73,11 +72,14 @@ impl HarnessService for HarnessServiceServer {
 
         let result = tokio::task::spawn_blocking(move || {
             let id = ResourceId::new(&req.agent_id);
+            let session_id = SessionId::try_from(req.session_id)
+                .map_err(|e| format!("invalid session_id: {}", e))?;
             let timeline = TimelineId::from(req.timeline_id);
             let dag_parent = DagNodeId::from(req.dag_parent);
-            harness.lock().unwrap().run_agent(
+            harness.run_agent(
                 &id,
                 &req.input,
+                session_id,
                 timeline,
                 req.sealed,
                 req.initial_state,
@@ -127,8 +129,10 @@ impl HarnessService for HarnessServiceServer {
                 state: req.state,
             };
 
+            let session_id = SessionId::try_from(req.session_id)
+                .map_err(|e| format!("invalid session_id: {}", e))?;
             let timeline = TimelineId::from(req.timeline_id);
-            harness.lock().unwrap().repair_agent(params, timeline)
+            harness.repair_agent(params, session_id, timeline)
         })
         .await
         .map_err(|e| Status::internal(format!("spawn_blocking failed: {}", e)))?;
@@ -159,8 +163,10 @@ impl HarnessService for HarnessServiceServer {
                 fork_point: DagNodeId::from(req.fork_point),
                 parent_timeline_id: req.parent_timeline_id,
             };
+            let session_id = SessionId::try_from(req.session_id)
+                .map_err(|e| format!("invalid session_id: {}", e))?;
             let timeline = TimelineId::from(req.timeline_id);
-            harness.lock().unwrap().fork_timeline(params, timeline)
+            harness.fork_timeline(params, session_id, timeline)
         })
         .await
         .map_err(|e| Status::internal(format!("spawn_blocking failed: {}", e)))?;

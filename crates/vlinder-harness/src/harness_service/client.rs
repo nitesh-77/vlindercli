@@ -4,7 +4,7 @@ use tonic::transport::Channel;
 
 use super::proto::{self, harness_client::HarnessClient};
 use vlinder_core::domain::{
-    DagNodeId, ForkParams, Harness, HarnessType, RepairParams, ResourceId, TimelineId,
+    DagNodeId, ForkParams, Harness, HarnessType, RepairParams, ResourceId, SessionId, TimelineId,
 };
 
 /// Ping a harness service at the given address, returning its protocol version.
@@ -48,22 +48,28 @@ impl Harness for GrpcHarnessClient {
         HarnessType::Grpc
     }
 
-    fn start_session(&mut self, agent_name: &str, timeline: TimelineId) {
+    fn start_session(&self, agent_name: &str, timeline: TimelineId) -> SessionId {
         let request = proto::StartSessionRequest {
             agent_name: agent_name.to_string(),
             timeline_id: timeline.as_str().to_string(),
         };
 
         let mut client = self.client.clone();
-        let _ = self
+        let response = self
             .runtime
             .block_on(async { client.start_session(request).await });
+
+        let resp = response
+            .expect("failed to start session via gRPC")
+            .into_inner();
+        SessionId::try_from(resp.session_id).expect("server returned invalid session_id")
     }
 
     fn run_agent(
-        &mut self,
+        &self,
         agent_id: &ResourceId,
         input: &str,
+        session_id: SessionId,
         timeline: TimelineId,
         sealed: bool,
         initial_state: Option<String>,
@@ -76,6 +82,7 @@ impl Harness for GrpcHarnessClient {
             sealed,
             initial_state,
             dag_parent: dag_parent.to_string(),
+            session_id: session_id.as_str().to_string(),
         };
 
         let mut client = self.client.clone();
@@ -93,8 +100,9 @@ impl Harness for GrpcHarnessClient {
     }
 
     fn repair_agent(
-        &mut self,
+        &self,
         params: RepairParams,
+        session_id: SessionId,
         timeline: TimelineId,
     ) -> Result<String, String> {
         let request = proto::RepairAgentRequest {
@@ -108,6 +116,7 @@ impl Harness for GrpcHarnessClient {
             payload: params.payload,
             state: params.state,
             timeline_id: timeline.as_str().to_string(),
+            session_id: session_id.as_str().to_string(),
         };
 
         let mut client = self.client.clone();
@@ -124,13 +133,19 @@ impl Harness for GrpcHarnessClient {
         }
     }
 
-    fn fork_timeline(&mut self, params: ForkParams, timeline: TimelineId) -> Result<(), String> {
+    fn fork_timeline(
+        &self,
+        params: ForkParams,
+        session_id: SessionId,
+        timeline: TimelineId,
+    ) -> Result<(), String> {
         let request = proto::ForkTimelineRequest {
             agent_name: params.agent_name,
             branch_name: params.branch_name,
             fork_point: params.fork_point.to_string(),
             parent_timeline_id: params.parent_timeline_id,
             timeline_id: timeline.as_str().to_string(),
+            session_id: session_id.as_str().to_string(),
         };
 
         let mut client = self.client.clone();
