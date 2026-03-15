@@ -126,7 +126,7 @@ pub use runtime::{Runtime, RuntimeType};
 // Harness (API surface for agent interaction)
 // ============================================================================
 
-pub use harness::{CoreHarness, ForkParams, Harness, RepairParams};
+pub use harness::{CoreHarness, ForkParams, Harness};
 pub use session::Session;
 
 // ============================================================================

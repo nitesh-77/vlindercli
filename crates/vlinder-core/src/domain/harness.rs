@@ -10,9 +10,9 @@
 use std::sync::Arc;
 
 use crate::domain::{
-    AgentId, DagNodeId, DagStore, ForkMessage, HarnessType, InvokeDiagnostics, InvokeMessage,
-    JobId, JobStatus, MessageQueue, MessageType, Operation, Registry, RepairMessage, ResourceId,
-    Sequence, ServiceBackend, SessionId, SessionStartMessage, SubmissionId, TimelineId,
+    DagNodeId, DagStore, ForkMessage, HarnessType, InvokeDiagnostics, InvokeMessage, JobId,
+    JobStatus, MessageQueue, MessageType, Registry, ResourceId, SessionId, SessionStartMessage,
+    SubmissionId, TimelineId,
 };
 
 /// Common harness operations shared across all harness types.
@@ -45,21 +45,6 @@ pub trait Harness {
         dag_parent: DagNodeId,
     ) -> Result<String, String>;
 
-    /// Replay a failed service call (ADR 113).
-    ///
-    /// The caller provides the repair metadata (read from the DAG at the
-    /// checkout point). The harness adds its own context (timeline, session,
-    /// harness type) and sends a RepairMessage through the queue.
-    ///
-    /// Returns the agent's output after the checkpoint handler processes
-    /// the replayed service response.
-    fn repair_agent(
-        &self,
-        params: RepairParams,
-        session_id: SessionId,
-        timeline: TimelineId,
-    ) -> Result<String, String>;
-
     /// Create a timeline fork by sending a ForkMessage through the queue.
     ///
     /// Fire-and-forget: both SQL (via RecordingQueue) and git (via
@@ -70,21 +55,6 @@ pub trait Harness {
         session_id: SessionId,
         timeline: TimelineId,
     ) -> Result<(), String>;
-}
-
-/// Parameters for `Harness::repair_agent()`.
-///
-/// The caller (CLI) reads these from the DAG at the checkout point.
-/// The harness adds timeline, session, submission, and harness type.
-pub struct RepairParams {
-    pub agent_id: AgentId,
-    pub dag_parent: DagNodeId,
-    pub checkpoint: String,
-    pub service: ServiceBackend,
-    pub operation: Operation,
-    pub sequence: Sequence,
-    pub payload: Vec<u8>,
-    pub state: Option<String>,
 }
 
 /// Parameters for `Harness::fork_timeline()`.
@@ -309,48 +279,6 @@ impl Harness for CoreHarness {
         self.queue
             .send_fork(fork_msg)
             .map_err(|e| format!("queue error: {}", e))
-    }
-
-    fn repair_agent(
-        &self,
-        params: RepairParams,
-        session_id: SessionId,
-        timeline: TimelineId,
-    ) -> Result<String, String> {
-        let parent_submission = self
-            .store
-            .get_node(&params.dag_parent)
-            .unwrap_or(None)
-            .map(|n| n.submission_id().as_str().to_string())
-            .unwrap_or_default();
-        let submission = SubmissionId::content_addressed(
-            &params.payload,
-            session_id.as_str(),
-            &parent_submission,
-        );
-
-        let repair_msg = RepairMessage::new(
-            timeline,
-            submission,
-            session_id,
-            params.agent_id,
-            self.harness_type(),
-            params.dag_parent,
-            params.checkpoint,
-            params.service,
-            params.operation,
-            params.sequence,
-            params.payload,
-            params.state,
-        );
-
-        let complete = self
-            .queue
-            .repair_agent(repair_msg)
-            .map_err(|e| format!("queue error: {}", e))?;
-
-        let result = String::from_utf8_lossy(&complete.payload).to_string();
-        Ok(result)
     }
 }
 

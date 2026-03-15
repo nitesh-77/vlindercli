@@ -4,7 +4,7 @@ use tonic::transport::Channel;
 
 use super::proto::{self, harness_client::HarnessClient};
 use vlinder_core::domain::{
-    DagNodeId, ForkParams, Harness, HarnessType, RepairParams, ResourceId, SessionId, TimelineId,
+    DagNodeId, ForkParams, Harness, HarnessType, ResourceId, SessionId, TimelineId,
 };
 
 /// Ping a harness service at the given address, returning its protocol version.
@@ -89,40 +89,6 @@ impl Harness for GrpcHarnessClient {
         let response = self
             .runtime
             .block_on(async { client.run_agent(request).await })
-            .map_err(|e| format!("gRPC error: {}", e))?;
-
-        let resp = response.into_inner();
-        if let Some(error) = resp.error {
-            Err(error)
-        } else {
-            Ok(resp.output)
-        }
-    }
-
-    fn repair_agent(
-        &self,
-        params: RepairParams,
-        session_id: SessionId,
-        timeline: TimelineId,
-    ) -> Result<String, String> {
-        let request = proto::RepairAgentRequest {
-            agent_id: params.agent_id.as_str().to_string(),
-            dag_parent: params.dag_parent.to_string(),
-            checkpoint: params.checkpoint,
-            service: params.service.service_type().as_str().to_string(),
-            backend: params.service.backend_str().to_string(),
-            operation: params.operation.as_str().to_string(),
-            sequence: params.sequence.as_u32(),
-            payload: params.payload,
-            state: params.state,
-            timeline_id: timeline.as_str().to_string(),
-            session_id: session_id.as_str().to_string(),
-        };
-
-        let mut client = self.client.clone();
-        let response = self
-            .runtime
-            .block_on(async { client.repair_agent(request).await })
             .map_err(|e| format!("gRPC error: {}", e))?;
 
         let resp = response.into_inner();

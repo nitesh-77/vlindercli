@@ -450,19 +450,6 @@ mod tests {
     }
 
     #[test]
-    fn cli_session_repair() {
-        let cli = Cli::try_parse_from(["vlinder", "session", "repair", "repair-1"]).unwrap();
-        assert_eq!(
-            cli.command,
-            Command::Session {
-                cmd: session::SessionCommand::Repair {
-                    branch: "repair-1".to_string(),
-                }
-            }
-        );
-    }
-
-    #[test]
     fn cli_session_branches() {
         let cli =
             Cli::try_parse_from(["vlinder", "session", "branches", "wired-pig-543e"]).unwrap();

@@ -6,14 +6,10 @@ use tonic::{Request, Response, Status};
 
 use super::proto::{
     self, harness_server::Harness as HarnessService, ForkTimelineRequest, ForkTimelineResponse,
-    PingRequest, RepairAgentRequest, RepairAgentResponse, RunAgentRequest, RunAgentResponse,
-    SemVer, StartSessionRequest, StartSessionResponse,
+    PingRequest, RunAgentRequest, RunAgentResponse, SemVer, StartSessionRequest,
+    StartSessionResponse,
 };
-use std::str::FromStr;
-use vlinder_core::domain::{
-    AgentId, DagNodeId, ForkParams, Harness, Operation, RepairParams, ResourceId, Sequence,
-    ServiceBackend, ServiceType, SessionId, TimelineId,
-};
+use vlinder_core::domain::{DagNodeId, ForkParams, Harness, ResourceId, SessionId, TimelineId};
 
 /// gRPC server that wraps a Harness implementation.
 ///
@@ -95,54 +91,6 @@ impl HarnessService for HarnessServiceServer {
                 error: None,
             })),
             Err(e) => Ok(Response::new(RunAgentResponse {
-                output: String::new(),
-                error: Some(e),
-            })),
-        }
-    }
-
-    async fn repair_agent(
-        &self,
-        request: Request<RepairAgentRequest>,
-    ) -> Result<Response<RepairAgentResponse>, Status> {
-        let req = request.into_inner();
-        let harness = Arc::clone(&self.harness);
-
-        let result = tokio::task::spawn_blocking(move || {
-            let service_type = ServiceType::from_str(&req.service)
-                .map_err(|_| format!("unknown service type: {}", req.service))?;
-            let service =
-                ServiceBackend::from_parts(service_type, &req.backend).ok_or_else(|| {
-                    format!("invalid service/backend: {}/{}", req.service, req.backend)
-                })?;
-            let operation = Operation::from_str(&req.operation)
-                .map_err(|_| format!("unknown operation: {}", req.operation))?;
-
-            let params = RepairParams {
-                agent_id: AgentId::new(&req.agent_id),
-                dag_parent: DagNodeId::from(req.dag_parent),
-                checkpoint: req.checkpoint,
-                service,
-                operation,
-                sequence: Sequence::from(req.sequence),
-                payload: req.payload,
-                state: req.state,
-            };
-
-            let session_id = SessionId::try_from(req.session_id)
-                .map_err(|e| format!("invalid session_id: {}", e))?;
-            let timeline = TimelineId::from(req.timeline_id);
-            harness.repair_agent(params, session_id, timeline)
-        })
-        .await
-        .map_err(|e| Status::internal(format!("spawn_blocking failed: {}", e)))?;
-
-        match result {
-            Ok(output) => Ok(Response::new(RepairAgentResponse {
-                output,
-                error: None,
-            })),
-            Err(e) => Ok(Response::new(RepairAgentResponse {
                 output: String::new(),
                 error: Some(e),
             })),

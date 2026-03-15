@@ -1,12 +1,7 @@
-use std::str::FromStr;
-
 use clap::Subcommand;
 
 use crate::config::CliConfig;
-use vlinder_core::domain::{
-    AgentId, DagStore, ForkParams, MessageType, Operation, RepairParams, Sequence, ServiceBackend,
-    ServiceType, SessionId, TimelineId,
-};
+use vlinder_core::domain::{DagStore, ForkParams, MessageType, SessionId, TimelineId};
 
 use super::connect::{connect_harness, open_dag_store};
 
@@ -33,11 +28,6 @@ pub enum SessionCommand {
         #[arg(long)]
         name: String,
     },
-    /// Replay a failed service call on a repair branch
-    Repair {
-        /// Branch name (must match a Timeline created by fork)
-        branch: String,
-    },
     /// List branches (timelines) forked from a session
     Branches {
         /// Session ID
@@ -54,7 +44,7 @@ pub fn execute(cmd: SessionCommand) {
             from,
             name,
         } => fork(&session_id, &from, &name),
-        SessionCommand::Repair { branch } => repair(&branch),
+
         SessionCommand::Branches { session_id } => branches(&session_id),
     }
 }
@@ -222,122 +212,6 @@ fn fork(session_id_or_name: &str, from_hash: &str, branch_name: &str) {
     );
 }
 
-fn repair(branch: &str) {
-    let config = CliConfig::load();
-    let store = require_dag_store(&config);
-
-    // Look up the timeline
-    let timeline = store
-        .get_timeline_by_branch(branch)
-        .unwrap_or_else(|e| {
-            eprintln!("Failed to look up timeline: {}", e);
-            std::process::exit(1);
-        })
-        .unwrap_or_else(|| {
-            eprintln!("Timeline '{}' not found", branch);
-            std::process::exit(1);
-        });
-
-    let fork_point = timeline.fork_point.unwrap_or_else(|| {
-        eprintln!("Timeline '{}' has no fork point", branch);
-        std::process::exit(1);
-    });
-
-    // Get the DagNode at the fork point — should be a Request
-    let node = store
-        .get_node(&fork_point)
-        .unwrap_or_else(|e| {
-            eprintln!("Failed to look up fork point: {}", e);
-            std::process::exit(1);
-        })
-        .unwrap_or_else(|| {
-            eprintln!("Fork point {} not found", fork_point);
-            std::process::exit(1);
-        });
-
-    if node.message_type() != MessageType::Request {
-        eprintln!(
-            "Fork point {} is a {} message, expected request",
-            fork_point,
-            node.message_type().as_str()
-        );
-        std::process::exit(1);
-    }
-
-    let checkpoint = node
-        .message
-        .checkpoint()
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| {
-            eprintln!(
-                "Fork point {} has no checkpoint — repair requires a checkpoint handler",
-                fork_point
-            );
-            std::process::exit(1);
-        });
-
-    // Parse service from node routing ("infer.ollama" -> ServiceBackend)
-    let (from, to) = node.message.from_to();
-    let service = parse_service_backend(&to).unwrap_or_else(|| {
-        eprintln!("Cannot parse service backend from '{}'", to);
-        std::process::exit(1);
-    });
-
-    // Parse operation
-    let operation_str = node
-        .message
-        .operation()
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| {
-            eprintln!("Fork point {} has no operation", fork_point);
-            std::process::exit(1);
-        });
-    let operation = Operation::from_str(&operation_str).unwrap_or_else(|e| {
-        eprintln!("Invalid operation '{}': {}", operation_str, e);
-        std::process::exit(1);
-    });
-
-    // Extract sequence from diagnostics
-    let sequence = extract_sequence(&node.message.diagnostics_json());
-
-    // Derive agent name from the Invoke message in this session
-    let agent_name = find_agent_name(&*store, node.session_id()).unwrap_or_else(|| {
-        eprintln!(
-            "Cannot determine agent name for session {}",
-            node.session_id()
-        );
-        std::process::exit(1);
-    });
-
-    let params = RepairParams {
-        agent_id: AgentId::new(from.clone()),
-        dag_parent: node.id.clone(),
-        checkpoint,
-        service,
-        operation,
-        sequence,
-        payload: node.payload().to_vec(),
-        state: node.message.state().map(|s| s.to_string()),
-    };
-
-    // Set up harness
-    let harness = connect_harness(&config);
-    let timeline = vlinder_core::domain::TimelineId::from(timeline.id);
-    let session_id = harness.start_session(&agent_name, timeline.clone());
-
-    println!("Repairing: replaying {} on {}...", operation_str, to);
-    match harness.repair_agent(params, session_id, timeline) {
-        Ok(result) => {
-            println!("Repair completed successfully.");
-            println!("{}", result);
-        }
-        Err(e) => {
-            eprintln!("Repair failed: {}", e);
-            std::process::exit(1);
-        }
-    }
-}
-
 fn branches(session_id_or_name: &str) {
     let config = CliConfig::load();
     let store = require_dag_store(&config);
@@ -419,28 +293,6 @@ fn causal_sort(nodes: &[vlinder_core::domain::DagNode]) -> Vec<vlinder_core::dom
     }
 
     sorted
-}
-
-/// Parse "infer.ollama" into ServiceBackend::Infer(Ollama).
-fn parse_service_backend(s: &str) -> Option<ServiceBackend> {
-    let (service_str, backend_str) = s.split_once('.')?;
-    let service_type = ServiceType::from_str(service_str).ok()?;
-    ServiceBackend::from_parts(service_type, backend_str)
-}
-
-/// Extract sequence number from RequestDiagnostics JSON.
-fn extract_sequence(diagnostics: &[u8]) -> Sequence {
-    if diagnostics.is_empty() {
-        return Sequence::from(1u32);
-    }
-    #[derive(serde::Deserialize)]
-    struct Diag {
-        sequence: u32,
-    }
-    match serde_json::from_slice::<Diag>(diagnostics) {
-        Ok(d) => Sequence::from(d.sequence),
-        Err(_) => Sequence::from(1u32),
-    }
 }
 
 /// Resolve a user-provided string (UUID or petname) to a SessionId.
