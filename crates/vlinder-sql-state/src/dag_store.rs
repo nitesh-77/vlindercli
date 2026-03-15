@@ -1144,7 +1144,8 @@ mod tests {
     #[test]
     fn latest_node_hash_returns_none_for_empty_session() {
         let store = test_store();
-        let session_id = SessionId::try_from("nonexistent".to_string()).unwrap();
+        let session_id =
+            SessionId::try_from("00000000-0000-0000-0000-000000000000".to_string()).unwrap();
         let hash = store.latest_node_hash(&session_id).unwrap();
         assert_eq!(hash, None);
     }
@@ -1219,7 +1220,7 @@ mod tests {
     fn create_timeline_returns_auto_id() {
         let store = test_store();
 
-        let session_id = SessionId::try_from("sess-1".to_string()).unwrap();
+        let session_id = sess();
         let fork = DagNodeId::from("abc123".to_string());
         let id = store
             .create_timeline("repair-1", &session_id, None, Some(&fork))
@@ -1238,7 +1239,7 @@ mod tests {
     fn create_timeline_with_parent() {
         let store = test_store();
 
-        let session_id = SessionId::try_from("sess-1".to_string()).unwrap();
+        let session_id = sess();
         let parent_id = store
             .create_timeline("main", &session_id, None, None)
             .unwrap();
@@ -1254,7 +1255,7 @@ mod tests {
     #[test]
     fn get_timeline_by_branch() {
         let store = test_store();
-        let session_id = SessionId::try_from("sess-1".to_string()).unwrap();
+        let session_id = sess();
         store
             .create_timeline("main", &session_id, None, None)
             .unwrap();
@@ -1271,7 +1272,7 @@ mod tests {
     #[test]
     fn seal_timeline_sets_broken_at() {
         let store = test_store();
-        let session_id = SessionId::try_from("sess-1".to_string()).unwrap();
+        let session_id = sess();
         let id = store
             .create_timeline("main", &session_id, None, None)
             .unwrap();
@@ -1288,7 +1289,7 @@ mod tests {
     #[test]
     fn rename_timeline_updates_branch_name() {
         let store = test_store();
-        let session_id = SessionId::try_from("sess-1".to_string()).unwrap();
+        let session_id = sess();
         let id = store
             .create_timeline("main", &session_id, None, None)
             .unwrap();
