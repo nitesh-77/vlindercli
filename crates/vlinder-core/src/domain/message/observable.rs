@@ -419,6 +419,22 @@ impl ObservableMessage {
         }
     }
 
+    /// Restore payload from a separate storage column.
+    ///
+    /// Needed because payload is `#[serde(skip)]` on some message types,
+    /// so it's lost during JSON round-trip through `message_blob`.
+    pub fn set_payload(&mut self, payload: Vec<u8>) {
+        match self {
+            ObservableMessage::Invoke(m) => m.payload = payload,
+            ObservableMessage::Request(m) => m.payload = payload,
+            ObservableMessage::Response(m) => m.payload = payload,
+            ObservableMessage::Complete(m) => m.payload = payload,
+            ObservableMessage::Delegate(m) => m.payload = payload,
+            ObservableMessage::Repair(m) => m.payload = payload,
+            ObservableMessage::Fork(_) => {}
+        }
+    }
+
     /// Extract (from, to) routing pair.
     pub fn from_to(&self) -> (String, String) {
         match self {

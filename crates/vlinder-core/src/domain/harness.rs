@@ -11,9 +11,9 @@ use std::sync::Arc;
 
 use crate::domain::Session;
 use crate::domain::{
-    AgentId, DagNodeId, ForkMessage, HarnessType, InvokeDiagnostics, InvokeMessage, JobId,
-    JobStatus, MessageQueue, Operation, Registry, RepairMessage, ResourceId, Sequence,
-    ServiceBackend, SessionId, SessionStartMessage, SubmissionId, TimelineId,
+    AgentId, DagNodeId, DagStore, ForkMessage, HarnessType, InvokeDiagnostics, InvokeMessage,
+    JobId, JobStatus, MessageQueue, MessageType, Operation, Registry, RepairMessage, ResourceId,
+    Sequence, ServiceBackend, SessionId, SessionStartMessage, SubmissionId, TimelineId,
 };
 
 /// Common harness operations shared across all harness types.
@@ -98,6 +98,23 @@ pub struct ForkParams {
     pub parent_timeline_id: i64,
 }
 
+/// Build an enriched payload from DAG-derived history.
+///
+/// Each invoke payload already contains the full conversation history up to
+/// that point, so we only need the last invoke + last complete to reconstruct.
+fn build_payload(
+    last_invoke_payload: Option<&str>,
+    last_complete_payload: Option<&str>,
+    current_input: &str,
+) -> String {
+    match (last_invoke_payload, last_complete_payload) {
+        (Some(invoke), Some(complete)) => {
+            format!("{}\nAgent: {}\nUser: {}", invoke, complete, current_input)
+        }
+        _ => format!("User: {}", current_input),
+    }
+}
+
 // ============================================================================
 // CoreHarness — canonical implementation
 // ============================================================================
@@ -114,6 +131,7 @@ pub struct CoreHarness {
     harness_type: HarnessType,
     queue: Arc<dyn MessageQueue + Send + Sync>,
     registry: Arc<dyn Registry>,
+    store: Arc<dyn DagStore>,
     session: Option<Session>,
     /// Last SubmissionId — parent for Merkle chaining (ADR 081).
     last_submission_id: Option<String>,
@@ -134,12 +152,14 @@ impl CoreHarness {
     pub fn new(
         queue: Arc<dyn MessageQueue + Send + Sync>,
         registry: Arc<dyn Registry>,
+        store: Arc<dyn DagStore>,
         harness_type: HarnessType,
     ) -> Self {
         Self {
             harness_type,
             queue,
             registry,
+            store,
             session: None,
             last_submission_id: None,
             last_state: None,
@@ -150,20 +170,11 @@ impl CoreHarness {
         }
     }
 
-    /// Record an agent response to the in-memory session.
-    ///
-    /// Clears the pending question and appends the completed turn to history.
-    /// If state tracking is active (ADR 055), promotes pending_state to last_state.
-    fn record_response(&mut self, response: &str) {
-        if let Some(session) = self.session.as_mut() {
-            // Take pending_state and promote it to last_state
-            let state = self.pending_state.take();
-
-            session.record_agent_response(response);
-
-            if state.is_some() {
-                self.last_state = state;
-            }
+    /// Promote pending state after a completed invocation (ADR 055).
+    fn record_response(&mut self) {
+        let state = self.pending_state.take();
+        if state.is_some() {
+            self.last_state = state;
         }
     }
 
@@ -193,14 +204,28 @@ impl CoreHarness {
             .ok_or_else(|| format!("no runtime available for agent: {}", agent_id))?;
 
         let (submission, session_id, payload) = if let Some(session) = self.session.as_mut() {
-            let enriched_payload = session.build_payload(input);
+            let timeline_id: i64 = self.timeline.as_str().parse().unwrap_or(0);
+            let last_invoke_payload = self
+                .store
+                .latest_node_on_timeline(timeline_id, Some(MessageType::Invoke))
+                .unwrap_or(None)
+                .map(|n| String::from_utf8_lossy(n.payload()).to_string());
+            let last_complete_payload = self
+                .store
+                .latest_node_on_timeline(timeline_id, Some(MessageType::Complete))
+                .unwrap_or(None)
+                .map(|n| String::from_utf8_lossy(n.payload()).to_string());
+            let enriched_payload = build_payload(
+                last_invoke_payload.as_deref(),
+                last_complete_payload.as_deref(),
+                input,
+            );
             let parent = self.last_submission_id.as_deref().unwrap_or("");
             let submission = SubmissionId::content_addressed(
                 enriched_payload.as_bytes(),
                 session.session.as_str(),
                 parent,
             );
-            session.record_user_input(input, submission.clone());
             self.last_submission_id = Some(submission.as_str().to_string());
             (submission, session.session.clone(), enriched_payload)
         } else {
@@ -278,7 +303,7 @@ impl Harness for CoreHarness {
         if complete.state.is_some() {
             self.pending_state = complete.state;
         }
-        self.record_response(&result);
+        self.record_response();
         Ok(result)
     }
 
@@ -343,7 +368,7 @@ impl Harness for CoreHarness {
         if complete.state.is_some() {
             self.pending_state = complete.state;
         }
-        self.record_response(&result);
+        self.record_response();
         Ok(result)
     }
 }
@@ -351,18 +376,21 @@ impl Harness for CoreHarness {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{InMemoryRegistry, InMemorySecretStore, RuntimeType, SecretStore};
+    use crate::domain::{
+        InMemoryDagStore, InMemoryRegistry, InMemorySecretStore, RuntimeType, SecretStore,
+    };
     use crate::queue::InMemoryQueue;
 
     #[test]
     fn harness_type_is_cli() {
         let queue = Arc::new(InMemoryQueue::new());
-        let store: Arc<dyn SecretStore> = Arc::new(InMemorySecretStore::new());
-        let registry = InMemoryRegistry::new(store);
+        let secret_store: Arc<dyn SecretStore> = Arc::new(InMemorySecretStore::new());
+        let registry = InMemoryRegistry::new(secret_store);
         registry.register_runtime(RuntimeType::Container);
         let registry: Arc<dyn Registry> = Arc::new(registry);
+        let store: Arc<dyn DagStore> = Arc::new(InMemoryDagStore::new());
 
-        let harness = CoreHarness::new(queue, registry, HarnessType::Cli);
+        let harness = CoreHarness::new(queue, registry, store, HarnessType::Cli);
 
         assert_eq!(harness.harness_type(), HarnessType::Cli);
     }

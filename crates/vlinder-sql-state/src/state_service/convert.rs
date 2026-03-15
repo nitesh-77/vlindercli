@@ -59,13 +59,20 @@ impl TryFrom<proto::DagNode> for DagNode {
             .parse()
             .map_err(|e| format!("invalid created_at: {}", e))?;
 
-        let message: ObservableMessage = node
+        let mut message: ObservableMessage = node
             .message_blob
             .as_ref()
             .ok_or_else(|| "missing message_blob".to_string())
             .and_then(|blob| {
                 serde_json::from_str(blob).map_err(|e| format!("invalid message_blob JSON: {}", e))
             })?;
+
+        // Payload is #[serde(skip)] on most message types, so it's lost
+        // during JSON round-trip through message_blob. Restore it from
+        // the dedicated proto field.
+        if !node.payload.is_empty() {
+            message.set_payload(node.payload);
+        }
 
         Ok(Self {
             id: DagNodeId::from(node.hash),

@@ -127,13 +127,19 @@ fn row_to_dag_node(row: &rusqlite::Row) -> Result<DagNode, rusqlite::Error> {
         .map(|dt| dt.with_timezone(&Utc))
         .unwrap_or_default();
     let blob: String = row.get(3)?;
-    let message: ObservableMessage = serde_json::from_str(&blob).map_err(|e| {
+    let payload: Vec<u8> = row.get(4)?;
+    let mut message: ObservableMessage = serde_json::from_str(&blob).map_err(|e| {
         rusqlite::Error::FromSqlConversionFailure(
             3,
             rusqlite::types::Type::Text,
             format!("invalid message_blob JSON: {}", e).into(),
         )
     })?;
+    // Payload is #[serde(skip)] on several message types, so patch it back
+    // from the dedicated column.
+    if !payload.is_empty() {
+        message.set_payload(payload);
+    }
     Ok(DagNode {
         id: DagNodeId::from(row.get::<_, String>(0)?),
         parent_id: DagNodeId::from(row.get::<_, String>(1)?),
@@ -143,7 +149,7 @@ fn row_to_dag_node(row: &rusqlite::Row) -> Result<DagNode, rusqlite::Error> {
 }
 
 /// Column list for queries that return full DagNodes.
-const DAG_NODE_COLUMNS: &str = "hash, parent_hash, created_at, message_blob";
+const DAG_NODE_COLUMNS: &str = "hash, parent_hash, created_at, message_blob, payload";
 
 impl DagStore for SqliteDagStore {
     fn insert_node(&self, node: &DagNode) -> Result<(), String> {
@@ -600,7 +606,6 @@ impl DagStore for SqliteDagStore {
             let name: String = row.get(1)?;
             let agent: String = row.get(2)?;
             Ok(Session {
-                open: None,
                 session: SessionId::try_from(id).map_err(|e| {
                     rusqlite::Error::FromSqlConversionFailure(
                         0,
@@ -610,7 +615,6 @@ impl DagStore for SqliteDagStore {
                 })?,
                 name,
                 agent,
-                history: Vec::new(),
             })
         })
         .optional()
@@ -628,7 +632,6 @@ impl DagStore for SqliteDagStore {
             let name: String = row.get(1)?;
             let agent: String = row.get(2)?;
             Ok(Session {
-                open: None,
                 session: SessionId::try_from(id).map_err(|e| {
                     rusqlite::Error::FromSqlConversionFailure(
                         0,
@@ -638,7 +641,6 @@ impl DagStore for SqliteDagStore {
                 })?,
                 name,
                 agent,
-                history: Vec::new(),
             })
         })
         .optional()

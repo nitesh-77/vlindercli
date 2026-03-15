@@ -407,11 +407,9 @@ impl DagStore for GrpcStateClient {
             Some(s) => {
                 let sid = vlinder_core::domain::SessionId::try_from(s.id)?;
                 Ok(Some(vlinder_core::domain::Session {
-                    open: None,
                     session: sid,
                     name: s.name,
                     agent: s.agent_name,
-                    history: Vec::new(),
                 }))
             }
             None => Ok(None),
@@ -435,11 +433,9 @@ impl DagStore for GrpcStateClient {
             Some(s) => {
                 let sid = vlinder_core::domain::SessionId::try_from(s.id)?;
                 Ok(Some(vlinder_core::domain::Session {
-                    open: None,
                     session: sid,
                     name: s.name,
                     agent: s.agent_name,
-                    history: Vec::new(),
                 }))
             }
             None => Ok(None),

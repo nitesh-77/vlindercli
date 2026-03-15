@@ -200,7 +200,10 @@ fn run_harness_worker(config: &Config, shutdown: &AtomicBool) {
         GrpcRegistryClient::connect(&registry_addr).expect("Failed to connect to registry"),
     );
 
-    let harness = CoreHarness::new(queue, registry, HarnessType::Grpc);
+    let store =
+        crate::state_factory::from_config(config).expect("Failed to connect to state service");
+
+    let harness = CoreHarness::new(queue, registry, store, HarnessType::Grpc);
 
     // Parse address, stripping http:// prefix if present
     let addr_str = config
