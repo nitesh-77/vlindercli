@@ -38,11 +38,6 @@ pub enum SessionCommand {
         /// Branch name (must match a Timeline created by fork)
         branch: String,
     },
-    /// Seal old timeline and promote the repaired branch
-    Promote {
-        /// Branch name to promote
-        branch: String,
-    },
     /// List branches (timelines) forked from a session
     Branches {
         /// Session ID
@@ -60,7 +55,6 @@ pub fn execute(cmd: SessionCommand) {
             name,
         } => fork(&session_id, &from, &name),
         SessionCommand::Repair { branch } => repair(&branch),
-        SessionCommand::Promote { branch } => promote(&branch),
         SessionCommand::Branches { session_id } => branches(&session_id),
     }
 }
@@ -342,37 +336,6 @@ fn repair(branch: &str) {
             std::process::exit(1);
         }
     }
-}
-
-fn promote(branch: &str) {
-    let config = CliConfig::load();
-    let store = require_dag_store(&config);
-
-    let timeline = store
-        .get_timeline_by_branch(branch)
-        .unwrap_or_else(|e| {
-            eprintln!("Failed to look up timeline: {}", e);
-            std::process::exit(1);
-        })
-        .unwrap_or_else(|| {
-            eprintln!("Timeline '{}' not found", branch);
-            std::process::exit(1);
-        });
-
-    let parent_id = timeline.parent_timeline_id.unwrap_or_else(|| {
-        eprintln!("Timeline '{}' has no parent to promote over", branch);
-        std::process::exit(1);
-    });
-
-    store.seal_timeline(parent_id).unwrap_or_else(|e| {
-        eprintln!("Failed to seal parent timeline: {}", e);
-        std::process::exit(1);
-    });
-
-    println!(
-        "Promoted '{}': parent timeline {} sealed",
-        branch, parent_id
-    );
 }
 
 fn branches(session_id_or_name: &str) {

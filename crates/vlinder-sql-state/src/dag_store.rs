@@ -404,41 +404,6 @@ impl DagStore for SqliteDagStore {
             .map_err(|e| format!("get_timeline query failed: {}", e))
     }
 
-    fn seal_timeline(&self, id: i64) -> Result<(), String> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "UPDATE timelines SET broken_at = ?1 WHERE id = ?2",
-            rusqlite::params![Utc::now().to_rfc3339(), id],
-        )
-        .map_err(|e| format!("seal_timeline failed: {}", e))?;
-        Ok(())
-    }
-
-    fn rename_timeline(&self, id: i64, new_name: &str) -> Result<(), String> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "UPDATE timelines SET branch_name = ?1 WHERE id = ?2",
-            rusqlite::params![new_name, id],
-        )
-        .map_err(|e| format!("rename_timeline failed: {}", e))?;
-        Ok(())
-    }
-
-    fn is_timeline_sealed(&self, id: i64) -> Result<bool, String> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn
-            .prepare("SELECT broken_at FROM timelines WHERE id = ?1")
-            .map_err(|e| format!("is_timeline_sealed prepare failed: {}", e))?;
-
-        let broken_at: Option<String> = stmt
-            .query_row(rusqlite::params![id], |row| row.get(0))
-            .optional()
-            .map_err(|e| format!("is_timeline_sealed query failed: {}", e))?
-            .flatten();
-
-        Ok(broken_at.is_some())
-    }
-
     fn list_sessions(&self) -> Result<Vec<SessionSummary>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
@@ -1106,48 +1071,6 @@ mod tests {
             .get_timeline_by_branch("nonexistent")
             .unwrap()
             .is_none());
-    }
-
-    #[test]
-    fn seal_timeline_sets_broken_at() {
-        let store = test_store();
-        let session_id = sess();
-        let id = store
-            .create_timeline("main", &session_id, None, None)
-            .unwrap();
-
-        assert!(!store.is_timeline_sealed(id).unwrap());
-
-        store.seal_timeline(id).unwrap();
-        assert!(store.is_timeline_sealed(id).unwrap());
-
-        let tl = store.get_timeline(id).unwrap().unwrap();
-        assert!(tl.broken_at.is_some());
-    }
-
-    #[test]
-    fn rename_timeline_updates_branch_name() {
-        let store = test_store();
-        let session_id = sess();
-        let id = store
-            .create_timeline("main", &session_id, None, None)
-            .unwrap();
-
-        store.rename_timeline(id, "broken-main-2026-01-01").unwrap();
-
-        assert!(store.get_timeline_by_branch("main").unwrap().is_none());
-        let tl = store
-            .get_timeline_by_branch("broken-main-2026-01-01")
-            .unwrap()
-            .unwrap();
-        assert_eq!(tl.id, id);
-    }
-
-    #[test]
-    fn is_timeline_sealed_returns_false_for_nonexistent() {
-        let store = test_store();
-        // Non-existent timeline → not sealed (no row → broken_at is None)
-        assert!(!store.is_timeline_sealed(999).unwrap());
     }
 
     // ========================================================================

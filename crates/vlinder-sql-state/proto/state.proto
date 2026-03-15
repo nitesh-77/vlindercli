@@ -23,10 +23,6 @@ service StateService {
   rpc CreateTimeline(CreateTimelineRequest) returns (CreateTimelineResponse);
   rpc GetTimelineByBranch(GetTimelineByBranchRequest) returns (GetTimelineResponse);
   rpc GetTimeline(GetTimelineByIdRequest) returns (GetTimelineResponse);
-  rpc SealTimeline(SealTimelineRequest) returns (SealTimelineResponse);
-  rpc RenameTimeline(RenameTimelineRequest) returns (RenameTimelineResponse);
-  rpc IsTimelineSealed(IsTimelineSealedRequest) returns (IsTimelineSealedResponse);
-
   // Session CRUD
   rpc CreateSession(CreateSessionRequest) returns (CreateSessionResponse);
   rpc GetSession(GetSessionRequest) returns (GetSessionResponse);
@@ -134,15 +130,6 @@ message CreateTimelineResponse { int64 id = 1; }
 message GetTimelineByBranchRequest { string branch_name = 1; }
 message GetTimelineByIdRequest { int64 id = 1; }
 message GetTimelineResponse { optional Timeline timeline = 1; }
-
-message SealTimelineRequest { int64 id = 1; }
-message SealTimelineResponse { bool success = 1; optional string error = 2; }
-
-message RenameTimelineRequest { int64 id = 1; string new_name = 2; }
-message RenameTimelineResponse { bool success = 1; optional string error = 2; }
-
-message IsTimelineSealedRequest { int64 id = 1; }
-message IsTimelineSealedResponse { bool sealed = 1; }
 
 // =============================================================================
 // Session CRUD

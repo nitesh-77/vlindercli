@@ -230,51 +230,6 @@ impl DagStore for GrpcStateClient {
         }
     }
 
-    fn seal_timeline(&self, id: i64) -> Result<(), String> {
-        let request = proto::SealTimelineRequest { id };
-        let mut client = self.client.clone();
-        let response = self
-            .runtime
-            .block_on(async { client.seal_timeline(request).await })
-            .map_err(|e| e.to_string())?;
-
-        let resp = response.into_inner();
-        if resp.success {
-            Ok(())
-        } else {
-            Err(resp.error.unwrap_or_else(|| "unknown error".to_string()))
-        }
-    }
-
-    fn rename_timeline(&self, id: i64, new_name: &str) -> Result<(), String> {
-        let request = proto::RenameTimelineRequest {
-            id,
-            new_name: new_name.to_string(),
-        };
-        let mut client = self.client.clone();
-        let response = self
-            .runtime
-            .block_on(async { client.rename_timeline(request).await })
-            .map_err(|e| e.to_string())?;
-
-        let resp = response.into_inner();
-        if resp.success {
-            Ok(())
-        } else {
-            Err(resp.error.unwrap_or_else(|| "unknown error".to_string()))
-        }
-    }
-
-    fn is_timeline_sealed(&self, id: i64) -> Result<bool, String> {
-        let request = proto::IsTimelineSealedRequest { id };
-        let mut client = self.client.clone();
-        let response = self
-            .runtime
-            .block_on(async { client.is_timeline_sealed(request).await })
-            .map_err(|e| e.to_string())?;
-        Ok(response.into_inner().sealed)
-    }
-
     fn list_sessions(&self) -> Result<Vec<vlinder_core::domain::SessionSummary>, String> {
         let mut client = self.client.clone();
         let response = self

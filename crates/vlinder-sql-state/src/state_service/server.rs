@@ -10,12 +10,10 @@ use super::proto::{
     GetNodesBySubmissionResponse, GetSessionByNameRequest, GetSessionNodesRequest,
     GetSessionNodesResponse, GetSessionRequest, GetSessionResponse, GetTimelineByBranchRequest,
     GetTimelineByIdRequest, GetTimelineResponse, GetTimelinesForSessionRequest,
-    GetTimelinesForSessionResponse, InsertNodeRequest, InsertNodeResponse, IsTimelineSealedRequest,
-    IsTimelineSealedResponse, LatestNodeHashRequest, LatestNodeHashResponse,
-    LatestNodeOnTimelineRequest, LatestNodeOnTimelineResponse, LatestStateRequest,
-    LatestStateResponse, ListSessionsRequest, ListSessionsResponse, PingRequest,
-    RenameTimelineRequest, RenameTimelineResponse, SealTimelineRequest, SealTimelineResponse,
-    SemVer, SetCheckoutStateRequest, SetCheckoutStateResponse,
+    GetTimelinesForSessionResponse, InsertNodeRequest, InsertNodeResponse, LatestNodeHashRequest,
+    LatestNodeHashResponse, LatestNodeOnTimelineRequest, LatestNodeOnTimelineResponse,
+    LatestStateRequest, LatestStateResponse, ListSessionsRequest, ListSessionsResponse,
+    PingRequest, SemVer, SetCheckoutStateRequest, SetCheckoutStateResponse,
 };
 use vlinder_core::domain::{DagNodeId, DagStore, MessageType, SessionId};
 
@@ -216,52 +214,6 @@ impl StateService for StateServiceServer {
             .map_err(Status::internal)?
             .map(|t| t.into());
         Ok(Response::new(GetTimelineResponse { timeline }))
-    }
-
-    async fn seal_timeline(
-        &self,
-        request: Request<SealTimelineRequest>,
-    ) -> Result<Response<SealTimelineResponse>, Status> {
-        let req = request.into_inner();
-        match self.store.seal_timeline(req.id) {
-            Ok(()) => Ok(Response::new(SealTimelineResponse {
-                success: true,
-                error: None,
-            })),
-            Err(e) => Ok(Response::new(SealTimelineResponse {
-                success: false,
-                error: Some(e),
-            })),
-        }
-    }
-
-    async fn rename_timeline(
-        &self,
-        request: Request<RenameTimelineRequest>,
-    ) -> Result<Response<RenameTimelineResponse>, Status> {
-        let req = request.into_inner();
-        match self.store.rename_timeline(req.id, &req.new_name) {
-            Ok(()) => Ok(Response::new(RenameTimelineResponse {
-                success: true,
-                error: None,
-            })),
-            Err(e) => Ok(Response::new(RenameTimelineResponse {
-                success: false,
-                error: Some(e),
-            })),
-        }
-    }
-
-    async fn is_timeline_sealed(
-        &self,
-        request: Request<IsTimelineSealedRequest>,
-    ) -> Result<Response<IsTimelineSealedResponse>, Status> {
-        let req = request.into_inner();
-        let sealed = self
-            .store
-            .is_timeline_sealed(req.id)
-            .map_err(Status::internal)?;
-        Ok(Response::new(IsTimelineSealedResponse { sealed }))
     }
 
     // -------------------------------------------------------------------------

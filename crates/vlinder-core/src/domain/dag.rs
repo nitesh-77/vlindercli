@@ -217,15 +217,6 @@ pub trait DagStore: Send + Sync {
     /// Look up a timeline by its integer ID.
     fn get_timeline(&self, id: i64) -> Result<Option<Timeline>, String>;
 
-    /// Seal a timeline: set `broken_at` to now. Sealed timelines reject invocations.
-    fn seal_timeline(&self, id: i64) -> Result<(), String>;
-
-    /// Rename a timeline's branch name.
-    fn rename_timeline(&self, id: i64, new_name: &str) -> Result<(), String>;
-
-    /// Check whether a timeline has been sealed.
-    fn is_timeline_sealed(&self, id: i64) -> Result<bool, String>;
-
     /// List all sessions with summary information.
     fn list_sessions(&self) -> Result<Vec<SessionSummary>, String>;
 
@@ -407,31 +398,6 @@ impl DagStore for InMemoryDagStore {
     fn get_timeline(&self, id: i64) -> Result<Option<Timeline>, String> {
         let timelines = self.timelines.lock().unwrap();
         Ok(timelines.iter().find(|t| t.id == id).cloned())
-    }
-
-    fn seal_timeline(&self, id: i64) -> Result<(), String> {
-        let mut timelines = self.timelines.lock().unwrap();
-        if let Some(t) = timelines.iter_mut().find(|t| t.id == id) {
-            t.broken_at = Some(Utc::now());
-        }
-        Ok(())
-    }
-
-    fn rename_timeline(&self, id: i64, new_name: &str) -> Result<(), String> {
-        let mut timelines = self.timelines.lock().unwrap();
-        if let Some(t) = timelines.iter_mut().find(|t| t.id == id) {
-            t.branch_name = new_name.to_string();
-        }
-        Ok(())
-    }
-
-    fn is_timeline_sealed(&self, id: i64) -> Result<bool, String> {
-        let timelines = self.timelines.lock().unwrap();
-        Ok(timelines
-            .iter()
-            .find(|t| t.id == id)
-            .map(|t| t.broken_at.is_some())
-            .unwrap_or(false))
     }
 
     fn list_sessions(&self) -> Result<Vec<SessionSummary>, String> {
