@@ -187,9 +187,9 @@ fn fork(session_id_or_name: &str, from_hash: &str, branch_name: &str) {
     });
 
     // Send ForkMessage through the harness/queue (CQRS: both SQL and git react)
+    // Fork creates a branch within the existing session — no new session needed.
     let harness = connect_harness(&config);
     let timeline = TimelineId::main();
-    let session_id = harness.start_session(&agent_name, timeline.clone());
 
     let params = ForkParams {
         agent_name,
