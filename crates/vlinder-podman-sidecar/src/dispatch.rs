@@ -332,7 +332,6 @@ pub fn handle_repair(
         repair.state.clone(),
         vlinder_core::domain::InvokeDiagnostics {
             harness_version: env!("CARGO_PKG_VERSION").to_string(),
-            history_turns: 0,
         },
         repair.dag_parent.clone(),
     );

@@ -29,8 +29,6 @@ use super::service_type::ServiceType;
 pub struct InvokeDiagnostics {
     /// Harness version (e.g., `env!("CARGO_PKG_VERSION")`).
     pub harness_version: String,
-    /// Number of history turns included in the enriched payload.
-    pub history_turns: u32,
 }
 
 // ============================================================================
@@ -293,7 +291,6 @@ mod tests {
     fn invoke_diagnostics_json_round_trip() {
         let diag = InvokeDiagnostics {
             harness_version: "0.1.0".to_string(),
-            history_turns: 3,
         };
         let json = serde_json::to_string(&diag).unwrap();
         let back: InvokeDiagnostics = serde_json::from_str(&json).unwrap();
@@ -304,7 +301,6 @@ mod tests {
     fn invoke_diagnostics_toml_round_trip() {
         let diag = InvokeDiagnostics {
             harness_version: "0.1.0".to_string(),
-            history_turns: 3,
         };
         let toml_str = toml::to_string_pretty(&diag).unwrap();
         let back: InvokeDiagnostics = toml::from_str(&toml_str).unwrap();

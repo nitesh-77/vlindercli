@@ -65,7 +65,6 @@ fn container_runtime_executes_echo_agent() {
         None,
         InvokeDiagnostics {
             harness_version: String::new(),
-            history_turns: 0,
         },
         String::new(),
     );

@@ -388,7 +388,6 @@ impl MessageQueue for NatsQueue {
                 .and_then(|s| serde_json::from_str(&s).ok())
                 .unwrap_or_else(|| InvokeDiagnostics {
                     harness_version: String::new(),
-                    history_turns: 0,
                 });
 
             let msg = InvokeMessage {
@@ -1192,7 +1191,6 @@ pub fn from_nats_headers(
                 .and_then(|s| serde_json::from_str(s).ok())
                 .unwrap_or_else(|| InvokeDiagnostics {
                     harness_version: String::new(),
-                    history_turns: 0,
                 });
 
             let dag_parent =
@@ -2024,7 +2022,6 @@ mod tests {
             state,
             InvokeDiagnostics {
                 harness_version: "0.1.0".to_string(),
-                history_turns: 0,
             },
             DagNodeId::root(),
         )

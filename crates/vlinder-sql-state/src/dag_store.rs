@@ -857,7 +857,6 @@ mod tests {
             state,
             InvokeDiagnostics {
                 harness_version: "0.1.0".to_string(),
-                history_turns: 0,
             },
             DagNodeId::root(),
         )
@@ -1055,7 +1054,6 @@ mod tests {
             None,
             InvokeDiagnostics {
                 harness_version: "0.1.0".to_string(),
-                history_turns: 0,
             },
             DagNodeId::root(),
         )
@@ -1073,7 +1071,6 @@ mod tests {
             None,
             InvokeDiagnostics {
                 harness_version: "0.1.0".to_string(),
-                history_turns: 0,
             },
             DagNodeId::root(),
         )

@@ -211,14 +211,8 @@ impl CoreHarness {
             self.registry
                 .create_job(submission.clone(), agent_id.clone(), input.to_string());
 
-        let history_turns = self
-            .session
-            .as_ref()
-            .map(|s| s.history.len() as u32)
-            .unwrap_or(0);
         let invoke_diag = InvokeDiagnostics {
             harness_version: env!("CARGO_PKG_VERSION").to_string(),
-            history_turns,
         };
 
         let invoke = InvokeMessage::new(

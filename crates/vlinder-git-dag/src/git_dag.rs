@@ -763,7 +763,6 @@ mod tests {
             None,
             InvokeDiagnostics {
                 harness_version: "0.1.0".to_string(),
-                history_turns: 3,
             },
             DagNodeId::root(),
         );
@@ -1083,7 +1082,6 @@ mod tests {
         assert!(!show("protocol_version").unwrap().is_empty());
         let diag = show("diagnostics.toml").unwrap();
         assert!(diag.contains("harness_version"), "diag: {}", diag);
-        assert!(diag.contains("history_turns"), "diag: {}", diag);
     }
 
     #[test]
@@ -1203,7 +1201,6 @@ mod tests {
             Some("abc123state".to_string()),
             InvokeDiagnostics {
                 harness_version: "0.1.0".to_string(),
-                history_turns: 0,
             },
             DagNodeId::root(),
         );
@@ -1378,7 +1375,6 @@ mod tests {
             None,
             InvokeDiagnostics {
                 harness_version: "0.1.0".to_string(),
-                history_turns: 0,
             },
             DagNodeId::root(),
         );

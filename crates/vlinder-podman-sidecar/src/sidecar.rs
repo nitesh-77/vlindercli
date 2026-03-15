@@ -165,7 +165,6 @@ impl Sidecar {
                     None,
                     InvokeDiagnostics {
                         harness_version: env!("CARGO_PKG_VERSION").to_string(),
-                        history_turns: 0,
                     },
                     DagNodeId::root(),
                 );
