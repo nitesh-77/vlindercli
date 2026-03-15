@@ -127,7 +127,7 @@ pub use runtime::{Runtime, RuntimeType};
 // ============================================================================
 
 pub use harness::{CoreHarness, ForkParams, Harness, RepairParams};
-pub use session::{HistoryEntry, Session};
+pub use session::Session;
 
 // ============================================================================
 // Secret Store (ADR 083)
