@@ -133,8 +133,6 @@ pub struct CoreHarness {
     registry: Arc<dyn Registry>,
     store: Arc<dyn DagStore>,
     session: Option<Session>,
-    /// Last SubmissionId — parent for Merkle chaining (ADR 081).
-    last_submission_id: Option<String>,
     /// Final state hash from the last completed invocation (ADR 055).
     last_state: Option<String>,
     /// Pending state from a just-completed invocation, not yet committed.
@@ -161,7 +159,6 @@ impl CoreHarness {
             registry,
             store,
             session: None,
-            last_submission_id: None,
             last_state: None,
             pending_state: None,
             timeline: TimelineId::main(),
@@ -205,10 +202,12 @@ impl CoreHarness {
 
         let (submission, session_id, payload) = if let Some(session) = self.session.as_mut() {
             let timeline_id: i64 = self.timeline.as_str().parse().unwrap_or(0);
-            let last_invoke_payload = self
+            let last_invoke_node = self
                 .store
                 .latest_node_on_timeline(timeline_id, Some(MessageType::Invoke))
-                .unwrap_or(None)
+                .unwrap_or(None);
+            let last_invoke_payload = last_invoke_node
+                .as_ref()
                 .map(|n| String::from_utf8_lossy(n.payload()).to_string());
             let last_complete_payload = self
                 .store
@@ -220,13 +219,15 @@ impl CoreHarness {
                 last_complete_payload.as_deref(),
                 input,
             );
-            let parent = self.last_submission_id.as_deref().unwrap_or("");
+            let parent_submission = last_invoke_node
+                .as_ref()
+                .map(|n| n.submission_id().as_str().to_string())
+                .unwrap_or_default();
             let submission = SubmissionId::content_addressed(
                 enriched_payload.as_bytes(),
                 session.session.as_str(),
-                parent,
+                &parent_submission,
             );
-            self.last_submission_id = Some(submission.as_str().to_string());
             (submission, session.session.clone(), enriched_payload)
         } else {
             (SubmissionId::new(), SessionId::new(), input.to_string())
@@ -338,10 +339,16 @@ impl Harness for CoreHarness {
             .map(|s| s.session.clone())
             .unwrap_or_default();
 
+        let parent_submission = self
+            .store
+            .get_node(&params.dag_parent)
+            .unwrap_or(None)
+            .map(|n| n.submission_id().as_str().to_string())
+            .unwrap_or_default();
         let submission = SubmissionId::content_addressed(
             &params.payload,
             session_id.as_str(),
-            self.last_submission_id.as_deref().unwrap_or(""),
+            &parent_submission,
         );
 
         let repair_msg = RepairMessage::new(
