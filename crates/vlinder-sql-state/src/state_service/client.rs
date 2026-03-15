@@ -3,7 +3,7 @@
 use tonic::transport::Channel;
 
 use super::proto::{self, state_service_client::StateServiceClient};
-use vlinder_core::domain::{DagNode, DagNodeId, DagStore, Timeline};
+use vlinder_core::domain::{Branch, DagNode, DagNodeId, DagStore};
 
 /// DagStore implementation that makes gRPC calls to a remote State Service.
 pub struct GrpcStateClient {
@@ -176,56 +176,54 @@ impl DagStore for GrpcStateClient {
     }
 
     // -------------------------------------------------------------------------
-    // Timeline methods (ADR 093)
+    // Branch methods
     // -------------------------------------------------------------------------
 
-    fn create_timeline(
+    fn create_branch(
         &self,
-        branch_name: &str,
+        name: &str,
         session_id: &vlinder_core::domain::SessionId,
-        parent_id: Option<i64>,
         fork_point: Option<&DagNodeId>,
     ) -> Result<i64, String> {
-        let request = proto::CreateTimelineRequest {
-            branch_name: branch_name.to_string(),
+        let request = proto::CreateBranchRequest {
+            name: name.to_string(),
             session_id: session_id.as_str().to_string(),
-            parent_id,
             fork_point: fork_point.map(|fp| fp.to_string()),
         };
         let mut client = self.client.clone();
         let response = self
             .runtime
-            .block_on(async { client.create_timeline(request).await })
+            .block_on(async { client.create_branch(request).await })
             .map_err(|e| e.to_string())?;
         Ok(response.into_inner().id)
     }
 
-    fn get_timeline_by_branch(&self, branch_name: &str) -> Result<Option<Timeline>, String> {
-        let request = proto::GetTimelineByBranchRequest {
-            branch_name: branch_name.to_string(),
+    fn get_branch_by_name(&self, name: &str) -> Result<Option<Branch>, String> {
+        let request = proto::GetBranchByNameRequest {
+            name: name.to_string(),
         };
         let mut client = self.client.clone();
         let response = self
             .runtime
-            .block_on(async { client.get_timeline_by_branch(request).await })
+            .block_on(async { client.get_branch_by_name(request).await })
             .map_err(|e| e.to_string())?;
 
-        match response.into_inner().timeline {
-            Some(tl) => Ok(Some(tl.try_into()?)),
+        match response.into_inner().branch {
+            Some(b) => Ok(Some(b.try_into()?)),
             None => Ok(None),
         }
     }
 
-    fn get_timeline(&self, id: i64) -> Result<Option<Timeline>, String> {
-        let request = proto::GetTimelineByIdRequest { id };
+    fn get_branch(&self, id: i64) -> Result<Option<Branch>, String> {
+        let request = proto::GetBranchByIdRequest { id };
         let mut client = self.client.clone();
         let response = self
             .runtime
-            .block_on(async { client.get_timeline(request).await })
+            .block_on(async { client.get_branch(request).await })
             .map_err(|e| e.to_string())?;
 
-        match response.into_inner().timeline {
-            Some(tl) => Ok(Some(tl.try_into()?)),
+        match response.into_inner().branch {
+            Some(b) => Ok(Some(b.try_into()?)),
             None => Ok(None),
         }
     }
@@ -281,41 +279,41 @@ impl DagStore for GrpcStateClient {
         }
     }
 
-    fn get_timelines_for_session(
+    fn get_branches_for_session(
         &self,
         session_id: &vlinder_core::domain::SessionId,
-    ) -> Result<Vec<vlinder_core::domain::Timeline>, String> {
-        let request = proto::GetTimelinesForSessionRequest {
+    ) -> Result<Vec<Branch>, String> {
+        let request = proto::GetBranchesForSessionRequest {
             session_id: session_id.as_str().to_string(),
         };
 
         let mut client = self.client.clone();
         let response = self
             .runtime
-            .block_on(async { client.get_timelines_for_session(request).await })
+            .block_on(async { client.get_branches_for_session(request).await })
             .map_err(|e| e.to_string())?;
 
         response
             .into_inner()
-            .timelines
+            .branches
             .into_iter()
-            .map(|t| t.try_into())
+            .map(|b| b.try_into())
             .collect()
     }
 
-    fn latest_node_on_timeline(
+    fn latest_node_on_branch(
         &self,
-        timeline_id: i64,
+        branch_id: i64,
         message_type: Option<vlinder_core::domain::MessageType>,
     ) -> Result<Option<vlinder_core::domain::DagNode>, String> {
-        let request = proto::LatestNodeOnTimelineRequest {
-            timeline_id,
+        let request = proto::LatestNodeOnBranchRequest {
+            branch_id,
             message_type: message_type.map(|mt| mt.as_str().to_string()),
         };
         let mut client = self.client.clone();
         let response = self
             .runtime
-            .block_on(async { client.latest_node_on_timeline(request).await })
+            .block_on(async { client.latest_node_on_branch(request).await })
             .map_err(|e| e.to_string())?;
 
         match response.into_inner().node {
@@ -328,7 +326,7 @@ impl DagStore for GrpcStateClient {
         let mut client = self.client.clone();
         let req = proto::CreateSessionRequest {
             session: Some(proto::SessionProto {
-                id: session.session.as_str().to_string(),
+                id: session.id.as_str().to_string(),
                 name: session.name.clone(),
                 agent_name: session.agent.clone(),
             }),
@@ -361,11 +359,11 @@ impl DagStore for GrpcStateClient {
         match resp.session {
             Some(s) => {
                 let sid = vlinder_core::domain::SessionId::try_from(s.id)?;
-                Ok(Some(vlinder_core::domain::Session {
-                    session: sid,
-                    name: s.name,
-                    agent: s.agent_name,
-                }))
+                Ok(Some(vlinder_core::domain::Session::new(
+                    sid,
+                    &s.agent_name,
+                    1,
+                )))
             }
             None => Ok(None),
         }
@@ -387,11 +385,11 @@ impl DagStore for GrpcStateClient {
         match resp.session {
             Some(s) => {
                 let sid = vlinder_core::domain::SessionId::try_from(s.id)?;
-                Ok(Some(vlinder_core::domain::Session {
-                    session: sid,
-                    name: s.name,
-                    agent: s.agent_name,
-                }))
+                Ok(Some(vlinder_core::domain::Session::new(
+                    sid,
+                    &s.agent_name,
+                    1,
+                )))
             }
             None => Ok(None),
         }

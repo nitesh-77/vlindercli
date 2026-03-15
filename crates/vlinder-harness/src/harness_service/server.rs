@@ -109,7 +109,6 @@ impl HarnessService for HarnessServiceServer {
                 agent_name: req.agent_name,
                 branch_name: req.branch_name,
                 fork_point: DagNodeId::from(req.fork_point),
-                parent_timeline_id: req.parent_timeline_id,
             };
             let session_id = SessionId::try_from(req.session_id)
                 .map_err(|e| format!("invalid session_id: {}", e))?;

@@ -200,7 +200,7 @@ fn resolve_branch(
     let store = require_dag_store(config);
 
     let timeline = store
-        .get_timeline_by_branch(branch)
+        .get_branch_by_name(branch)
         .unwrap_or_else(|e| {
             eprintln!("Failed to look up timeline: {}", e);
             std::process::exit(1);
@@ -220,7 +220,7 @@ fn resolve_branch(
 
     // Find the tip of the branch — latest node on timeline, falling back to fork_point
     let tip_hash = store
-        .latest_node_on_timeline(timeline.id, None)
+        .latest_node_on_branch(timeline.id, None)
         .unwrap_or_else(|e| {
             eprintln!("Failed to query latest node on timeline: {}", e);
             std::process::exit(1);

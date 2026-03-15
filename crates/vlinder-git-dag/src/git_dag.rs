@@ -296,11 +296,6 @@ impl GitDagWorker {
                 self.insert_field(&mut tb, "type", "fork")?;
                 self.insert_field(&mut tb, "branch_name", &m.branch_name)?;
                 self.insert_field(&mut tb, "fork_point", m.fork_point.as_str())?;
-                self.insert_field(
-                    &mut tb,
-                    "parent_timeline_id",
-                    &m.parent_timeline_id.to_string(),
-                )?;
             }
         }
 

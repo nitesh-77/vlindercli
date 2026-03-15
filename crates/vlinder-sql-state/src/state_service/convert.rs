@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 
 use super::proto;
 use vlinder_core::domain::{
-    DagNode, DagNodeId, ObservableMessage, SessionId, SessionSummary, Timeline,
+    Branch, DagNode, DagNodeId, ObservableMessage, SessionId, SessionSummary,
 };
 
 // =============================================================================
@@ -84,48 +84,47 @@ impl TryFrom<proto::DagNode> for DagNode {
 }
 
 // =============================================================================
-// Timeline → proto::Timeline
+// Branch → proto::Branch
 // =============================================================================
 
-impl From<Timeline> for proto::Timeline {
-    fn from(tl: Timeline) -> Self {
+impl From<Branch> for proto::Branch {
+    fn from(b: Branch) -> Self {
         Self {
-            id: tl.id,
-            branch_name: tl.branch_name,
-            session_id: tl.session_id.as_str().to_string(),
-            parent_timeline_id: tl.parent_timeline_id,
-            fork_point: tl.fork_point.map(|fp| fp.to_string()),
-            created_at: tl.created_at.to_rfc3339(),
-            broken_at: tl.broken_at.map(|dt| dt.to_rfc3339()),
-            head: None,
+            id: b.id,
+            name: b.name,
+            session_id: b.session_id.as_str().to_string(),
+            fork_point: b.fork_point.map(|fp| fp.to_string()),
+            head: b.head.map(|h| h.to_string()),
+            created_at: b.created_at.to_rfc3339(),
+            broken_at: b.broken_at.map(|dt| dt.to_rfc3339()),
         }
     }
 }
 
 // =============================================================================
-// proto::Timeline → Timeline
+// proto::Branch → Branch
 // =============================================================================
 
-impl TryFrom<proto::Timeline> for Timeline {
+impl TryFrom<proto::Branch> for Branch {
     type Error = String;
 
-    fn try_from(tl: proto::Timeline) -> Result<Self, Self::Error> {
-        let created_at: DateTime<Utc> = tl
+    fn try_from(b: proto::Branch) -> Result<Self, Self::Error> {
+        let created_at: DateTime<Utc> = b
             .created_at
             .parse()
             .map_err(|e| format!("invalid created_at: {}", e))?;
-        let broken_at = tl
+        let broken_at = b
             .broken_at
             .map(|s| s.parse::<DateTime<Utc>>())
             .transpose()
             .map_err(|e| format!("invalid broken_at: {}", e))?;
 
         Ok(Self {
-            id: tl.id,
-            branch_name: tl.branch_name,
-            session_id: SessionId::try_from(tl.session_id)?,
-            parent_timeline_id: tl.parent_timeline_id,
-            fork_point: tl.fork_point.map(DagNodeId::from),
+            id: b.id,
+            name: b.name,
+            session_id: SessionId::try_from(b.session_id)?,
+            fork_point: b.fork_point.map(DagNodeId::from),
+            head: b.head.map(DagNodeId::from),
             created_at,
             broken_at,
         })

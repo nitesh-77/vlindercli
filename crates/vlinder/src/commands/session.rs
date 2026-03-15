@@ -195,7 +195,6 @@ fn fork(session_id_or_name: &str, from_hash: &str, branch_name: &str) {
         agent_name,
         branch_name: branch_name.to_string(),
         fork_point: node.id.clone(),
-        parent_timeline_id: 1, // main timeline
     };
 
     harness
@@ -217,43 +216,33 @@ fn branches(session_id_or_name: &str) {
     let store = require_dag_store(&config);
     let session_id = resolve_session_id(&*store, session_id_or_name);
 
-    let timelines = store
-        .get_timelines_for_session(&session_id)
+    let branches = store
+        .get_branches_for_session(&session_id)
         .unwrap_or_else(|e| {
-            eprintln!("Failed to query timelines: {}", e);
+            eprintln!("Failed to query branches: {}", e);
             std::process::exit(1);
         });
 
-    if timelines.is_empty() {
+    if branches.is_empty() {
         println!("No branches for session '{}'", session_id);
         return;
     }
 
-    println!(
-        "{:<4} {:<24} {:<10} {:<10} FORK_POINT",
-        "ID", "BRANCH", "PARENT", "STATUS"
-    );
-    for t in &timelines {
-        let status = if t.broken_at.is_some() {
+    println!("{:<4} {:<24} {:<10} FORK_POINT", "ID", "BRANCH", "STATUS");
+    for b in &branches {
+        let status = if b.broken_at.is_some() {
             "sealed"
         } else {
             "active"
         };
-        let parent = t
-            .parent_timeline_id
-            .map(|id| id.to_string())
-            .unwrap_or_else(|| "-".to_string());
-        let fork = match &t.fork_point {
+        let fork = match &b.fork_point {
             Some(h) => {
                 let s = h.as_str();
                 &s[..8.min(s.len())]
             }
             None => "-",
         };
-        println!(
-            "{:<4} {:<24} {:<10} {:<10} {}",
-            t.id, t.branch_name, parent, status, fork
-        );
+        println!("{:<4} {:<24} {:<10} {}", b.id, b.name, status, fork);
     }
 }
 
@@ -303,7 +292,7 @@ fn resolve_session_id(store: &dyn DagStore, id_or_name: &str) -> SessionId {
     }
     // Try by petname
     if let Some(session) = store.get_session_by_name(id_or_name).ok().flatten() {
-        return session.session;
+        return session.id;
     }
     eprintln!("Session '{}' not found", id_or_name);
     std::process::exit(1);

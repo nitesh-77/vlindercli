@@ -32,8 +32,6 @@ pub struct ForkMessage {
     pub branch_name: String,
     /// The DagNode to fork from.
     pub fork_point: DagNodeId,
-    /// ID of the parent timeline being forked.
-    pub parent_timeline_id: i64,
 }
 
 impl ForkMessage {
@@ -44,7 +42,6 @@ impl ForkMessage {
         agent_name: String,
         branch_name: String,
         fork_point: DagNodeId,
-        parent_timeline_id: i64,
     ) -> Self {
         Self {
             id: MessageId::new(),
@@ -55,7 +52,6 @@ impl ForkMessage {
             agent_name,
             branch_name,
             fork_point,
-            parent_timeline_id,
         }
     }
 }

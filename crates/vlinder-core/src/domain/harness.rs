@@ -65,7 +65,6 @@ pub struct ForkParams {
     pub agent_name: String,
     pub branch_name: String,
     pub fork_point: DagNodeId,
-    pub parent_timeline_id: i64,
 }
 
 /// Build an enriched payload from DAG-derived history.
@@ -153,14 +152,14 @@ impl CoreHarness {
         let timeline_id: i64 = timeline.as_str().parse().unwrap_or(0);
         let last_invoke_node = self
             .store
-            .latest_node_on_timeline(timeline_id, Some(MessageType::Invoke))
+            .latest_node_on_branch(timeline_id, Some(MessageType::Invoke))
             .unwrap_or(None);
         let last_invoke_payload = last_invoke_node
             .as_ref()
             .map(|n| String::from_utf8_lossy(n.payload()).to_string());
         let last_complete_node = self
             .store
-            .latest_node_on_timeline(timeline_id, Some(MessageType::Complete))
+            .latest_node_on_branch(timeline_id, Some(MessageType::Complete))
             .unwrap_or(None);
         let last_complete_payload = last_complete_node
             .as_ref()
@@ -273,7 +272,6 @@ impl Harness for CoreHarness {
             params.agent_name,
             params.branch_name,
             params.fork_point,
-            params.parent_timeline_id,
         );
 
         self.queue

@@ -11,8 +11,7 @@ use rusqlite::Connection;
 
 use vlinder_core::domain::session::Session;
 use vlinder_core::domain::{
-    DagNode, DagNodeId, DagStore, MessageType, ObservableMessage, SessionId, SessionSummary,
-    Timeline,
+    Branch, DagNode, DagNodeId, DagStore, MessageType, ObservableMessage, SessionId, SessionSummary,
 };
 
 /// SQLite-backed DagStore.
@@ -62,22 +61,23 @@ impl SqliteDagStore {
                  agent_name TEXT PRIMARY KEY,
                  state_hash TEXT NOT NULL
              );
-             CREATE TABLE IF NOT EXISTS timelines (
+             CREATE TABLE IF NOT EXISTS branches (
                  id INTEGER PRIMARY KEY AUTOINCREMENT,
-                 branch_name TEXT NOT NULL UNIQUE,
+                 name TEXT NOT NULL,
                  session_id TEXT NOT NULL DEFAULT '',
-                 parent_timeline_id INTEGER,
                  fork_point TEXT,
+                 head TEXT,
                  created_at TEXT NOT NULL,
                  broken_at TEXT,
-                 FOREIGN KEY (parent_timeline_id) REFERENCES timelines(id)
+                 UNIQUE(name, session_id)
              );
-             CREATE INDEX IF NOT EXISTS idx_timelines_session
-                 ON timelines (session_id);
+             CREATE INDEX IF NOT EXISTS idx_branches_session
+                 ON branches (session_id);
              CREATE TABLE IF NOT EXISTS sessions (
                  id TEXT PRIMARY KEY,
                  name TEXT NOT NULL UNIQUE,
                  agent_name TEXT NOT NULL,
+                 default_branch INTEGER NOT NULL DEFAULT 1,
                  created_at TEXT NOT NULL
              );",
         )
@@ -89,11 +89,11 @@ impl SqliteDagStore {
     }
 }
 
-/// Construct a Timeline from a SQLite row.
+/// Construct a Branch from a SQLite row.
 ///
-/// Expects columns in order: id, branch_name, session_id, parent_timeline_id,
-/// fork_point, created_at, broken_at.
-fn row_to_timeline(row: &rusqlite::Row) -> Result<Timeline, rusqlite::Error> {
+/// Expects columns in order: id, name, session_id, fork_point, head,
+/// created_at, broken_at.
+fn row_to_branch(row: &rusqlite::Row) -> Result<Branch, rusqlite::Error> {
     let created_at_str: String = row.get(5)?;
     let created_at = DateTime::parse_from_rfc3339(&created_at_str)
         .map(|dt| dt.with_timezone(&Utc))
@@ -104,16 +104,39 @@ fn row_to_timeline(row: &rusqlite::Row) -> Result<Timeline, rusqlite::Error> {
             .map(|dt| dt.with_timezone(&Utc))
             .ok()
     });
-    Ok(Timeline {
+    Ok(Branch {
         id: row.get(0)?,
-        branch_name: row.get(1)?,
+        name: row.get(1)?,
         session_id: SessionId::try_from(row.get::<_, String>(2)?).map_err(|e| {
             rusqlite::Error::FromSqlConversionFailure(2, rusqlite::types::Type::Text, e.into())
         })?,
-        parent_timeline_id: row.get(3)?,
-        fork_point: row.get::<_, Option<String>>(4)?.map(DagNodeId::from),
+        fork_point: row.get::<_, Option<String>>(3)?.map(DagNodeId::from),
+        head: row.get::<_, Option<String>>(4)?.map(DagNodeId::from),
         created_at,
         broken_at,
+    })
+}
+
+/// Construct a Session from a SQLite row.
+///
+/// Expects columns in order: id, name, agent_name, default_branch, created_at.
+fn row_to_session(row: &rusqlite::Row) -> Result<Session, rusqlite::Error> {
+    let id: String = row.get(0)?;
+    let name: String = row.get(1)?;
+    let agent: String = row.get(2)?;
+    let default_branch: i64 = row.get(3)?;
+    let created_at_str: String = row.get(4)?;
+    let created_at = DateTime::parse_from_rfc3339(&created_at_str)
+        .map(|dt| dt.with_timezone(&Utc))
+        .unwrap_or_default();
+    Ok(Session {
+        id: SessionId::try_from(id).map_err(|e| {
+            rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, e.into())
+        })?,
+        name,
+        agent,
+        default_branch,
+        created_at,
     })
 }
 
@@ -356,52 +379,56 @@ impl DagStore for SqliteDagStore {
     }
 
     // -------------------------------------------------------------------------
-    // Timeline methods (ADR 093)
+    // Branch methods
     // -------------------------------------------------------------------------
 
-    fn create_timeline(
+    fn create_branch(
         &self,
-        branch_name: &str,
+        name: &str,
         session_id: &SessionId,
-        parent_id: Option<i64>,
         fork_point: Option<&DagNodeId>,
     ) -> Result<i64, String> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO timelines (branch_name, session_id, parent_timeline_id, fork_point, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            rusqlite::params![branch_name, session_id.as_str(), parent_id, fork_point.map(|fp| fp.as_str()), Utc::now().to_rfc3339()],
+            "INSERT INTO branches (name, session_id, fork_point, created_at)
+             VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![
+                name,
+                session_id.as_str(),
+                fork_point.map(|fp| fp.as_str()),
+                Utc::now().to_rfc3339()
+            ],
         )
-        .map_err(|e| format!("create_timeline failed: {}", e))?;
+        .map_err(|e| format!("create_branch failed: {}", e))?;
         Ok(conn.last_insert_rowid())
     }
 
-    fn get_timeline_by_branch(&self, branch_name: &str) -> Result<Option<Timeline>, String> {
+    fn get_branch_by_name(&self, name: &str) -> Result<Option<Branch>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
             .prepare(
-                "SELECT id, branch_name, session_id, parent_timeline_id, fork_point, created_at, broken_at
-             FROM timelines WHERE branch_name = ?1",
+                "SELECT id, name, session_id, fork_point, head, created_at, broken_at
+                 FROM branches WHERE name = ?1",
             )
-            .map_err(|e| format!("get_timeline_by_branch prepare failed: {}", e))?;
+            .map_err(|e| format!("get_branch_by_name prepare failed: {}", e))?;
 
-        stmt.query_row(rusqlite::params![branch_name], row_to_timeline)
+        stmt.query_row(rusqlite::params![name], row_to_branch)
             .optional()
-            .map_err(|e| format!("get_timeline_by_branch query failed: {}", e))
+            .map_err(|e| format!("get_branch_by_name query failed: {}", e))
     }
 
-    fn get_timeline(&self, id: i64) -> Result<Option<Timeline>, String> {
+    fn get_branch(&self, id: i64) -> Result<Option<Branch>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
             .prepare(
-                "SELECT id, branch_name, session_id, parent_timeline_id, fork_point, created_at, broken_at
-             FROM timelines WHERE id = ?1",
+                "SELECT id, name, session_id, fork_point, head, created_at, broken_at
+                 FROM branches WHERE id = ?1",
             )
-            .map_err(|e| format!("get_timeline prepare failed: {}", e))?;
+            .map_err(|e| format!("get_branch prepare failed: {}", e))?;
 
-        stmt.query_row(rusqlite::params![id], row_to_timeline)
+        stmt.query_row(rusqlite::params![id], row_to_branch)
             .optional()
-            .map_err(|e| format!("get_timeline query failed: {}", e))
+            .map_err(|e| format!("get_branch query failed: {}", e))
     }
 
     fn list_sessions(&self) -> Result<Vec<SessionSummary>, String> {
@@ -479,38 +506,35 @@ impl DagStore for SqliteDagStore {
         Ok(nodes)
     }
 
-    fn get_timelines_for_session(&self, session_id: &SessionId) -> Result<Vec<Timeline>, String> {
+    fn get_branches_for_session(&self, session_id: &SessionId) -> Result<Vec<Branch>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
             .prepare(
-                "SELECT t.id, t.branch_name, t.session_id, t.parent_timeline_id, t.fork_point,
-                        t.created_at, t.broken_at
-                 FROM timelines t
-                 JOIN dag_nodes d ON t.fork_point = d.hash
-                 WHERE d.session_id = ?1
-                 ORDER BY t.created_at",
+                "SELECT id, name, session_id, fork_point, head, created_at, broken_at
+                 FROM branches
+                 WHERE session_id = ?1
+                 ORDER BY created_at",
             )
-            .map_err(|e| format!("get_timelines_for_session prepare failed: {}", e))?;
+            .map_err(|e| format!("get_branches_for_session prepare failed: {}", e))?;
 
         let rows = stmt
-            .query_map(rusqlite::params![session_id.as_str()], row_to_timeline)
-            .map_err(|e| format!("get_timelines_for_session query failed: {}", e))?;
+            .query_map(rusqlite::params![session_id.as_str()], row_to_branch)
+            .map_err(|e| format!("get_branches_for_session query failed: {}", e))?;
 
-        let mut timelines = Vec::new();
+        let mut branches = Vec::new();
         for row in rows {
-            timelines
-                .push(row.map_err(|e| format!("get_timelines_for_session row failed: {}", e))?);
+            branches.push(row.map_err(|e| format!("get_branches_for_session row failed: {}", e))?);
         }
-        Ok(timelines)
+        Ok(branches)
     }
 
-    fn latest_node_on_timeline(
+    fn latest_node_on_branch(
         &self,
-        timeline_id: i64,
+        branch_id: i64,
         message_type: Option<MessageType>,
     ) -> Result<Option<DagNode>, String> {
         let conn = self.conn.lock().unwrap();
-        let tl_id_str = timeline_id.to_string();
+        let branch_id_str = branch_id.to_string();
 
         match message_type {
             Some(mt) => {
@@ -519,11 +543,14 @@ impl DagStore for SqliteDagStore {
                         "SELECT {} FROM dag_nodes WHERE timeline_id = ?1 AND message_type = ?2 ORDER BY created_at DESC LIMIT 1",
                         DAG_NODE_COLUMNS
                     ))
-                    .map_err(|e| format!("latest_node_on_timeline prepare failed: {}", e))?;
+                    .map_err(|e| format!("latest_node_on_branch prepare failed: {}", e))?;
 
-                stmt.query_row(rusqlite::params![tl_id_str, mt.as_str()], row_to_dag_node)
-                    .optional()
-                    .map_err(|e| format!("latest_node_on_timeline query failed: {}", e))
+                stmt.query_row(
+                    rusqlite::params![branch_id_str, mt.as_str()],
+                    row_to_dag_node,
+                )
+                .optional()
+                .map_err(|e| format!("latest_node_on_branch query failed: {}", e))
             }
             None => {
                 let mut stmt = conn
@@ -531,11 +558,11 @@ impl DagStore for SqliteDagStore {
                         "SELECT {} FROM dag_nodes WHERE timeline_id = ?1 ORDER BY created_at DESC LIMIT 1",
                         DAG_NODE_COLUMNS
                     ))
-                    .map_err(|e| format!("latest_node_on_timeline prepare failed: {}", e))?;
+                    .map_err(|e| format!("latest_node_on_branch prepare failed: {}", e))?;
 
-                stmt.query_row(rusqlite::params![tl_id_str], row_to_dag_node)
+                stmt.query_row(rusqlite::params![branch_id_str], row_to_dag_node)
                     .optional()
-                    .map_err(|e| format!("latest_node_on_timeline query failed: {}", e))
+                    .map_err(|e| format!("latest_node_on_branch query failed: {}", e))
             }
         }
     }
@@ -547,13 +574,14 @@ impl DagStore for SqliteDagStore {
     fn create_session(&self, session: &Session) -> Result<(), String> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT OR IGNORE INTO sessions (id, name, agent_name, created_at)
-             VALUES (?1, ?2, ?3, ?4)",
+            "INSERT OR IGNORE INTO sessions (id, name, agent_name, default_branch, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
             rusqlite::params![
-                session.session.as_str(),
+                session.id.as_str(),
                 session.name,
                 session.agent,
-                Utc::now().to_rfc3339(),
+                session.default_branch,
+                session.created_at.to_rfc3339(),
             ],
         )
         .map_err(|e| format!("create_session failed: {}", e))?;
@@ -563,53 +591,29 @@ impl DagStore for SqliteDagStore {
     fn get_session(&self, session_id: &SessionId) -> Result<Option<Session>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
-            .prepare("SELECT id, name, agent_name FROM sessions WHERE id = ?1")
+            .prepare(
+                "SELECT id, name, agent_name, default_branch, created_at
+                 FROM sessions WHERE id = ?1",
+            )
             .map_err(|e| format!("get_session prepare failed: {}", e))?;
 
-        stmt.query_row(rusqlite::params![session_id.as_str()], |row| {
-            let id: String = row.get(0)?;
-            let name: String = row.get(1)?;
-            let agent: String = row.get(2)?;
-            Ok(Session {
-                session: SessionId::try_from(id).map_err(|e| {
-                    rusqlite::Error::FromSqlConversionFailure(
-                        0,
-                        rusqlite::types::Type::Text,
-                        e.into(),
-                    )
-                })?,
-                name,
-                agent,
-            })
-        })
-        .optional()
-        .map_err(|e| format!("get_session query failed: {}", e))
+        stmt.query_row(rusqlite::params![session_id.as_str()], row_to_session)
+            .optional()
+            .map_err(|e| format!("get_session query failed: {}", e))
     }
 
     fn get_session_by_name(&self, name: &str) -> Result<Option<Session>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
-            .prepare("SELECT id, name, agent_name FROM sessions WHERE name = ?1")
+            .prepare(
+                "SELECT id, name, agent_name, default_branch, created_at
+                 FROM sessions WHERE name = ?1",
+            )
             .map_err(|e| format!("get_session_by_name prepare failed: {}", e))?;
 
-        stmt.query_row(rusqlite::params![name], |row| {
-            let id: String = row.get(0)?;
-            let name: String = row.get(1)?;
-            let agent: String = row.get(2)?;
-            Ok(Session {
-                session: SessionId::try_from(id).map_err(|e| {
-                    rusqlite::Error::FromSqlConversionFailure(
-                        0,
-                        rusqlite::types::Type::Text,
-                        e.into(),
-                    )
-                })?,
-                name,
-                agent,
-            })
-        })
-        .optional()
-        .map_err(|e| format!("get_session_by_name query failed: {}", e))
+        stmt.query_row(rusqlite::params![name], row_to_session)
+            .optional()
+            .map_err(|e| format!("get_session_by_name query failed: {}", e))
     }
 }
 

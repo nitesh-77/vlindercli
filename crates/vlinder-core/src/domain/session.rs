@@ -5,28 +5,39 @@
 
 use serde::{Deserialize, Serialize};
 
+use chrono::{DateTime, Utc};
+
 use super::SessionId;
 
-/// A conversation session.
+/// A conversation session — container for branches.
+///
+/// A session groups branches into a single conversation. The
+/// `default_branch` points to the canonical branch (typically "main").
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Session {
     /// Session identifier (UUID).
-    pub session: SessionId,
+    pub id: SessionId,
     /// Human-friendly name (petname, unique).
     pub name: String,
     /// Agent name this session is with.
     pub agent: String,
+    /// The canonical branch for this session.
+    pub default_branch: i64,
+    /// When this session was created.
+    pub created_at: DateTime<Utc>,
 }
 
 impl Session {
     /// Create a new session with a generated petname.
-    pub fn new(session: SessionId, agent: impl Into<String>) -> Self {
-        let name = session.petname();
+    pub fn new(id: SessionId, agent: impl Into<String>, default_branch: i64) -> Self {
+        let name = id.petname();
         let agent = agent.into();
         Self {
-            session,
+            id,
             name,
             agent,
+            default_branch,
+            created_at: Utc::now(),
         }
     }
 }
@@ -40,12 +51,11 @@ mod tests {
         let session = Session::new(
             SessionId::try_from("d4761d76-dee4-4ebf-9df4-43b52efa4f78".to_string()).unwrap(),
             "pensieve",
+            1,
         );
 
         assert_eq!(session.agent, "pensieve");
-        assert_eq!(
-            session.session.as_str(),
-            "d4761d76-dee4-4ebf-9df4-43b52efa4f78"
-        );
+        assert_eq!(session.id.as_str(), "d4761d76-dee4-4ebf-9df4-43b52efa4f78");
+        assert_eq!(session.default_branch, 1);
     }
 }

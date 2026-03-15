@@ -206,7 +206,7 @@ fn render_session(
     store: &dyn DagStore,
     session: &vlinder_core::domain::Session,
 ) -> Result<String, String> {
-    let nodes = store.get_session_nodes(&session.session)?;
+    let nodes = store.get_session_nodes(&session.id)?;
     if nodes.is_empty() {
         return Err("session not found".to_string());
     }

@@ -830,10 +830,6 @@ impl MessageQueue for NatsQueue {
             headers.insert("session-id", msg.session.as_str());
             headers.insert("branch-name", msg.branch_name.as_str());
             headers.insert("fork-point", msg.fork_point.as_str());
-            headers.insert(
-                "parent-timeline-id",
-                msg.parent_timeline_id.to_string().as_str(),
-            );
 
             self.inner
                 .jetstream
@@ -1371,9 +1367,6 @@ pub fn from_nats_headers(
         } => {
             let branch_name = headers.get("branch-name").cloned()?;
             let fork_point = DagNodeId::from(headers.get("fork-point").cloned()?);
-            let parent_timeline_id = headers
-                .get("parent-timeline-id")
-                .and_then(|s| s.parse::<i64>().ok())?;
 
             Some(ObservableMessageHeaders::Fork {
                 id,
@@ -1384,7 +1377,6 @@ pub fn from_nats_headers(
                 agent_name: agent_name.clone(),
                 branch_name,
                 fork_point,
-                parent_timeline_id,
             })
         }
     }

@@ -109,7 +109,6 @@ impl Harness for GrpcHarnessClient {
             agent_name: params.agent_name,
             branch_name: params.branch_name,
             fork_point: params.fork_point.to_string(),
-            parent_timeline_id: params.parent_timeline_id,
             timeline_id: timeline.as_str().to_string(),
             session_id: session_id.as_str().to_string(),
         };

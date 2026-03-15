@@ -49,12 +49,12 @@ impl RecordingQueue {
             _ => None,
         };
 
-        // Look up parent ID: dag_parent override → latest node on timeline
+        // Look up parent ID: dag_parent override → latest node on branch
         let parent_id = dag_parent_override.unwrap_or_else(|| {
             self.store
-                .latest_node_on_timeline(timeline_id, None)
+                .latest_node_on_branch(timeline_id, None)
                 .unwrap_or_else(|e| {
-                    tracing::warn!(error = %e, timeline = timeline_id, "Failed to query latest node on timeline");
+                    tracing::warn!(error = %e, branch = timeline_id, "Failed to query latest node on branch");
                     None
                 })
                 .map(|n| n.id)
@@ -184,25 +184,23 @@ impl MessageQueue for RecordingQueue {
     fn send_fork(&self, msg: ForkMessage) -> Result<(), QueueError> {
         self.record(&msg.clone().into());
 
-        // Create the timeline row so `--branch` and `session repair` can find it.
-        match self.store.create_timeline(
-            &msg.branch_name,
-            &msg.session,
-            Some(msg.parent_timeline_id),
-            Some(&msg.fork_point),
-        ) {
+        // Create the branch row so `--branch` and `session fork` can find it.
+        match self
+            .store
+            .create_branch(&msg.branch_name, &msg.session, Some(&msg.fork_point))
+        {
             Ok(id) => {
                 tracing::info!(
-                    timeline_id = id,
+                    branch_id = id,
                     branch = %msg.branch_name,
-                    "Created timeline on fork"
+                    "Created branch on fork"
                 );
             }
             Err(e) => {
                 tracing::warn!(
                     error = %e,
                     branch = %msg.branch_name,
-                    "Failed to create timeline on fork"
+                    "Failed to create branch on fork"
                 );
             }
         }
@@ -227,7 +225,16 @@ impl MessageQueue for RecordingQueue {
         &self,
         msg: crate::domain::SessionStartMessage,
     ) -> Result<(), QueueError> {
-        let session = crate::domain::Session::new(msg.session.clone(), &msg.agent_name);
+        // Create the default "main" branch, then the session pointing to it.
+        let default_branch = self
+            .store
+            .create_branch("main", &msg.session, None)
+            .unwrap_or_else(|e| {
+                tracing::warn!(error = %e, "Failed to create default branch");
+                1 // fallback
+            });
+        let session =
+            crate::domain::Session::new(msg.session.clone(), &msg.agent_name, default_branch);
         if let Err(e) = self.store.create_session(&session) {
             tracing::warn!(
                 error = %e,
@@ -252,10 +259,8 @@ mod tests {
 
     fn test_store() -> Arc<dyn DagStore> {
         let store = Arc::new(InMemoryDagStore::new());
-        // Seed "main" timeline (id=1) — mirrors production setup.
-        store
-            .create_timeline("main", &test_session(), None, None)
-            .unwrap();
+        // Seed "main" branch (id=1) — mirrors production setup.
+        store.create_branch("main", &test_session(), None).unwrap();
         store
     }
 
@@ -531,22 +536,18 @@ mod tests {
             fn set_checkout_state(&self, _: &str, _: &str) -> Result<(), String> {
                 Ok(())
             }
-            fn create_timeline(
+            fn create_branch(
                 &self,
                 _: &str,
                 _: &crate::domain::SessionId,
-                _: Option<i64>,
                 _: Option<&crate::domain::DagNodeId>,
             ) -> Result<i64, String> {
                 Ok(0)
             }
-            fn get_timeline_by_branch(
-                &self,
-                _: &str,
-            ) -> Result<Option<crate::domain::Timeline>, String> {
+            fn get_branch_by_name(&self, _: &str) -> Result<Option<crate::domain::Branch>, String> {
                 Ok(None)
             }
-            fn get_timeline(&self, _: i64) -> Result<Option<crate::domain::Timeline>, String> {
+            fn get_branch(&self, _: i64) -> Result<Option<crate::domain::Branch>, String> {
                 Ok(None)
             }
             fn list_sessions(&self) -> Result<Vec<crate::domain::SessionSummary>, String> {
@@ -555,13 +556,13 @@ mod tests {
             fn get_nodes_by_submission(&self, _: &str) -> Result<Vec<DagNode>, String> {
                 Ok(vec![])
             }
-            fn get_timelines_for_session(
+            fn get_branches_for_session(
                 &self,
                 _: &crate::domain::SessionId,
-            ) -> Result<Vec<crate::domain::Timeline>, String> {
+            ) -> Result<Vec<crate::domain::Branch>, String> {
                 Ok(vec![])
             }
-            fn latest_node_on_timeline(
+            fn latest_node_on_branch(
                 &self,
                 _: i64,
                 _: Option<crate::domain::MessageType>,

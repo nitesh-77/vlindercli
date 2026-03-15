@@ -4,14 +4,14 @@ use std::sync::Arc;
 use tonic::{Request, Response, Status};
 
 use super::proto::{
-    self, state_service_server::StateService, CreateSessionRequest, CreateSessionResponse,
-    CreateTimelineRequest, CreateTimelineResponse, GetChildrenRequest, GetChildrenResponse,
-    GetNodeByPrefixRequest, GetNodeRequest, GetNodeResponse, GetNodesBySubmissionRequest,
-    GetNodesBySubmissionResponse, GetSessionByNameRequest, GetSessionNodesRequest,
-    GetSessionNodesResponse, GetSessionRequest, GetSessionResponse, GetTimelineByBranchRequest,
-    GetTimelineByIdRequest, GetTimelineResponse, GetTimelinesForSessionRequest,
-    GetTimelinesForSessionResponse, InsertNodeRequest, InsertNodeResponse, LatestNodeHashRequest,
-    LatestNodeHashResponse, LatestNodeOnTimelineRequest, LatestNodeOnTimelineResponse,
+    self, state_service_server::StateService, CreateBranchRequest, CreateBranchResponse,
+    CreateSessionRequest, CreateSessionResponse, GetBranchByIdRequest, GetBranchByNameRequest,
+    GetBranchResponse, GetBranchesForSessionRequest, GetBranchesForSessionResponse,
+    GetChildrenRequest, GetChildrenResponse, GetNodeByPrefixRequest, GetNodeRequest,
+    GetNodeResponse, GetNodesBySubmissionRequest, GetNodesBySubmissionResponse,
+    GetSessionByNameRequest, GetSessionNodesRequest, GetSessionNodesResponse, GetSessionRequest,
+    GetSessionResponse, InsertNodeRequest, InsertNodeResponse, LatestNodeHashRequest,
+    LatestNodeHashResponse, LatestNodeOnBranchRequest, LatestNodeOnBranchResponse,
     LatestStateRequest, LatestStateResponse, ListSessionsRequest, ListSessionsResponse,
     PingRequest, SemVer, SetCheckoutStateRequest, SetCheckoutStateResponse,
 };
@@ -169,55 +169,54 @@ impl StateService for StateServiceServer {
     }
 
     // -------------------------------------------------------------------------
-    // Timeline RPCs (ADR 093)
+    // Branch RPCs
     // -------------------------------------------------------------------------
 
-    async fn create_timeline(
+    async fn create_branch(
         &self,
-        request: Request<CreateTimelineRequest>,
-    ) -> Result<Response<CreateTimelineResponse>, Status> {
+        request: Request<CreateBranchRequest>,
+    ) -> Result<Response<CreateBranchResponse>, Status> {
         let req = request.into_inner();
         let fork_point = req.fork_point.map(DagNodeId::from);
         let id = self
             .store
-            .create_timeline(
-                &req.branch_name,
+            .create_branch(
+                &req.name,
                 &SessionId::try_from(req.session_id).map_err(Status::invalid_argument)?,
-                req.parent_id,
                 fork_point.as_ref(),
             )
             .map_err(Status::internal)?;
-        Ok(Response::new(CreateTimelineResponse { id }))
+        Ok(Response::new(CreateBranchResponse { id }))
     }
 
-    async fn get_timeline_by_branch(
+    async fn get_branch_by_name(
         &self,
-        request: Request<GetTimelineByBranchRequest>,
-    ) -> Result<Response<GetTimelineResponse>, Status> {
+        request: Request<GetBranchByNameRequest>,
+    ) -> Result<Response<GetBranchResponse>, Status> {
         let req = request.into_inner();
-        let timeline = self
+        let branch = self
             .store
-            .get_timeline_by_branch(&req.branch_name)
+            .get_branch_by_name(&req.name)
             .map_err(Status::internal)?
-            .map(|t| t.into());
-        Ok(Response::new(GetTimelineResponse { timeline }))
+            .map(|b| b.into());
+        Ok(Response::new(GetBranchResponse { branch }))
     }
 
-    async fn get_timeline(
+    async fn get_branch(
         &self,
-        request: Request<GetTimelineByIdRequest>,
-    ) -> Result<Response<GetTimelineResponse>, Status> {
+        request: Request<GetBranchByIdRequest>,
+    ) -> Result<Response<GetBranchResponse>, Status> {
         let req = request.into_inner();
-        let timeline = self
+        let branch = self
             .store
-            .get_timeline(req.id)
+            .get_branch(req.id)
             .map_err(Status::internal)?
-            .map(|t| t.into());
-        Ok(Response::new(GetTimelineResponse { timeline }))
+            .map(|b| b.into());
+        Ok(Response::new(GetBranchResponse { branch }))
     }
 
     // -------------------------------------------------------------------------
-    // Session query RPCs (ADR 113)
+    // Session query RPCs
     // -------------------------------------------------------------------------
 
     async fn list_sessions(
@@ -262,21 +261,21 @@ impl StateService for StateServiceServer {
         Ok(Response::new(GetNodeResponse { node }))
     }
 
-    async fn get_timelines_for_session(
+    async fn get_branches_for_session(
         &self,
-        request: Request<GetTimelinesForSessionRequest>,
-    ) -> Result<Response<GetTimelinesForSessionResponse>, Status> {
+        request: Request<GetBranchesForSessionRequest>,
+    ) -> Result<Response<GetBranchesForSessionResponse>, Status> {
         let req = request.into_inner();
-        let timelines = self
+        let branches = self
             .store
-            .get_timelines_for_session(
+            .get_branches_for_session(
                 &SessionId::try_from(req.session_id).map_err(Status::invalid_argument)?,
             )
             .map_err(Status::internal)?
             .into_iter()
-            .map(|t| t.into())
+            .map(|b| b.into())
             .collect();
-        Ok(Response::new(GetTimelinesForSessionResponse { timelines }))
+        Ok(Response::new(GetBranchesForSessionResponse { branches }))
     }
 
     // -------------------------------------------------------------------------
@@ -292,7 +291,7 @@ impl StateService for StateServiceServer {
             .session
             .ok_or_else(|| Status::invalid_argument("missing session"))?;
         let session_id = SessionId::try_from(session_proto.id).map_err(Status::invalid_argument)?;
-        let session = vlinder_core::domain::Session::new(session_id, &session_proto.agent_name);
+        let session = vlinder_core::domain::Session::new(session_id, &session_proto.agent_name, 1);
         match self.store.create_session(&vlinder_core::domain::Session {
             name: session_proto.name,
             ..session
@@ -320,7 +319,7 @@ impl StateService for StateServiceServer {
             .map_err(Status::internal)?;
         Ok(Response::new(GetSessionResponse {
             session: session.map(|s| proto::SessionProto {
-                id: s.session.as_str().to_string(),
+                id: s.id.as_str().to_string(),
                 name: s.name,
                 agent_name: s.agent,
             }),
@@ -338,17 +337,17 @@ impl StateService for StateServiceServer {
             .map_err(Status::internal)?;
         Ok(Response::new(GetSessionResponse {
             session: session.map(|s| proto::SessionProto {
-                id: s.session.as_str().to_string(),
+                id: s.id.as_str().to_string(),
                 name: s.name,
                 agent_name: s.agent,
             }),
         }))
     }
 
-    async fn latest_node_on_timeline(
+    async fn latest_node_on_branch(
         &self,
-        request: Request<LatestNodeOnTimelineRequest>,
-    ) -> Result<Response<LatestNodeOnTimelineResponse>, Status> {
+        request: Request<LatestNodeOnBranchRequest>,
+    ) -> Result<Response<LatestNodeOnBranchResponse>, Status> {
         let req = request.into_inner();
         let message_type = req
             .message_type
@@ -357,9 +356,9 @@ impl StateService for StateServiceServer {
             .map_err(Status::invalid_argument)?;
         let node = self
             .store
-            .latest_node_on_timeline(req.timeline_id, message_type)
+            .latest_node_on_branch(req.branch_id, message_type)
             .map_err(Status::internal)?
             .map(|n| n.into());
-        Ok(Response::new(LatestNodeOnTimelineResponse { node }))
+        Ok(Response::new(LatestNodeOnBranchResponse { node }))
     }
 }

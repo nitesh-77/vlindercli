@@ -138,7 +138,6 @@ pub enum ObservableMessageHeaders {
         agent_name: String,
         branch_name: String,
         fork_point: DagNodeId,
-        parent_timeline_id: i64,
     },
 }
 
@@ -317,7 +316,6 @@ impl ObservableMessageHeaders {
                 agent_name,
                 branch_name,
                 fork_point,
-                parent_timeline_id,
             } => ObservableMessage::Fork(ForkMessage {
                 id,
                 protocol_version,
@@ -327,7 +325,6 @@ impl ObservableMessageHeaders {
                 agent_name,
                 branch_name,
                 fork_point,
-                parent_timeline_id,
             }),
         }
     }
