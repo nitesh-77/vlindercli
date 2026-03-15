@@ -48,21 +48,10 @@ impl Harness for GrpcHarnessClient {
         HarnessType::Grpc
     }
 
-    fn set_timeline(&mut self, timeline: TimelineId, sealed: bool) {
-        let request = proto::SetTimelineRequest {
-            timeline_id: timeline.as_str().to_string(),
-            sealed,
-        };
-
-        let mut client = self.client.clone();
-        let _ = self
-            .runtime
-            .block_on(async { client.set_timeline(request).await });
-    }
-
-    fn start_session(&mut self, agent_name: &str) {
+    fn start_session(&mut self, agent_name: &str, timeline: TimelineId) {
         let request = proto::StartSessionRequest {
             agent_name: agent_name.to_string(),
+            timeline_id: timeline.as_str().to_string(),
         };
 
         let mut client = self.client.clone();
@@ -71,30 +60,22 @@ impl Harness for GrpcHarnessClient {
             .block_on(async { client.start_session(request).await });
     }
 
-    fn set_initial_state(&mut self, state: String) {
-        let request = proto::SetInitialStateRequest { state };
-
-        let mut client = self.client.clone();
-        let _ = self
-            .runtime
-            .block_on(async { client.set_initial_state(request).await });
-    }
-
-    fn set_dag_parent(&mut self, hash: DagNodeId) {
-        let request = proto::SetDagParentRequest {
-            hash: hash.to_string(),
-        };
-
-        let mut client = self.client.clone();
-        let _ = self
-            .runtime
-            .block_on(async { client.set_dag_parent(request).await });
-    }
-
-    fn run_agent(&mut self, agent_id: &ResourceId, input: &str) -> Result<String, String> {
+    fn run_agent(
+        &mut self,
+        agent_id: &ResourceId,
+        input: &str,
+        timeline: TimelineId,
+        sealed: bool,
+        initial_state: Option<String>,
+        dag_parent: DagNodeId,
+    ) -> Result<String, String> {
         let request = proto::RunAgentRequest {
             agent_id: agent_id.as_str().to_string(),
             input: input.to_string(),
+            timeline_id: timeline.as_str().to_string(),
+            sealed,
+            initial_state,
+            dag_parent: dag_parent.to_string(),
         };
 
         let mut client = self.client.clone();
@@ -111,7 +92,11 @@ impl Harness for GrpcHarnessClient {
         }
     }
 
-    fn repair_agent(&mut self, params: RepairParams) -> Result<String, String> {
+    fn repair_agent(
+        &mut self,
+        params: RepairParams,
+        timeline: TimelineId,
+    ) -> Result<String, String> {
         let request = proto::RepairAgentRequest {
             agent_id: params.agent_id.as_str().to_string(),
             dag_parent: params.dag_parent.to_string(),
@@ -122,6 +107,7 @@ impl Harness for GrpcHarnessClient {
             sequence: params.sequence.as_u32(),
             payload: params.payload,
             state: params.state,
+            timeline_id: timeline.as_str().to_string(),
         };
 
         let mut client = self.client.clone();
@@ -138,12 +124,13 @@ impl Harness for GrpcHarnessClient {
         }
     }
 
-    fn fork_timeline(&mut self, params: ForkParams) -> Result<(), String> {
+    fn fork_timeline(&mut self, params: ForkParams, timeline: TimelineId) -> Result<(), String> {
         let request = proto::ForkTimelineRequest {
             agent_name: params.agent_name,
             branch_name: params.branch_name,
             fork_point: params.fork_point.to_string(),
             parent_timeline_id: params.parent_timeline_id,
+            timeline_id: timeline.as_str().to_string(),
         };
 
         let mut client = self.client.clone();

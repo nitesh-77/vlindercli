@@ -3,7 +3,9 @@ use std::path::{Path, PathBuf};
 use clap::Subcommand;
 
 use crate::config::CliConfig;
-use vlinder_core::domain::{agent_routing_key, Fleet, FleetManifest, Harness, Registry};
+use vlinder_core::domain::{
+    agent_routing_key, DagNodeId, Fleet, FleetManifest, Registry, TimelineId,
+};
 
 use super::connect::{connect_harness, connect_registry, open_dag_store, read_latest_state};
 use super::repl;
@@ -192,12 +194,17 @@ pub fn run(name: &str) {
 
     // Connect harness via gRPC — the daemon owns queue and registry
     let mut harness = connect_harness(&config);
-    harness.start_session(entry_agent_name.as_str());
+
+    // Resolve session context before starting
+    let initial_state = open_dag_store(&config)
+        .and_then(|store| read_latest_state(store.as_ref(), entry_agent_name.as_str()));
+    if let Some(ref state) = initial_state {
+        println!("Resuming from state {}…", &state[..8.min(state.len())]);
+    }
+    let timeline = TimelineId::main();
+    harness.start_session(entry_agent_name.as_str(), timeline.clone());
 
     tracing::debug!(fleet = %fleet.name, "Fleet session started");
-
-    // Read state from the state service (ADR 079)
-    apply_latest_state(&config, &mut *harness, entry_agent_name.as_str());
 
     println!(
         "Fleet '{}' ready. Entry agent: {}",
@@ -207,7 +214,14 @@ pub fn run(name: &str) {
     // Run REPL with synchronous run_agent (ADR 092)
     repl::run(|input| {
         let enriched_input = format!("{}\n\n{}", fleet_context, input);
-        match harness.run_agent(&entry_agent_id, &enriched_input) {
+        match harness.run_agent(
+            &entry_agent_id,
+            &enriched_input,
+            timeline.clone(),
+            false,
+            initial_state.clone(),
+            DagNodeId::root(),
+        ) {
             Ok(result) => result,
             Err(e) => format!("[error] {}", e),
         }
@@ -234,16 +248,6 @@ fn build_fleet_context(registry: &dyn vlinder_core::domain::Registry, fleet: &Fl
     }
 
     lines.join("\n")
-}
-
-/// Read the latest state for an agent from the DAG store (ADR 079).
-fn apply_latest_state(config: &CliConfig, harness: &mut dyn Harness, agent_name: &str) {
-    let store = open_dag_store(config);
-    let Some(store) = store else { return };
-    if let Some(state) = read_latest_state(store.as_ref(), agent_name) {
-        println!("Resuming from state {}…", &state[..8.min(state.len())]);
-        harness.set_initial_state(state);
-    }
 }
 
 #[cfg(test)]

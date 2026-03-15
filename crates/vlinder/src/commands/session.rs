@@ -5,7 +5,7 @@ use clap::Subcommand;
 use crate::config::CliConfig;
 use vlinder_core::domain::{
     AgentId, DagStore, ForkParams, MessageType, Operation, RepairParams, Sequence, ServiceBackend,
-    ServiceType, SessionId,
+    ServiceType, SessionId, TimelineId,
 };
 
 use super::connect::{connect_harness, open_dag_store};
@@ -204,7 +204,8 @@ fn fork(session_id_or_name: &str, from_hash: &str, branch_name: &str) {
 
     // Send ForkMessage through the harness/queue (CQRS: both SQL and git react)
     let mut harness = connect_harness(&config);
-    harness.start_session(&agent_name);
+    let timeline = TimelineId::main();
+    harness.start_session(&agent_name, timeline.clone());
 
     let params = ForkParams {
         agent_name,
@@ -213,7 +214,7 @@ fn fork(session_id_or_name: &str, from_hash: &str, branch_name: &str) {
         parent_timeline_id: 1, // main timeline
     };
 
-    harness.fork_timeline(params).unwrap_or_else(|e| {
+    harness.fork_timeline(params, timeline).unwrap_or_else(|e| {
         eprintln!("Failed to fork timeline: {}", e);
         std::process::exit(1);
     });
@@ -325,15 +326,11 @@ fn repair(branch: &str) {
 
     // Set up harness
     let mut harness = connect_harness(&config);
-    harness.start_session(&agent_name);
-    if let Some(state) = node.message.state() {
-        harness.set_initial_state(state.to_string());
-    }
-    harness.set_dag_parent(node.id.clone());
-    harness.set_timeline(vlinder_core::domain::TimelineId::from(timeline.id), false);
+    let timeline = vlinder_core::domain::TimelineId::from(timeline.id);
+    harness.start_session(&agent_name, timeline.clone());
 
     println!("Repairing: replaying {} on {}...", operation_str, to);
-    match harness.repair_agent(params) {
+    match harness.repair_agent(params, timeline) {
         Ok(result) => {
             println!("Repair completed successfully.");
             println!("{}", result);

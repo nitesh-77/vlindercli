@@ -4,7 +4,7 @@ use std::sync::Arc;
 use clap::{Subcommand, ValueEnum};
 
 use crate::config::CliConfig;
-use vlinder_core::domain::{Agent, AgentManifest, DagStore, Harness, Registry, TimelineId};
+use vlinder_core::domain::{Agent, AgentManifest, DagNodeId, DagStore, Registry, TimelineId};
 
 use super::connect::{connect_harness, connect_registry, open_dag_store, read_latest_state};
 use super::repl;
@@ -152,38 +152,50 @@ fn run(name: &str, branch: Option<&str>) {
     // queue and registry connection. The CLI is now a pure gRPC client.
     let mut harness = connect_harness(&config);
 
-    // Start conversation session (ADR 054, ADR 070)
-    harness.start_session(name);
-
-    if let Some(branch_name) = branch {
-        // Switch to named branch: look up timeline, set state + dag_parent + timeline
-        apply_branch(&config, &mut *harness, name, branch_name);
+    // Resolve session context before starting (ADR 054, ADR 070)
+    let (timeline, sealed, initial_state, dag_parent) = if let Some(branch_name) = branch {
+        resolve_branch(&config, name, branch_name)
     } else {
-        // Default: read latest state for the agent (ADR 079)
-        apply_latest_state(&config, &mut *harness, name);
-    }
+        resolve_default(&config, name)
+    };
+
+    harness.start_session(name, timeline.clone());
 
     // Run REPL with synchronous run_agent (ADR 092)
-    repl::run(|input| match harness.run_agent(&agent_id, input) {
-        Ok(result) => result,
-        Err(e) => format!("[error] {}", e),
+    repl::run(|input| {
+        match harness.run_agent(
+            &agent_id,
+            input,
+            timeline.clone(),
+            sealed,
+            initial_state.clone(),
+            dag_parent.clone(),
+        ) {
+            Ok(result) => result,
+            Err(e) => format!("[error] {}", e),
+        }
     });
 }
 
-/// Read the latest state for an agent from the DAG store (ADR 079)
-/// and initialize the harness with it (state continuity across sessions).
-fn apply_latest_state(config: &CliConfig, harness: &mut dyn Harness, agent_name: &str) {
-    let store = open_dag_store(config);
-    let Some(store) = store else { return };
-    if let Some(state) = read_latest_state(store.as_ref(), agent_name) {
+/// Resolve default session context: main timeline, latest state (ADR 079).
+fn resolve_default(
+    config: &CliConfig,
+    agent_name: &str,
+) -> (TimelineId, bool, Option<String>, DagNodeId) {
+    let initial_state =
+        open_dag_store(config).and_then(|store| read_latest_state(store.as_ref(), agent_name));
+    if let Some(ref state) = initial_state {
         println!("Resuming from state {}…", &state[..8.min(state.len())]);
-        harness.set_initial_state(state);
     }
+    (TimelineId::main(), false, initial_state, DagNodeId::root())
 }
 
-/// Switch to a named branch: look up the timeline, read the head node's
-/// state, and configure the harness to chain from the branch tip.
-fn apply_branch(config: &CliConfig, harness: &mut dyn Harness, agent_name: &str, branch: &str) {
+/// Resolve branch session context: look up timeline, read tip state/hash.
+fn resolve_branch(
+    config: &CliConfig,
+    agent_name: &str,
+    branch: &str,
+) -> (TimelineId, bool, Option<String>, DagNodeId) {
     let store = require_dag_store(config);
 
     let timeline = store
@@ -219,8 +231,8 @@ fn apply_branch(config: &CliConfig, harness: &mut dyn Harness, agent_name: &str,
             std::process::exit(1);
         });
 
-    // Read state from the tip node and set checkout state
-    if let Ok(Some(node)) = store.get_node(&tip_hash) {
+    // Read state from the tip node
+    let initial_state = if let Ok(Some(node)) = store.get_node(&tip_hash) {
         let state = node.message.state().unwrap_or("");
         if !state.is_empty() {
             println!(
@@ -228,19 +240,24 @@ fn apply_branch(config: &CliConfig, harness: &mut dyn Harness, agent_name: &str,
                 branch,
                 &state[..8.min(state.len())]
             );
-            harness.set_initial_state(state.to_string());
+            if let Err(e) = store.set_checkout_state(agent_name, state) {
+                tracing::warn!(error = %e, "Failed to set checkout state for branch");
+            }
+            Some(state.to_string())
+        } else {
+            None
         }
-        if let Err(e) = store.set_checkout_state(agent_name, state) {
-            tracing::warn!(error = %e, "Failed to set checkout state for branch");
-        }
-    }
-
-    // Set dag_parent so the next message chains from the branch tip
-    harness.set_dag_parent(tip_hash);
-    // Set the timeline so all messages are recorded on this branch
-    harness.set_timeline(TimelineId::from(timeline.id), false);
+    } else {
+        None
+    };
 
     println!("On branch '{}'", branch);
+    (
+        TimelineId::from(timeline.id),
+        false,
+        initial_state,
+        tip_hash,
+    )
 }
 
 fn require_dag_store(config: &CliConfig) -> Box<dyn DagStore> {
