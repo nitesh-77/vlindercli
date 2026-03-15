@@ -205,16 +205,19 @@ fn apply_branch(config: &CliConfig, harness: &mut dyn Harness, agent_name: &str,
         std::process::exit(1);
     }
 
-    // Find the tip of the branch — head pointer, falling back to fork_point
-    let tip_hash = timeline
-        .head
-        .as_ref()
-        .or(timeline.fork_point.as_ref())
-        .unwrap_or_else(|| {
-            eprintln!("Branch '{}' has no head or fork point", branch);
+    // Find the tip of the branch — latest node on timeline, falling back to fork_point
+    let tip_hash = store
+        .latest_node_on_timeline(timeline.id, None)
+        .unwrap_or_else(|e| {
+            eprintln!("Failed to query latest node on timeline: {}", e);
             std::process::exit(1);
         })
-        .clone();
+        .map(|n| n.id)
+        .or_else(|| timeline.fork_point.clone())
+        .unwrap_or_else(|| {
+            eprintln!("Branch '{}' has no nodes or fork point", branch);
+            std::process::exit(1);
+        });
 
     // Read state from the tip node and set checkout state
     if let Ok(Some(node)) = store.get_node(&tip_hash) {

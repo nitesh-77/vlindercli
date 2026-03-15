@@ -38,9 +38,8 @@ service StateService {
   rpc GetNodeByPrefix(GetNodeByPrefixRequest) returns (GetNodeResponse);
   rpc GetTimelinesForSession(GetTimelinesForSessionRequest) returns (GetTimelinesForSessionResponse);
 
-  // Timeline head pointer
-  rpc GetTimelineHead(GetTimelineHeadRequest) returns (GetTimelineHeadResponse);
-  rpc UpdateTimelineHead(UpdateTimelineHeadRequest) returns (UpdateTimelineHeadResponse);
+  // Derived timeline head query
+  rpc LatestNodeOnTimeline(LatestNodeOnTimelineRequest) returns (LatestNodeOnTimelineResponse);
 }
 
 // =============================================================================
@@ -186,11 +185,11 @@ message GetTimelinesForSessionRequest { string session_id = 1; }
 message GetTimelinesForSessionResponse { repeated Timeline timelines = 1; }
 
 // =============================================================================
-// Timeline Head (issue #37)
+// Timeline Head Query
 // =============================================================================
 
-message GetTimelineHeadRequest { int64 timeline_id = 1; }
-message GetTimelineHeadResponse { optional string hash = 1; }
-
-message UpdateTimelineHeadRequest { int64 timeline_id = 1; string hash = 2; }
-message UpdateTimelineHeadResponse { bool success = 1; optional string error = 2; }
+message LatestNodeOnTimelineRequest {
+  int64 timeline_id = 1;
+  optional string message_type = 2;  // e.g. "invoke", "complete"; omit for any type
+}
+message LatestNodeOnTimelineResponse { optional DagNode node = 1; }

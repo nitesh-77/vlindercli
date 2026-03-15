@@ -222,16 +222,17 @@ impl TryFrom<String> for SessionId {
 /// Value is the integer primary key from the `timelines` table in the DAG store.
 /// Carried as a string in NATS headers and message subjects.
 ///
-/// `TimelineId::main()` returns `"1"` — row 1 is always the main timeline.
+/// `TimelineId::main()` returns `"0"` — the implicit main timeline.
+/// Forked timelines get IDs from AUTOINCREMENT (1, 2, …).
 /// Timeline IDs never change, even when branch names are renamed during promote.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct TimelineId(String);
 
 impl TimelineId {
-    /// The main timeline (row 1 in the timelines table).
+    /// The main timeline — always present, never has a row in the timelines table.
     pub fn main() -> Self {
-        Self("1".to_string())
+        Self("0".to_string())
     }
 
     pub fn as_str(&self) -> &str {
@@ -530,15 +531,15 @@ mod tests {
     // --- TimelineId tests (ADR 093) ---
 
     #[test]
-    fn timeline_id_main_is_one() {
+    fn timeline_id_main_is_zero() {
         let id = TimelineId::main();
-        assert_eq!(id.as_str(), "1");
+        assert_eq!(id.as_str(), "0");
     }
 
     #[test]
     fn timeline_id_display() {
         let id = TimelineId::main();
-        assert_eq!(format!("{}", id), "1");
+        assert_eq!(format!("{}", id), "0");
     }
 
     #[test]

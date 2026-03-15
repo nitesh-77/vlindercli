@@ -348,32 +348,24 @@ impl DagStore for GrpcStateClient {
             .collect()
     }
 
-    fn get_timeline_head(&self, timeline_id: i64) -> Result<Option<DagNodeId>, String> {
-        let request = proto::GetTimelineHeadRequest { timeline_id };
-        let mut client = self.client.clone();
-        let response = self
-            .runtime
-            .block_on(async { client.get_timeline_head(request).await })
-            .map_err(|e| e.to_string())?;
-        Ok(response.into_inner().hash.map(DagNodeId::from))
-    }
-
-    fn update_timeline_head(&self, timeline_id: i64, hash: &DagNodeId) -> Result<(), String> {
-        let request = proto::UpdateTimelineHeadRequest {
+    fn latest_node_on_timeline(
+        &self,
+        timeline_id: i64,
+        message_type: Option<vlinder_core::domain::MessageType>,
+    ) -> Result<Option<vlinder_core::domain::DagNode>, String> {
+        let request = proto::LatestNodeOnTimelineRequest {
             timeline_id,
-            hash: hash.to_string(),
+            message_type: message_type.map(|mt| mt.as_str().to_string()),
         };
         let mut client = self.client.clone();
         let response = self
             .runtime
-            .block_on(async { client.update_timeline_head(request).await })
+            .block_on(async { client.latest_node_on_timeline(request).await })
             .map_err(|e| e.to_string())?;
 
-        let resp = response.into_inner();
-        if resp.success {
-            Ok(())
-        } else {
-            Err(resp.error.unwrap_or_else(|| "unknown error".to_string()))
+        match response.into_inner().node {
+            Some(n) => Ok(Some(n.try_into()?)),
+            None => Ok(None),
         }
     }
 

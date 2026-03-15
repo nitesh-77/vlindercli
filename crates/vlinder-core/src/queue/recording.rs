@@ -37,26 +37,27 @@ impl RecordingQueue {
         Self { inner, store }
     }
 
-    /// Record a DAG node for the given observable message, then update timeline head.
+    /// Record a DAG node for the given observable message.
     fn record(&self, observable: &ObservableMessage) {
         let timeline_id_str = observable.timeline().as_str();
         let timeline_id: i64 = timeline_id_str.parse().unwrap_or(1);
 
-        // Explicit dag_parent on Invoke/Fork overrides timeline head.
+        // Explicit dag_parent on Invoke/Fork overrides the latest node on the timeline.
         let dag_parent_override: Option<DagNodeId> = match observable {
             ObservableMessage::Invoke(m) if !m.dag_parent.is_empty() => Some(m.dag_parent.clone()),
             ObservableMessage::Fork(m) => Some(m.fork_point.clone()),
             _ => None,
         };
 
-        // Look up parent ID: dag_parent override → timeline head
+        // Look up parent ID: dag_parent override → latest node on timeline
         let parent_id = dag_parent_override.unwrap_or_else(|| {
             self.store
-                .get_timeline_head(timeline_id)
+                .latest_node_on_timeline(timeline_id, None)
                 .unwrap_or_else(|e| {
-                    tracing::warn!(error = %e, timeline = timeline_id, "Failed to read timeline head");
+                    tracing::warn!(error = %e, timeline = timeline_id, "Failed to query latest node on timeline");
                     None
                 })
+                .map(|n| n.id)
                 .unwrap_or_else(DagNodeId::root)
         });
 
@@ -65,12 +66,6 @@ impl RecordingQueue {
 
         if let Err(e) = self.store.insert_node(&node) {
             tracing::warn!(error = %node_id, "Failed to record DAG node (outbox): {}", e);
-        }
-
-        // Advance the timeline head — both sidecar and daemon update
-        // the same row, giving a single Merkle chain per timeline.
-        if let Err(e) = self.store.update_timeline_head(timeline_id, &node_id) {
-            tracing::warn!(error = %node_id, "Failed to update timeline head: {}", e);
         }
     }
 }
@@ -575,18 +570,12 @@ mod tests {
             ) -> Result<Vec<crate::domain::Timeline>, String> {
                 Ok(vec![])
             }
-            fn get_timeline_head(
+            fn latest_node_on_timeline(
                 &self,
                 _: i64,
-            ) -> Result<Option<crate::domain::DagNodeId>, String> {
+                _: Option<crate::domain::MessageType>,
+            ) -> Result<Option<crate::domain::DagNode>, String> {
                 Ok(None)
-            }
-            fn update_timeline_head(
-                &self,
-                _: i64,
-                _: &crate::domain::DagNodeId,
-            ) -> Result<(), String> {
-                Ok(())
             }
             fn create_session(&self, _: &crate::domain::Session) -> Result<(), String> {
                 Ok(())

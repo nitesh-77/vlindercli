@@ -49,12 +49,15 @@ impl SqliteDagStore {
                  protocol_version TEXT NOT NULL DEFAULT '',
                  checkpoint TEXT,
                  operation TEXT,
-                 message_blob TEXT
+                 message_blob TEXT,
+                 timeline_id TEXT NOT NULL DEFAULT '0'
              );
              CREATE INDEX IF NOT EXISTS idx_dag_nodes_session
                  ON dag_nodes (session_id, created_at);
              CREATE INDEX IF NOT EXISTS idx_dag_nodes_parent
                  ON dag_nodes (parent_hash);
+             CREATE INDEX IF NOT EXISTS idx_dag_nodes_timeline
+                 ON dag_nodes (timeline_id, message_type, created_at);
              CREATE TABLE IF NOT EXISTS checkout_state (
                  agent_name TEXT PRIMARY KEY,
                  state_hash TEXT NOT NULL
@@ -80,190 +83,16 @@ impl SqliteDagStore {
         )
         .map_err(|e| format!("failed to initialize dag store: {}", e))?;
 
-        // Migrate existing databases: add diagnostics and stderr columns (ADR 071).
-        // ALTER TABLE ADD COLUMN is idempotent-safe: we check PRAGMA table_info first.
-        Self::migrate_071(&conn)?;
-        Self::migrate_state(&conn)?;
-        Self::migrate_protocol_version(&conn)?;
-        Self::migrate_timelines(&conn)?;
-        Self::migrate_timeline_head(&conn)?;
-        Self::migrate_message_blob(&conn)?;
-
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })
-    }
-
-    /// Migrate existing databases to include diagnostics and stderr columns (ADR 071).
-    fn migrate_071(conn: &Connection) -> Result<(), String> {
-        let has_diagnostics = conn
-            .prepare("PRAGMA table_info(dag_nodes)")
-            .and_then(|mut stmt| {
-                let mut found = false;
-                let mut rows = stmt.query([])?;
-                while let Some(row) = rows.next()? {
-                    let name: String = row.get(1)?;
-                    if name == "diagnostics" {
-                        found = true;
-                        break;
-                    }
-                }
-                Ok(found)
-            })
-            .map_err(|e| format!("migration check failed: {}", e))?;
-
-        if !has_diagnostics {
-            conn.execute_batch(
-                "ALTER TABLE dag_nodes ADD COLUMN diagnostics BLOB NOT NULL DEFAULT x'';
-                 ALTER TABLE dag_nodes ADD COLUMN stderr BLOB NOT NULL DEFAULT x'';",
-            )
-            .map_err(|e| format!("ADR 071 migration failed: {}", e))?;
-        }
-
-        Ok(())
-    }
-
-    /// Migrate existing databases to include the state column (ADR 055).
-    fn migrate_state(conn: &Connection) -> Result<(), String> {
-        let has_state = conn
-            .prepare("PRAGMA table_info(dag_nodes)")
-            .and_then(|mut stmt| {
-                let mut found = false;
-                let mut rows = stmt.query([])?;
-                while let Some(row) = rows.next()? {
-                    let name: String = row.get(1)?;
-                    if name == "state" {
-                        found = true;
-                        break;
-                    }
-                }
-                Ok(found)
-            })
-            .map_err(|e| format!("migration check failed: {}", e))?;
-
-        if !has_state {
-            conn.execute_batch("ALTER TABLE dag_nodes ADD COLUMN state TEXT;")
-                .map_err(|e| format!("state migration failed: {}", e))?;
-        }
-
-        Ok(())
-    }
-
-    /// Migrate existing databases to include the timelines table (ADR 093).
-    fn migrate_timelines(conn: &Connection) -> Result<(), String> {
-        // Check if table exists
-        let exists: bool = conn
-            .prepare("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='timelines'")
-            .and_then(|mut stmt| stmt.query_row([], |row| row.get::<_, i64>(0)))
-            .map(|count| count > 0)
-            .map_err(|e| format!("timelines migration check failed: {}", e))?;
-
-        if !exists {
-            conn.execute_batch(
-                "CREATE TABLE IF NOT EXISTS timelines (
-                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                     branch_name TEXT NOT NULL UNIQUE,
-                     session_id TEXT NOT NULL DEFAULT '',
-                     parent_timeline_id INTEGER,
-                     fork_point TEXT,
-                     created_at TEXT NOT NULL,
-                     broken_at TEXT,
-                     FOREIGN KEY (parent_timeline_id) REFERENCES timelines(id)
-                 );
-                 CREATE INDEX IF NOT EXISTS idx_timelines_session
-                     ON timelines (session_id);",
-            )
-            .map_err(|e| format!("timelines migration failed: {}", e))?;
-        }
-
-        Ok(())
-    }
-
-    /// Migrate existing databases to include the head column on timelines.
-    fn migrate_timeline_head(conn: &Connection) -> Result<(), String> {
-        let has_head = conn
-            .prepare("PRAGMA table_info(timelines)")
-            .and_then(|mut stmt| {
-                let mut found = false;
-                let mut rows = stmt.query([])?;
-                while let Some(row) = rows.next()? {
-                    let name: String = row.get(1)?;
-                    if name == "head" {
-                        found = true;
-                        break;
-                    }
-                }
-                Ok(found)
-            })
-            .map_err(|e| format!("migration check failed: {}", e))?;
-
-        if !has_head {
-            conn.execute_batch("ALTER TABLE timelines ADD COLUMN head TEXT;")
-                .map_err(|e| format!("timeline head migration failed: {}", e))?;
-        }
-
-        Ok(())
-    }
-
-    /// Migrate existing databases to include the protocol_version column.
-    fn migrate_protocol_version(conn: &Connection) -> Result<(), String> {
-        let has_col = conn
-            .prepare("PRAGMA table_info(dag_nodes)")
-            .and_then(|mut stmt| {
-                let mut found = false;
-                let mut rows = stmt.query([])?;
-                while let Some(row) = rows.next()? {
-                    let name: String = row.get(1)?;
-                    if name == "protocol_version" {
-                        found = true;
-                        break;
-                    }
-                }
-                Ok(found)
-            })
-            .map_err(|e| format!("migration check failed: {}", e))?;
-
-        if !has_col {
-            conn.execute_batch(
-                "ALTER TABLE dag_nodes ADD COLUMN protocol_version TEXT NOT NULL DEFAULT '';",
-            )
-            .map_err(|e| format!("protocol_version migration failed: {}", e))?;
-        }
-
-        Ok(())
-    }
-
-    /// Migrate existing databases to include the message_blob column.
-    fn migrate_message_blob(conn: &Connection) -> Result<(), String> {
-        let has_col = conn
-            .prepare("PRAGMA table_info(dag_nodes)")
-            .and_then(|mut stmt| {
-                let mut found = false;
-                let mut rows = stmt.query([])?;
-                while let Some(row) = rows.next()? {
-                    let name: String = row.get(1)?;
-                    if name == "message_blob" {
-                        found = true;
-                        break;
-                    }
-                }
-                Ok(found)
-            })
-            .map_err(|e| format!("migration check failed: {}", e))?;
-
-        if !has_col {
-            conn.execute_batch("ALTER TABLE dag_nodes ADD COLUMN message_blob TEXT;")
-                .map_err(|e| format!("message_blob migration failed: {}", e))?;
-        }
-
-        Ok(())
     }
 }
 
 /// Construct a Timeline from a SQLite row.
 ///
 /// Expects columns in order: id, branch_name, session_id, parent_timeline_id,
-/// fork_point, created_at, broken_at, head.
+/// fork_point, created_at, broken_at.
 fn row_to_timeline(row: &rusqlite::Row) -> Result<Timeline, rusqlite::Error> {
     let created_at_str: String = row.get(5)?;
     let created_at = DateTime::parse_from_rfc3339(&created_at_str)
@@ -285,7 +114,6 @@ fn row_to_timeline(row: &rusqlite::Row) -> Result<Timeline, rusqlite::Error> {
         fork_point: row.get::<_, Option<String>>(4)?.map(DagNodeId::from),
         created_at,
         broken_at,
-        head: row.get::<_, Option<String>>(7)?.map(DagNodeId::from),
     })
 }
 
@@ -329,8 +157,8 @@ impl DagStore for SqliteDagStore {
         let (from, to) = node.message.from_to();
 
         conn.execute(
-            "INSERT OR IGNORE INTO dag_nodes (hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state, protocol_version, checkpoint, operation, message_blob)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+            "INSERT OR IGNORE INTO dag_nodes (hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state, protocol_version, checkpoint, operation, message_blob, timeline_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
             rusqlite::params![
                 node.id.as_str(),
                 node.parent_id.as_str(),
@@ -348,6 +176,7 @@ impl DagStore for SqliteDagStore {
                 node.message.checkpoint(),
                 node.message.operation(),
                 message_blob,
+                node.timeline_id().as_str(),
             ],
         ).map_err(|e| format!("insert_node failed: {}", e))?;
 
@@ -545,7 +374,7 @@ impl DagStore for SqliteDagStore {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
             .prepare(
-                "SELECT id, branch_name, session_id, parent_timeline_id, fork_point, created_at, broken_at, head
+                "SELECT id, branch_name, session_id, parent_timeline_id, fork_point, created_at, broken_at
              FROM timelines WHERE branch_name = ?1",
             )
             .map_err(|e| format!("get_timeline_by_branch prepare failed: {}", e))?;
@@ -559,7 +388,7 @@ impl DagStore for SqliteDagStore {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
             .prepare(
-                "SELECT id, branch_name, session_id, parent_timeline_id, fork_point, created_at, broken_at, head
+                "SELECT id, branch_name, session_id, parent_timeline_id, fork_point, created_at, broken_at
              FROM timelines WHERE id = ?1",
             )
             .map_err(|e| format!("get_timeline prepare failed: {}", e))?;
@@ -684,7 +513,7 @@ impl DagStore for SqliteDagStore {
         let mut stmt = conn
             .prepare(
                 "SELECT t.id, t.branch_name, t.session_id, t.parent_timeline_id, t.fork_point,
-                        t.created_at, t.broken_at, t.head
+                        t.created_at, t.broken_at
                  FROM timelines t
                  JOIN dag_nodes d ON t.fork_point = d.hash
                  WHERE d.session_id = ?1
@@ -704,29 +533,40 @@ impl DagStore for SqliteDagStore {
         Ok(timelines)
     }
 
-    fn get_timeline_head(&self, timeline_id: i64) -> Result<Option<DagNodeId>, String> {
+    fn latest_node_on_timeline(
+        &self,
+        timeline_id: i64,
+        message_type: Option<MessageType>,
+    ) -> Result<Option<DagNode>, String> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn
-            .prepare("SELECT head FROM timelines WHERE id = ?1")
-            .map_err(|e| format!("get_timeline_head prepare failed: {}", e))?;
+        let tl_id_str = timeline_id.to_string();
 
-        let result: Option<String> = stmt
-            .query_row(rusqlite::params![timeline_id], |row| row.get(0))
-            .optional()
-            .map_err(|e| format!("get_timeline_head query failed: {}", e))?
-            .flatten();
+        match message_type {
+            Some(mt) => {
+                let mut stmt = conn
+                    .prepare(&format!(
+                        "SELECT {} FROM dag_nodes WHERE timeline_id = ?1 AND message_type = ?2 ORDER BY created_at DESC LIMIT 1",
+                        DAG_NODE_COLUMNS
+                    ))
+                    .map_err(|e| format!("latest_node_on_timeline prepare failed: {}", e))?;
 
-        Ok(result.map(DagNodeId::from))
-    }
+                stmt.query_row(rusqlite::params![tl_id_str, mt.as_str()], row_to_dag_node)
+                    .optional()
+                    .map_err(|e| format!("latest_node_on_timeline query failed: {}", e))
+            }
+            None => {
+                let mut stmt = conn
+                    .prepare(&format!(
+                        "SELECT {} FROM dag_nodes WHERE timeline_id = ?1 ORDER BY created_at DESC LIMIT 1",
+                        DAG_NODE_COLUMNS
+                    ))
+                    .map_err(|e| format!("latest_node_on_timeline prepare failed: {}", e))?;
 
-    fn update_timeline_head(&self, timeline_id: i64, hash: &DagNodeId) -> Result<(), String> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "UPDATE timelines SET head = ?1 WHERE id = ?2",
-            rusqlite::params![hash.as_str(), timeline_id],
-        )
-        .map_err(|e| format!("update_timeline_head failed: {}", e))?;
-        Ok(())
+                stmt.query_row(rusqlite::params![tl_id_str], row_to_dag_node)
+                    .optional()
+                    .map_err(|e| format!("latest_node_on_timeline query failed: {}", e))
+            }
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -1306,6 +1146,61 @@ mod tests {
         let store = test_store();
         // Non-existent timeline → not sealed (no row → broken_at is None)
         assert!(!store.is_timeline_sealed(999).unwrap());
+    }
+
+    // ========================================================================
+    // latest_node_on_timeline tests
+    // ========================================================================
+
+    #[test]
+    fn latest_node_on_timeline_returns_none_for_empty() {
+        let store = test_store();
+        let result = store.latest_node_on_timeline(1, None).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn latest_node_on_timeline_returns_most_recent() {
+        let store = test_store();
+
+        let invoke = make_invoke(b"first", None);
+        let node1 = build_dag_node(&invoke, &DagNodeId::root());
+        store.insert_node(&node1).unwrap();
+
+        let complete = make_complete(b"response", None);
+        let node2 = build_dag_node(&complete, &node1.id);
+        store.insert_node(&node2).unwrap();
+
+        // No filter — returns the most recent (complete)
+        let latest = store.latest_node_on_timeline(1, None).unwrap().unwrap();
+        assert_eq!(latest.id, node2.id);
+    }
+
+    #[test]
+    fn latest_node_on_timeline_filters_by_message_type() {
+        let store = test_store();
+
+        let invoke = make_invoke(b"question", None);
+        let node1 = build_dag_node(&invoke, &DagNodeId::root());
+        store.insert_node(&node1).unwrap();
+
+        let complete = make_complete(b"answer", None);
+        let node2 = build_dag_node(&complete, &node1.id);
+        store.insert_node(&node2).unwrap();
+
+        // Filter for Invoke — should return node1, not node2
+        let latest_invoke = store
+            .latest_node_on_timeline(1, Some(MessageType::Invoke))
+            .unwrap()
+            .unwrap();
+        assert_eq!(latest_invoke.id, node1.id);
+
+        // Filter for Complete — should return node2
+        let latest_complete = store
+            .latest_node_on_timeline(1, Some(MessageType::Complete))
+            .unwrap()
+            .unwrap();
+        assert_eq!(latest_complete.id, node2.id);
     }
 
     // ========================================================================

@@ -92,6 +92,9 @@ impl DagNode {
     pub fn protocol_version(&self) -> &str {
         self.message.protocol_version()
     }
+    pub fn timeline_id(&self) -> &super::TimelineId {
+        self.message.timeline()
+    }
 }
 
 /// Compute the content-addressed hash for a DAG node.
@@ -142,9 +145,6 @@ pub struct Timeline {
     pub created_at: DateTime<Utc>,
     /// When this timeline was sealed (broken). None = still active.
     pub broken_at: Option<DateTime<Utc>>,
-    /// The latest DagNode recorded on this timeline.
-    /// Moves forward with each recorded message. None before any messages.
-    pub head: Option<super::DagNodeId>,
 }
 
 /// A worker that persists observable messages to a DAG structure.
@@ -238,11 +238,12 @@ pub trait DagStore: Send + Sync {
         session_id: &super::SessionId,
     ) -> Result<Vec<Timeline>, String>;
 
-    /// Get the head for a timeline (the latest recorded DagNode ID).
-    fn get_timeline_head(&self, timeline_id: i64) -> Result<Option<super::DagNodeId>, String>;
-
-    /// Advance the head pointer of a timeline to the given DagNode ID.
-    fn update_timeline_head(&self, timeline_id: i64, id: &super::DagNodeId) -> Result<(), String>;
+    /// Get the most recent DagNode on a timeline, optionally filtered by message type.
+    fn latest_node_on_timeline(
+        &self,
+        timeline_id: i64,
+        message_type: Option<MessageType>,
+    ) -> Result<Option<DagNode>, String>;
 
     // -------------------------------------------------------------------------
     // Session CRUD
@@ -391,7 +392,6 @@ impl DagStore for InMemoryDagStore {
             fork_point: fork_point.cloned(),
             created_at: Utc::now(),
             broken_at: None,
-            head: None,
         });
         Ok(id)
     }
@@ -515,20 +515,19 @@ impl DagStore for InMemoryDagStore {
             .collect())
     }
 
-    fn get_timeline_head(&self, timeline_id: i64) -> Result<Option<super::DagNodeId>, String> {
-        let timelines = self.timelines.lock().unwrap();
-        Ok(timelines
+    fn latest_node_on_timeline(
+        &self,
+        timeline_id: i64,
+        message_type: Option<MessageType>,
+    ) -> Result<Option<DagNode>, String> {
+        let tl_id_str = timeline_id.to_string();
+        let nodes = self.nodes.lock().unwrap();
+        Ok(nodes
             .iter()
-            .find(|t| t.id == timeline_id)
-            .and_then(|t| t.head.clone()))
-    }
-
-    fn update_timeline_head(&self, timeline_id: i64, id: &super::DagNodeId) -> Result<(), String> {
-        let mut timelines = self.timelines.lock().unwrap();
-        if let Some(t) = timelines.iter_mut().find(|t| t.id == timeline_id) {
-            t.head = Some(id.clone());
-        }
-        Ok(())
+            .rev()
+            .filter(|n| n.timeline_id().as_str() == tl_id_str)
+            .find(|n| message_type.is_none_or(|mt| n.message_type() == mt))
+            .cloned())
     }
 
     fn create_session(&self, session: &Session) -> Result<(), String> {

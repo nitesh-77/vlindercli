@@ -9,15 +9,15 @@ use super::proto::{
     GetNodeByPrefixRequest, GetNodeRequest, GetNodeResponse, GetNodesBySubmissionRequest,
     GetNodesBySubmissionResponse, GetSessionByNameRequest, GetSessionNodesRequest,
     GetSessionNodesResponse, GetSessionRequest, GetSessionResponse, GetTimelineByBranchRequest,
-    GetTimelineByIdRequest, GetTimelineHeadRequest, GetTimelineHeadResponse, GetTimelineResponse,
-    GetTimelinesForSessionRequest, GetTimelinesForSessionResponse, InsertNodeRequest,
-    InsertNodeResponse, IsTimelineSealedRequest, IsTimelineSealedResponse, LatestNodeHashRequest,
-    LatestNodeHashResponse, LatestStateRequest, LatestStateResponse, ListSessionsRequest,
-    ListSessionsResponse, PingRequest, RenameTimelineRequest, RenameTimelineResponse,
-    SealTimelineRequest, SealTimelineResponse, SemVer, SetCheckoutStateRequest,
-    SetCheckoutStateResponse, UpdateTimelineHeadRequest, UpdateTimelineHeadResponse,
+    GetTimelineByIdRequest, GetTimelineResponse, GetTimelinesForSessionRequest,
+    GetTimelinesForSessionResponse, InsertNodeRequest, InsertNodeResponse, IsTimelineSealedRequest,
+    IsTimelineSealedResponse, LatestNodeHashRequest, LatestNodeHashResponse,
+    LatestNodeOnTimelineRequest, LatestNodeOnTimelineResponse, LatestStateRequest,
+    LatestStateResponse, ListSessionsRequest, ListSessionsResponse, PingRequest,
+    RenameTimelineRequest, RenameTimelineResponse, SealTimelineRequest, SealTimelineResponse,
+    SemVer, SetCheckoutStateRequest, SetCheckoutStateResponse,
 };
-use vlinder_core::domain::{DagNodeId, DagStore, SessionId};
+use vlinder_core::domain::{DagNodeId, DagStore, MessageType, SessionId};
 
 /// gRPC server that wraps a DagStore implementation.
 pub struct StateServiceServer {
@@ -393,38 +393,21 @@ impl StateService for StateServiceServer {
         }))
     }
 
-    // -------------------------------------------------------------------------
-    // Timeline head RPCs (issue #37)
-    // -------------------------------------------------------------------------
-
-    async fn get_timeline_head(
+    async fn latest_node_on_timeline(
         &self,
-        request: Request<GetTimelineHeadRequest>,
-    ) -> Result<Response<GetTimelineHeadResponse>, Status> {
+        request: Request<LatestNodeOnTimelineRequest>,
+    ) -> Result<Response<LatestNodeOnTimelineResponse>, Status> {
         let req = request.into_inner();
-        let hash = self
+        let message_type = req
+            .message_type
+            .map(|s| s.parse::<MessageType>())
+            .transpose()
+            .map_err(Status::invalid_argument)?;
+        let node = self
             .store
-            .get_timeline_head(req.timeline_id)
+            .latest_node_on_timeline(req.timeline_id, message_type)
             .map_err(Status::internal)?
-            .map(|id| id.to_string());
-        Ok(Response::new(GetTimelineHeadResponse { hash }))
-    }
-
-    async fn update_timeline_head(
-        &self,
-        request: Request<UpdateTimelineHeadRequest>,
-    ) -> Result<Response<UpdateTimelineHeadResponse>, Status> {
-        let req = request.into_inner();
-        let hash = DagNodeId::from(req.hash);
-        match self.store.update_timeline_head(req.timeline_id, &hash) {
-            Ok(()) => Ok(Response::new(UpdateTimelineHeadResponse {
-                success: true,
-                error: None,
-            })),
-            Err(e) => Ok(Response::new(UpdateTimelineHeadResponse {
-                success: false,
-                error: Some(e),
-            })),
-        }
+            .map(|n| n.into());
+        Ok(Response::new(LatestNodeOnTimelineResponse { node }))
     }
 }

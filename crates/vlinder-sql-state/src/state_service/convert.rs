@@ -90,7 +90,7 @@ impl From<Timeline> for proto::Timeline {
             fork_point: tl.fork_point.map(|fp| fp.to_string()),
             created_at: tl.created_at.to_rfc3339(),
             broken_at: tl.broken_at.map(|dt| dt.to_rfc3339()),
-            head: tl.head.map(|h| h.to_string()),
+            head: None,
         }
     }
 }
@@ -121,7 +121,6 @@ impl TryFrom<proto::Timeline> for Timeline {
             fork_point: tl.fork_point.map(DagNodeId::from),
             created_at,
             broken_at,
-            head: tl.head.map(DagNodeId::from),
         })
     }
 }
