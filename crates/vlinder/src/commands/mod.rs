@@ -90,6 +90,7 @@ mod tests {
             Command::Agent {
                 cmd: agent::AgentCommand::Run {
                     name: "todoapp".to_string(),
+                    session: None,
                     branch: None,
                 }
             }
@@ -106,6 +107,55 @@ mod tests {
             Command::Agent {
                 cmd: agent::AgentCommand::Run {
                     name: "todoapp".to_string(),
+                    session: None,
+                    branch: Some("fix-typo".to_string()),
+                }
+            }
+        );
+    }
+
+    #[test]
+    fn cli_agent_run_with_session() {
+        let cli = Cli::try_parse_from([
+            "vlinder",
+            "agent",
+            "run",
+            "todoapp",
+            "--session",
+            "my-session",
+        ])
+        .unwrap();
+        assert_eq!(
+            cli.command,
+            Command::Agent {
+                cmd: agent::AgentCommand::Run {
+                    name: "todoapp".to_string(),
+                    session: Some("my-session".to_string()),
+                    branch: None,
+                }
+            }
+        );
+    }
+
+    #[test]
+    fn cli_agent_run_with_session_and_branch() {
+        let cli = Cli::try_parse_from([
+            "vlinder",
+            "agent",
+            "run",
+            "todoapp",
+            "--session",
+            "my-session",
+            "--branch",
+            "fix-typo",
+        ])
+        .unwrap();
+        assert_eq!(
+            cli.command,
+            Command::Agent {
+                cmd: agent::AgentCommand::Run {
+                    name: "todoapp".to_string(),
+                    session: Some("my-session".to_string()),
                     branch: Some("fix-typo".to_string()),
                 }
             }

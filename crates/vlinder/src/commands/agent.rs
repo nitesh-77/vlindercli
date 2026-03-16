@@ -50,6 +50,9 @@ pub enum AgentCommand {
     Run {
         /// Agent name
         name: String,
+        /// Continue an existing session (by name or ID)
+        #[arg(long)]
+        session: Option<String>,
         /// Resume on a named branch (created by `session fork`)
         #[arg(long)]
         branch: Option<String>,
@@ -78,7 +81,11 @@ pub enum AgentCommand {
 pub fn execute(cmd: AgentCommand) {
     match cmd {
         AgentCommand::Deploy { path } => deploy(path),
-        AgentCommand::Run { name, branch } => run(&name, branch.as_deref()),
+        AgentCommand::Run {
+            name,
+            session,
+            branch,
+        } => run(&name, session.as_deref(), branch.as_deref()),
         AgentCommand::List => list(),
         AgentCommand::Get { name } => get(&name),
         AgentCommand::Delete { name } => delete(&name),
@@ -130,7 +137,7 @@ pub(super) fn deploy_agent_from_path(agent_dir: &Path, registry: &dyn Registry) 
     })
 }
 
-fn run(name: &str, branch: Option<&str>) {
+fn run(name: &str, session: Option<&str>, branch: Option<&str>) {
     let config = CliConfig::load();
     let registry = connect_registry(&config);
 
@@ -152,24 +159,16 @@ fn run(name: &str, branch: Option<&str>) {
     // queue and registry connection. The CLI is now a pure gRPC client.
     let harness = connect_harness(&config);
 
-    // Resolve session context before starting (ADR 054, ADR 070)
-    let (session_id, timeline, sealed, initial_state, dag_parent) =
-        if let Some(branch_name) = branch {
-            let (tl, sealed, state, parent) = resolve_branch(&config, name, branch_name);
-            // Continuing an existing session on a named branch — no start_session needed.
-            // TODO: resolve session_id from the branch's session
-            let store = require_dag_store(&config);
-            let branch = store
-                .get_branch_by_name(branch_name)
-                .ok()
-                .flatten()
-                .expect("branch already resolved");
-            let session_id = branch.session_id;
-            (session_id, tl, sealed, state, parent)
-        } else {
-            // New session: create session + main branch via harness
+    // Three modes:
+    //   1. No --session: new session
+    //   2. --session <name>: continue on default branch
+    //   3. --session <name> --branch <branch>: continue on specific branch
+    //
+    // Legacy: --branch without --session still works (looks up session from branch).
+    let (session_id, timeline, sealed, initial_state, dag_parent) = match (session, branch) {
+        (None, None) => {
+            // Mode 1: new session
             let (session_id, branch_id) = harness.start_session(name);
-            let timeline = branch_id;
             let initial_state =
                 open_dag_store(&config).and_then(|store| read_latest_state(store.as_ref(), name));
             if let Some(ref state) = initial_state {
@@ -177,12 +176,21 @@ fn run(name: &str, branch: Option<&str>) {
             }
             (
                 session_id,
-                timeline,
+                branch_id,
                 false,
                 initial_state,
                 DagNodeId::root(),
             )
-        };
+        }
+        (Some(session_name), None) => {
+            // Mode 2: continue existing session on its default branch
+            resolve_session_default(&config, name, session_name)
+        }
+        (Some(_), Some(branch_name)) | (None, Some(branch_name)) => {
+            // Mode 3: continue on a specific branch
+            resolve_branch(&config, name, branch_name)
+        }
+    };
 
     // Run REPL with synchronous run_agent (ADR 092)
     repl::run(|input| {
@@ -201,46 +209,102 @@ fn run(name: &str, branch: Option<&str>) {
     });
 }
 
-/// Resolve branch session context: look up timeline, read tip state/hash.
-fn resolve_branch(
+/// Resolve session default branch: look up session by name, continue on its default branch.
+fn resolve_session_default(
     config: &CliConfig,
     agent_name: &str,
-    branch: &str,
-) -> (BranchId, bool, Option<String>, DagNodeId) {
+    session_name: &str,
+) -> (
+    vlinder_core::domain::SessionId,
+    BranchId,
+    bool,
+    Option<String>,
+    DagNodeId,
+) {
     let store = require_dag_store(config);
 
-    let timeline = store
-        .get_branch_by_name(branch)
+    let session = resolve_session(&*store, session_name);
+    let branch_id = session.default_branch;
+
+    let branch = store
+        .get_branch(branch_id)
         .unwrap_or_else(|e| {
-            eprintln!("Failed to look up timeline: {}", e);
+            eprintln!("Failed to look up default branch: {}", e);
             std::process::exit(1);
         })
         .unwrap_or_else(|| {
-            eprintln!("Branch '{}' not found", branch);
+            eprintln!("Default branch not found for session '{}'", session_name);
             std::process::exit(1);
         });
 
-    if timeline.broken_at.is_some() {
+    let (_, sealed, initial_state, dag_parent) =
+        resolve_branch_tip(&*store, agent_name, &branch, &branch.name);
+
+    println!(
+        "Continuing session '{}' on branch '{}'",
+        session.name, branch.name
+    );
+    (session.id, branch_id, sealed, initial_state, dag_parent)
+}
+
+/// Resolve branch session context: look up branch by name, continue on it.
+fn resolve_branch(
+    config: &CliConfig,
+    agent_name: &str,
+    branch_name: &str,
+) -> (
+    vlinder_core::domain::SessionId,
+    BranchId,
+    bool,
+    Option<String>,
+    DagNodeId,
+) {
+    let store = require_dag_store(config);
+
+    let branch = store
+        .get_branch_by_name(branch_name)
+        .unwrap_or_else(|e| {
+            eprintln!("Failed to look up branch: {}", e);
+            std::process::exit(1);
+        })
+        .unwrap_or_else(|| {
+            eprintln!("Branch '{}' not found", branch_name);
+            std::process::exit(1);
+        });
+
+    let session_id = branch.session_id.clone();
+    let (_, sealed, initial_state, dag_parent) =
+        resolve_branch_tip(&*store, agent_name, &branch, branch_name);
+
+    println!("On branch '{}'", branch_name);
+    (session_id, branch.id, sealed, initial_state, dag_parent)
+}
+
+/// Read tip state and dag_parent from a branch.
+fn resolve_branch_tip(
+    store: &dyn DagStore,
+    agent_name: &str,
+    branch: &vlinder_core::domain::Branch,
+    branch_name: &str,
+) -> (BranchId, bool, Option<String>, DagNodeId) {
+    if branch.broken_at.is_some() {
         eprintln!(
-            "Branch '{}' is sealed — cannot run on a sealed timeline",
-            branch
+            "Branch '{}' is sealed — cannot run on a sealed branch",
+            branch_name
         );
         std::process::exit(1);
     }
 
-    // Find the tip of the branch — latest node on timeline, falling back to fork_point
+    // Find the tip — latest node on branch, falling back to fork_point
     let tip_hash = store
-        .latest_node_on_branch(timeline.id, None)
+        .latest_node_on_branch(branch.id, None)
         .unwrap_or_else(|e| {
-            eprintln!("Failed to query latest node on timeline: {}", e);
+            eprintln!("Failed to query latest node on branch: {}", e);
             std::process::exit(1);
         })
         .map(|n| n.id)
-        .or_else(|| timeline.fork_point.clone())
-        .unwrap_or_else(|| {
-            eprintln!("Branch '{}' has no nodes or fork point", branch);
-            std::process::exit(1);
-        });
+        .or_else(|| branch.fork_point.clone())
+        .unwrap_or_else(DagNodeId::root);
 
     // Read state from the tip node
     let initial_state = if let Ok(Some(node)) = store.get_node(&tip_hash) {
@@ -248,7 +312,7 @@ fn resolve_branch(
         if !state.is_empty() {
             println!(
                 "Resuming '{}' from state {}…",
-                branch,
+                branch_name,
                 &state[..8.min(state.len())]
             );
             if let Err(e) = store.set_checkout_state(agent_name, state) {
@@ -262,8 +326,23 @@ fn resolve_branch(
         None
     };
 
-    println!("On branch '{}'", branch);
-    (timeline.id, false, initial_state, tip_hash)
+    (branch.id, false, initial_state, tip_hash)
+}
+
+/// Resolve a session by name or UUID.
+fn resolve_session(store: &dyn DagStore, name_or_id: &str) -> vlinder_core::domain::Session {
+    // Try UUID first
+    if let Ok(sid) = vlinder_core::domain::SessionId::try_from(name_or_id.to_string()) {
+        if let Some(session) = store.get_session(&sid).ok().flatten() {
+            return session;
+        }
+    }
+    // Try by petname
+    if let Some(session) = store.get_session_by_name(name_or_id).ok().flatten() {
+        return session;
+    }
+    eprintln!("Session '{}' not found", name_or_id);
+    std::process::exit(1);
 }
 
 fn require_dag_store(config: &CliConfig) -> Box<dyn DagStore> {
