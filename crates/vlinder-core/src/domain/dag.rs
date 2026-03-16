@@ -13,10 +13,28 @@
 //! - `payload`: raw message payload
 //! - `created_at`: ISO-8601 timestamp
 
+use std::collections::BTreeMap;
+
 use chrono::{DateTime, Utc};
 use sha2::{Digest, Sha256};
 
+use super::message::identity::{Instance, StateHash};
 use super::session::Session;
+
+/// Snapshot of all store states at a point in the DAG (ADR 116).
+///
+/// Maps service instance names to their per-store state hashes.
+/// BTreeMap guarantees deterministic ordering for content addressing.
+/// Always present on every DagNode — inherited from parent if unchanged.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Snapshot(pub BTreeMap<Instance, StateHash>);
+
+impl Snapshot {
+    /// Empty snapshot — no stores, no state. Used for root nodes.
+    pub fn empty() -> Self {
+        Self(BTreeMap::new())
+    }
+}
 
 /// The message types in the Vlinder protocol (ADR 044, 113).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,13 +84,14 @@ impl std::str::FromStr for MessageType {
 /// A single node in the runtime-captured DAG.
 ///
 /// Wraps the full `ObservableMessage` with DAG metadata:
-/// content-addressed ID, Merkle parent pointer, and insertion timestamp.
-/// Everything else lives on the message itself.
+/// content-addressed ID, Merkle parent pointer, insertion timestamp,
+/// and the full storage snapshot at this point (ADR 116).
 #[derive(Debug, Clone, PartialEq)]
 pub struct DagNode {
     pub id: super::DagNodeId,
     pub parent_id: super::DagNodeId,
     pub created_at: DateTime<Utc>,
+    pub state: Snapshot,
     pub message: super::ObservableMessage,
 }
 

@@ -164,6 +164,7 @@ fn row_to_dag_node(row: &rusqlite::Row) -> Result<DagNode, rusqlite::Error> {
         id: DagNodeId::from(row.get::<_, String>(0)?),
         parent_id: DagNodeId::from(row.get::<_, String>(1)?),
         created_at,
+        state: vlinder_core::domain::Snapshot::empty(),
         message,
     })
 }

@@ -26,7 +26,8 @@ pub use complete::CompleteMessage;
 pub use delegate::DelegateMessage;
 pub use fork::ForkMessage;
 pub use identity::{
-    BranchId, DagNodeId, HarnessType, MessageId, Sequence, SequenceCounter, SessionId, SubmissionId,
+    BranchId, DagNodeId, HarnessType, Instance, MessageId, Sequence, SequenceCounter, SessionId,
+    StateHash, SubmissionId,
 };
 pub use invoke::InvokeMessage;
 pub use observable::{ObservableMessage, ObservableMessageHeaders};

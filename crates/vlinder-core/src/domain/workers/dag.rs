@@ -8,11 +8,14 @@
 use chrono::Utc;
 
 use crate::domain::message::ObservableMessage;
-use crate::domain::{hash_dag_node, DagNode, DagNodeId};
+use crate::domain::{hash_dag_node, DagNode, DagNodeId, Snapshot};
 
 /// Build a `DagNode` from an `ObservableMessage` and Merkle chain state.
 ///
 /// Computes the content-addressed hash and wraps the message with DAG metadata.
+/// The snapshot is initialized from the message's state if present, otherwise
+/// empty. Callers that have the parent node should call `with_parent_snapshot`
+/// to inherit unchanged store states.
 pub fn build_dag_node(msg: &ObservableMessage, parent_id: &DagNodeId) -> DagNode {
     let id = hash_dag_node(
         msg.payload(),
@@ -26,6 +29,7 @@ pub fn build_dag_node(msg: &ObservableMessage, parent_id: &DagNodeId) -> DagNode
         id,
         parent_id: parent_id.clone(),
         created_at: Utc::now(),
+        state: Snapshot::empty(),
         message: msg.clone(),
     }
 }

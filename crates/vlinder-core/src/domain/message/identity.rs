@@ -215,6 +215,76 @@ impl TryFrom<String> for SessionId {
     }
 }
 
+// --- Instance (ADR 115, 116) ---
+
+/// A named service instance scoped to an agent.
+///
+/// Identifies a specific store the agent can write to (e.g. "kv", "vec").
+/// Post-ADR 115, agents declare named instances in their manifest.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct Instance(String);
+
+impl Instance {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for Instance {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<String> for Instance {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
+
+impl From<&str> for Instance {
+    fn from(s: &str) -> Self {
+        Self(s.to_string())
+    }
+}
+
+// --- StateHash (ADR 116) ---
+
+/// Content-addressed hash of a single store's state.
+///
+/// Produced by the store worker after a write operation.
+/// Empty string means the store has no state (initial/empty).
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct StateHash(String);
+
+impl StateHash {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn empty() -> Self {
+        Self(String::new())
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl fmt::Display for StateHash {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<String> for StateHash {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
+
 // --- BranchId ---
 
 /// Database primary key identifying a branch within a session.

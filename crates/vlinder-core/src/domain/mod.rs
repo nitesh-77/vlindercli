@@ -61,9 +61,9 @@ pub use diagnostics::{
 };
 pub use message::{
     BranchId, CompleteMessage, DagNodeId, DelegateMessage, ExpectsReply, ForkMessage, HarnessType,
-    InvokeMessage, MessageId, ObservableMessage, ObservableMessageHeaders, RepairMessage,
+    Instance, InvokeMessage, MessageId, ObservableMessage, ObservableMessageHeaders, RepairMessage,
     RequestMessage, ResponseMessage, Sequence, SequenceCounter, SessionId, SessionStartMessage,
-    SubmissionId, PROTOCOL_VERSION,
+    StateHash, SubmissionId, PROTOCOL_VERSION,
 };
 pub use message_queue::{agent_routing_key, Acknowledgement, MessageQueue, QueueError};
 pub use routing_key::{
@@ -76,7 +76,7 @@ pub use routing_key::{
 
 pub use dag::{
     hash_dag_node, Branch, DagNode, DagStore, DagWorker, InMemoryDagStore, MessageType,
-    SessionSummary,
+    SessionSummary, Snapshot,
 };
 
 // ============================================================================

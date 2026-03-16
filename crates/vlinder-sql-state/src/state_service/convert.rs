@@ -78,6 +78,7 @@ impl TryFrom<proto::DagNode> for DagNode {
             id: DagNodeId::from(node.hash),
             parent_id: DagNodeId::from(node.parent_hash),
             created_at,
+            state: vlinder_core::domain::Snapshot::empty(),
             message,
         })
     }
