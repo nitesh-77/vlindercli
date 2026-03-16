@@ -6,7 +6,7 @@ use clap::{Subcommand, ValueEnum};
 use crate::config::CliConfig;
 use vlinder_core::domain::{Agent, AgentManifest, BranchId, DagNodeId, DagStore, Registry};
 
-use super::connect::{connect_harness, connect_registry, open_dag_store, read_latest_state};
+use super::connect::{connect_harness, connect_registry, open_dag_store};
 use super::repl;
 
 #[derive(Clone, Debug, PartialEq, ValueEnum)]
@@ -159,35 +159,20 @@ fn run(name: &str, session: Option<&str>, branch: Option<&str>) {
     // queue and registry connection. The CLI is now a pure gRPC client.
     let harness = connect_harness(&config);
 
-    // Three modes:
-    //   1. No --session: new session
-    //   2. --session <name>: continue on default branch
-    //   3. --session <name> --branch <branch>: continue on specific branch
-    //
-    // Legacy: --branch without --session still works (looks up session from branch).
-    let (session_id, timeline, sealed, initial_state, dag_parent) = match (session, branch) {
+    // Resolve (session, branch) — the CLI flags are sugar for this tuple.
+    // All paths end at resolve_branch_tip for state resolution.
+    let (session_id, branch_id, sealed, initial_state, dag_parent) = match (session, branch) {
         (None, None) => {
-            // Mode 1: new session
+            // New session → create session + default branch, resolve tip
             let (session_id, branch_id) = harness.start_session(name);
-            let initial_state =
-                open_dag_store(&config).and_then(|store| read_latest_state(store.as_ref(), name));
-            if let Some(ref state) = initial_state {
-                println!("Resuming from state {}…", &state[..8.min(state.len())]);
-            }
-            (
-                session_id,
-                branch_id,
-                false,
-                initial_state,
-                DagNodeId::root(),
-            )
+            (session_id, branch_id, false, None, DagNodeId::root())
         }
         (Some(session_name), None) => {
-            // Mode 2: continue existing session on its default branch
+            // Existing session → resolve its default branch
             resolve_session_default(&config, session_name)
         }
         (Some(_), Some(branch_name)) | (None, Some(branch_name)) => {
-            // Mode 3: continue on a specific branch
+            // Specific branch → resolve it directly
             resolve_branch(&config, branch_name)
         }
     };
@@ -198,7 +183,7 @@ fn run(name: &str, session: Option<&str>, branch: Option<&str>) {
             &agent_id,
             input,
             session_id.clone(),
-            timeline,
+            branch_id,
             sealed,
             initial_state.clone(),
             dag_parent.clone(),

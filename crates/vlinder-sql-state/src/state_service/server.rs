@@ -11,8 +11,7 @@ use super::proto::{
     GetNodeResponse, GetNodesBySubmissionRequest, GetNodesBySubmissionResponse,
     GetSessionByNameRequest, GetSessionNodesRequest, GetSessionNodesResponse, GetSessionRequest,
     GetSessionResponse, InsertNodeRequest, InsertNodeResponse, LatestNodeOnBranchRequest,
-    LatestNodeOnBranchResponse, LatestStateRequest, LatestStateResponse, ListSessionsRequest,
-    ListSessionsResponse, PingRequest, SemVer,
+    LatestNodeOnBranchResponse, ListSessionsRequest, ListSessionsResponse, PingRequest, SemVer,
 };
 use vlinder_core::domain::{DagNodeId, DagStore, MessageType, SessionId};
 
@@ -116,20 +115,6 @@ impl StateService for StateServiceServer {
             .collect();
 
         Ok(Response::new(GetChildrenResponse { nodes }))
-    }
-
-    async fn latest_state(
-        &self,
-        request: Request<LatestStateRequest>,
-    ) -> Result<Response<LatestStateResponse>, Status> {
-        let req = request.into_inner();
-
-        let state = self
-            .store
-            .latest_state(&req.agent_name)
-            .map_err(Status::internal)?;
-
-        Ok(Response::new(LatestStateResponse { state }))
     }
 
     // -------------------------------------------------------------------------

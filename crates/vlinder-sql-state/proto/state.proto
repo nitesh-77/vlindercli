@@ -15,7 +15,6 @@ service StateService {
   rpc GetNode(GetNodeRequest) returns (GetNodeResponse);
   rpc GetSessionNodes(GetSessionNodesRequest) returns (GetSessionNodesResponse);
   rpc GetChildren(GetChildrenRequest) returns (GetChildrenResponse);
-  rpc LatestState(LatestStateRequest) returns (LatestStateResponse);
 
   // Branch methods
   rpc CreateBranch(CreateBranchRequest) returns (CreateBranchResponse);
@@ -90,9 +89,6 @@ message GetSessionNodesResponse { repeated DagNode nodes = 1; }
 
 message GetChildrenRequest { string parent_hash = 1; }
 message GetChildrenResponse { repeated DagNode nodes = 1; }
-
-message LatestStateRequest { string agent_name = 1; }
-message LatestStateResponse { optional string state = 1; }
 
 // =============================================================================
 // Branch

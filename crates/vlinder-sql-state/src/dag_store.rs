@@ -314,27 +314,6 @@ impl DagStore for SqliteDagStore {
         Ok(nodes)
     }
 
-    fn latest_state(&self, agent_name: &str) -> Result<Option<String>, String> {
-        let conn = self.conn.lock().unwrap();
-
-        let mut stmt = conn
-            .prepare(
-                "SELECT state FROM dag_nodes
-             WHERE state IS NOT NULL AND state != ''
-               AND (sender = ?1 OR receiver = ?1)
-             ORDER BY created_at DESC
-             LIMIT 1",
-            )
-            .map_err(|e| format!("latest_state prepare failed: {}", e))?;
-
-        let result: Option<String> = stmt
-            .query_row(rusqlite::params![agent_name], |row| row.get(0))
-            .optional()
-            .map_err(|e| format!("latest_state query failed: {}", e))?;
-
-        Ok(result)
-    }
-
     // -------------------------------------------------------------------------
     // Branch methods
     // -------------------------------------------------------------------------
@@ -855,38 +834,6 @@ mod tests {
         let s2_nodes = store.get_session_nodes(&sess2).unwrap();
         assert_eq!(s2_nodes.len(), 1);
         assert_eq!(*s2_nodes[0].session_id(), sess2);
-    }
-
-    #[test]
-    fn latest_state_returns_most_recent() {
-        let store = test_store();
-
-        let msg1 = make_complete(b"first", Some("old-state".to_string()));
-        let mut node1 = build_dag_node(&msg1, &DagNodeId::root());
-        node1.created_at = chrono::TimeZone::with_ymd_and_hms(&Utc, 2025, 1, 1, 0, 0, 0).unwrap();
-
-        let msg2 = make_complete(b"second", Some("new-state".to_string()));
-        let mut node2 = build_dag_node(&msg2, &node1.id);
-        node2.created_at = chrono::TimeZone::with_ymd_and_hms(&Utc, 2025, 1, 1, 0, 1, 0).unwrap();
-
-        store.insert_node(&node1).unwrap();
-        store.insert_node(&node2).unwrap();
-
-        // agent-a is the sender on Complete messages
-        let state = store.latest_state("agent-a").unwrap();
-        assert_eq!(state, Some("new-state".to_string()));
-    }
-
-    #[test]
-    fn latest_state_returns_none_when_no_state() {
-        let store = test_store();
-
-        let node = test_node(b"payload", &DagNodeId::root());
-        store.insert_node(&node).unwrap();
-
-        // cli is the sender, agent-a is receiver for invoke
-        let state = store.latest_state("agent-x").unwrap();
-        assert_eq!(state, None);
     }
 
     // ========================================================================

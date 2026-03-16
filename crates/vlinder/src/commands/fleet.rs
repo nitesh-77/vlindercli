@@ -5,7 +5,7 @@ use clap::Subcommand;
 use crate::config::CliConfig;
 use vlinder_core::domain::{agent_routing_key, DagNodeId, Fleet, FleetManifest, Registry};
 
-use super::connect::{connect_harness, connect_registry, open_dag_store, read_latest_state};
+use super::connect::{connect_harness, connect_registry};
 use super::repl;
 
 #[derive(Subcommand, Debug, PartialEq)]
@@ -193,14 +193,8 @@ pub fn run(name: &str) {
     // Connect harness via gRPC — the daemon owns queue and registry
     let harness = connect_harness(&config);
 
-    // Resolve session context before starting
-    let initial_state = open_dag_store(&config)
-        .and_then(|store| read_latest_state(store.as_ref(), entry_agent_name.as_str()));
-    if let Some(ref state) = initial_state {
-        println!("Resuming from state {}…", &state[..8.min(state.len())]);
-    }
+    // New session — start fresh, no prior state
     let (session_id, branch_id) = harness.start_session(entry_agent_name.as_str());
-    let timeline = branch_id;
 
     tracing::debug!(fleet = %fleet.name, "Fleet session started");
 
@@ -216,9 +210,9 @@ pub fn run(name: &str) {
             &entry_agent_id,
             &enriched_input,
             session_id.clone(),
-            timeline,
+            branch_id,
             false,
-            initial_state.clone(),
+            None,
             DagNodeId::root(),
         ) {
             Ok(result) => result,

@@ -174,12 +174,6 @@ pub trait DagStore: Send + Sync {
     /// Get all children of a given parent ID.
     fn get_children(&self, parent_id: &super::DagNodeId) -> Result<Vec<DagNode>, String>;
 
-    /// Get the most recent state hash associated with an agent (ADR 079).
-    ///
-    /// Scans nodes where the agent is either sender or receiver, returning
-    /// the latest non-empty state. Returns None if no state has been recorded.
-    fn latest_state(&self, agent_name: &str) -> Result<Option<String>, String>;
-
     // -------------------------------------------------------------------------
     // Branch methods
     // -------------------------------------------------------------------------
@@ -304,18 +298,6 @@ impl DagStore for InMemoryDagStore {
             .filter(|n| n.parent_id == *parent_id)
             .cloned()
             .collect())
-    }
-
-    fn latest_state(&self, agent_name: &str) -> Result<Option<String>, String> {
-        let nodes = self.nodes.lock().unwrap();
-        Ok(nodes
-            .iter()
-            .rev()
-            .filter(|n| {
-                let (from, to) = n.message.from_to();
-                from == agent_name || to == agent_name
-            })
-            .find_map(|n| n.message.state().map(|s| s.to_string())))
     }
 
     fn create_branch(

@@ -74,13 +74,6 @@ pub fn open_dag_store(config: &CliConfig) -> Option<Box<dyn DagStore>> {
     }
 }
 
-/// Read the latest state hash for an agent from the DAG store.
-///
-/// Returns None if no state exists or the store returns an error.
-pub fn read_latest_state(store: &dyn DagStore, agent_name: &str) -> Option<String> {
-    store.latest_state(agent_name).ok().flatten()
-}
-
 /// Ensure an address has an http:// or https:// scheme.
 fn normalize_addr(addr: &str) -> String {
     if addr.starts_with("http://") || addr.starts_with("https://") {

@@ -124,20 +124,6 @@ impl DagStore for GrpcStateClient {
             .collect()
     }
 
-    fn latest_state(&self, agent_name: &str) -> Result<Option<String>, String> {
-        let request = proto::LatestStateRequest {
-            agent_name: agent_name.to_string(),
-        };
-
-        let mut client = self.client.clone();
-        let response = self
-            .runtime
-            .block_on(async { client.latest_state(request).await })
-            .map_err(|e| e.to_string())?;
-
-        Ok(response.into_inner().state)
-    }
-
     // -------------------------------------------------------------------------
     // Branch methods
     // -------------------------------------------------------------------------

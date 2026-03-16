@@ -511,9 +511,6 @@ mod tests {
             fn get_children(&self, _: &crate::domain::DagNodeId) -> Result<Vec<DagNode>, String> {
                 Ok(vec![])
             }
-            fn latest_state(&self, _: &str) -> Result<Option<String>, String> {
-                Ok(None)
-            }
             fn create_branch(
                 &self,
                 _: &str,
