@@ -282,9 +282,10 @@ impl MessageQueue for InMemoryQueue {
     fn send_session_start(
         &self,
         _msg: crate::domain::SessionStartMessage,
-    ) -> Result<(), QueueError> {
-        // Session creation is fire-and-forget — RecordingQueue persists it.
-        Ok(())
+    ) -> Result<crate::domain::BranchId, QueueError> {
+        // InMemoryQueue doesn't have a store — return a placeholder.
+        // RecordingQueue wraps this and returns the real branch ID.
+        Ok(crate::domain::BranchId::from(1))
     }
 }
 
@@ -295,7 +296,7 @@ impl MessageQueue for InMemoryQueue {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{DagNodeId, Sequence, SessionId, SubmissionId, TimelineId};
+    use crate::domain::{BranchId, DagNodeId, Sequence, SessionId, SubmissionId};
     use crate::domain::{
         InferenceBackendType, Nonce, ObjectStorageType, Operation, RuntimeType, VectorStorageType,
     };
@@ -317,7 +318,7 @@ mod tests {
         let queue = InMemoryQueue::new();
 
         let invoke = InvokeMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             test_submission(),
             SessionId::new(),
             HarnessType::Cli,
@@ -353,7 +354,7 @@ mod tests {
         let agent_id = test_agent_id();
 
         let invoke = InvokeMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             submission.clone(),
             SessionId::new(),
             HarnessType::Web,
@@ -382,7 +383,7 @@ mod tests {
         let queue = InMemoryQueue::new();
 
         let request = RequestMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             test_submission(),
             SessionId::new(),
             test_agent_id(),
@@ -429,7 +430,7 @@ mod tests {
         let agent_id = test_agent_id();
 
         let request = RequestMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             submission.clone(),
             SessionId::new(),
             agent_id.clone(),
@@ -466,7 +467,7 @@ mod tests {
         let queue = InMemoryQueue::new();
 
         let request = RequestMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             test_submission(),
             SessionId::new(),
             test_agent_id(),
@@ -509,7 +510,7 @@ mod tests {
         let nonce = Nonce::new("test-nonce");
 
         let delegate = DelegateMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             test_submission(),
             SessionId::new(),
             AgentId::new("coordinator"),
@@ -541,7 +542,7 @@ mod tests {
         let queue = InMemoryQueue::new();
 
         let delegate = DelegateMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             test_submission(),
             SessionId::new(),
             AgentId::new("coordinator"),
@@ -566,7 +567,7 @@ mod tests {
 
         // Build a reply routing key (as if from a DelegateMessage)
         let reply_key = RoutingKey::DelegateReply {
-            timeline: TimelineId::main(),
+            timeline: BranchId::from(1),
             submission: test_submission(),
             caller: AgentId::new("coordinator"),
             target: AgentId::new("summarizer"),
@@ -574,7 +575,7 @@ mod tests {
         };
 
         let complete = CompleteMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             test_submission(),
             SessionId::new(),
             test_agent_id(),
@@ -596,14 +597,14 @@ mod tests {
         let queue = InMemoryQueue::new();
 
         let reply_key_a = RoutingKey::DelegateReply {
-            timeline: TimelineId::main(),
+            timeline: BranchId::from(1),
             submission: test_submission(),
             caller: AgentId::new("coordinator"),
             target: AgentId::new("summarizer"),
             nonce: Nonce::new("nonce-a"),
         };
         let reply_key_b = RoutingKey::DelegateReply {
-            timeline: TimelineId::main(),
+            timeline: BranchId::from(1),
             submission: test_submission(),
             caller: AgentId::new("coordinator"),
             target: AgentId::new("summarizer"),
@@ -611,7 +612,7 @@ mod tests {
         };
 
         let complete = CompleteMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             test_submission(),
             SessionId::new(),
             test_agent_id(),

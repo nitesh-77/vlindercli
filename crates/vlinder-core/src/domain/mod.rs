@@ -63,7 +63,7 @@ pub use message::{
     BranchId, CompleteMessage, DagNodeId, DelegateMessage, ExpectsReply, ForkMessage, HarnessType,
     InvokeMessage, MessageId, ObservableMessage, ObservableMessageHeaders, RepairMessage,
     RequestMessage, ResponseMessage, Sequence, SequenceCounter, SessionId, SessionStartMessage,
-    SubmissionId, TimelineId, PROTOCOL_VERSION,
+    SubmissionId, PROTOCOL_VERSION,
 };
 pub use message_queue::{agent_routing_key, Acknowledgement, MessageQueue, QueueError};
 pub use routing_key::{

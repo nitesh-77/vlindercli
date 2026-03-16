@@ -4,7 +4,7 @@ use tonic::transport::Channel;
 
 use super::proto::{self, harness_client::HarnessClient};
 use vlinder_core::domain::{
-    DagNodeId, ForkParams, Harness, HarnessType, ResourceId, SessionId, TimelineId,
+    BranchId, DagNodeId, ForkParams, Harness, HarnessType, ResourceId, SessionId,
 };
 
 /// Ping a harness service at the given address, returning its protocol version.
@@ -48,10 +48,9 @@ impl Harness for GrpcHarnessClient {
         HarnessType::Grpc
     }
 
-    fn start_session(&self, agent_name: &str, timeline: TimelineId) -> SessionId {
+    fn start_session(&self, agent_name: &str) -> (SessionId, BranchId) {
         let request = proto::StartSessionRequest {
             agent_name: agent_name.to_string(),
-            timeline_id: timeline.as_str().to_string(),
         };
 
         let mut client = self.client.clone();
@@ -62,7 +61,10 @@ impl Harness for GrpcHarnessClient {
         let resp = response
             .expect("failed to start session via gRPC")
             .into_inner();
-        SessionId::try_from(resp.session_id).expect("server returned invalid session_id")
+        let session_id =
+            SessionId::try_from(resp.session_id).expect("server returned invalid session_id");
+        let branch_id = BranchId::from(resp.default_branch_id);
+        (session_id, branch_id)
     }
 
     fn run_agent(
@@ -70,7 +72,7 @@ impl Harness for GrpcHarnessClient {
         agent_id: &ResourceId,
         input: &str,
         session_id: SessionId,
-        timeline: TimelineId,
+        timeline: BranchId,
         sealed: bool,
         initial_state: Option<String>,
         dag_parent: DagNodeId,
@@ -78,7 +80,7 @@ impl Harness for GrpcHarnessClient {
         let request = proto::RunAgentRequest {
             agent_id: agent_id.as_str().to_string(),
             input: input.to_string(),
-            timeline_id: timeline.as_str().to_string(),
+            timeline_id: timeline.to_string(),
             sealed,
             initial_state,
             dag_parent: dag_parent.to_string(),
@@ -103,13 +105,13 @@ impl Harness for GrpcHarnessClient {
         &self,
         params: ForkParams,
         session_id: SessionId,
-        timeline: TimelineId,
+        timeline: BranchId,
     ) -> Result<(), String> {
         let request = proto::ForkTimelineRequest {
             agent_name: params.agent_name,
             branch_name: params.branch_name,
             fork_point: params.fork_point.to_string(),
-            timeline_id: timeline.as_str().to_string(),
+            timeline_id: timeline.to_string(),
             session_id: session_id.as_str().to_string(),
         };
 

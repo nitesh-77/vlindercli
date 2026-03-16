@@ -9,8 +9,8 @@ use std::process::Command;
 use chrono::{DateTime, Utc};
 
 use vlinder_core::domain::{
-    AgentId, CompleteMessage, DagNodeId, HarnessType, InvokeDiagnostics, InvokeMessage,
-    ObservableMessage, RuntimeDiagnostics, RuntimeType, SessionId, SubmissionId, TimelineId,
+    AgentId, BranchId, CompleteMessage, DagNodeId, HarnessType, InvokeDiagnostics, InvokeMessage,
+    ObservableMessage, RuntimeDiagnostics, RuntimeType, SessionId, SubmissionId,
 };
 use vlinder_git_dag::GitDagWorker;
 
@@ -96,7 +96,7 @@ pub fn make_invoke(
     epoch_secs: i64,
 ) -> (ObservableMessage, DateTime<Utc>) {
     let msg = InvokeMessage::new(
-        TimelineId::main(),
+        BranchId::from(1),
         SubmissionId::from(submission.to_string()),
         SessionId::try_from(session.to_string()).unwrap(),
         HarnessType::Cli,
@@ -122,7 +122,7 @@ pub fn make_complete(
     epoch_secs: i64,
 ) -> (ObservableMessage, DateTime<Utc>) {
     let msg = CompleteMessage::new(
-        TimelineId::main(),
+        BranchId::from(1),
         SubmissionId::from(submission.to_string()),
         SessionId::try_from(session.to_string()).unwrap(),
         test_agent_id(),

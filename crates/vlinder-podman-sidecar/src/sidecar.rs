@@ -155,7 +155,7 @@ impl Sidecar {
                     "Dispatching delegated work"
                 );
                 let invoke = InvokeMessage::new(
-                    delegate.timeline.clone(),
+                    delegate.timeline,
                     delegate.submission.clone(),
                     delegate.session.clone(),
                     HarnessType::Cli,

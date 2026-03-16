@@ -39,11 +39,11 @@ message SemVer {
 
 message StartSessionRequest {
   string agent_name = 1;
-  string timeline_id = 2;
 }
 
 message StartSessionResponse {
   string session_id = 1;
+  int64 default_branch_id = 2;
 }
 
 message RunAgentRequest {

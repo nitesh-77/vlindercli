@@ -18,11 +18,11 @@ use tokio::runtime::Runtime;
 use std::str::FromStr;
 
 use vlinder_core::domain::{
-    Acknowledgement, AgentId, CompleteMessage, DagNodeId, DelegateDiagnostics, DelegateMessage,
-    HarnessType, InvokeDiagnostics, InvokeMessage, MessageId, MessageQueue, Nonce, Operation,
-    QueueError, RepairMessage, RequestDiagnostics, RequestMessage, ResponseMessage, RoutingKey,
-    RuntimeDiagnostics, RuntimeType, Sequence, ServiceBackend, ServiceDiagnostics, ServiceType,
-    SessionId, SubmissionId, TimelineId,
+    Acknowledgement, AgentId, BranchId, CompleteMessage, DagNodeId, DelegateDiagnostics,
+    DelegateMessage, HarnessType, InvokeDiagnostics, InvokeMessage, MessageId, MessageQueue, Nonce,
+    Operation, QueueError, RepairMessage, RequestDiagnostics, RequestMessage, ResponseMessage,
+    RoutingKey, RuntimeDiagnostics, RuntimeType, Sequence, ServiceBackend, ServiceDiagnostics,
+    ServiceType, SessionId, SubmissionId,
 };
 
 /// NATS queue with JetStream durability.
@@ -232,7 +232,7 @@ impl MessageQueue for NatsQueue {
             let mut headers = async_nats::HeaderMap::new();
             headers.insert("msg-id", msg.id.as_str());
             headers.insert("protocol-version", msg.protocol_version.as_str());
-            headers.insert("timeline-id", msg.timeline.as_str());
+            headers.insert("timeline-id", msg.timeline.to_string());
             headers.insert("submission-id", msg.submission.as_str());
             headers.insert("session-id", msg.session.as_str());
             headers.insert("harness", msg.harness.as_str());
@@ -267,7 +267,7 @@ impl MessageQueue for NatsQueue {
             let mut headers = async_nats::HeaderMap::new();
             headers.insert("msg-id", msg.id.as_str());
             headers.insert("protocol-version", msg.protocol_version.as_str());
-            headers.insert("timeline-id", msg.timeline.as_str());
+            headers.insert("timeline-id", msg.timeline.to_string());
             headers.insert("submission-id", msg.submission.as_str());
             headers.insert("session-id", msg.session.as_str());
             headers.insert("agent-id", msg.agent_id.as_str());
@@ -304,7 +304,7 @@ impl MessageQueue for NatsQueue {
             let mut headers = async_nats::HeaderMap::new();
             headers.insert("msg-id", msg.id.as_str());
             headers.insert("protocol-version", msg.protocol_version.as_str());
-            headers.insert("timeline-id", msg.timeline.as_str());
+            headers.insert("timeline-id", msg.timeline.to_string());
             headers.insert("submission-id", msg.submission.as_str());
             headers.insert("session-id", msg.session.as_str());
             headers.insert("agent-id", msg.agent_id.as_str());
@@ -343,7 +343,7 @@ impl MessageQueue for NatsQueue {
             let mut headers = async_nats::HeaderMap::new();
             headers.insert("msg-id", msg.id.as_str());
             headers.insert("protocol-version", msg.protocol_version.as_str());
-            headers.insert("timeline-id", msg.timeline.as_str());
+            headers.insert("timeline-id", msg.timeline.to_string());
             headers.insert("submission-id", msg.submission.as_str());
             headers.insert("session-id", msg.session.as_str());
             headers.insert("agent-id", msg.agent_id.as_str());
@@ -394,8 +394,10 @@ impl MessageQueue for NatsQueue {
                 id: MessageId::from(get_header(headers, "msg-id")?),
                 protocol_version: get_header(headers, "protocol-version").unwrap_or_default(),
                 timeline: get_header(headers, "timeline-id")
-                    .map(TimelineId::from)
-                    .unwrap_or_else(|_| TimelineId::main()),
+                    .ok()
+                    .and_then(|s| s.parse::<i64>().ok())
+                    .map(BranchId::from)
+                    .unwrap_or(BranchId::from(1)),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
                 session: SessionId::try_from(get_header(headers, "session-id")?)
                     .map_err(QueueError::ReceiveFailed)?,
@@ -449,8 +451,10 @@ impl MessageQueue for NatsQueue {
                 id: MessageId::from(get_header(headers, "msg-id")?),
                 protocol_version: get_header(headers, "protocol-version").unwrap_or_default(),
                 timeline: get_header(headers, "timeline-id")
-                    .map(TimelineId::from)
-                    .unwrap_or_else(|_| TimelineId::main()),
+                    .ok()
+                    .and_then(|s| s.parse::<i64>().ok())
+                    .map(BranchId::from)
+                    .unwrap_or(BranchId::from(1)),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
                 session: SessionId::try_from(get_header(headers, "session-id")?)
                     .map_err(QueueError::ReceiveFailed)?,
@@ -512,8 +516,10 @@ impl MessageQueue for NatsQueue {
                 id: MessageId::from(get_header(headers, "msg-id")?),
                 protocol_version: get_header(headers, "protocol-version").unwrap_or_default(),
                 timeline: get_header(headers, "timeline-id")
-                    .map(TimelineId::from)
-                    .unwrap_or_else(|_| TimelineId::main()),
+                    .ok()
+                    .and_then(|s| s.parse::<i64>().ok())
+                    .map(BranchId::from)
+                    .unwrap_or(BranchId::from(1)),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
                 session: SessionId::try_from(get_header(headers, "session-id")?)
                     .map_err(QueueError::ReceiveFailed)?,
@@ -567,8 +573,10 @@ impl MessageQueue for NatsQueue {
                 id: MessageId::from(get_header(headers, "msg-id")?),
                 protocol_version: get_header(headers, "protocol-version").unwrap_or_default(),
                 timeline: get_header(headers, "timeline-id")
-                    .map(TimelineId::from)
-                    .unwrap_or_else(|_| TimelineId::main()),
+                    .ok()
+                    .and_then(|s| s.parse::<i64>().ok())
+                    .map(BranchId::from)
+                    .unwrap_or(BranchId::from(1)),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
                 session: SessionId::try_from(get_header(headers, "session-id")?)
                     .map_err(QueueError::ReceiveFailed)?,
@@ -591,7 +599,7 @@ impl MessageQueue for NatsQueue {
             let mut headers = async_nats::HeaderMap::new();
             headers.insert("msg-id", msg.id.as_str());
             headers.insert("protocol-version", msg.protocol_version.as_str());
-            headers.insert("timeline-id", msg.timeline.as_str());
+            headers.insert("timeline-id", msg.timeline.to_string());
             headers.insert("submission-id", msg.submission.as_str());
             headers.insert("session-id", msg.session.as_str());
             headers.insert("caller-agent", msg.caller.as_str());
@@ -641,8 +649,10 @@ impl MessageQueue for NatsQueue {
                 id: MessageId::from(get_header(headers, "msg-id")?),
                 protocol_version: get_header(headers, "protocol-version").unwrap_or_default(),
                 timeline: get_header(headers, "timeline-id")
-                    .map(TimelineId::from)
-                    .unwrap_or_else(|_| TimelineId::main()),
+                    .ok()
+                    .and_then(|s| s.parse::<i64>().ok())
+                    .map(BranchId::from)
+                    .unwrap_or(BranchId::from(1)),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
                 session: SessionId::try_from(get_header(headers, "session-id")?)
                     .map_err(QueueError::ReceiveFailed)?,
@@ -669,7 +679,7 @@ impl MessageQueue for NatsQueue {
             let mut headers = async_nats::HeaderMap::new();
             headers.insert("msg-id", msg.id.as_str());
             headers.insert("protocol-version", msg.protocol_version.as_str());
-            headers.insert("timeline-id", msg.timeline.as_str());
+            headers.insert("timeline-id", msg.timeline.to_string());
             headers.insert("submission-id", msg.submission.as_str());
             headers.insert("session-id", msg.session.as_str());
             headers.insert("agent-id", msg.agent_id.as_str());
@@ -716,8 +726,10 @@ impl MessageQueue for NatsQueue {
                 id: MessageId::from(get_header(headers, "msg-id")?),
                 protocol_version: get_header(headers, "protocol-version").unwrap_or_default(),
                 timeline: get_header(headers, "timeline-id")
-                    .map(TimelineId::from)
-                    .unwrap_or_else(|_| TimelineId::main()),
+                    .ok()
+                    .and_then(|s| s.parse::<i64>().ok())
+                    .map(BranchId::from)
+                    .unwrap_or(BranchId::from(1)),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
                 session: SessionId::try_from(get_header(headers, "session-id")?)
                     .map_err(QueueError::ReceiveFailed)?,
@@ -740,7 +752,7 @@ impl MessageQueue for NatsQueue {
             let mut headers = async_nats::HeaderMap::new();
             headers.insert("msg-id", msg.id.as_str());
             headers.insert("protocol-version", msg.protocol_version.as_str());
-            headers.insert("timeline-id", msg.timeline.as_str());
+            headers.insert("timeline-id", msg.timeline.to_string());
             headers.insert("submission-id", msg.submission.as_str());
             headers.insert("session-id", msg.session.as_str());
             headers.insert("agent-id", msg.agent_id.as_str());
@@ -786,8 +798,10 @@ impl MessageQueue for NatsQueue {
                 id: MessageId::from(get_header(headers, "msg-id")?),
                 protocol_version: get_header(headers, "protocol-version").unwrap_or_default(),
                 timeline: get_header(headers, "timeline-id")
-                    .map(TimelineId::from)
-                    .unwrap_or_else(|_| TimelineId::main()),
+                    .ok()
+                    .and_then(|s| s.parse::<i64>().ok())
+                    .map(BranchId::from)
+                    .unwrap_or(BranchId::from(1)),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
                 session: SessionId::try_from(get_header(headers, "session-id")?)
                     .map_err(QueueError::ReceiveFailed)?,
@@ -818,7 +832,7 @@ impl MessageQueue for NatsQueue {
 
     fn send_fork(&self, msg: vlinder_core::domain::ForkMessage) -> Result<(), QueueError> {
         let subject = routing_key_to_subject(&RoutingKey::Fork {
-            timeline: msg.timeline.clone(),
+            timeline: msg.timeline,
             submission: msg.submission.clone(),
             agent_name: msg.agent_name.clone(),
         });
@@ -846,9 +860,10 @@ impl MessageQueue for NatsQueue {
     fn send_session_start(
         &self,
         _msg: vlinder_core::domain::SessionStartMessage,
-    ) -> Result<(), QueueError> {
-        // Session creation is fire-and-forget — RecordingQueue persists it.
-        Ok(())
+    ) -> Result<vlinder_core::domain::BranchId, QueueError> {
+        // NatsQueue doesn't create branches — RecordingQueue wraps this
+        // and returns the real branch ID.
+        Ok(vlinder_core::domain::BranchId::from(1))
     }
 }
 
@@ -974,7 +989,7 @@ pub fn subject_to_routing_key(subject: &str) -> Option<RoutingKey> {
         return None;
     }
 
-    let timeline = TimelineId::from(s[1].to_string());
+    let timeline = BranchId::from(s[1].parse::<i64>().unwrap_or(0));
     let submission = SubmissionId::from(s[2].to_string());
 
     match s[3] {
@@ -1195,7 +1210,7 @@ pub fn from_nats_headers(
             Some(ObservableMessageHeaders::Invoke {
                 id,
                 protocol_version,
-                timeline: timeline.clone(),
+                timeline: *timeline,
                 submission: submission.clone(),
                 session,
                 harness: *harness,
@@ -1227,7 +1242,7 @@ pub fn from_nats_headers(
             Some(ObservableMessageHeaders::Request {
                 id,
                 protocol_version,
-                timeline: timeline.clone(),
+                timeline: *timeline,
                 submission: submission.clone(),
                 session,
                 agent_id: agent.clone(),
@@ -1260,7 +1275,7 @@ pub fn from_nats_headers(
             Some(ObservableMessageHeaders::Response {
                 id,
                 protocol_version,
-                timeline: timeline.clone(),
+                timeline: *timeline,
                 submission: submission.clone(),
                 session,
                 agent_id: agent.clone(),
@@ -1288,7 +1303,7 @@ pub fn from_nats_headers(
             Some(ObservableMessageHeaders::Complete {
                 id,
                 protocol_version,
-                timeline: timeline.clone(),
+                timeline: *timeline,
                 submission: submission.clone(),
                 session,
                 agent_id: agent.clone(),
@@ -1314,7 +1329,7 @@ pub fn from_nats_headers(
             Some(ObservableMessageHeaders::Delegate {
                 id,
                 protocol_version,
-                timeline: timeline.clone(),
+                timeline: *timeline,
                 submission: submission.clone(),
                 session,
                 caller: caller.clone(),
@@ -1347,7 +1362,7 @@ pub fn from_nats_headers(
             Some(ObservableMessageHeaders::Repair {
                 id,
                 protocol_version,
-                timeline: timeline.clone(),
+                timeline: *timeline,
                 submission: submission.clone(),
                 session,
                 agent_id: agent.clone(),
@@ -1371,7 +1386,7 @@ pub fn from_nats_headers(
             Some(ObservableMessageHeaders::Fork {
                 id,
                 protocol_version,
-                timeline: timeline.clone(),
+                timeline: *timeline,
                 submission: submission.clone(),
                 session,
                 agent_name: agent_name.clone(),
@@ -1407,11 +1422,11 @@ mod tests {
     use super::*;
     use vlinder_core::domain::{InferenceBackendType, ObjectStorageType, VectorStorageType};
 
-    fn timeline() -> TimelineId {
-        TimelineId::main()
+    fn timeline() -> BranchId {
+        BranchId::from(1)
     }
-    fn timeline_alt() -> TimelineId {
-        TimelineId::from(2)
+    fn timeline_alt() -> BranchId {
+        BranchId::from(2)
     }
     fn submission() -> SubmissionId {
         SubmissionId::from("sub-1".to_string())

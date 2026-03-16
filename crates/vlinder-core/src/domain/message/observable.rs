@@ -16,7 +16,7 @@ use super::complete::CompleteMessage;
 use super::delegate::DelegateMessage;
 use super::fork::ForkMessage;
 use super::identity::{
-    DagNodeId, HarnessType, MessageId, Sequence, SessionId, SubmissionId, TimelineId,
+    BranchId, DagNodeId, HarnessType, MessageId, Sequence, SessionId, SubmissionId,
 };
 use super::invoke::InvokeMessage;
 use super::repair::RepairMessage;
@@ -51,7 +51,7 @@ pub enum ObservableMessageHeaders {
     Invoke {
         id: MessageId,
         protocol_version: String,
-        timeline: TimelineId,
+        timeline: BranchId,
         submission: SubmissionId,
         session: SessionId,
         harness: HarnessType,
@@ -64,7 +64,7 @@ pub enum ObservableMessageHeaders {
     Request {
         id: MessageId,
         protocol_version: String,
-        timeline: TimelineId,
+        timeline: BranchId,
         submission: SubmissionId,
         session: SessionId,
         agent_id: AgentId,
@@ -78,7 +78,7 @@ pub enum ObservableMessageHeaders {
     Response {
         id: MessageId,
         protocol_version: String,
-        timeline: TimelineId,
+        timeline: BranchId,
         submission: SubmissionId,
         session: SessionId,
         agent_id: AgentId,
@@ -94,7 +94,7 @@ pub enum ObservableMessageHeaders {
     Complete {
         id: MessageId,
         protocol_version: String,
-        timeline: TimelineId,
+        timeline: BranchId,
         submission: SubmissionId,
         session: SessionId,
         agent_id: AgentId,
@@ -105,7 +105,7 @@ pub enum ObservableMessageHeaders {
     Delegate {
         id: MessageId,
         protocol_version: String,
-        timeline: TimelineId,
+        timeline: BranchId,
         submission: SubmissionId,
         session: SessionId,
         caller: AgentId,
@@ -117,7 +117,7 @@ pub enum ObservableMessageHeaders {
     Repair {
         id: MessageId,
         protocol_version: String,
-        timeline: TimelineId,
+        timeline: BranchId,
         submission: SubmissionId,
         session: SessionId,
         agent_id: AgentId,
@@ -132,7 +132,7 @@ pub enum ObservableMessageHeaders {
     Fork {
         id: MessageId,
         protocol_version: String,
-        timeline: TimelineId,
+        timeline: BranchId,
         submission: SubmissionId,
         session: SessionId,
         agent_name: String,
@@ -379,7 +379,7 @@ impl ObservableMessage {
         }
     }
 
-    pub fn timeline(&self) -> &TimelineId {
+    pub fn timeline(&self) -> &BranchId {
         match self {
             ObservableMessage::Invoke(m) => &m.timeline,
             ObservableMessage::Request(m) => &m.timeline,

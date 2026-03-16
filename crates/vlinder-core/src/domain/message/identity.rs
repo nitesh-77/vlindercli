@@ -215,55 +215,12 @@ impl TryFrom<String> for SessionId {
     }
 }
 
-// --- TimelineId (ADR 093) ---
-
-/// Immutable identifier for a timeline (branch-scoped subjects).
-///
-/// Value is the integer primary key from the `timelines` table in the DAG store.
-/// Carried as a string in NATS headers and message subjects.
-///
-/// `TimelineId::main()` returns `"0"` — the implicit main timeline.
-/// Forked timelines get IDs from AUTOINCREMENT (1, 2, …).
-/// Timeline IDs never change, even when branch names are renamed during promote.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct TimelineId(String);
-
-impl TimelineId {
-    /// The main timeline — always present, never has a row in the timelines table.
-    pub fn main() -> Self {
-        Self("0".to_string())
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl fmt::Display for TimelineId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl From<String> for TimelineId {
-    fn from(s: String) -> Self {
-        Self(s)
-    }
-}
-
-impl From<i64> for TimelineId {
-    fn from(id: i64) -> Self {
-        Self(id.to_string())
-    }
-}
-
 // --- BranchId ---
 
 /// Database primary key identifying a branch within a session.
 ///
 /// Wraps the integer ID from the `branches` table. Carried on messages
-/// as a `TimelineId` (string form) and stored in `Branch.id`.
+/// and stored in `Branch.id`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct BranchId(i64);
@@ -283,12 +240,6 @@ impl fmt::Display for BranchId {
 impl From<i64> for BranchId {
     fn from(id: i64) -> Self {
         Self(id)
-    }
-}
-
-impl From<BranchId> for TimelineId {
-    fn from(id: BranchId) -> Self {
-        Self(id.0.to_string())
     }
 }
 
@@ -562,43 +513,37 @@ mod tests {
         assert_eq!(format!("{}", id), "d4761d76-dee4-4ebf-9df4-43b52efa4f78");
     }
 
-    // --- TimelineId tests (ADR 093) ---
+    // --- BranchId tests (ADR 093) ---
 
     #[test]
-    fn timeline_id_main_is_zero() {
-        let id = TimelineId::main();
-        assert_eq!(id.as_str(), "0");
+    fn branch_id_main_is_one() {
+        let id = BranchId::from(1);
+        assert_eq!(format!("{}", id), "1");
     }
 
     #[test]
-    fn timeline_id_display() {
-        let id = TimelineId::main();
-        assert_eq!(format!("{}", id), "0");
+    fn branch_id_display() {
+        let id = BranchId::from(1);
+        assert_eq!(format!("{}", id), "1");
     }
 
     #[test]
-    fn timeline_id_from_string() {
-        let id = TimelineId::from("42".to_string());
-        assert_eq!(id.as_str(), "42");
+    fn branch_id_from_i64() {
+        let id = BranchId::from(42i64);
+        assert_eq!(id.as_i64(), 42);
     }
 
     #[test]
-    fn timeline_id_from_i64() {
-        let id = TimelineId::from(7i64);
-        assert_eq!(id.as_str(), "7");
-    }
-
-    #[test]
-    fn timeline_id_equality_and_hashing() {
-        let id1 = TimelineId::from("3".to_string());
-        let id2 = TimelineId::from("3".to_string());
-        let id3 = TimelineId::from("5".to_string());
+    fn branch_id_equality_and_hashing() {
+        let id1 = BranchId::from(3i64);
+        let id2 = BranchId::from(3i64);
+        let id3 = BranchId::from(5i64);
 
         assert_eq!(id1, id2);
         assert_ne!(id1, id3);
 
         let mut set = HashSet::new();
-        set.insert(id1.clone());
+        set.insert(id1);
         assert!(set.contains(&id2));
         assert!(!set.contains(&id3));
     }

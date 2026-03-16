@@ -471,8 +471,8 @@ mod tests {
     use vlinder_core::domain::SecretStore;
     use vlinder_core::domain::{Agent, AgentId, Registry};
     use vlinder_core::domain::{
-        ObjectStorageType, Operation, RequestDiagnostics, Sequence, ServiceBackend, SessionId,
-        SubmissionId, TimelineId,
+        BranchId, ObjectStorageType, Operation, RequestDiagnostics, Sequence, ServiceBackend,
+        SessionId, SubmissionId,
     };
     use vlinder_core::queue::InMemoryQueue;
 
@@ -537,7 +537,7 @@ mod tests {
             "content": "hello world"
         });
         let put_request = RequestMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             test_submission(),
             SessionId::new(),
             test_agent_id(),
@@ -558,7 +558,7 @@ mod tests {
         // Get request
         let get_payload = serde_json::json!({"path": "/hello.txt"});
         let get_request = RequestMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             test_submission(),
             SessionId::new(),
             test_agent_id(),
@@ -601,7 +601,7 @@ mod tests {
         });
         // State comes from the envelope (empty string = root state)
         let put_request = RequestMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             test_submission(),
             SessionId::new(),
             test_agent_id(),
@@ -649,7 +649,7 @@ mod tests {
         // First put
         let put1 = serde_json::json!({"path": "/a.txt", "content": "aaa"});
         let req1 = RequestMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             test_submission(),
             SessionId::new(),
             test_agent_id(),
@@ -670,7 +670,7 @@ mod tests {
         // Second put chained from first — state via envelope
         let put2 = serde_json::json!({"path": "/b.txt", "content": "bbb"});
         let req2 = RequestMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             test_submission(),
             SessionId::new(),
             test_agent_id(),
@@ -694,7 +694,7 @@ mod tests {
         // Reading /a.txt from state2 should still work (inherited from snapshot)
         let get = serde_json::json!({"path": "/a.txt"});
         let get_req = RequestMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             test_submission(),
             SessionId::new(),
             test_agent_id(),
@@ -733,7 +733,7 @@ mod tests {
 
         // Put /a.txt → state1
         let req1 = RequestMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             test_submission(),
             session.clone(),
             test_agent_id(),
@@ -753,7 +753,7 @@ mod tests {
 
         // Put /b.txt → state2
         let req2 = RequestMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             test_submission(),
             session.clone(),
             test_agent_id(),
@@ -773,7 +773,7 @@ mod tests {
 
         // List from state2 — should see both files
         let list_req2 = RequestMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             test_submission(),
             session.clone(),
             test_agent_id(),
@@ -793,7 +793,7 @@ mod tests {
 
         // List from state1 (time travel) — should only see /a.txt
         let list_req1 = RequestMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             test_submission(),
             session.clone(),
             test_agent_id(),
@@ -833,7 +833,7 @@ mod tests {
         // Put a file first (unversioned)
         let put_payload = serde_json::json!({"path": "/hello.txt", "content": "hello"});
         let put_request = RequestMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             test_submission(),
             SessionId::new(),
             test_agent_id(),
@@ -852,7 +852,7 @@ mod tests {
         // Get with state in envelope — should echo it back
         let get_payload = serde_json::json!({"path": "/hello.txt"});
         let get_request = RequestMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             test_submission(),
             SessionId::new(),
             test_agent_id(),

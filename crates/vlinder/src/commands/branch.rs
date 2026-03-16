@@ -98,10 +98,9 @@ fn get(session_id_or_name: &str, branch_name: &str) {
         std::process::exit(1);
     });
 
-    let branch_id_str = branch.id.to_string();
     let branch_nodes: Vec<_> = nodes
         .into_iter()
-        .filter(|n| n.timeline_id().as_str() == branch_id_str)
+        .filter(|n| *n.timeline_id() == branch.id)
         .collect();
 
     if branch_nodes.is_empty() {

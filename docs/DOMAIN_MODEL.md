@@ -72,14 +72,14 @@ URI-based resource identity. Key for looking up any resource in the registry.
 - Supports parsing into `scheme()`, `authority()`, and `path()` components
 - Location: `domain/resource_id.rs`
 
-### MessageId, SubmissionId, SessionId, TimelineId
+### MessageId, SubmissionId, SessionId, BranchId
 
 Tracking identifiers for message flow:
 
 - `MessageId` -- unique per message (UUID)
 - `SubmissionId` -- groups messages for one user request. Content-addressed SHA-256 hash of (payload, session_id, parent_submission) per ADR 081
 - `SessionId` -- groups submissions into a conversation. Format: `ses-{uuid}`
-- `TimelineId` -- branch-scoped identity for time-travel (ADR 093)
+- `BranchId` -- database primary key identifying a branch within a session (ADR 093)
 
 ### Sequence / SequenceCounter
 
@@ -164,7 +164,7 @@ Harness --ForkMessage--> Runtime (session fork)
 
 ### InvokeMessage
 
-Harness -> Runtime. Starts a submission. Carries `agent_id`, `harness: HarnessType`, `runtime: RuntimeType`, `state: Option<String>`, `timeline: TimelineId`, and `InvokeDiagnostics`.
+Harness -> Runtime. Starts a submission. Carries `agent_id`, `harness: HarnessType`, `runtime: RuntimeType`, `state: Option<String>`, `timeline: BranchId`, and `InvokeDiagnostics`.
 
 ### RequestMessage
 

@@ -26,8 +26,7 @@ pub use complete::CompleteMessage;
 pub use delegate::DelegateMessage;
 pub use fork::ForkMessage;
 pub use identity::{
-    BranchId, DagNodeId, HarnessType, MessageId, Sequence, SequenceCounter, SessionId,
-    SubmissionId, TimelineId,
+    BranchId, DagNodeId, HarnessType, MessageId, Sequence, SequenceCounter, SessionId, SubmissionId,
 };
 pub use invoke::InvokeMessage;
 pub use observable::{ObservableMessage, ObservableMessageHeaders};
@@ -95,7 +94,7 @@ mod tests {
         let session = SessionId::new();
         let agent_id = test_agent_id();
         let msg = InvokeMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             submission.clone(),
             session.clone(),
             HarnessType::Cli,
@@ -122,7 +121,7 @@ mod tests {
         let session = SessionId::new();
         let agent_id = test_agent_id();
         let msg = RequestMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             submission.clone(),
             session.clone(),
             agent_id.clone(),
@@ -146,7 +145,7 @@ mod tests {
     #[test]
     fn response_from_request_echoes_dimensions() {
         let request = RequestMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             test_submission(),
             SessionId::new(),
             test_agent_id(),
@@ -177,7 +176,7 @@ mod tests {
         let session = SessionId::new();
         let agent_id = test_agent_id();
         let msg = CompleteMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             submission.clone(),
             session.clone(),
             agent_id.clone(),
@@ -200,7 +199,7 @@ mod tests {
     #[test]
     fn invoke_create_reply_returns_complete() {
         let invoke = InvokeMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             test_submission(),
             SessionId::new(),
             HarnessType::Cli,
@@ -224,7 +223,7 @@ mod tests {
     #[test]
     fn request_create_reply_returns_response() {
         let request = RequestMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             test_submission(),
             SessionId::new(),
             test_agent_id(),
@@ -253,7 +252,7 @@ mod tests {
     #[test]
     fn observable_message_from_invoke() {
         let invoke = InvokeMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             test_submission(),
             SessionId::new(),
             HarnessType::Cli,
@@ -277,7 +276,7 @@ mod tests {
     #[test]
     fn observable_message_from_request() {
         let request = RequestMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             test_submission(),
             SessionId::new(),
             test_agent_id(),
@@ -301,7 +300,7 @@ mod tests {
         let submission = test_submission();
         let session = SessionId::new();
         let invoke = InvokeMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             submission.clone(),
             session.clone(),
             HarnessType::Cli,
@@ -325,7 +324,7 @@ mod tests {
     #[test]
     fn invoke_routing_key() {
         let msg = InvokeMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             test_submission(),
             SessionId::new(),
             HarnessType::Cli,
@@ -341,7 +340,7 @@ mod tests {
         assert_eq!(
             key,
             RoutingKey::Invoke {
-                timeline: msg.timeline.clone(),
+                timeline: msg.timeline,
                 submission: msg.submission.clone(),
                 harness: msg.harness,
                 runtime: msg.runtime,
@@ -353,7 +352,7 @@ mod tests {
     #[test]
     fn request_routing_key() {
         let msg = RequestMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             test_submission(),
             SessionId::new(),
             test_agent_id(),
@@ -369,7 +368,7 @@ mod tests {
         assert_eq!(
             key,
             RoutingKey::Request {
-                timeline: msg.timeline.clone(),
+                timeline: msg.timeline,
                 submission: msg.submission.clone(),
                 agent: msg.agent_id.clone(),
                 service: msg.service,
@@ -382,7 +381,7 @@ mod tests {
     #[test]
     fn response_routing_key() {
         let request = RequestMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             test_submission(),
             SessionId::new(),
             test_agent_id(),
@@ -399,7 +398,7 @@ mod tests {
         assert_eq!(
             key,
             RoutingKey::Response {
-                timeline: response.timeline.clone(),
+                timeline: response.timeline,
                 submission: response.submission.clone(),
                 service: response.service,
                 agent: response.agent_id.clone(),
@@ -412,7 +411,7 @@ mod tests {
     #[test]
     fn complete_routing_key() {
         let msg = CompleteMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             test_submission(),
             SessionId::new(),
             test_agent_id(),
@@ -426,7 +425,7 @@ mod tests {
         assert_eq!(
             key,
             RoutingKey::Complete {
-                timeline: msg.timeline.clone(),
+                timeline: msg.timeline,
                 submission: msg.submission.clone(),
                 agent: msg.agent_id.clone(),
                 harness: msg.harness,
@@ -437,7 +436,7 @@ mod tests {
     #[test]
     fn delegate_routing_key() {
         let msg = DelegateMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             test_submission(),
             SessionId::new(),
             AgentId::new("coordinator"),
@@ -454,7 +453,7 @@ mod tests {
         assert_eq!(
             key,
             RoutingKey::Delegate {
-                timeline: msg.timeline.clone(),
+                timeline: msg.timeline,
                 submission: msg.submission.clone(),
                 caller: msg.caller.clone(),
                 target: msg.target.clone(),
@@ -465,7 +464,7 @@ mod tests {
     #[test]
     fn delegate_reply_routing_key() {
         let msg = DelegateMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             test_submission(),
             SessionId::new(),
             AgentId::new("coordinator"),
@@ -482,7 +481,7 @@ mod tests {
         assert_eq!(
             reply_key,
             RoutingKey::DelegateReply {
-                timeline: msg.timeline.clone(),
+                timeline: msg.timeline,
                 submission: msg.submission.clone(),
                 caller: msg.caller.clone(),
                 target: msg.target.clone(),
@@ -497,7 +496,7 @@ mod tests {
         let session = SessionId::new();
         let nonce = Nonce::new("abc123");
         let msg = DelegateMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             submission.clone(),
             session.clone(),
             AgentId::new("coordinator"),
@@ -522,7 +521,7 @@ mod tests {
     fn observable_message_from_delegate() {
         let submission = test_submission();
         let delegate = DelegateMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             submission.clone(),
             SessionId::new(),
             AgentId::new("coordinator"),
@@ -547,7 +546,7 @@ mod tests {
     #[test]
     fn routing_key_reply_key_round_trip() {
         let invoke = InvokeMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             test_submission(),
             SessionId::new(),
             HarnessType::Cli,
@@ -567,7 +566,7 @@ mod tests {
     #[test]
     fn request_reply_key_matches_response_routing_key() {
         let request = RequestMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             test_submission(),
             SessionId::new(),
             test_agent_id(),
@@ -591,7 +590,7 @@ mod tests {
         let headers = ObservableMessageHeaders::Invoke {
             id: MessageId::from("msg-1".to_string()),
             protocol_version: "0.1.0".to_string(),
-            timeline: TimelineId::main(),
+            timeline: BranchId::from(1),
             submission: test_submission(),
             session: SessionId::new(),
             harness: HarnessType::Cli,

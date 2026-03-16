@@ -9,8 +9,8 @@
 #![cfg(feature = "test-support")]
 
 use vlinder_core::domain::{
-    Agent, AgentId, HarnessType, InvokeDiagnostics, InvokeMessage, Runtime, RuntimeType, SessionId,
-    SubmissionId, TimelineId,
+    Agent, AgentId, BranchId, HarnessType, InvokeDiagnostics, InvokeMessage, Runtime, RuntimeType,
+    SessionId, SubmissionId,
 };
 use vlinder_podman_runtime::{ContainerRuntime, PodmanRuntimeConfig};
 use vlinderd::config::Config;
@@ -55,7 +55,7 @@ fn container_runtime_executes_echo_agent() {
     // Send InvokeMessage
     let submission = SubmissionId::new();
     let invoke = InvokeMessage::new(
-        TimelineId::main(),
+        BranchId::from(1),
         submission.clone(),
         SessionId::new(),
         HarnessType::Cli,

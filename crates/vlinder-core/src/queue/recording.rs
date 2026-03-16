@@ -39,8 +39,7 @@ impl RecordingQueue {
 
     /// Record a DAG node for the given observable message.
     fn record(&self, observable: &ObservableMessage) {
-        let timeline_id_str = observable.timeline().as_str();
-        let branch_id = crate::domain::BranchId::from(timeline_id_str.parse::<i64>().unwrap_or(1));
+        let branch_id = *observable.timeline();
 
         // Explicit dag_parent on Invoke/Fork overrides the latest node on the timeline.
         let dag_parent_override: Option<DagNodeId> = match observable {
@@ -224,7 +223,7 @@ impl MessageQueue for RecordingQueue {
     fn send_session_start(
         &self,
         msg: crate::domain::SessionStartMessage,
-    ) -> Result<(), QueueError> {
+    ) -> Result<crate::domain::BranchId, QueueError> {
         // Create the default "main" branch, then the session pointing to it.
         let default_branch = self
             .store
@@ -242,7 +241,8 @@ impl MessageQueue for RecordingQueue {
                 "Failed to persist session"
             );
         }
-        self.inner.send_session_start(msg)
+        let _ = self.inner.send_session_start(msg);
+        Ok(default_branch)
     }
 }
 
@@ -250,10 +250,10 @@ impl MessageQueue for RecordingQueue {
 mod tests {
     use super::*;
     use crate::domain::{
-        AgentId, DagNode, DelegateDiagnostics, HarnessType, InMemoryDagStore, InferenceBackendType,
-        InvokeDiagnostics, MessageType, Nonce, Operation, RequestDiagnostics, RuntimeDiagnostics,
-        RuntimeType, Sequence, ServiceBackend, ServiceDiagnostics, SessionId, SubmissionId,
-        TimelineId,
+        AgentId, BranchId, DagNode, DelegateDiagnostics, HarnessType, InMemoryDagStore,
+        InferenceBackendType, InvokeDiagnostics, MessageType, Nonce, Operation, RequestDiagnostics,
+        RuntimeDiagnostics, RuntimeType, Sequence, ServiceBackend, ServiceDiagnostics, SessionId,
+        SubmissionId,
     };
     use crate::queue::InMemoryQueue;
 
@@ -283,7 +283,7 @@ mod tests {
 
     fn test_invoke() -> InvokeMessage {
         InvokeMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             test_submission(),
             test_session(),
             HarnessType::Cli,
@@ -300,7 +300,7 @@ mod tests {
 
     fn test_request() -> RequestMessage {
         RequestMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             test_submission(),
             test_session(),
             test_agent_id(),
@@ -328,7 +328,7 @@ mod tests {
 
     fn test_complete() -> CompleteMessage {
         CompleteMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             test_submission(),
             test_session(),
             test_agent_id(),
@@ -341,7 +341,7 @@ mod tests {
 
     fn test_delegate() -> DelegateMessage {
         DelegateMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             test_submission(),
             test_session(),
             AgentId::new("echo"),

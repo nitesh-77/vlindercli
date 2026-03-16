@@ -206,7 +206,7 @@ impl DagStore for SqliteDagStore {
                 node.message.checkpoint(),
                 node.message.operation(),
                 message_blob,
-                node.timeline_id().as_str(),
+                node.timeline_id().as_i64(),
             ],
         ).map_err(|e| format!("insert_node failed: {}", e))?;
 
@@ -638,10 +638,10 @@ mod tests {
     use super::*;
     use vlinder_core::domain::workers::dag::build_dag_node;
     use vlinder_core::domain::{
-        AgentId, CompleteMessage, DelegateDiagnostics, DelegateMessage, HarnessType,
+        AgentId, BranchId, CompleteMessage, DelegateDiagnostics, DelegateMessage, HarnessType,
         InferenceBackendType, InvokeDiagnostics, InvokeMessage, Nonce, Operation,
         RequestDiagnostics, RequestMessage, ResponseMessage, RuntimeDiagnostics, RuntimeType,
-        Sequence, ServiceBackend, SubmissionId, TimelineId,
+        Sequence, ServiceBackend, SubmissionId,
     };
 
     fn test_store() -> SqliteDagStore {
@@ -659,7 +659,7 @@ mod tests {
 
     fn make_invoke(payload: &[u8], state: Option<String>) -> ObservableMessage {
         InvokeMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             sub(),
             sess(),
             HarnessType::Cli,
@@ -677,7 +677,7 @@ mod tests {
 
     fn make_request(payload: &[u8]) -> ObservableMessage {
         RequestMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             sub(),
             sess(),
             AgentId::new("agent-a"),
@@ -698,7 +698,7 @@ mod tests {
 
     fn make_response(payload: &[u8]) -> ObservableMessage {
         let request = RequestMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             sub(),
             sess(),
             AgentId::new("agent-a"),
@@ -719,7 +719,7 @@ mod tests {
 
     fn make_complete(payload: &[u8], state: Option<String>) -> ObservableMessage {
         CompleteMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             sub(),
             sess(),
             AgentId::new("agent-a"),
@@ -733,7 +733,7 @@ mod tests {
 
     fn make_delegate(payload: &[u8]) -> ObservableMessage {
         DelegateMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             sub(),
             sess(),
             AgentId::new("coordinator"),
@@ -856,7 +856,7 @@ mod tests {
             SessionId::try_from("e2660cff-33d6-4428-acca-2d297dcc1cad".to_string()).unwrap();
 
         let msg_a: ObservableMessage = InvokeMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             sub(),
             sess1.clone(),
             HarnessType::Cli,
@@ -873,7 +873,7 @@ mod tests {
         let node_a = build_dag_node(&msg_a, &DagNodeId::root());
 
         let msg_b: ObservableMessage = InvokeMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             sub(),
             sess2.clone(),
             HarnessType::Cli,

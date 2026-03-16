@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use super::super::diagnostics::RequestDiagnostics;
 use super::super::operation::Operation;
 use super::super::routing_key::{AgentId, RoutingKey, ServiceBackend};
-use super::identity::{MessageId, Sequence, SessionId, SubmissionId, TimelineId};
+use super::identity::{BranchId, MessageId, Sequence, SessionId, SubmissionId};
 use super::response::ResponseMessage;
 use super::{ExpectsReply, PROTOCOL_VERSION};
 
@@ -17,7 +17,7 @@ use super::{ExpectsReply, PROTOCOL_VERSION};
 pub struct RequestMessage {
     pub id: MessageId,
     pub protocol_version: String,
-    pub timeline: TimelineId,
+    pub timeline: BranchId,
     pub submission: SubmissionId,
     pub session: SessionId,
     pub agent_id: AgentId,
@@ -40,7 +40,7 @@ pub struct RequestMessage {
 impl RequestMessage {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        timeline: TimelineId,
+        timeline: BranchId,
         submission: SubmissionId,
         session: SessionId,
         agent_id: AgentId,
@@ -71,7 +71,7 @@ impl RequestMessage {
     /// Produce the routing key for this message (ADR 096 §4).
     pub fn routing_key(&self) -> RoutingKey {
         RoutingKey::Request {
-            timeline: self.timeline.clone(),
+            timeline: self.timeline,
             submission: self.submission.clone(),
             agent: self.agent_id.clone(),
             service: self.service,

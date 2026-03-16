@@ -9,7 +9,7 @@ use super::proto::{
     PingRequest, RunAgentRequest, RunAgentResponse, SemVer, StartSessionRequest,
     StartSessionResponse,
 };
-use vlinder_core::domain::{DagNodeId, ForkParams, Harness, ResourceId, SessionId, TimelineId};
+use vlinder_core::domain::{BranchId, DagNodeId, ForkParams, Harness, ResourceId, SessionId};
 
 /// gRPC server that wraps a Harness implementation.
 ///
@@ -48,14 +48,13 @@ impl HarnessService for HarnessServiceServer {
     ) -> Result<Response<StartSessionResponse>, Status> {
         let req = request.into_inner();
         let harness = Arc::clone(&self.harness);
-        let session_id = tokio::task::spawn_blocking(move || {
-            let timeline = TimelineId::from(req.timeline_id);
-            harness.start_session(&req.agent_name, timeline)
-        })
-        .await
-        .map_err(|e| Status::internal(format!("spawn_blocking failed: {}", e)))?;
+        let (session_id, branch_id) =
+            tokio::task::spawn_blocking(move || harness.start_session(&req.agent_name))
+                .await
+                .map_err(|e| Status::internal(format!("spawn_blocking failed: {}", e)))?;
         Ok(Response::new(StartSessionResponse {
             session_id: session_id.as_str().to_string(),
+            default_branch_id: branch_id.as_i64(),
         }))
     }
 
@@ -70,7 +69,7 @@ impl HarnessService for HarnessServiceServer {
             let id = ResourceId::new(&req.agent_id);
             let session_id = SessionId::try_from(req.session_id)
                 .map_err(|e| format!("invalid session_id: {}", e))?;
-            let timeline = TimelineId::from(req.timeline_id);
+            let timeline = BranchId::from(req.timeline_id.parse::<i64>().unwrap_or(0));
             let dag_parent = DagNodeId::from(req.dag_parent);
             harness.run_agent(
                 &id,
@@ -112,7 +111,7 @@ impl HarnessService for HarnessServiceServer {
             };
             let session_id = SessionId::try_from(req.session_id)
                 .map_err(|e| format!("invalid session_id: {}", e))?;
-            let timeline = TimelineId::from(req.timeline_id);
+            let timeline = BranchId::from(req.timeline_id.parse::<i64>().unwrap_or(0));
             harness.fork_timeline(params, session_id, timeline)
         })
         .await

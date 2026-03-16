@@ -176,13 +176,13 @@ mod tests {
     use chrono::Utc;
     use vlinder_core::domain::workers::dag::build_dag_node;
     use vlinder_core::domain::{
-        AgentId, DagNodeId, HarnessType, InvokeDiagnostics, InvokeMessage, RuntimeType, SessionId,
-        SubmissionId, TimelineId,
+        AgentId, BranchId, DagNodeId, HarnessType, InvokeDiagnostics, InvokeMessage, RuntimeType,
+        SessionId, SubmissionId,
     };
 
     fn sample_dag_node() -> DagNode {
         let msg: ObservableMessage = InvokeMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             SubmissionId::from("sub-001".to_string()),
             SessionId::new(),
             HarnessType::Cli,
@@ -218,7 +218,7 @@ mod tests {
     #[test]
     fn dag_node_without_state_round_trips() {
         let msg: ObservableMessage = InvokeMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             SubmissionId::from("sub-001".to_string()),
             SessionId::new(),
             HarnessType::Cli,

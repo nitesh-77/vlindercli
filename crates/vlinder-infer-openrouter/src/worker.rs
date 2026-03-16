@@ -154,8 +154,8 @@ fn openai_error_json(message: &str, error_type: &str) -> Vec<u8> {
 mod tests {
     use super::*;
     use vlinder_core::domain::{
-        AgentId, InferenceBackendType, RequestDiagnostics, RequestMessage, Sequence,
-        ServiceBackend, SessionId, SubmissionId, TimelineId,
+        AgentId, BranchId, InferenceBackendType, RequestDiagnostics, RequestMessage, Sequence,
+        ServiceBackend, SessionId, SubmissionId,
     };
     use vlinder_core::queue::InMemoryQueue;
 
@@ -174,7 +174,7 @@ mod tests {
         state: Option<String>,
     ) -> RequestMessage {
         let request = RequestMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             SubmissionId::from("sub-test".to_string()),
             SessionId::new(),
             AgentId::new("test-agent"),

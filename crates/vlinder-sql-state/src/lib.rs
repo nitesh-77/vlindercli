@@ -375,9 +375,9 @@ mod tests {
     use vlinder_core::domain::session::Session;
     use vlinder_core::domain::workers::dag::build_dag_node;
     use vlinder_core::domain::{
-        AgentId, CompleteMessage, DagNodeId, HarnessType, InMemoryDagStore, InvokeDiagnostics,
-        InvokeMessage, ObservableMessage, RuntimeDiagnostics, RuntimeType, SubmissionId,
-        TimelineId,
+        AgentId, BranchId, CompleteMessage, DagNodeId, HarnessType, InMemoryDagStore,
+        InvokeDiagnostics, InvokeMessage, ObservableMessage, RuntimeDiagnostics, RuntimeType,
+        SubmissionId,
     };
 
     fn sess_id() -> SessionId {
@@ -386,7 +386,7 @@ mod tests {
 
     fn make_invoke_msg(payload: &[u8], agent: &str, session: SessionId) -> ObservableMessage {
         InvokeMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             SubmissionId::from("sub-1".to_string()),
             session,
             HarnessType::Cli,
@@ -404,7 +404,7 @@ mod tests {
 
     fn make_complete_msg(payload: &[u8], agent: &str, session: SessionId) -> ObservableMessage {
         CompleteMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             SubmissionId::from("sub-1".to_string()),
             session,
             AgentId::new(agent),

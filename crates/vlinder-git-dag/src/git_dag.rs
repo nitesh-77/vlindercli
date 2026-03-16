@@ -734,12 +734,12 @@ mod tests {
     use super::*;
     use std::process::Command;
     use vlinder_core::domain::{
-        Agent, AgentId, CompleteMessage, ContainerId, DagNodeId, DelegateDiagnostics,
+        Agent, AgentId, BranchId, CompleteMessage, ContainerId, DagNodeId, DelegateDiagnostics,
         DelegateMessage, HarnessType, InMemoryRegistry, InMemorySecretStore, InferenceBackendType,
         InvokeDiagnostics, InvokeMessage, Nonce, ObservableMessage, Operation, RequestDiagnostics,
         RequestMessage, ResponseMessage, RuntimeDiagnostics, RuntimeInfo, RuntimeType, SecretStore,
         Sequence, ServiceBackend, ServiceDiagnostics, ServiceMetrics, ServiceType, SessionId,
-        SubmissionId, TimelineId,
+        SubmissionId,
     };
 
     fn test_agent_id() -> AgentId {
@@ -748,7 +748,7 @@ mod tests {
 
     fn test_invoke(payload: &[u8], epoch_secs: i64) -> (ObservableMessage, DateTime<Utc>) {
         let msg = InvokeMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             SubmissionId::from("sub-1".to_string()),
             SessionId::try_from(SESSION.to_string()).unwrap(),
             HarnessType::Cli,
@@ -767,7 +767,7 @@ mod tests {
 
     fn test_request(payload: &[u8], epoch_secs: i64) -> (ObservableMessage, DateTime<Utc>) {
         let msg = RequestMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             SubmissionId::from("sub-1".to_string()),
             SessionId::try_from(SESSION.to_string()).unwrap(),
             test_agent_id(),
@@ -789,7 +789,7 @@ mod tests {
 
     fn test_response(payload: &[u8], epoch_secs: i64) -> (ObservableMessage, DateTime<Utc>) {
         let request = RequestMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             SubmissionId::from("sub-1".to_string()),
             SessionId::try_from(SESSION.to_string()).unwrap(),
             test_agent_id(),
@@ -825,7 +825,7 @@ mod tests {
 
     fn test_complete(payload: &[u8], epoch_secs: i64) -> (ObservableMessage, DateTime<Utc>) {
         let msg = CompleteMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             SubmissionId::from("sub-1".to_string()),
             SessionId::try_from(SESSION.to_string()).unwrap(),
             test_agent_id(),
@@ -840,7 +840,7 @@ mod tests {
 
     fn test_delegate(payload: &[u8], epoch_secs: i64) -> (ObservableMessage, DateTime<Utc>) {
         let msg = DelegateMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             SubmissionId::from("sub-1".to_string()),
             SessionId::try_from(SESSION.to_string()).unwrap(),
             AgentId::new("coordinator"),
@@ -984,7 +984,7 @@ mod tests {
         worker.on_observable_message(&invoke, ts1);
 
         let complete = CompleteMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             SubmissionId::from("sub-1".to_string()),
             SessionId::try_from(SESSION.to_string()).unwrap(),
             test_agent_id(),
@@ -1125,7 +1125,7 @@ mod tests {
     fn complete_directory_has_harness_and_stderr() {
         let (mut worker, tmp) = test_worker();
         let msg_inner = CompleteMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             SubmissionId::from("sub-1".to_string()),
             SessionId::try_from(SESSION.to_string()).unwrap(),
             test_agent_id(),
@@ -1186,7 +1186,7 @@ mod tests {
     fn state_file_present_when_state_set() {
         let (mut worker, tmp) = test_worker();
         let invoke = InvokeMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             SubmissionId::from("sub-1".to_string()),
             SessionId::try_from(SESSION.to_string()).unwrap(),
             HarnessType::Cli,
@@ -1360,7 +1360,7 @@ mod tests {
         session: &str,
     ) -> (ObservableMessage, DateTime<Utc>) {
         let msg = InvokeMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             SubmissionId::from("sub-1".to_string()),
             SessionId::try_from(session.to_string()).unwrap(),
             HarnessType::Cli,
@@ -1662,7 +1662,7 @@ mod tests {
     ) -> (ObservableMessage, DateTime<Utc>) {
         use vlinder_core::domain::ForkMessage;
         let msg = ForkMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             SubmissionId::from("sub-fork".to_string()),
             SessionId::try_from(SESSION.to_string()).unwrap(),
             agent_name.to_string(),

@@ -6,7 +6,7 @@
 //!
 //! Like ForkMessage, this is fire-and-forget — there is no reply.
 
-use super::identity::{MessageId, SessionId, TimelineId};
+use super::identity::{BranchId, MessageId, SessionId};
 use super::PROTOCOL_VERSION;
 
 /// Session start message: CLI → Platform
@@ -17,13 +17,13 @@ use super::PROTOCOL_VERSION;
 pub struct SessionStartMessage {
     pub id: MessageId,
     pub protocol_version: String,
-    pub timeline: TimelineId,
+    pub timeline: BranchId,
     pub session: SessionId,
     pub agent_name: String,
 }
 
 impl SessionStartMessage {
-    pub fn new(timeline: TimelineId, session: SessionId, agent_name: String) -> Self {
+    pub fn new(timeline: BranchId, session: SessionId, agent_name: String) -> Self {
         Self {
             id: MessageId::new(),
             protocol_version: PROTOCOL_VERSION.to_string(),

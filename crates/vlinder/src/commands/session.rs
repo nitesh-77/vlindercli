@@ -1,7 +1,7 @@
 use clap::Subcommand;
 
 use crate::config::CliConfig;
-use vlinder_core::domain::{DagStore, ForkParams, MessageType, SessionId, TimelineId};
+use vlinder_core::domain::{BranchId, DagStore, ForkParams, MessageType, SessionId};
 
 use super::connect::{connect_harness, open_dag_store};
 
@@ -183,7 +183,7 @@ fn fork(session_id_or_name: &str, from_hash: &str, branch_name: &str) {
     // Send ForkMessage through the harness/queue (CQRS: both SQL and git react)
     // Fork creates a branch within the existing session — no new session needed.
     let harness = connect_harness(&config);
-    let timeline = TimelineId::main();
+    let timeline = BranchId::from(1);
 
     let params = ForkParams {
         agent_name,

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use super::super::diagnostics::ServiceDiagnostics;
 use super::super::operation::Operation;
 use super::super::routing_key::{AgentId, RoutingKey, ServiceBackend};
-use super::identity::{MessageId, Sequence, SessionId, SubmissionId, TimelineId};
+use super::identity::{BranchId, MessageId, Sequence, SessionId, SubmissionId};
 use super::request::RequestMessage;
 use super::PROTOCOL_VERSION;
 
@@ -16,7 +16,7 @@ use super::PROTOCOL_VERSION;
 pub struct ResponseMessage {
     pub id: MessageId,
     pub protocol_version: String,
-    pub timeline: TimelineId,
+    pub timeline: BranchId,
     pub submission: SubmissionId,
     pub session: SessionId,
     pub agent_id: AgentId,
@@ -64,7 +64,7 @@ impl ResponseMessage {
         Self {
             id: MessageId::new(),
             protocol_version: PROTOCOL_VERSION.to_string(),
-            timeline: request.timeline.clone(),
+            timeline: request.timeline,
             submission: request.submission.clone(),
             session: request.session.clone(),
             agent_id: request.agent_id.clone(),
@@ -83,7 +83,7 @@ impl ResponseMessage {
     /// Produce the routing key for this message (ADR 096 §4).
     pub fn routing_key(&self) -> RoutingKey {
         RoutingKey::Response {
-            timeline: self.timeline.clone(),
+            timeline: self.timeline,
             submission: self.submission.clone(),
             service: self.service,
             agent: self.agent_id.clone(),

@@ -7,8 +7,8 @@
 use std::str::FromStr;
 
 use super::{
-    HarnessType, ObjectStorageType, Operation, RuntimeType, Sequence, ServiceType, SubmissionId,
-    TimelineId, VectorStorageType,
+    BranchId, HarnessType, ObjectStorageType, Operation, RuntimeType, Sequence, ServiceType,
+    SubmissionId, VectorStorageType,
 };
 
 /// Agent identity within the routing bounded context.
@@ -189,20 +189,20 @@ impl std::fmt::Display for Nonce {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum RoutingKey {
     Invoke {
-        timeline: TimelineId,
+        timeline: BranchId,
         submission: SubmissionId,
         harness: HarnessType,
         runtime: RuntimeType,
         agent: AgentId,
     },
     Complete {
-        timeline: TimelineId,
+        timeline: BranchId,
         submission: SubmissionId,
         agent: AgentId,
         harness: HarnessType,
     },
     Request {
-        timeline: TimelineId,
+        timeline: BranchId,
         submission: SubmissionId,
         agent: AgentId,
         service: ServiceBackend,
@@ -210,7 +210,7 @@ pub enum RoutingKey {
         sequence: Sequence,
     },
     Response {
-        timeline: TimelineId,
+        timeline: BranchId,
         submission: SubmissionId,
         service: ServiceBackend,
         agent: AgentId,
@@ -218,13 +218,13 @@ pub enum RoutingKey {
         sequence: Sequence,
     },
     Delegate {
-        timeline: TimelineId,
+        timeline: BranchId,
         submission: SubmissionId,
         caller: AgentId,
         target: AgentId,
     },
     DelegateReply {
-        timeline: TimelineId,
+        timeline: BranchId,
         submission: SubmissionId,
         caller: AgentId,
         target: AgentId,
@@ -232,14 +232,14 @@ pub enum RoutingKey {
     },
     /// Repair: Platform → Sidecar (replay a failed service call, ADR 113).
     Repair {
-        timeline: TimelineId,
+        timeline: BranchId,
         submission: SubmissionId,
         harness: HarnessType,
         agent: AgentId,
     },
     /// Fork: CLI → Platform (create a timeline branch).
     Fork {
-        timeline: TimelineId,
+        timeline: BranchId,
         submission: SubmissionId,
         agent_name: String,
     },
@@ -263,7 +263,7 @@ impl RoutingKey {
                 agent,
                 ..
             } => Some(RoutingKey::Complete {
-                timeline: timeline.clone(),
+                timeline: *timeline,
                 submission: submission.clone(),
                 agent: agent.clone(),
                 harness: *harness,
@@ -276,7 +276,7 @@ impl RoutingKey {
                 operation,
                 sequence,
             } => Some(RoutingKey::Response {
-                timeline: timeline.clone(),
+                timeline: *timeline,
                 submission: submission.clone(),
                 service: *service,
                 agent: agent.clone(),
@@ -289,7 +289,7 @@ impl RoutingKey {
                 caller,
                 target,
             } => nonce.map(|n| RoutingKey::DelegateReply {
-                timeline: timeline.clone(),
+                timeline: *timeline,
                 submission: submission.clone(),
                 caller: caller.clone(),
                 target: target.clone(),
@@ -309,12 +309,12 @@ impl RoutingKey {
 mod tests {
     use super::*;
 
-    fn timeline() -> TimelineId {
-        TimelineId::main()
+    fn timeline() -> BranchId {
+        BranchId::from(1)
     }
 
-    fn timeline_alt() -> TimelineId {
-        TimelineId::from(2)
+    fn timeline_alt() -> BranchId {
+        BranchId::from(2)
     }
 
     fn submission() -> SubmissionId {

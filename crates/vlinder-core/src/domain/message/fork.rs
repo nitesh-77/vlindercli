@@ -8,7 +8,7 @@
 //! Unlike service messages, ForkMessage carries no payload — the fork point
 //! hash and branch name are all that's needed to define the topology change.
 
-use super::identity::{DagNodeId, MessageId, SessionId, SubmissionId, TimelineId};
+use super::identity::{BranchId, DagNodeId, MessageId, SessionId, SubmissionId};
 use super::PROTOCOL_VERSION;
 
 /// Fork message: CLI → Platform
@@ -23,7 +23,7 @@ use super::PROTOCOL_VERSION;
 pub struct ForkMessage {
     pub id: MessageId,
     pub protocol_version: String,
-    pub timeline: TimelineId,
+    pub timeline: BranchId,
     pub submission: SubmissionId,
     pub session: SessionId,
     /// Agent that owns the session being forked (needed for git tree path).
@@ -36,7 +36,7 @@ pub struct ForkMessage {
 
 impl ForkMessage {
     pub fn new(
-        timeline: TimelineId,
+        timeline: BranchId,
         submission: SubmissionId,
         session: SessionId,
         agent_name: String,

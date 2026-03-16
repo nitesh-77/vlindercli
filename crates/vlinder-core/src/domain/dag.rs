@@ -92,7 +92,7 @@ impl DagNode {
     pub fn protocol_version(&self) -> &str {
         self.message.protocol_version()
     }
-    pub fn timeline_id(&self) -> &super::TimelineId {
+    pub fn timeline_id(&self) -> &super::BranchId {
         self.message.timeline()
     }
 }
@@ -467,12 +467,11 @@ impl DagStore for InMemoryDagStore {
         branch_id: super::BranchId,
         message_type: Option<MessageType>,
     ) -> Result<Option<DagNode>, String> {
-        let branch_id_str = branch_id.to_string();
         let nodes = self.nodes.lock().unwrap();
         Ok(nodes
             .iter()
             .rev()
-            .filter(|n| n.timeline_id().as_str() == branch_id_str)
+            .filter(|n| *n.timeline_id() == branch_id)
             .find(|n| message_type.is_none_or(|mt| n.message_type() == mt))
             .cloned())
     }

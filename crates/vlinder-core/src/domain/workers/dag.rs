@@ -38,10 +38,10 @@ pub fn build_dag_node(msg: &ObservableMessage, parent_id: &DagNodeId) -> DagNode
 mod tests {
     use super::*;
     use crate::domain::{
-        AgentId, CompleteMessage, DagStore, DelegateDiagnostics, DelegateMessage, HarnessType,
-        InMemoryDagStore, InferenceBackendType, InvokeDiagnostics, InvokeMessage, MessageType,
-        Nonce, Operation, RequestDiagnostics, RequestMessage, ResponseMessage, RuntimeDiagnostics,
-        RuntimeType, Sequence, ServiceBackend, SessionId, SubmissionId, TimelineId,
+        AgentId, BranchId, CompleteMessage, DagStore, DelegateDiagnostics, DelegateMessage,
+        HarnessType, InMemoryDagStore, InferenceBackendType, InvokeDiagnostics, InvokeMessage,
+        MessageType, Nonce, Operation, RequestDiagnostics, RequestMessage, ResponseMessage,
+        RuntimeDiagnostics, RuntimeType, Sequence, ServiceBackend, SessionId, SubmissionId,
     };
 
     fn session() -> SessionId {
@@ -56,7 +56,7 @@ mod tests {
 
     fn test_invoke(payload: &[u8]) -> ObservableMessage {
         InvokeMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             submission(),
             session(),
             HarnessType::Cli,
@@ -74,7 +74,7 @@ mod tests {
 
     fn test_request(payload: &[u8]) -> ObservableMessage {
         RequestMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             submission(),
             session(),
             AgentId::new("myagent"),
@@ -95,7 +95,7 @@ mod tests {
 
     fn test_response(payload: &[u8]) -> ObservableMessage {
         let request = RequestMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             submission(),
             session(),
             AgentId::new("myagent"),
@@ -116,7 +116,7 @@ mod tests {
 
     fn test_complete(payload: &[u8], state: Option<String>) -> ObservableMessage {
         CompleteMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             submission(),
             session(),
             AgentId::new("myagent"),
@@ -130,7 +130,7 @@ mod tests {
 
     fn test_delegate(payload: &[u8]) -> ObservableMessage {
         DelegateMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             submission(),
             session(),
             AgentId::new("coordinator"),
@@ -285,7 +285,7 @@ mod tests {
         let sess2 =
             SessionId::try_from("e2660cff-33d6-4428-acca-2d297dcc1cad".to_string()).unwrap();
         let msg2: ObservableMessage = InvokeMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             submission_alt(),
             sess2.clone(),
             HarnessType::Cli,

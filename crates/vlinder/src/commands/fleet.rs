@@ -3,9 +3,7 @@ use std::path::{Path, PathBuf};
 use clap::Subcommand;
 
 use crate::config::CliConfig;
-use vlinder_core::domain::{
-    agent_routing_key, DagNodeId, Fleet, FleetManifest, Registry, TimelineId,
-};
+use vlinder_core::domain::{agent_routing_key, DagNodeId, Fleet, FleetManifest, Registry};
 
 use super::connect::{connect_harness, connect_registry, open_dag_store, read_latest_state};
 use super::repl;
@@ -201,8 +199,8 @@ pub fn run(name: &str) {
     if let Some(ref state) = initial_state {
         println!("Resuming from state {}…", &state[..8.min(state.len())]);
     }
-    let timeline = TimelineId::main();
-    let session_id = harness.start_session(entry_agent_name.as_str(), timeline.clone());
+    let (session_id, branch_id) = harness.start_session(entry_agent_name.as_str());
+    let timeline = branch_id;
 
     tracing::debug!(fleet = %fleet.name, "Fleet session started");
 
@@ -218,7 +216,7 @@ pub fn run(name: &str) {
             &entry_agent_id,
             &enriched_input,
             session_id.clone(),
-            timeline.clone(),
+            timeline,
             false,
             initial_state.clone(),
             DagNodeId::root(),

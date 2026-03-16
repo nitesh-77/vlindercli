@@ -147,9 +147,13 @@ pub trait MessageQueue {
 
     /// Send a SessionStartMessage (CLI → Platform).
     ///
-    /// Creates a new conversation session. Must be sent before the first
-    /// InvokeMessage in a session (FK: dag_nodes.session_id → sessions.id).
-    fn send_session_start(&self, msg: super::SessionStartMessage) -> Result<(), QueueError>;
+    /// Creates a new conversation session and its default "main" branch.
+    /// Returns the BranchId of the default branch so callers can use it
+    /// as the BranchId for subsequent messages.
+    fn send_session_start(
+        &self,
+        msg: super::SessionStartMessage,
+    ) -> Result<super::BranchId, QueueError>;
 
     // -------------------------------------------------------------------------
     // Request-reply facades (ADR 092)

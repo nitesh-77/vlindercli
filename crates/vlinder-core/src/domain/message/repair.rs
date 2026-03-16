@@ -3,7 +3,7 @@
 use super::super::operation::Operation;
 use super::super::routing_key::{AgentId, RoutingKey, ServiceBackend};
 use super::identity::{
-    DagNodeId, HarnessType, MessageId, Sequence, SessionId, SubmissionId, TimelineId,
+    BranchId, DagNodeId, HarnessType, MessageId, Sequence, SessionId, SubmissionId,
 };
 use super::PROTOCOL_VERSION;
 
@@ -22,7 +22,7 @@ use super::PROTOCOL_VERSION;
 pub struct RepairMessage {
     pub id: MessageId,
     pub protocol_version: String,
-    pub timeline: TimelineId,
+    pub timeline: BranchId,
     pub submission: SubmissionId,
     pub session: SessionId,
     pub agent_id: AgentId,
@@ -42,7 +42,7 @@ pub struct RepairMessage {
 impl RepairMessage {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        timeline: TimelineId,
+        timeline: BranchId,
         submission: SubmissionId,
         session: SessionId,
         agent_id: AgentId,
@@ -76,7 +76,7 @@ impl RepairMessage {
     /// Produce the routing key for this message.
     pub fn routing_key(&self) -> RoutingKey {
         RoutingKey::Repair {
-            timeline: self.timeline.clone(),
+            timeline: self.timeline,
             submission: self.submission.clone(),
             harness: self.harness,
             agent: self.agent_id.clone(),

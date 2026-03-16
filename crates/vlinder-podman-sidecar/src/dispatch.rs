@@ -295,7 +295,7 @@ pub fn handle_repair(
     };
 
     let mut request = RequestMessage::new(
-        repair.timeline.clone(),
+        repair.timeline,
         repair.submission.clone(),
         repair.session.clone(),
         repair.agent_id.clone(),
@@ -322,7 +322,7 @@ pub fn handle_repair(
     // Build a synthetic InvokeMessage so DurableSession can create
     // CompleteMessage replies when the agent finishes.
     let invoke = InvokeMessage::new(
-        repair.timeline.clone(),
+        repair.timeline,
         repair.submission.clone(),
         repair.session.clone(),
         repair.harness,
@@ -416,7 +416,7 @@ fn handle_action(
             };
 
             let mut request = RequestMessage::new(
-                invoke.timeline.clone(),
+                invoke.timeline,
                 invoke.submission.clone(),
                 invoke.session.clone(),
                 invoke.agent_id.clone(),

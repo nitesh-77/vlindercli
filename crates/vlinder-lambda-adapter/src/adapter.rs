@@ -57,15 +57,15 @@ pub fn build_error_body(message: &str) -> String {
 mod tests {
     use super::*;
     use vlinder_core::domain::{
-        AgentId, DagNodeId, HarnessType, InvokeDiagnostics, RuntimeType, SessionId, SubmissionId,
-        TimelineId,
+        AgentId, BranchId, DagNodeId, HarnessType, InvokeDiagnostics, RuntimeType, SessionId,
+        SubmissionId,
     };
 
     /// Build a test InvokeMessage and serialize it to JSON, simulating what
     /// the daemon sends as the Lambda payload.
     fn make_invoke_json(payload: &[u8]) -> Vec<u8> {
         let invoke = InvokeMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             SubmissionId::from("sub-test".to_string()),
             SessionId::try_from("d4761d76-dee4-4ebf-9df4-43b52efa4f78".to_string()).unwrap(),
             HarnessType::Cli,

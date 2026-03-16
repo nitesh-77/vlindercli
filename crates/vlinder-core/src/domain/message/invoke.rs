@@ -6,7 +6,7 @@ use super::super::diagnostics::{InvokeDiagnostics, RuntimeDiagnostics};
 use super::super::routing_key::{AgentId, RoutingKey};
 use super::super::RuntimeType;
 use super::complete::CompleteMessage;
-use super::identity::{DagNodeId, HarnessType, MessageId, SessionId, SubmissionId, TimelineId};
+use super::identity::{BranchId, DagNodeId, HarnessType, MessageId, SessionId, SubmissionId};
 use super::{ExpectsReply, PROTOCOL_VERSION};
 
 /// Serde helper: encode Vec<u8> as a base64 string for JSON-friendly transport.
@@ -32,7 +32,7 @@ mod base64_serde {
 pub struct InvokeMessage {
     pub id: MessageId,
     pub protocol_version: String,
-    pub timeline: TimelineId,
+    pub timeline: BranchId,
     pub submission: SubmissionId,
     pub session: SessionId,
     pub harness: HarnessType,
@@ -54,7 +54,7 @@ pub struct InvokeMessage {
 impl InvokeMessage {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        timeline: TimelineId,
+        timeline: BranchId,
         submission: SubmissionId,
         session: SessionId,
         harness: HarnessType,
@@ -84,7 +84,7 @@ impl InvokeMessage {
     /// Produce the routing key for this message (ADR 096 §4).
     pub fn routing_key(&self) -> RoutingKey {
         RoutingKey::Invoke {
-            timeline: self.timeline.clone(),
+            timeline: self.timeline,
             submission: self.submission.clone(),
             harness: self.harness,
             runtime: self.runtime,
@@ -99,7 +99,7 @@ impl InvokeMessage {
         state: Option<String>,
     ) -> CompleteMessage {
         CompleteMessage::new(
-            self.timeline.clone(),
+            self.timeline,
             self.submission.clone(),
             self.session.clone(),
             self.agent_id.clone(),
@@ -118,7 +118,7 @@ impl InvokeMessage {
         diagnostics: RuntimeDiagnostics,
     ) -> CompleteMessage {
         CompleteMessage::new(
-            self.timeline.clone(),
+            self.timeline,
             self.submission.clone(),
             self.session.clone(),
             self.agent_id.clone(),
@@ -135,7 +135,7 @@ impl ExpectsReply for InvokeMessage {
 
     fn create_reply(&self, payload: Vec<u8>) -> CompleteMessage {
         CompleteMessage::new(
-            self.timeline.clone(),
+            self.timeline,
             self.submission.clone(),
             self.session.clone(),
             self.agent_id.clone(),
@@ -154,7 +154,7 @@ mod tests {
     #[test]
     fn invoke_message_json_round_trip() {
         let msg = InvokeMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             SubmissionId::from("sub-1".to_string()),
             SessionId::new(),
             HarnessType::Cli,
@@ -187,7 +187,7 @@ mod tests {
     #[test]
     fn payload_serializes_as_base64_string() {
         let msg = InvokeMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             SubmissionId::from("sub-1".to_string()),
             SessionId::new(),
             HarnessType::Cli,

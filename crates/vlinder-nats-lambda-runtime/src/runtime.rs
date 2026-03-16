@@ -519,8 +519,8 @@ mod tests {
     #[test]
     fn invoke_dispatches_to_lambda_consumes_from_queue() {
         use vlinder_core::domain::{
-            DagNodeId, HarnessType, InvokeDiagnostics, InvokeMessage, SessionId, SubmissionId,
-            TimelineId,
+            BranchId, DagNodeId, HarnessType, InvokeDiagnostics, InvokeMessage, SessionId,
+            SubmissionId,
         };
 
         let registry = test_registry();
@@ -543,7 +543,7 @@ mod tests {
 
         // Enqueue an invoke message.
         let invoke = InvokeMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             SubmissionId::new(),
             SessionId::new(),
             HarnessType::Grpc,
@@ -573,8 +573,8 @@ mod tests {
     #[test]
     fn invoke_failure_sends_error_complete() {
         use vlinder_core::domain::{
-            DagNodeId, HarnessType, InvokeDiagnostics, InvokeMessage, SessionId, SubmissionId,
-            TimelineId,
+            BranchId, DagNodeId, HarnessType, InvokeDiagnostics, InvokeMessage, SessionId,
+            SubmissionId,
         };
 
         let registry = test_registry();
@@ -599,7 +599,7 @@ mod tests {
 
         // Enqueue an invoke message.
         let invoke = InvokeMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             SubmissionId::new(),
             SessionId::new(),
             HarnessType::Grpc,

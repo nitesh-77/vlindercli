@@ -10,9 +10,9 @@
 use std::sync::Arc;
 
 use crate::domain::{
-    DagNodeId, DagStore, ForkMessage, HarnessType, InvokeDiagnostics, InvokeMessage, JobId,
-    JobStatus, MessageQueue, MessageType, Registry, ResourceId, SessionId, SessionStartMessage,
-    SubmissionId, TimelineId,
+    BranchId, DagNodeId, DagStore, ForkMessage, HarnessType, InvokeDiagnostics, InvokeMessage,
+    JobId, JobStatus, MessageQueue, MessageType, Registry, ResourceId, SessionId,
+    SessionStartMessage, SubmissionId,
 };
 
 /// Common harness operations shared across all harness types.
@@ -23,11 +23,11 @@ pub trait Harness {
     /// path to route responses back to the correct consumer.
     fn harness_type(&self) -> HarnessType;
 
-    /// Start a conversation session for an agent.
+    /// Start a new conversation session for an agent.
     ///
-    /// Creates a session, sends a SessionStartMessage, and returns the
-    /// SessionId for the caller to pass to subsequent commands.
-    fn start_session(&self, agent_name: &str, timeline: TimelineId) -> SessionId;
+    /// Creates a session and its default "main" branch. Returns the
+    /// SessionId and the default branch's BranchId.
+    fn start_session(&self, agent_name: &str) -> (SessionId, BranchId);
 
     /// Run an agent to completion synchronously.
     ///
@@ -39,7 +39,7 @@ pub trait Harness {
         agent_id: &ResourceId,
         input: &str,
         session_id: SessionId,
-        timeline: TimelineId,
+        timeline: BranchId,
         sealed: bool,
         initial_state: Option<String>,
         dag_parent: DagNodeId,
@@ -53,7 +53,7 @@ pub trait Harness {
         &self,
         params: ForkParams,
         session_id: SessionId,
-        timeline: TimelineId,
+        timeline: BranchId,
     ) -> Result<(), String>;
 }
 
@@ -127,7 +127,7 @@ impl CoreHarness {
         agent_id: &ResourceId,
         input: &str,
         session_id: &SessionId,
-        timeline: &TimelineId,
+        timeline: &BranchId,
         sealed: bool,
         initial_state: Option<&str>,
         dag_parent: &DagNodeId,
@@ -149,18 +149,16 @@ impl CoreHarness {
             .select_runtime(&agent)
             .ok_or_else(|| format!("no runtime available for agent: {}", agent_id))?;
 
-        let timeline_id: i64 = timeline.as_str().parse().unwrap_or(0);
-        let branch_id = crate::domain::BranchId::from(timeline_id);
         let last_invoke_node = self
             .store
-            .latest_node_on_branch(branch_id, Some(MessageType::Invoke))
+            .latest_node_on_branch(*timeline, Some(MessageType::Invoke))
             .unwrap_or(None);
         let last_invoke_payload = last_invoke_node
             .as_ref()
             .map(|n| String::from_utf8_lossy(n.payload()).to_string());
         let last_complete_node = self
             .store
-            .latest_node_on_branch(branch_id, Some(MessageType::Complete))
+            .latest_node_on_branch(*timeline, Some(MessageType::Complete))
             .unwrap_or(None);
         let last_complete_payload = last_complete_node
             .as_ref()
@@ -194,7 +192,7 @@ impl CoreHarness {
         };
 
         let invoke = InvokeMessage::new(
-            timeline.clone(),
+            *timeline,
             submission,
             session_id.clone(),
             self.harness_type(),
@@ -215,15 +213,19 @@ impl Harness for CoreHarness {
         self.harness_type
     }
 
-    fn start_session(&self, agent_name: &str, timeline: TimelineId) -> SessionId {
+    fn start_session(&self, agent_name: &str) -> (SessionId, BranchId) {
         let session_id = SessionId::new();
+        // Placeholder — the actual branch ID is determined by
+        // send_session_start (RecordingQueue creates the branch row).
+        let placeholder = BranchId::from(0);
 
-        let msg = SessionStartMessage::new(timeline, session_id.clone(), agent_name.to_string());
-        if let Err(e) = self.queue.send_session_start(msg) {
+        let msg = SessionStartMessage::new(placeholder, session_id.clone(), agent_name.to_string());
+        let branch_id = self.queue.send_session_start(msg).unwrap_or_else(|e| {
             tracing::warn!(error = %e, "Failed to send session start message");
-        }
+            BranchId::from(1) // fallback
+        });
 
-        session_id
+        (session_id, branch_id)
     }
 
     fn run_agent(
@@ -231,7 +233,7 @@ impl Harness for CoreHarness {
         agent_id: &ResourceId,
         input: &str,
         session_id: SessionId,
-        timeline: TimelineId,
+        timeline: BranchId,
         sealed: bool,
         initial_state: Option<String>,
         dag_parent: DagNodeId,
@@ -262,7 +264,7 @@ impl Harness for CoreHarness {
         &self,
         params: ForkParams,
         session_id: SessionId,
-        timeline: TimelineId,
+        timeline: BranchId,
     ) -> Result<(), String> {
         let submission = SubmissionId::new();
 

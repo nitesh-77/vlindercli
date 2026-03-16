@@ -235,8 +235,8 @@ mod tests {
     use vlinder_core::domain::SecretStore;
     use vlinder_core::domain::{Agent, AgentId, Registry};
     use vlinder_core::domain::{
-        Operation, RequestDiagnostics, Sequence, ServiceBackend, SessionId, SubmissionId,
-        TimelineId, VectorStorageType,
+        BranchId, Operation, RequestDiagnostics, Sequence, ServiceBackend, SessionId, SubmissionId,
+        VectorStorageType,
     };
     use vlinder_core::queue::InMemoryQueue;
 
@@ -302,7 +302,7 @@ mod tests {
             "metadata": "test"
         });
         let store_request = RequestMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             test_submission(),
             SessionId::new(),
             test_agent_id(),
@@ -328,7 +328,7 @@ mod tests {
             "limit": 1
         });
         let search_request = RequestMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             test_submission(),
             SessionId::new(),
             test_agent_id(),
@@ -375,7 +375,7 @@ mod tests {
             "metadata": "test document"
         });
         let store_request = RequestMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             test_submission(),
             SessionId::new(),
             test_agent_id(),
@@ -398,7 +398,7 @@ mod tests {
             "limit": 1
         });
         let search_request = RequestMessage::new(
-            TimelineId::main(),
+            BranchId::from(1),
             test_submission(),
             SessionId::new(),
             test_agent_id(),

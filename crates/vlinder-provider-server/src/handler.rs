@@ -64,7 +64,7 @@ impl InvokeHandler {
         };
 
         let mut request = RequestMessage::new(
-            self.invoke.timeline.clone(),
+            self.invoke.timeline,
             self.invoke.submission.clone(),
             self.invoke.session.clone(),
             self.invoke.agent_id.clone(),
@@ -127,7 +127,7 @@ impl InvokeHandler {
         let nonce = Nonce::generate();
 
         let delegate = DelegateMessage::new(
-            self.invoke.timeline.clone(),
+            self.invoke.timeline,
             self.invoke.submission.clone(),
             self.invoke.session.clone(),
             caller.clone(),

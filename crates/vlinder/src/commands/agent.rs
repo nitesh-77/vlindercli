@@ -4,7 +4,7 @@ use std::sync::Arc;
 use clap::{Subcommand, ValueEnum};
 
 use crate::config::CliConfig;
-use vlinder_core::domain::{Agent, AgentManifest, DagNodeId, DagStore, Registry, TimelineId};
+use vlinder_core::domain::{Agent, AgentManifest, BranchId, DagNodeId, DagStore, Registry};
 
 use super::connect::{connect_harness, connect_registry, open_dag_store, read_latest_state};
 use super::repl;
@@ -153,13 +153,36 @@ fn run(name: &str, branch: Option<&str>) {
     let harness = connect_harness(&config);
 
     // Resolve session context before starting (ADR 054, ADR 070)
-    let (timeline, sealed, initial_state, dag_parent) = if let Some(branch_name) = branch {
-        resolve_branch(&config, name, branch_name)
-    } else {
-        resolve_default(&config, name)
-    };
-
-    let session_id = harness.start_session(name, timeline.clone());
+    let (session_id, timeline, sealed, initial_state, dag_parent) =
+        if let Some(branch_name) = branch {
+            let (tl, sealed, state, parent) = resolve_branch(&config, name, branch_name);
+            // Continuing an existing session on a named branch — no start_session needed.
+            // TODO: resolve session_id from the branch's session
+            let store = require_dag_store(&config);
+            let branch = store
+                .get_branch_by_name(branch_name)
+                .ok()
+                .flatten()
+                .expect("branch already resolved");
+            let session_id = branch.session_id;
+            (session_id, tl, sealed, state, parent)
+        } else {
+            // New session: create session + main branch via harness
+            let (session_id, branch_id) = harness.start_session(name);
+            let timeline = branch_id;
+            let initial_state =
+                open_dag_store(&config).and_then(|store| read_latest_state(store.as_ref(), name));
+            if let Some(ref state) = initial_state {
+                println!("Resuming from state {}…", &state[..8.min(state.len())]);
+            }
+            (
+                session_id,
+                timeline,
+                false,
+                initial_state,
+                DagNodeId::root(),
+            )
+        };
 
     // Run REPL with synchronous run_agent (ADR 092)
     repl::run(|input| {
@@ -167,7 +190,7 @@ fn run(name: &str, branch: Option<&str>) {
             &agent_id,
             input,
             session_id.clone(),
-            timeline.clone(),
+            timeline,
             sealed,
             initial_state.clone(),
             dag_parent.clone(),
@@ -178,25 +201,12 @@ fn run(name: &str, branch: Option<&str>) {
     });
 }
 
-/// Resolve default session context: main timeline, latest state (ADR 079).
-fn resolve_default(
-    config: &CliConfig,
-    agent_name: &str,
-) -> (TimelineId, bool, Option<String>, DagNodeId) {
-    let initial_state =
-        open_dag_store(config).and_then(|store| read_latest_state(store.as_ref(), agent_name));
-    if let Some(ref state) = initial_state {
-        println!("Resuming from state {}…", &state[..8.min(state.len())]);
-    }
-    (TimelineId::main(), false, initial_state, DagNodeId::root())
-}
-
 /// Resolve branch session context: look up timeline, read tip state/hash.
 fn resolve_branch(
     config: &CliConfig,
     agent_name: &str,
     branch: &str,
-) -> (TimelineId, bool, Option<String>, DagNodeId) {
+) -> (BranchId, bool, Option<String>, DagNodeId) {
     let store = require_dag_store(config);
 
     let timeline = store
@@ -253,12 +263,7 @@ fn resolve_branch(
     };
 
     println!("On branch '{}'", branch);
-    (
-        TimelineId::from(timeline.id),
-        false,
-        initial_state,
-        tip_hash,
-    )
+    (timeline.id, false, initial_state, tip_hash)
 }
 
 fn require_dag_store(config: &CliConfig) -> Box<dyn DagStore> {
