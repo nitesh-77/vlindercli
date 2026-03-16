@@ -58,10 +58,6 @@ impl SqliteDagStore {
                  ON dag_nodes (parent_hash);
              CREATE INDEX IF NOT EXISTS idx_dag_nodes_timeline
                  ON dag_nodes (timeline_id, message_type, created_at);
-             CREATE TABLE IF NOT EXISTS checkout_state (
-                 agent_name TEXT PRIMARY KEY,
-                 state_hash TEXT NOT NULL
-             );
              CREATE TABLE IF NOT EXISTS branches (
                  id INTEGER PRIMARY KEY AUTOINCREMENT,
                  name TEXT NOT NULL,
@@ -209,16 +205,6 @@ impl DagStore for SqliteDagStore {
                 node.timeline_id().as_i64(),
             ],
         ).map_err(|e| format!("insert_node failed: {}", e))?;
-
-        // Clear checkout override when a Complete with state is recorded.
-        // The agent is the sender on Complete messages.
-        if node.message_type() == MessageType::Complete && node.message.state().is_some() {
-            conn.execute(
-                "DELETE FROM checkout_state WHERE agent_name = ?1",
-                rusqlite::params![from],
-            )
-            .map_err(|e| format!("clear checkout_state failed: {}", e))?;
-        }
 
         Ok(())
     }
