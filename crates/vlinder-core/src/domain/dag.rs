@@ -180,13 +180,6 @@ pub trait DagStore: Send + Sync {
     /// the latest non-empty state. Returns None if no state has been recorded.
     fn latest_state(&self, agent_name: &str) -> Result<Option<String>, String>;
 
-    /// Set an override state for timeline checkout (ADR 081).
-    ///
-    /// When set, `latest_state()` returns this value instead of querying
-    /// the dag_nodes table. Cleared automatically when a Complete message
-    /// with state is recorded via `insert_node()`.
-    fn set_checkout_state(&self, agent_name: &str, state: &str) -> Result<(), String>;
-
     // -------------------------------------------------------------------------
     // Branch methods
     // -------------------------------------------------------------------------
@@ -246,7 +239,6 @@ pub trait DagStore: Send + Sync {
 pub struct InMemoryDagStore {
     nodes: std::sync::Mutex<Vec<DagNode>>,
     branches: std::sync::Mutex<Vec<Branch>>,
-    checkout_states: std::sync::Mutex<std::collections::HashMap<String, String>>,
     sessions: std::sync::Mutex<Vec<Session>>,
 }
 
@@ -255,7 +247,6 @@ impl InMemoryDagStore {
         Self {
             nodes: std::sync::Mutex::new(Vec::new()),
             branches: std::sync::Mutex::new(Vec::new()),
-            checkout_states: std::sync::Mutex::new(std::collections::HashMap::new()),
             sessions: std::sync::Mutex::new(Vec::new()),
         }
     }
@@ -316,13 +307,6 @@ impl DagStore for InMemoryDagStore {
     }
 
     fn latest_state(&self, agent_name: &str) -> Result<Option<String>, String> {
-        // Check checkout override first
-        let overrides = self.checkout_states.lock().unwrap();
-        if let Some(state) = overrides.get(agent_name) {
-            return Ok(Some(state.clone()));
-        }
-        drop(overrides);
-
         let nodes = self.nodes.lock().unwrap();
         Ok(nodes
             .iter()
@@ -332,14 +316,6 @@ impl DagStore for InMemoryDagStore {
                 from == agent_name || to == agent_name
             })
             .find_map(|n| n.message.state().map(|s| s.to_string())))
-    }
-
-    fn set_checkout_state(&self, agent_name: &str, state: &str) -> Result<(), String> {
-        self.checkout_states
-            .lock()
-            .unwrap()
-            .insert(agent_name.to_string(), state.to_string());
-        Ok(())
     }
 
     fn create_branch(

@@ -317,21 +317,6 @@ impl DagStore for SqliteDagStore {
     fn latest_state(&self, agent_name: &str) -> Result<Option<String>, String> {
         let conn = self.conn.lock().unwrap();
 
-        // Check checkout override first (ADR 081).
-        let mut stmt = conn
-            .prepare("SELECT state_hash FROM checkout_state WHERE agent_name = ?1")
-            .map_err(|e| format!("checkout_state prepare failed: {}", e))?;
-
-        let override_state: Option<String> = stmt
-            .query_row(rusqlite::params![agent_name], |row| row.get(0))
-            .optional()
-            .map_err(|e| format!("checkout_state query failed: {}", e))?;
-
-        if override_state.is_some() {
-            return Ok(override_state);
-        }
-
-        // Fall back to latest state from dag_nodes.
         let mut stmt = conn
             .prepare(
                 "SELECT state FROM dag_nodes
@@ -348,16 +333,6 @@ impl DagStore for SqliteDagStore {
             .map_err(|e| format!("latest_state query failed: {}", e))?;
 
         Ok(result)
-    }
-
-    fn set_checkout_state(&self, agent_name: &str, state: &str) -> Result<(), String> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "INSERT OR REPLACE INTO checkout_state (agent_name, state_hash) VALUES (?1, ?2)",
-            rusqlite::params![agent_name, state],
-        )
-        .map_err(|e| format!("set_checkout_state failed: {}", e))?;
-        Ok(())
     }
 
     // -------------------------------------------------------------------------
@@ -912,68 +887,6 @@ mod tests {
         // cli is the sender, agent-a is receiver for invoke
         let state = store.latest_state("agent-x").unwrap();
         assert_eq!(state, None);
-    }
-
-    #[test]
-    fn checkout_state_overrides_latest_state() {
-        let store = test_store();
-
-        let msg = make_complete(b"complete", Some("real-state".to_string()));
-        let node = build_dag_node(&msg, &DagNodeId::root());
-        store.insert_node(&node).unwrap();
-
-        // agent-a is the sender on Complete
-        assert_eq!(
-            store.latest_state("agent-a").unwrap(),
-            Some("real-state".to_string())
-        );
-
-        store
-            .set_checkout_state("agent-a", "checked-out-state")
-            .unwrap();
-        assert_eq!(
-            store.latest_state("agent-a").unwrap(),
-            Some("checked-out-state".to_string())
-        );
-    }
-
-    #[test]
-    fn insert_complete_clears_checkout_state() {
-        let store = test_store();
-
-        store.set_checkout_state("agent-a", "old-state").unwrap();
-        assert_eq!(
-            store.latest_state("agent-a").unwrap(),
-            Some("old-state".to_string())
-        );
-
-        let msg = make_complete(b"new-complete", Some("new-state".to_string()));
-        let mut node = build_dag_node(&msg, &DagNodeId::root());
-        node.created_at = chrono::TimeZone::with_ymd_and_hms(&Utc, 2025, 6, 1, 0, 0, 0).unwrap();
-        store.insert_node(&node).unwrap();
-
-        assert_eq!(
-            store.latest_state("agent-a").unwrap(),
-            Some("new-state".to_string())
-        );
-    }
-
-    #[test]
-    fn insert_non_complete_does_not_clear_checkout_state() {
-        let store = test_store();
-
-        store
-            .set_checkout_state("agent-a", "checkout-state")
-            .unwrap();
-
-        let msg = make_response(b"response");
-        let node = build_dag_node(&msg, &DagNodeId::root());
-        store.insert_node(&node).unwrap();
-
-        assert_eq!(
-            store.latest_state("agent-a").unwrap(),
-            Some("checkout-state".to_string())
-        );
     }
 
     // ========================================================================

@@ -184,11 +184,11 @@ fn run(name: &str, session: Option<&str>, branch: Option<&str>) {
         }
         (Some(session_name), None) => {
             // Mode 2: continue existing session on its default branch
-            resolve_session_default(&config, name, session_name)
+            resolve_session_default(&config, session_name)
         }
         (Some(_), Some(branch_name)) | (None, Some(branch_name)) => {
             // Mode 3: continue on a specific branch
-            resolve_branch(&config, name, branch_name)
+            resolve_branch(&config, branch_name)
         }
     };
 
@@ -212,7 +212,6 @@ fn run(name: &str, session: Option<&str>, branch: Option<&str>) {
 /// Resolve session default branch: look up session by name, continue on its default branch.
 fn resolve_session_default(
     config: &CliConfig,
-    agent_name: &str,
     session_name: &str,
 ) -> (
     vlinder_core::domain::SessionId,
@@ -237,8 +236,7 @@ fn resolve_session_default(
             std::process::exit(1);
         });
 
-    let (_, sealed, initial_state, dag_parent) =
-        resolve_branch_tip(&*store, agent_name, &branch, &branch.name);
+    let (_, sealed, initial_state, dag_parent) = resolve_branch_tip(&*store, &branch, &branch.name);
 
     println!(
         "Continuing session '{}' on branch '{}'",
@@ -250,7 +248,6 @@ fn resolve_session_default(
 /// Resolve branch session context: look up branch by name, continue on it.
 fn resolve_branch(
     config: &CliConfig,
-    agent_name: &str,
     branch_name: &str,
 ) -> (
     vlinder_core::domain::SessionId,
@@ -273,8 +270,7 @@ fn resolve_branch(
         });
 
     let session_id = branch.session_id.clone();
-    let (_, sealed, initial_state, dag_parent) =
-        resolve_branch_tip(&*store, agent_name, &branch, branch_name);
+    let (_, sealed, initial_state, dag_parent) = resolve_branch_tip(&*store, &branch, branch_name);
 
     println!("On branch '{}'", branch_name);
     (session_id, branch.id, sealed, initial_state, dag_parent)
@@ -283,7 +279,6 @@ fn resolve_branch(
 /// Read tip state and dag_parent from a branch.
 fn resolve_branch_tip(
     store: &dyn DagStore,
-    agent_name: &str,
     branch: &vlinder_core::domain::Branch,
     branch_name: &str,
 ) -> (BranchId, bool, Option<String>, DagNodeId) {
@@ -315,9 +310,6 @@ fn resolve_branch_tip(
                 branch_name,
                 &state[..8.min(state.len())]
             );
-            if let Err(e) = store.set_checkout_state(agent_name, state) {
-                tracing::warn!(error = %e, "Failed to set checkout state for branch");
-            }
             Some(state.to_string())
         } else {
             None

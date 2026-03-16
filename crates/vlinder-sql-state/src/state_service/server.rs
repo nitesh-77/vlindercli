@@ -12,7 +12,7 @@ use super::proto::{
     GetSessionByNameRequest, GetSessionNodesRequest, GetSessionNodesResponse, GetSessionRequest,
     GetSessionResponse, InsertNodeRequest, InsertNodeResponse, LatestNodeOnBranchRequest,
     LatestNodeOnBranchResponse, LatestStateRequest, LatestStateResponse, ListSessionsRequest,
-    ListSessionsResponse, PingRequest, SemVer, SetCheckoutStateRequest, SetCheckoutStateResponse,
+    ListSessionsResponse, PingRequest, SemVer,
 };
 use vlinder_core::domain::{DagNodeId, DagStore, MessageType, SessionId};
 
@@ -130,24 +130,6 @@ impl StateService for StateServiceServer {
             .map_err(Status::internal)?;
 
         Ok(Response::new(LatestStateResponse { state }))
-    }
-
-    async fn set_checkout_state(
-        &self,
-        request: Request<SetCheckoutStateRequest>,
-    ) -> Result<Response<SetCheckoutStateResponse>, Status> {
-        let req = request.into_inner();
-
-        match self.store.set_checkout_state(&req.agent_name, &req.state) {
-            Ok(()) => Ok(Response::new(SetCheckoutStateResponse {
-                success: true,
-                error: None,
-            })),
-            Err(e) => Ok(Response::new(SetCheckoutStateResponse {
-                success: false,
-                error: Some(e),
-            })),
-        }
     }
 
     // -------------------------------------------------------------------------
