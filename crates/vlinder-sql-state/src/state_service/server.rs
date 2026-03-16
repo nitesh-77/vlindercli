@@ -10,10 +10,9 @@ use super::proto::{
     GetChildrenRequest, GetChildrenResponse, GetNodeByPrefixRequest, GetNodeRequest,
     GetNodeResponse, GetNodesBySubmissionRequest, GetNodesBySubmissionResponse,
     GetSessionByNameRequest, GetSessionNodesRequest, GetSessionNodesResponse, GetSessionRequest,
-    GetSessionResponse, InsertNodeRequest, InsertNodeResponse, LatestNodeHashRequest,
-    LatestNodeHashResponse, LatestNodeOnBranchRequest, LatestNodeOnBranchResponse,
-    LatestStateRequest, LatestStateResponse, ListSessionsRequest, ListSessionsResponse,
-    PingRequest, SemVer, SetCheckoutStateRequest, SetCheckoutStateResponse,
+    GetSessionResponse, InsertNodeRequest, InsertNodeResponse, LatestNodeOnBranchRequest,
+    LatestNodeOnBranchResponse, LatestStateRequest, LatestStateResponse, ListSessionsRequest,
+    ListSessionsResponse, PingRequest, SemVer, SetCheckoutStateRequest, SetCheckoutStateResponse,
 };
 use vlinder_core::domain::{DagNodeId, DagStore, MessageType, SessionId};
 
@@ -131,23 +130,6 @@ impl StateService for StateServiceServer {
             .map_err(Status::internal)?;
 
         Ok(Response::new(LatestStateResponse { state }))
-    }
-
-    async fn latest_node_hash(
-        &self,
-        request: Request<LatestNodeHashRequest>,
-    ) -> Result<Response<LatestNodeHashResponse>, Status> {
-        let req = request.into_inner();
-
-        let hash = self
-            .store
-            .latest_node_hash(
-                &SessionId::try_from(req.session_id).map_err(Status::invalid_argument)?,
-            )
-            .map_err(Status::internal)?
-            .map(|id| id.to_string());
-
-        Ok(Response::new(LatestNodeHashResponse { hash }))
     }
 
     async fn set_checkout_state(

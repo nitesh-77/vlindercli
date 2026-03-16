@@ -527,12 +527,6 @@ mod tests {
             fn latest_state(&self, _: &str) -> Result<Option<String>, String> {
                 Ok(None)
             }
-            fn latest_node_hash(
-                &self,
-                _: &crate::domain::SessionId,
-            ) -> Result<Option<crate::domain::DagNodeId>, String> {
-                Ok(None)
-            }
             fn set_checkout_state(&self, _: &str, _: &str) -> Result<(), String> {
                 Ok(())
             }

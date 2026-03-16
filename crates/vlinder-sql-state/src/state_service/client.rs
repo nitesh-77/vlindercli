@@ -138,23 +138,6 @@ impl DagStore for GrpcStateClient {
         Ok(response.into_inner().state)
     }
 
-    fn latest_node_hash(
-        &self,
-        session_id: &vlinder_core::domain::SessionId,
-    ) -> Result<Option<DagNodeId>, String> {
-        let request = proto::LatestNodeHashRequest {
-            session_id: session_id.as_str().to_string(),
-        };
-
-        let mut client = self.client.clone();
-        let response = self
-            .runtime
-            .block_on(async { client.latest_node_hash(request).await })
-            .map_err(|e| e.to_string())?;
-
-        Ok(response.into_inner().hash.map(DagNodeId::from))
-    }
-
     fn set_checkout_state(&self, agent_name: &str, state: &str) -> Result<(), String> {
         let request = proto::SetCheckoutStateRequest {
             agent_name: agent_name.to_string(),

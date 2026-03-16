@@ -314,25 +314,6 @@ impl DagStore for SqliteDagStore {
         Ok(nodes)
     }
 
-    fn latest_node_hash(&self, session_id: &SessionId) -> Result<Option<DagNodeId>, String> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn
-            .prepare(
-                "SELECT hash FROM dag_nodes
-             WHERE session_id = ?1
-             ORDER BY created_at DESC
-             LIMIT 1",
-            )
-            .map_err(|e| format!("latest_node_hash prepare failed: {}", e))?;
-
-        let result: Option<String> = stmt
-            .query_row(rusqlite::params![session_id.as_str()], |row| row.get(0))
-            .optional()
-            .map_err(|e| format!("latest_node_hash query failed: {}", e))?;
-
-        Ok(result.map(DagNodeId::from))
-    }
-
     fn latest_state(&self, agent_name: &str) -> Result<Option<String>, String> {
         let conn = self.conn.lock().unwrap();
 
@@ -931,32 +912,6 @@ mod tests {
         // cli is the sender, agent-a is receiver for invoke
         let state = store.latest_state("agent-x").unwrap();
         assert_eq!(state, None);
-    }
-
-    #[test]
-    fn latest_node_hash_returns_most_recent() {
-        let store = test_store();
-
-        let mut node1 = test_node(b"first", &DagNodeId::root());
-        node1.created_at = chrono::TimeZone::with_ymd_and_hms(&Utc, 2025, 1, 1, 0, 0, 0).unwrap();
-
-        let mut node2 = build_dag_node(&make_request(b"second"), &node1.id);
-        node2.created_at = chrono::TimeZone::with_ymd_and_hms(&Utc, 2025, 1, 1, 0, 1, 0).unwrap();
-
-        store.insert_node(&node1).unwrap();
-        store.insert_node(&node2).unwrap();
-
-        let hash = store.latest_node_hash(&sess()).unwrap();
-        assert_eq!(hash, Some(node2.id));
-    }
-
-    #[test]
-    fn latest_node_hash_returns_none_for_empty_session() {
-        let store = test_store();
-        let session_id =
-            SessionId::try_from("00000000-0000-0000-0000-000000000000".to_string()).unwrap();
-        let hash = store.latest_node_hash(&session_id).unwrap();
-        assert_eq!(hash, None);
     }
 
     #[test]

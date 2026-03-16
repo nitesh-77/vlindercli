@@ -180,15 +180,6 @@ pub trait DagStore: Send + Sync {
     /// the latest non-empty state. Returns None if no state has been recorded.
     fn latest_state(&self, agent_name: &str) -> Result<Option<String>, String>;
 
-    /// Get the hash of the most recently inserted node for a session.
-    ///
-    /// Used by the transactional outbox to resume Merkle chaining
-    /// when a session spans multiple process lifetimes.
-    fn latest_node_hash(
-        &self,
-        session_id: &super::SessionId,
-    ) -> Result<Option<super::DagNodeId>, String>;
-
     /// Set an override state for timeline checkout (ADR 081).
     ///
     /// When set, `latest_state()` returns this value instead of querying
@@ -341,18 +332,6 @@ impl DagStore for InMemoryDagStore {
                 from == agent_name || to == agent_name
             })
             .find_map(|n| n.message.state().map(|s| s.to_string())))
-    }
-
-    fn latest_node_hash(
-        &self,
-        session_id: &super::SessionId,
-    ) -> Result<Option<super::DagNodeId>, String> {
-        let nodes = self.nodes.lock().unwrap();
-        Ok(nodes
-            .iter()
-            .rev()
-            .find(|n| *n.session_id() == *session_id)
-            .map(|n| n.id.clone()))
     }
 
     fn set_checkout_state(&self, agent_name: &str, state: &str) -> Result<(), String> {
