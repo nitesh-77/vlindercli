@@ -138,6 +138,8 @@ message SessionProto {
   string id = 1;
   string name = 2;
   string agent_name = 3;
+  int64 default_branch = 4;
+  string created_at = 5;  // ISO-8601
 }
 
 message CreateSessionRequest { SessionProto session = 1; }

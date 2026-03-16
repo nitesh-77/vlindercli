@@ -291,7 +291,11 @@ impl StateService for StateServiceServer {
             .session
             .ok_or_else(|| Status::invalid_argument("missing session"))?;
         let session_id = SessionId::try_from(session_proto.id).map_err(Status::invalid_argument)?;
-        let session = vlinder_core::domain::Session::new(session_id, &session_proto.agent_name, 1);
+        let session = vlinder_core::domain::Session::new(
+            session_id,
+            &session_proto.agent_name,
+            session_proto.default_branch,
+        );
         match self.store.create_session(&vlinder_core::domain::Session {
             name: session_proto.name,
             ..session
@@ -318,11 +322,7 @@ impl StateService for StateServiceServer {
             .get_session(&session_id)
             .map_err(Status::internal)?;
         Ok(Response::new(GetSessionResponse {
-            session: session.map(|s| proto::SessionProto {
-                id: s.id.as_str().to_string(),
-                name: s.name,
-                agent_name: s.agent,
-            }),
+            session: session.map(session_to_proto),
         }))
     }
 
@@ -336,11 +336,7 @@ impl StateService for StateServiceServer {
             .get_session_by_name(&req.name)
             .map_err(Status::internal)?;
         Ok(Response::new(GetSessionResponse {
-            session: session.map(|s| proto::SessionProto {
-                id: s.id.as_str().to_string(),
-                name: s.name,
-                agent_name: s.agent,
-            }),
+            session: session.map(session_to_proto),
         }))
     }
 
@@ -360,5 +356,15 @@ impl StateService for StateServiceServer {
             .map_err(Status::internal)?
             .map(|n| n.into());
         Ok(Response::new(LatestNodeOnBranchResponse { node }))
+    }
+}
+
+fn session_to_proto(s: vlinder_core::domain::Session) -> proto::SessionProto {
+    proto::SessionProto {
+        id: s.id.as_str().to_string(),
+        name: s.name,
+        agent_name: s.agent,
+        default_branch: s.default_branch,
+        created_at: s.created_at.to_rfc3339(),
     }
 }

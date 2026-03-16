@@ -329,6 +329,8 @@ impl DagStore for GrpcStateClient {
                 id: session.id.as_str().to_string(),
                 name: session.name.clone(),
                 agent_name: session.agent.clone(),
+                default_branch: session.default_branch,
+                created_at: session.created_at.to_rfc3339(),
             }),
         };
         let resp = self
@@ -356,17 +358,7 @@ impl DagStore for GrpcStateClient {
             .block_on(async { client.get_session(req).await })
             .map_err(|e| e.to_string())?
             .into_inner();
-        match resp.session {
-            Some(s) => {
-                let sid = vlinder_core::domain::SessionId::try_from(s.id)?;
-                Ok(Some(vlinder_core::domain::Session::new(
-                    sid,
-                    &s.agent_name,
-                    1,
-                )))
-            }
-            None => Ok(None),
-        }
+        resp.session.map(proto_to_session).transpose()
     }
 
     fn get_session_by_name(
@@ -382,16 +374,21 @@ impl DagStore for GrpcStateClient {
             .block_on(async { client.get_session_by_name(req).await })
             .map_err(|e| e.to_string())?
             .into_inner();
-        match resp.session {
-            Some(s) => {
-                let sid = vlinder_core::domain::SessionId::try_from(s.id)?;
-                Ok(Some(vlinder_core::domain::Session::new(
-                    sid,
-                    &s.agent_name,
-                    1,
-                )))
-            }
-            None => Ok(None),
-        }
+        resp.session.map(proto_to_session).transpose()
     }
+}
+
+fn proto_to_session(s: proto::SessionProto) -> Result<vlinder_core::domain::Session, String> {
+    let id = vlinder_core::domain::SessionId::try_from(s.id)?;
+    let created_at: chrono::DateTime<chrono::Utc> = s
+        .created_at
+        .parse()
+        .map_err(|e| format!("invalid created_at: {}", e))?;
+    Ok(vlinder_core::domain::Session {
+        id,
+        name: s.name,
+        agent: s.agent_name,
+        default_branch: s.default_branch,
+        created_at,
+    })
 }
