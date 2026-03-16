@@ -20,6 +20,7 @@ ADRs are records of validated decisions, not speculative ones.
 - One ADR captures one domain decision
 - Don't overreach - focus on what's needed now
 - Domain insights first, implementation details later
+- **Think critically, don't yes-and**: When the user proposes something, evaluate it independently. If it's wrong, say so with reasoning. Never rubber-stamp an idea just because the user said it.
 
 ## ADRs
 
