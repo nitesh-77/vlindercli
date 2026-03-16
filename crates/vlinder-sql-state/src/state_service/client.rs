@@ -3,7 +3,7 @@
 use tonic::transport::Channel;
 
 use super::proto::{self, state_service_client::StateServiceClient};
-use vlinder_core::domain::{Branch, DagNode, DagNodeId, DagStore};
+use vlinder_core::domain::{Branch, BranchId, DagNode, DagNodeId, DagStore};
 
 /// DagStore implementation that makes gRPC calls to a remote State Service.
 pub struct GrpcStateClient {
@@ -184,7 +184,7 @@ impl DagStore for GrpcStateClient {
         name: &str,
         session_id: &vlinder_core::domain::SessionId,
         fork_point: Option<&DagNodeId>,
-    ) -> Result<i64, String> {
+    ) -> Result<BranchId, String> {
         let request = proto::CreateBranchRequest {
             name: name.to_string(),
             session_id: session_id.as_str().to_string(),
@@ -195,7 +195,7 @@ impl DagStore for GrpcStateClient {
             .runtime
             .block_on(async { client.create_branch(request).await })
             .map_err(|e| e.to_string())?;
-        Ok(response.into_inner().id)
+        Ok(BranchId::from(response.into_inner().id))
     }
 
     fn get_branch_by_name(&self, name: &str) -> Result<Option<Branch>, String> {
@@ -214,8 +214,8 @@ impl DagStore for GrpcStateClient {
         }
     }
 
-    fn get_branch(&self, id: i64) -> Result<Option<Branch>, String> {
-        let request = proto::GetBranchByIdRequest { id };
+    fn get_branch(&self, id: BranchId) -> Result<Option<Branch>, String> {
+        let request = proto::GetBranchByIdRequest { id: id.as_i64() };
         let mut client = self.client.clone();
         let response = self
             .runtime
@@ -303,11 +303,11 @@ impl DagStore for GrpcStateClient {
 
     fn latest_node_on_branch(
         &self,
-        branch_id: i64,
+        branch_id: BranchId,
         message_type: Option<vlinder_core::domain::MessageType>,
     ) -> Result<Option<vlinder_core::domain::DagNode>, String> {
         let request = proto::LatestNodeOnBranchRequest {
-            branch_id,
+            branch_id: branch_id.as_i64(),
             message_type: message_type.map(|mt| mt.as_str().to_string()),
         };
         let mut client = self.client.clone();
@@ -329,7 +329,7 @@ impl DagStore for GrpcStateClient {
                 id: session.id.as_str().to_string(),
                 name: session.name.clone(),
                 agent_name: session.agent.clone(),
-                default_branch: session.default_branch,
+                default_branch: session.default_branch.as_i64(),
                 created_at: session.created_at.to_rfc3339(),
             }),
         };
@@ -388,7 +388,7 @@ fn proto_to_session(s: proto::SessionProto) -> Result<vlinder_core::domain::Sess
         id,
         name: s.name,
         agent: s.agent_name,
-        default_branch: s.default_branch,
+        default_branch: BranchId::from(s.default_branch),
         created_at,
     })
 }

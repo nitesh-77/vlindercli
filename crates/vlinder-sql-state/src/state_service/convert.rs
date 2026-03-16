@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 
 use super::proto;
 use vlinder_core::domain::{
-    Branch, DagNode, DagNodeId, ObservableMessage, SessionId, SessionSummary,
+    Branch, BranchId, DagNode, DagNodeId, ObservableMessage, SessionId, SessionSummary,
 };
 
 // =============================================================================
@@ -90,7 +90,7 @@ impl TryFrom<proto::DagNode> for DagNode {
 impl From<Branch> for proto::Branch {
     fn from(b: Branch) -> Self {
         Self {
-            id: b.id,
+            id: b.id.as_i64(),
             name: b.name,
             session_id: b.session_id.as_str().to_string(),
             fork_point: b.fork_point.map(|fp| fp.to_string()),
@@ -120,7 +120,7 @@ impl TryFrom<proto::Branch> for Branch {
             .map_err(|e| format!("invalid broken_at: {}", e))?;
 
         Ok(Self {
-            id: b.id,
+            id: BranchId::from(b.id),
             name: b.name,
             session_id: SessionId::try_from(b.session_id)?,
             fork_point: b.fork_point.map(DagNodeId::from),

@@ -60,7 +60,7 @@ pub use diagnostics::{
     RuntimeDiagnostics, RuntimeInfo, ServiceDiagnostics, ServiceMetrics,
 };
 pub use message::{
-    CompleteMessage, DagNodeId, DelegateMessage, ExpectsReply, ForkMessage, HarnessType,
+    BranchId, CompleteMessage, DagNodeId, DelegateMessage, ExpectsReply, ForkMessage, HarnessType,
     InvokeMessage, MessageId, ObservableMessage, ObservableMessageHeaders, RepairMessage,
     RequestMessage, ResponseMessage, Sequence, SequenceCounter, SessionId, SessionStartMessage,
     SubmissionId, TimelineId, PROTOCOL_VERSION,

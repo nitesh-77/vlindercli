@@ -136,7 +136,7 @@ pub struct SessionSummary {
 /// new branch from a point on an existing one.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Branch {
-    pub id: i64,
+    pub id: super::BranchId,
     pub name: String,
     pub session_id: super::SessionId,
     pub fork_point: Option<super::DagNodeId>,
@@ -206,13 +206,13 @@ pub trait DagStore: Send + Sync {
         name: &str,
         session_id: &super::SessionId,
         fork_point: Option<&super::DagNodeId>,
-    ) -> Result<i64, String>;
+    ) -> Result<super::BranchId, String>;
 
     /// Look up a branch by its name.
     fn get_branch_by_name(&self, name: &str) -> Result<Option<Branch>, String>;
 
     /// Look up a branch by its integer ID.
-    fn get_branch(&self, id: i64) -> Result<Option<Branch>, String>;
+    fn get_branch(&self, id: super::BranchId) -> Result<Option<Branch>, String>;
 
     /// List all sessions with summary information.
     fn list_sessions(&self) -> Result<Vec<SessionSummary>, String>;
@@ -229,7 +229,7 @@ pub trait DagStore: Send + Sync {
     /// Get the most recent DagNode on a branch, optionally filtered by message type.
     fn latest_node_on_branch(
         &self,
-        timeline_id: i64,
+        branch_id: super::BranchId,
         message_type: Option<MessageType>,
     ) -> Result<Option<DagNode>, String>;
 
@@ -368,9 +368,9 @@ impl DagStore for InMemoryDagStore {
         name: &str,
         session_id: &super::SessionId,
         fork_point: Option<&super::DagNodeId>,
-    ) -> Result<i64, String> {
+    ) -> Result<super::BranchId, String> {
         let mut branches = self.branches.lock().unwrap();
-        let id = branches.len() as i64 + 1;
+        let id = super::BranchId::from(branches.len() as i64 + 1);
         branches.push(Branch {
             id,
             name: name.to_string(),
@@ -388,7 +388,7 @@ impl DagStore for InMemoryDagStore {
         Ok(branches.iter().find(|b| b.name == name).cloned())
     }
 
-    fn get_branch(&self, id: i64) -> Result<Option<Branch>, String> {
+    fn get_branch(&self, id: super::BranchId) -> Result<Option<Branch>, String> {
         let branches = self.branches.lock().unwrap();
         Ok(branches.iter().find(|b| b.id == id).cloned())
     }
@@ -464,7 +464,7 @@ impl DagStore for InMemoryDagStore {
 
     fn latest_node_on_branch(
         &self,
-        branch_id: i64,
+        branch_id: super::BranchId,
         message_type: Option<MessageType>,
     ) -> Result<Option<DagNode>, String> {
         let branch_id_str = branch_id.to_string();

@@ -40,7 +40,7 @@ impl RecordingQueue {
     /// Record a DAG node for the given observable message.
     fn record(&self, observable: &ObservableMessage) {
         let timeline_id_str = observable.timeline().as_str();
-        let timeline_id: i64 = timeline_id_str.parse().unwrap_or(1);
+        let branch_id = crate::domain::BranchId::from(timeline_id_str.parse::<i64>().unwrap_or(1));
 
         // Explicit dag_parent on Invoke/Fork overrides the latest node on the timeline.
         let dag_parent_override: Option<DagNodeId> = match observable {
@@ -52,9 +52,9 @@ impl RecordingQueue {
         // Look up parent ID: dag_parent override → latest node on branch
         let parent_id = dag_parent_override.unwrap_or_else(|| {
             self.store
-                .latest_node_on_branch(timeline_id, None)
+                .latest_node_on_branch(branch_id, None)
                 .unwrap_or_else(|e| {
-                    tracing::warn!(error = %e, branch = timeline_id, "Failed to query latest node on branch");
+                    tracing::warn!(error = %e, branch = branch_id.as_i64(), "Failed to query latest node on branch");
                     None
                 })
                 .map(|n| n.id)
@@ -191,7 +191,7 @@ impl MessageQueue for RecordingQueue {
         {
             Ok(id) => {
                 tracing::info!(
-                    branch_id = id,
+                    branch_id = id.as_i64(),
                     branch = %msg.branch_name,
                     "Created branch on fork"
                 );
@@ -231,7 +231,7 @@ impl MessageQueue for RecordingQueue {
             .create_branch("main", &msg.session, None)
             .unwrap_or_else(|e| {
                 tracing::warn!(error = %e, "Failed to create default branch");
-                1 // fallback
+                crate::domain::BranchId::from(1) // fallback
             });
         let session =
             crate::domain::Session::new(msg.session.clone(), &msg.agent_name, default_branch);

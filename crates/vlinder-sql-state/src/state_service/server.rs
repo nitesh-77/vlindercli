@@ -186,7 +186,7 @@ impl StateService for StateServiceServer {
                 fork_point.as_ref(),
             )
             .map_err(Status::internal)?;
-        Ok(Response::new(CreateBranchResponse { id }))
+        Ok(Response::new(CreateBranchResponse { id: id.as_i64() }))
     }
 
     async fn get_branch_by_name(
@@ -209,7 +209,7 @@ impl StateService for StateServiceServer {
         let req = request.into_inner();
         let branch = self
             .store
-            .get_branch(req.id)
+            .get_branch(vlinder_core::domain::BranchId::from(req.id))
             .map_err(Status::internal)?
             .map(|b| b.into());
         Ok(Response::new(GetBranchResponse { branch }))
@@ -294,7 +294,7 @@ impl StateService for StateServiceServer {
         let session = vlinder_core::domain::Session::new(
             session_id,
             &session_proto.agent_name,
-            session_proto.default_branch,
+            vlinder_core::domain::BranchId::from(session_proto.default_branch),
         );
         match self.store.create_session(&vlinder_core::domain::Session {
             name: session_proto.name,
@@ -352,7 +352,10 @@ impl StateService for StateServiceServer {
             .map_err(Status::invalid_argument)?;
         let node = self
             .store
-            .latest_node_on_branch(req.branch_id, message_type)
+            .latest_node_on_branch(
+                vlinder_core::domain::BranchId::from(req.branch_id),
+                message_type,
+            )
             .map_err(Status::internal)?
             .map(|n| n.into());
         Ok(Response::new(LatestNodeOnBranchResponse { node }))
@@ -364,7 +367,7 @@ fn session_to_proto(s: vlinder_core::domain::Session) -> proto::SessionProto {
         id: s.id.as_str().to_string(),
         name: s.name,
         agent_name: s.agent,
-        default_branch: s.default_branch,
+        default_branch: s.default_branch.as_i64(),
         created_at: s.created_at.to_rfc3339(),
     }
 }

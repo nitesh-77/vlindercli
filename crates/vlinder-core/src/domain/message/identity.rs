@@ -258,6 +258,40 @@ impl From<i64> for TimelineId {
     }
 }
 
+// --- BranchId ---
+
+/// Database primary key identifying a branch within a session.
+///
+/// Wraps the integer ID from the `branches` table. Carried on messages
+/// as a `TimelineId` (string form) and stored in `Branch.id`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct BranchId(i64);
+
+impl BranchId {
+    pub fn as_i64(&self) -> i64 {
+        self.0
+    }
+}
+
+impl fmt::Display for BranchId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<i64> for BranchId {
+    fn from(id: i64) -> Self {
+        Self(id)
+    }
+}
+
+impl From<BranchId> for TimelineId {
+    fn from(id: BranchId) -> Self {
+        Self(id.0.to_string())
+    }
+}
+
 // --- Sequence (ADR 044) ---
 
 /// Sequence number for ordering interactions within a submission.

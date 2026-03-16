@@ -11,7 +11,8 @@ use rusqlite::Connection;
 
 use vlinder_core::domain::session::Session;
 use vlinder_core::domain::{
-    Branch, DagNode, DagNodeId, DagStore, MessageType, ObservableMessage, SessionId, SessionSummary,
+    Branch, BranchId, DagNode, DagNodeId, DagStore, MessageType, ObservableMessage, SessionId,
+    SessionSummary,
 };
 
 /// SQLite-backed DagStore.
@@ -105,7 +106,7 @@ fn row_to_branch(row: &rusqlite::Row) -> Result<Branch, rusqlite::Error> {
             .ok()
     });
     Ok(Branch {
-        id: row.get(0)?,
+        id: BranchId::from(row.get::<_, i64>(0)?),
         name: row.get(1)?,
         session_id: SessionId::try_from(row.get::<_, String>(2)?).map_err(|e| {
             rusqlite::Error::FromSqlConversionFailure(2, rusqlite::types::Type::Text, e.into())
@@ -124,7 +125,7 @@ fn row_to_session(row: &rusqlite::Row) -> Result<Session, rusqlite::Error> {
     let id: String = row.get(0)?;
     let name: String = row.get(1)?;
     let agent: String = row.get(2)?;
-    let default_branch: i64 = row.get(3)?;
+    let default_branch = BranchId::from(row.get::<_, i64>(3)?);
     let created_at_str: String = row.get(4)?;
     let created_at = DateTime::parse_from_rfc3339(&created_at_str)
         .map(|dt| dt.with_timezone(&Utc))
@@ -387,7 +388,7 @@ impl DagStore for SqliteDagStore {
         name: &str,
         session_id: &SessionId,
         fork_point: Option<&DagNodeId>,
-    ) -> Result<i64, String> {
+    ) -> Result<BranchId, String> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "INSERT INTO branches (name, session_id, fork_point, created_at)
@@ -400,7 +401,7 @@ impl DagStore for SqliteDagStore {
             ],
         )
         .map_err(|e| format!("create_branch failed: {}", e))?;
-        Ok(conn.last_insert_rowid())
+        Ok(BranchId::from(conn.last_insert_rowid()))
     }
 
     fn get_branch_by_name(&self, name: &str) -> Result<Option<Branch>, String> {
@@ -417,7 +418,7 @@ impl DagStore for SqliteDagStore {
             .map_err(|e| format!("get_branch_by_name query failed: {}", e))
     }
 
-    fn get_branch(&self, id: i64) -> Result<Option<Branch>, String> {
+    fn get_branch(&self, id: BranchId) -> Result<Option<Branch>, String> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
             .prepare(
@@ -426,7 +427,7 @@ impl DagStore for SqliteDagStore {
             )
             .map_err(|e| format!("get_branch prepare failed: {}", e))?;
 
-        stmt.query_row(rusqlite::params![id], row_to_branch)
+        stmt.query_row(rusqlite::params![id.as_i64()], row_to_branch)
             .optional()
             .map_err(|e| format!("get_branch query failed: {}", e))
     }
@@ -530,7 +531,7 @@ impl DagStore for SqliteDagStore {
 
     fn latest_node_on_branch(
         &self,
-        branch_id: i64,
+        branch_id: BranchId,
         message_type: Option<MessageType>,
     ) -> Result<Option<DagNode>, String> {
         let conn = self.conn.lock().unwrap();
@@ -580,7 +581,7 @@ impl DagStore for SqliteDagStore {
                 session.id.as_str(),
                 session.name,
                 session.agent,
-                session.default_branch,
+                session.default_branch.as_i64(),
                 session.created_at.to_rfc3339(),
             ],
         )
