@@ -10,7 +10,8 @@ pub enum SessionCommand {
     /// List sessions for an agent
     List {
         /// Agent name
-        agent_name: String,
+        #[arg(long)]
+        agent: String,
     },
     /// Show turns and messages in a session
     Get {
@@ -28,24 +29,17 @@ pub enum SessionCommand {
         #[arg(long)]
         name: String,
     },
-    /// List branches (timelines) forked from a session
-    Branches {
-        /// Session ID
-        session_id: String,
-    },
 }
 
 pub fn execute(cmd: SessionCommand) {
     match cmd {
-        SessionCommand::List { agent_name } => list(&agent_name),
+        SessionCommand::List { agent } => list(&agent),
         SessionCommand::Get { session_id } => get(&session_id),
         SessionCommand::Fork {
             session_id,
             from,
             name,
         } => fork(&session_id, &from, &name),
-
-        SessionCommand::Branches { session_id } => branches(&session_id),
     }
 }
 
@@ -209,41 +203,6 @@ fn fork(session_id_or_name: &str, from_hash: &str, branch_name: &str) {
         branch_name,
         &node.id.as_str()[..8]
     );
-}
-
-fn branches(session_id_or_name: &str) {
-    let config = CliConfig::load();
-    let store = require_dag_store(&config);
-    let session_id = resolve_session_id(&*store, session_id_or_name);
-
-    let branches = store
-        .get_branches_for_session(&session_id)
-        .unwrap_or_else(|e| {
-            eprintln!("Failed to query branches: {}", e);
-            std::process::exit(1);
-        });
-
-    if branches.is_empty() {
-        println!("No branches for session '{}'", session_id);
-        return;
-    }
-
-    println!("{:<4} {:<24} {:<10} FORK_POINT", "ID", "BRANCH", "STATUS");
-    for b in &branches {
-        let status = if b.broken_at.is_some() {
-            "sealed"
-        } else {
-            "active"
-        };
-        let fork = match &b.fork_point {
-            Some(h) => {
-                let s = h.as_str();
-                &s[..8.min(s.len())]
-            }
-            None => "-",
-        };
-        println!("{:<4} {:<24} {:<10} {}", b.id, b.name, status, fork);
-    }
 }
 
 // ---------------------------------------------------------------------------

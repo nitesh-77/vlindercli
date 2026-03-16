@@ -1,4 +1,5 @@
 mod agent;
+pub(crate) mod branch;
 mod connect;
 mod fleet;
 mod help;
@@ -48,6 +49,11 @@ pub enum Command {
         #[command(subcommand)]
         cmd: session::SessionCommand,
     },
+    /// Inspect branches within a session
+    Branch {
+        #[command(subcommand)]
+        cmd: branch::BranchCommand,
+    },
     /// Inspect individual turns within a session
     Turn {
         #[command(subcommand)]
@@ -65,6 +71,7 @@ pub fn run() {
         Command::Model { cmd } => model::execute(cmd),
         Command::Secret { cmd } => secret::execute(cmd),
         Command::Session { cmd } => session::execute(cmd),
+        Command::Branch { cmd } => branch::execute(cmd),
         Command::Turn { cmd } => turn::execute(cmd),
     }
 }
@@ -407,12 +414,13 @@ mod tests {
 
     #[test]
     fn cli_session_list() {
-        let cli = Cli::try_parse_from(["vlinder", "session", "list", "todoapp"]).unwrap();
+        let cli =
+            Cli::try_parse_from(["vlinder", "session", "list", "--agent", "todoapp"]).unwrap();
         assert_eq!(
             cli.command,
             Command::Session {
                 cmd: session::SessionCommand::List {
-                    agent_name: "todoapp".to_string(),
+                    agent: "todoapp".to_string(),
                 }
             }
         );
@@ -450,14 +458,36 @@ mod tests {
     }
 
     #[test]
-    fn cli_session_branches() {
-        let cli =
-            Cli::try_parse_from(["vlinder", "session", "branches", "wired-pig-543e"]).unwrap();
+    fn cli_branch_list() {
+        let cli = Cli::try_parse_from(["vlinder", "branch", "list", "--session", "wired-pig-543e"])
+            .unwrap();
         assert_eq!(
             cli.command,
-            Command::Session {
-                cmd: session::SessionCommand::Branches {
-                    session_id: "wired-pig-543e".to_string(),
+            Command::Branch {
+                cmd: branch::BranchCommand::List {
+                    session: "wired-pig-543e".to_string(),
+                }
+            }
+        );
+    }
+
+    #[test]
+    fn cli_branch_get() {
+        let cli = Cli::try_parse_from([
+            "vlinder",
+            "branch",
+            "get",
+            "repair-1",
+            "--session",
+            "wired-pig-543e",
+        ])
+        .unwrap();
+        assert_eq!(
+            cli.command,
+            Command::Branch {
+                cmd: branch::BranchCommand::Get {
+                    branch_name: "repair-1".to_string(),
+                    session: "wired-pig-543e".to_string(),
                 }
             }
         );
