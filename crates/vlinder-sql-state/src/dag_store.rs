@@ -50,7 +50,8 @@ impl SqliteDagStore {
                  checkpoint TEXT,
                  operation TEXT,
                  message_blob TEXT,
-                 timeline_id TEXT NOT NULL DEFAULT '0'
+                 timeline_id TEXT NOT NULL DEFAULT '0',
+                 snapshot TEXT NOT NULL DEFAULT '{}'
              );
              CREATE INDEX IF NOT EXISTS idx_dag_nodes_session
                  ON dag_nodes (session_id, created_at);
@@ -160,17 +161,21 @@ fn row_to_dag_node(row: &rusqlite::Row) -> Result<DagNode, rusqlite::Error> {
     if !payload.is_empty() {
         message.set_payload(payload);
     }
+    let snapshot_json: String = row.get(5)?;
+    let state: vlinder_core::domain::Snapshot = serde_json::from_str(&snapshot_json)
+        .unwrap_or_else(|_| vlinder_core::domain::Snapshot::empty());
+
     Ok(DagNode {
         id: DagNodeId::from(row.get::<_, String>(0)?),
         parent_id: DagNodeId::from(row.get::<_, String>(1)?),
         created_at,
-        state: vlinder_core::domain::Snapshot::empty(),
+        state,
         message,
     })
 }
 
 /// Column list for queries that return full DagNodes.
-const DAG_NODE_COLUMNS: &str = "hash, parent_hash, created_at, message_blob, payload";
+const DAG_NODE_COLUMNS: &str = "hash, parent_hash, created_at, message_blob, payload, snapshot";
 
 impl DagStore for SqliteDagStore {
     fn insert_node(&self, node: &DagNode) -> Result<(), String> {
@@ -179,13 +184,15 @@ impl DagStore for SqliteDagStore {
         // Serialize the full message as JSON blob (source of truth).
         let message_blob = serde_json::to_string(&node.message)
             .map_err(|e| format!("serialize message_blob failed: {}", e))?;
+        let snapshot_json = serde_json::to_string(&node.state)
+            .map_err(|e| format!("serialize snapshot failed: {}", e))?;
 
         // Extract indexed columns from the message for query performance.
         let (from, to) = node.message.from_to();
 
         conn.execute(
-            "INSERT OR IGNORE INTO dag_nodes (hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state, protocol_version, checkpoint, operation, message_blob, timeline_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+            "INSERT OR IGNORE INTO dag_nodes (hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state, protocol_version, checkpoint, operation, message_blob, timeline_id, snapshot)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
             rusqlite::params![
                 node.id.as_str(),
                 node.parent_id.as_str(),
@@ -204,6 +211,7 @@ impl DagStore for SqliteDagStore {
                 node.message.operation(),
                 message_blob,
                 node.timeline_id().as_i64(),
+                snapshot_json,
             ],
         ).map_err(|e| format!("insert_node failed: {}", e))?;
 

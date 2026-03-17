@@ -26,7 +26,8 @@ use super::session::Session;
 /// Maps service instance names to their per-store state hashes.
 /// BTreeMap guarantees deterministic ordering for content addressing.
 /// Always present on every DagNode — inherited from parent if unchanged.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(transparent)]
 pub struct Snapshot(pub BTreeMap<Instance, StateHash>);
 
 impl Snapshot {
