@@ -51,7 +51,7 @@ pub enum ObservableMessageHeaders {
     Invoke {
         id: MessageId,
         protocol_version: String,
-        timeline: BranchId,
+        branch: BranchId,
         submission: SubmissionId,
         session: SessionId,
         harness: HarnessType,
@@ -64,7 +64,7 @@ pub enum ObservableMessageHeaders {
     Request {
         id: MessageId,
         protocol_version: String,
-        timeline: BranchId,
+        branch: BranchId,
         submission: SubmissionId,
         session: SessionId,
         agent_id: AgentId,
@@ -78,7 +78,7 @@ pub enum ObservableMessageHeaders {
     Response {
         id: MessageId,
         protocol_version: String,
-        timeline: BranchId,
+        branch: BranchId,
         submission: SubmissionId,
         session: SessionId,
         agent_id: AgentId,
@@ -94,7 +94,7 @@ pub enum ObservableMessageHeaders {
     Complete {
         id: MessageId,
         protocol_version: String,
-        timeline: BranchId,
+        branch: BranchId,
         submission: SubmissionId,
         session: SessionId,
         agent_id: AgentId,
@@ -105,7 +105,7 @@ pub enum ObservableMessageHeaders {
     Delegate {
         id: MessageId,
         protocol_version: String,
-        timeline: BranchId,
+        branch: BranchId,
         submission: SubmissionId,
         session: SessionId,
         caller: AgentId,
@@ -117,7 +117,7 @@ pub enum ObservableMessageHeaders {
     Repair {
         id: MessageId,
         protocol_version: String,
-        timeline: BranchId,
+        branch: BranchId,
         submission: SubmissionId,
         session: SessionId,
         agent_id: AgentId,
@@ -132,7 +132,7 @@ pub enum ObservableMessageHeaders {
     Fork {
         id: MessageId,
         protocol_version: String,
-        timeline: BranchId,
+        branch: BranchId,
         submission: SubmissionId,
         session: SessionId,
         agent_name: String,
@@ -148,7 +148,7 @@ impl ObservableMessageHeaders {
             Self::Invoke {
                 id,
                 protocol_version,
-                timeline,
+                branch,
                 submission,
                 session,
                 harness,
@@ -160,7 +160,7 @@ impl ObservableMessageHeaders {
             } => ObservableMessage::Invoke(InvokeMessage {
                 id,
                 protocol_version,
-                timeline,
+                branch,
                 submission,
                 session,
                 harness,
@@ -174,7 +174,7 @@ impl ObservableMessageHeaders {
             Self::Request {
                 id,
                 protocol_version,
-                timeline,
+                branch,
                 submission,
                 session,
                 agent_id,
@@ -187,7 +187,7 @@ impl ObservableMessageHeaders {
             } => ObservableMessage::Request(RequestMessage {
                 id,
                 protocol_version,
-                timeline,
+                branch,
                 submission,
                 session,
                 agent_id,
@@ -202,7 +202,7 @@ impl ObservableMessageHeaders {
             Self::Response {
                 id,
                 protocol_version,
-                timeline,
+                branch,
                 submission,
                 session,
                 agent_id,
@@ -217,7 +217,7 @@ impl ObservableMessageHeaders {
             } => ObservableMessage::Response(ResponseMessage {
                 id,
                 protocol_version,
-                timeline,
+                branch,
                 submission,
                 session,
                 agent_id,
@@ -234,7 +234,7 @@ impl ObservableMessageHeaders {
             Self::Complete {
                 id,
                 protocol_version,
-                timeline,
+                branch,
                 submission,
                 session,
                 agent_id,
@@ -244,7 +244,7 @@ impl ObservableMessageHeaders {
             } => ObservableMessage::Complete(CompleteMessage {
                 id,
                 protocol_version,
-                timeline,
+                branch,
                 submission,
                 session,
                 agent_id,
@@ -256,7 +256,7 @@ impl ObservableMessageHeaders {
             Self::Delegate {
                 id,
                 protocol_version,
-                timeline,
+                branch,
                 submission,
                 session,
                 caller,
@@ -267,7 +267,7 @@ impl ObservableMessageHeaders {
             } => ObservableMessage::Delegate(DelegateMessage {
                 id,
                 protocol_version,
-                timeline,
+                branch,
                 submission,
                 session,
                 caller,
@@ -280,7 +280,7 @@ impl ObservableMessageHeaders {
             Self::Repair {
                 id,
                 protocol_version,
-                timeline,
+                branch,
                 submission,
                 session,
                 agent_id,
@@ -294,7 +294,7 @@ impl ObservableMessageHeaders {
             } => ObservableMessage::Repair(RepairMessage {
                 id,
                 protocol_version,
-                timeline,
+                branch,
                 submission,
                 session,
                 agent_id,
@@ -310,7 +310,7 @@ impl ObservableMessageHeaders {
             Self::Fork {
                 id,
                 protocol_version,
-                timeline,
+                branch,
                 submission,
                 session,
                 agent_name,
@@ -319,7 +319,7 @@ impl ObservableMessageHeaders {
             } => ObservableMessage::Fork(ForkMessage {
                 id,
                 protocol_version,
-                timeline,
+                branch,
                 submission,
                 session,
                 agent_name,
@@ -379,15 +379,15 @@ impl ObservableMessage {
         }
     }
 
-    pub fn timeline(&self) -> &BranchId {
+    pub fn branch(&self) -> &BranchId {
         match self {
-            ObservableMessage::Invoke(m) => &m.timeline,
-            ObservableMessage::Request(m) => &m.timeline,
-            ObservableMessage::Response(m) => &m.timeline,
-            ObservableMessage::Complete(m) => &m.timeline,
-            ObservableMessage::Delegate(m) => &m.timeline,
-            ObservableMessage::Repair(m) => &m.timeline,
-            ObservableMessage::Fork(m) => &m.timeline,
+            ObservableMessage::Invoke(m) => &m.branch,
+            ObservableMessage::Request(m) => &m.branch,
+            ObservableMessage::Response(m) => &m.branch,
+            ObservableMessage::Complete(m) => &m.branch,
+            ObservableMessage::Delegate(m) => &m.branch,
+            ObservableMessage::Repair(m) => &m.branch,
+            ObservableMessage::Fork(m) => &m.branch,
         }
     }
 

@@ -8,7 +8,7 @@ use std::str::FromStr;
 
 use super::{
     BranchId, HarnessType, ObjectStorageType, Operation, RuntimeType, Sequence, ServiceType,
-    SubmissionId, VectorStorageType,
+    SessionId, SubmissionId, VectorStorageType,
 };
 
 /// Agent identity within the routing bounded context.
@@ -189,20 +189,23 @@ impl std::fmt::Display for Nonce {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum RoutingKey {
     Invoke {
-        timeline: BranchId,
+        session: SessionId,
+        branch: BranchId,
         submission: SubmissionId,
         harness: HarnessType,
         runtime: RuntimeType,
         agent: AgentId,
     },
     Complete {
-        timeline: BranchId,
+        session: SessionId,
+        branch: BranchId,
         submission: SubmissionId,
         agent: AgentId,
         harness: HarnessType,
     },
     Request {
-        timeline: BranchId,
+        session: SessionId,
+        branch: BranchId,
         submission: SubmissionId,
         agent: AgentId,
         service: ServiceBackend,
@@ -210,7 +213,8 @@ pub enum RoutingKey {
         sequence: Sequence,
     },
     Response {
-        timeline: BranchId,
+        session: SessionId,
+        branch: BranchId,
         submission: SubmissionId,
         service: ServiceBackend,
         agent: AgentId,
@@ -218,13 +222,15 @@ pub enum RoutingKey {
         sequence: Sequence,
     },
     Delegate {
-        timeline: BranchId,
+        session: SessionId,
+        branch: BranchId,
         submission: SubmissionId,
         caller: AgentId,
         target: AgentId,
     },
     DelegateReply {
-        timeline: BranchId,
+        session: SessionId,
+        branch: BranchId,
         submission: SubmissionId,
         caller: AgentId,
         target: AgentId,
@@ -232,14 +238,16 @@ pub enum RoutingKey {
     },
     /// Repair: Platform → Sidecar (replay a failed service call, ADR 113).
     Repair {
-        timeline: BranchId,
+        session: SessionId,
+        branch: BranchId,
         submission: SubmissionId,
         harness: HarnessType,
         agent: AgentId,
     },
-    /// Fork: CLI → Platform (create a timeline branch).
+    /// Fork: CLI → Platform (create a branch).
     Fork {
-        timeline: BranchId,
+        session: SessionId,
+        branch: BranchId,
         submission: SubmissionId,
         agent_name: String,
     },
@@ -257,26 +265,30 @@ impl RoutingKey {
     pub fn reply_key(&self, nonce: Option<Nonce>) -> Option<RoutingKey> {
         match self {
             RoutingKey::Invoke {
-                timeline,
+                session,
+                branch,
                 submission,
                 harness,
                 agent,
                 ..
             } => Some(RoutingKey::Complete {
-                timeline: *timeline,
+                session: session.clone(),
+                branch: *branch,
                 submission: submission.clone(),
                 agent: agent.clone(),
                 harness: *harness,
             }),
             RoutingKey::Request {
-                timeline,
+                session,
+                branch,
                 submission,
                 agent,
                 service,
                 operation,
                 sequence,
             } => Some(RoutingKey::Response {
-                timeline: *timeline,
+                session: session.clone(),
+                branch: *branch,
                 submission: submission.clone(),
                 service: *service,
                 agent: agent.clone(),
@@ -284,12 +296,14 @@ impl RoutingKey {
                 sequence: *sequence,
             }),
             RoutingKey::Delegate {
-                timeline,
+                session,
+                branch,
                 submission,
                 caller,
                 target,
             } => nonce.map(|n| RoutingKey::DelegateReply {
-                timeline: *timeline,
+                session: session.clone(),
+                branch: *branch,
                 submission: submission.clone(),
                 caller: caller.clone(),
                 target: target.clone(),
@@ -309,11 +323,15 @@ impl RoutingKey {
 mod tests {
     use super::*;
 
-    fn timeline() -> BranchId {
+    fn session() -> SessionId {
+        SessionId::try_from("ses-1".to_string()).unwrap()
+    }
+
+    fn branch() -> BranchId {
         BranchId::from(1)
     }
 
-    fn timeline_alt() -> BranchId {
+    fn branch_alt() -> BranchId {
         BranchId::from(2)
     }
 
@@ -339,7 +357,8 @@ mod tests {
 
     fn base_invoke() -> RoutingKey {
         RoutingKey::Invoke {
-            timeline: timeline(),
+            session: session(),
+            branch: branch(),
             submission: submission(),
             harness: HarnessType::Cli,
             runtime: RuntimeType::Container,
@@ -353,13 +372,10 @@ mod tests {
     }
 
     #[test]
-    fn invoke_differs_by_timeline() {
+    fn invoke_differs_by_branch() {
         let mut key = base_invoke();
-        if let RoutingKey::Invoke {
-            ref mut timeline, ..
-        } = key
-        {
-            *timeline = timeline_alt();
+        if let RoutingKey::Invoke { ref mut branch, .. } = key {
+            *branch = branch_alt();
         }
         assert_ne!(base_invoke(), key);
     }
@@ -403,7 +419,8 @@ mod tests {
 
     fn base_complete() -> RoutingKey {
         RoutingKey::Complete {
-            timeline: timeline(),
+            session: session(),
+            branch: branch(),
             submission: submission(),
             agent: agent(),
             harness: HarnessType::Cli,
@@ -442,7 +459,8 @@ mod tests {
 
     fn base_request() -> RoutingKey {
         RoutingKey::Request {
-            timeline: timeline(),
+            session: session(),
+            branch: branch(),
             submission: submission(),
             agent: agent(),
             service: ServiceBackend::Kv(ObjectStorageType::Sqlite),
@@ -519,7 +537,8 @@ mod tests {
 
     fn base_response() -> RoutingKey {
         RoutingKey::Response {
-            timeline: timeline(),
+            session: session(),
+            branch: branch(),
             submission: submission(),
             service: ServiceBackend::Kv(ObjectStorageType::Sqlite),
             agent: agent(),
@@ -560,7 +579,8 @@ mod tests {
 
     fn base_delegate() -> RoutingKey {
         RoutingKey::Delegate {
-            timeline: timeline(),
+            session: session(),
+            branch: branch(),
             submission: submission(),
             caller: agent(),
             target: agent_alt(),
@@ -596,7 +616,8 @@ mod tests {
 
     fn base_delegate_reply() -> RoutingKey {
         RoutingKey::DelegateReply {
-            timeline: timeline(),
+            session: session(),
+            branch: branch(),
             submission: submission(),
             caller: agent(),
             target: agent_alt(),
@@ -677,14 +698,16 @@ mod tests {
         let reply = base_request().reply_key(None).unwrap();
         match reply {
             RoutingKey::Response {
-                timeline,
+                session: s,
+                branch: b,
                 submission,
                 service,
                 agent,
                 operation,
                 sequence,
             } => {
-                assert_eq!(timeline, self::timeline());
+                assert_eq!(s, self::session());
+                assert_eq!(b, self::branch());
                 assert_eq!(submission, self::submission());
                 assert_eq!(service, ServiceBackend::Kv(ObjectStorageType::Sqlite));
                 assert_eq!(agent, self::agent());

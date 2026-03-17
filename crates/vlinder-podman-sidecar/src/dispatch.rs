@@ -50,7 +50,7 @@ pub enum InvokeOutcome {
     /// Invocation fully handled — CompleteMessage sent.
     Done,
     /// Durable mode — waiting for a service response.
-    Pending(DurableSession),
+    Pending(Box<DurableSession>),
 }
 
 /// Handle a single invocation: POST to agent, detect mode, handle response.
@@ -295,7 +295,7 @@ pub fn handle_repair(
     };
 
     let mut request = RequestMessage::new(
-        repair.timeline,
+        repair.branch,
         repair.submission.clone(),
         repair.session.clone(),
         repair.agent_id.clone(),
@@ -322,7 +322,7 @@ pub fn handle_repair(
     // Build a synthetic InvokeMessage so DurableSession can create
     // CompleteMessage replies when the agent finishes.
     let invoke = InvokeMessage::new(
-        repair.timeline,
+        repair.branch,
         repair.submission.clone(),
         repair.session.clone(),
         repair.harness,
@@ -342,14 +342,14 @@ pub fn handle_repair(
         sequence.next();
     }
 
-    Ok(InvokeOutcome::Pending(DurableSession {
+    Ok(InvokeOutcome::Pending(Box::new(DurableSession {
         invoke,
         reply_key: None,
         hosts,
         sequence,
         pending_request: request,
         started_at,
-    }))
+    })))
 }
 
 /// Parse and execute a JSON action from the agent.
@@ -416,7 +416,7 @@ fn handle_action(
             };
 
             let mut request = RequestMessage::new(
-                invoke.timeline,
+                invoke.branch,
                 invoke.submission.clone(),
                 invoke.session.clone(),
                 invoke.agent_id.clone(),
@@ -440,14 +440,14 @@ fn handle_action(
                 .send_request(request.clone())
                 .map_err(|e| format!("Failed to send request: {}", e))?;
 
-            Ok(InvokeOutcome::Pending(DurableSession {
+            Ok(InvokeOutcome::Pending(Box::new(DurableSession {
                 invoke: invoke.clone(),
                 reply_key: reply_key.clone(),
                 hosts,
                 sequence,
                 pending_request: request,
                 started_at,
-            }))
+            })))
         }
         other => Err(format!("Unknown action: {}", other)),
     }

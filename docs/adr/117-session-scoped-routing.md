@@ -58,15 +58,14 @@ This hierarchy matches the domain model:
 - Branch owns the DAG chain
 - Submission identifies a turn on a branch
 
-### 2. Branch ID included in submission hash
-`SubmissionId::content_addressed` adds `branch_id` to the hash:
-```
-SHA-256(payload || \0 || session_id || \0 || branch_id || \0 || parent_submission)
-```
+### 2. Content-addressed submission IDs removed
+`SubmissionId::content_addressed` is deleted. Every user-initiated invoke
+mints a fresh UUID via `SubmissionId::new()`.
 
-Same content on different branches produces different submission IDs.
-The content-addressed property is preserved within a branch — same input
-at the same conversation position still produces the same hash.
+Two identical user inputs are two different actions — content addressing
+is wrong for invokes. Content-addressed IDs will be reintroduced later
+for cross-branch operations (cherry-pick, promote) where identity must
+be preserved across branches.
 
 ### 3. Receive filters use exact dimensions, not wildcards
 `receive_response` currently wildcards the branch:
@@ -86,8 +85,8 @@ Every `RoutingKey` variant adds `session: SessionId` alongside the existing
 `branch: BranchId` (renamed from `timeline`).
 
 ## Consequences
-- Fork bug is fixed: different branches produce different submission IDs and
-  different NATS subjects.
+- Fork bug is fixed: every invoke gets a unique submission ID (no collision),
+  and session+branch in NATS subjects prevent cross-branch response pickup.
 - Multi-session isolation at the routing level — NATS subjects naturally
   partition by session.
 - Per-session sidecars become possible in the future (subscribe to

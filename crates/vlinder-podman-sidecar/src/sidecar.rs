@@ -94,7 +94,7 @@ impl Sidecar {
                         match dispatch::handle_service_response(&self.dispatch, session, response) {
                             Ok(InvokeOutcome::Done) => {}
                             Ok(InvokeOutcome::Pending(next)) => {
-                                durable_session = Some(next);
+                                durable_session = Some(*next);
                             }
                             Err(e) => {
                                 tracing::error!(
@@ -132,7 +132,7 @@ impl Sidecar {
                 match dispatch::handle_invoke(&self.dispatch, &mut self.health, &invoke, &None) {
                     Ok(InvokeOutcome::Done) => {}
                     Ok(InvokeOutcome::Pending(session)) => {
-                        durable_session = Some(session);
+                        durable_session = Some(*session);
                     }
                     Err(e) => {
                         tracing::error!(
@@ -155,7 +155,7 @@ impl Sidecar {
                     "Dispatching delegated work"
                 );
                 let invoke = InvokeMessage::new(
-                    delegate.timeline,
+                    delegate.branch,
                     delegate.submission.clone(),
                     delegate.session.clone(),
                     HarnessType::Cli,
@@ -173,7 +173,7 @@ impl Sidecar {
                 {
                     Ok(InvokeOutcome::Done) => {}
                     Ok(InvokeOutcome::Pending(session)) => {
-                        durable_session = Some(session);
+                        durable_session = Some(*session);
                     }
                     Err(e) => {
                         tracing::error!(
@@ -198,7 +198,7 @@ impl Sidecar {
                 match dispatch::handle_repair(&self.dispatch, &repair) {
                     Ok(InvokeOutcome::Done) => {}
                     Ok(InvokeOutcome::Pending(session)) => {
-                        durable_session = Some(session);
+                        durable_session = Some(*session);
                     }
                     Err(e) => {
                         tracing::error!(

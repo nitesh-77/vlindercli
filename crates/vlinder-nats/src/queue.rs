@@ -232,7 +232,7 @@ impl MessageQueue for NatsQueue {
             let mut headers = async_nats::HeaderMap::new();
             headers.insert("msg-id", msg.id.as_str());
             headers.insert("protocol-version", msg.protocol_version.as_str());
-            headers.insert("timeline-id", msg.timeline.to_string());
+            headers.insert("branch-id", msg.branch.to_string());
             headers.insert("submission-id", msg.submission.as_str());
             headers.insert("session-id", msg.session.as_str());
             headers.insert("harness", msg.harness.as_str());
@@ -267,7 +267,7 @@ impl MessageQueue for NatsQueue {
             let mut headers = async_nats::HeaderMap::new();
             headers.insert("msg-id", msg.id.as_str());
             headers.insert("protocol-version", msg.protocol_version.as_str());
-            headers.insert("timeline-id", msg.timeline.to_string());
+            headers.insert("branch-id", msg.branch.to_string());
             headers.insert("submission-id", msg.submission.as_str());
             headers.insert("session-id", msg.session.as_str());
             headers.insert("agent-id", msg.agent_id.as_str());
@@ -304,7 +304,7 @@ impl MessageQueue for NatsQueue {
             let mut headers = async_nats::HeaderMap::new();
             headers.insert("msg-id", msg.id.as_str());
             headers.insert("protocol-version", msg.protocol_version.as_str());
-            headers.insert("timeline-id", msg.timeline.to_string());
+            headers.insert("branch-id", msg.branch.to_string());
             headers.insert("submission-id", msg.submission.as_str());
             headers.insert("session-id", msg.session.as_str());
             headers.insert("agent-id", msg.agent_id.as_str());
@@ -343,7 +343,7 @@ impl MessageQueue for NatsQueue {
             let mut headers = async_nats::HeaderMap::new();
             headers.insert("msg-id", msg.id.as_str());
             headers.insert("protocol-version", msg.protocol_version.as_str());
-            headers.insert("timeline-id", msg.timeline.to_string());
+            headers.insert("branch-id", msg.branch.to_string());
             headers.insert("submission-id", msg.submission.as_str());
             headers.insert("session-id", msg.session.as_str());
             headers.insert("agent-id", msg.agent_id.as_str());
@@ -371,8 +371,8 @@ impl MessageQueue for NatsQueue {
         &self,
         agent: &AgentId,
     ) -> Result<(InvokeMessage, Acknowledgement), QueueError> {
-        // Build filter: vlinder.{timeline}.{submission}.invoke.{harness}.{runtime}.{agent}
-        let filter = format!("vlinder.*.*.invoke.*.*.{}", agent.as_str());
+        // Build filter: vlinder.{session}.{branch}.{submission}.invoke.{harness}.{runtime}.{agent}
+        let filter = format!("vlinder.*.*.*.invoke.*.*.{}", agent.as_str());
 
         self.inner.runtime.block_on(async {
             let (js_msg, ack_fn) = self.fetch_one(&filter).await?;
@@ -393,7 +393,7 @@ impl MessageQueue for NatsQueue {
             let msg = InvokeMessage {
                 id: MessageId::from(get_header(headers, "msg-id")?),
                 protocol_version: get_header(headers, "protocol-version").unwrap_or_default(),
-                timeline: get_header(headers, "timeline-id")
+                branch: get_header(headers, "branch-id")
                     .ok()
                     .and_then(|s| s.parse::<i64>().ok())
                     .map(BranchId::from)
@@ -421,9 +421,9 @@ impl MessageQueue for NatsQueue {
         service: ServiceBackend,
         operation: Operation,
     ) -> Result<(RequestMessage, Acknowledgement), QueueError> {
-        // Build filter: vlinder.{timeline}.{submission}.req.{agent}.{service}.{backend}.{op}.{seq}
+        // Build filter: vlinder.{session}.{branch}.{submission}.req.{agent}.{service}.{backend}.{op}.{seq}
         let filter = format!(
-            "vlinder.*.*.req.*.{}.{}.{}.*",
+            "vlinder.*.*.*.req.*.{}.{}.{}.*",
             service.service_type(),
             service.backend_str(),
             operation
@@ -450,7 +450,7 @@ impl MessageQueue for NatsQueue {
             let msg = RequestMessage {
                 id: MessageId::from(get_header(headers, "msg-id")?),
                 protocol_version: get_header(headers, "protocol-version").unwrap_or_default(),
-                timeline: get_header(headers, "timeline-id")
+                branch: get_header(headers, "branch-id")
                     .ok()
                     .and_then(|s| s.parse::<i64>().ok())
                     .map(BranchId::from)
@@ -485,10 +485,11 @@ impl MessageQueue for NatsQueue {
         &self,
         request: &RequestMessage,
     ) -> Result<(ResponseMessage, Acknowledgement), QueueError> {
-        // Build filter from request dimensions
-        // Wildcards match: {timeline}, {agent}.{operation}.{sequence}
+        // Build filter from request dimensions — session and branch pinned (ADR 117).
         let filter = format!(
-            "vlinder.*.{}.res.{}.{}.*.*.*",
+            "vlinder.{}.{}.{}.res.{}.{}.*.*.*",
+            request.session,
+            request.branch,
             request.submission,
             request.service.service_type(),
             request.service.backend_str()
@@ -515,7 +516,7 @@ impl MessageQueue for NatsQueue {
             let msg = ResponseMessage {
                 id: MessageId::from(get_header(headers, "msg-id")?),
                 protocol_version: get_header(headers, "protocol-version").unwrap_or_default(),
-                timeline: get_header(headers, "timeline-id")
+                branch: get_header(headers, "branch-id")
                     .ok()
                     .and_then(|s| s.parse::<i64>().ok())
                     .map(BranchId::from)
@@ -553,8 +554,8 @@ impl MessageQueue for NatsQueue {
         submission: &SubmissionId,
         harness: HarnessType,
     ) -> Result<(CompleteMessage, Acknowledgement), QueueError> {
-        // Build filter: submission-scoped consumer (ADR 052) with timeline wildcard
-        let filter = format!("vlinder.*.{}.complete.*.{}", submission, harness.as_str());
+        // Build filter: vlinder.{session}.{branch}.{submission}.complete.{agent}.{harness}
+        let filter = format!("vlinder.*.*.{}.complete.*.{}", submission, harness.as_str());
 
         self.inner.runtime.block_on(async {
             let (js_msg, ack_fn) = self.fetch_one(&filter).await?;
@@ -572,7 +573,7 @@ impl MessageQueue for NatsQueue {
             let msg = CompleteMessage {
                 id: MessageId::from(get_header(headers, "msg-id")?),
                 protocol_version: get_header(headers, "protocol-version").unwrap_or_default(),
-                timeline: get_header(headers, "timeline-id")
+                branch: get_header(headers, "branch-id")
                     .ok()
                     .and_then(|s| s.parse::<i64>().ok())
                     .map(BranchId::from)
@@ -599,7 +600,7 @@ impl MessageQueue for NatsQueue {
             let mut headers = async_nats::HeaderMap::new();
             headers.insert("msg-id", msg.id.as_str());
             headers.insert("protocol-version", msg.protocol_version.as_str());
-            headers.insert("timeline-id", msg.timeline.to_string());
+            headers.insert("branch-id", msg.branch.to_string());
             headers.insert("submission-id", msg.submission.as_str());
             headers.insert("session-id", msg.session.as_str());
             headers.insert("caller-agent", msg.caller.as_str());
@@ -628,7 +629,7 @@ impl MessageQueue for NatsQueue {
         &self,
         target: &AgentId,
     ) -> Result<(DelegateMessage, Acknowledgement), QueueError> {
-        let filter = format!("vlinder.*.*.delegate.*.{}", target.as_str());
+        let filter = format!("vlinder.*.*.*.delegate.*.{}", target.as_str());
 
         self.inner.runtime.block_on(async {
             let (js_msg, ack_fn) = self.fetch_one(&filter).await?;
@@ -648,7 +649,7 @@ impl MessageQueue for NatsQueue {
             let msg = DelegateMessage {
                 id: MessageId::from(get_header(headers, "msg-id")?),
                 protocol_version: get_header(headers, "protocol-version").unwrap_or_default(),
-                timeline: get_header(headers, "timeline-id")
+                branch: get_header(headers, "branch-id")
                     .ok()
                     .and_then(|s| s.parse::<i64>().ok())
                     .map(BranchId::from)
@@ -679,7 +680,7 @@ impl MessageQueue for NatsQueue {
             let mut headers = async_nats::HeaderMap::new();
             headers.insert("msg-id", msg.id.as_str());
             headers.insert("protocol-version", msg.protocol_version.as_str());
-            headers.insert("timeline-id", msg.timeline.to_string());
+            headers.insert("branch-id", msg.branch.to_string());
             headers.insert("submission-id", msg.submission.as_str());
             headers.insert("session-id", msg.session.as_str());
             headers.insert("agent-id", msg.agent_id.as_str());
@@ -725,7 +726,7 @@ impl MessageQueue for NatsQueue {
             let msg = CompleteMessage {
                 id: MessageId::from(get_header(headers, "msg-id")?),
                 protocol_version: get_header(headers, "protocol-version").unwrap_or_default(),
-                timeline: get_header(headers, "timeline-id")
+                branch: get_header(headers, "branch-id")
                     .ok()
                     .and_then(|s| s.parse::<i64>().ok())
                     .map(BranchId::from)
@@ -752,7 +753,7 @@ impl MessageQueue for NatsQueue {
             let mut headers = async_nats::HeaderMap::new();
             headers.insert("msg-id", msg.id.as_str());
             headers.insert("protocol-version", msg.protocol_version.as_str());
-            headers.insert("timeline-id", msg.timeline.to_string());
+            headers.insert("branch-id", msg.branch.to_string());
             headers.insert("submission-id", msg.submission.as_str());
             headers.insert("session-id", msg.session.as_str());
             headers.insert("agent-id", msg.agent_id.as_str());
@@ -783,8 +784,8 @@ impl MessageQueue for NatsQueue {
         &self,
         agent: &AgentId,
     ) -> Result<(RepairMessage, Acknowledgement), QueueError> {
-        // Build filter: vlinder.{timeline}.{submission}.repair.{harness}.{agent}
-        let filter = format!("vlinder.*.*.repair.*.{}", agent.as_str());
+        // Build filter: vlinder.{session}.{branch}.{submission}.repair.{harness}.{agent}
+        let filter = format!("vlinder.*.*.*.repair.*.{}", agent.as_str());
 
         self.inner.runtime.block_on(async {
             let (js_msg, ack_fn) = self.fetch_one(&filter).await?;
@@ -797,7 +798,7 @@ impl MessageQueue for NatsQueue {
             let msg = RepairMessage {
                 id: MessageId::from(get_header(headers, "msg-id")?),
                 protocol_version: get_header(headers, "protocol-version").unwrap_or_default(),
-                timeline: get_header(headers, "timeline-id")
+                branch: get_header(headers, "branch-id")
                     .ok()
                     .and_then(|s| s.parse::<i64>().ok())
                     .map(BranchId::from)
@@ -832,7 +833,8 @@ impl MessageQueue for NatsQueue {
 
     fn send_fork(&self, msg: vlinder_core::domain::ForkMessage) -> Result<(), QueueError> {
         let subject = routing_key_to_subject(&RoutingKey::Fork {
-            timeline: msg.timeline,
+            session: msg.session.clone(),
+            branch: msg.branch,
             submission: msg.submission.clone(),
             agent_name: msg.agent_name.clone(),
         });
@@ -875,30 +877,33 @@ impl MessageQueue for NatsQueue {
 fn routing_key_to_subject(key: &RoutingKey) -> String {
     match key {
         RoutingKey::Invoke {
-            timeline,
+            session,
+            branch,
             submission,
             harness,
             runtime,
             agent,
         } => {
             format!(
-                "vlinder.{}.{}.invoke.{}.{}.{}",
-                timeline, submission, harness, runtime, agent,
+                "vlinder.{}.{}.{}.invoke.{}.{}.{}",
+                session, branch, submission, harness, runtime, agent,
             )
         }
         RoutingKey::Complete {
-            timeline,
+            session,
+            branch,
             submission,
             agent,
             harness,
         } => {
             format!(
-                "vlinder.{}.{}.complete.{}.{}",
-                timeline, submission, agent, harness,
+                "vlinder.{}.{}.{}.complete.{}.{}",
+                session, branch, submission, agent, harness,
             )
         }
         RoutingKey::Request {
-            timeline,
+            session,
+            branch,
             submission,
             agent,
             service,
@@ -906,8 +911,9 @@ fn routing_key_to_subject(key: &RoutingKey) -> String {
             sequence,
         } => {
             format!(
-                "vlinder.{}.{}.req.{}.{}.{}.{}.{}",
-                timeline,
+                "vlinder.{}.{}.{}.req.{}.{}.{}.{}.{}",
+                session,
+                branch,
                 submission,
                 agent,
                 service.service_type(),
@@ -917,7 +923,8 @@ fn routing_key_to_subject(key: &RoutingKey) -> String {
             )
         }
         RoutingKey::Response {
-            timeline,
+            session,
+            branch,
             submission,
             service,
             agent,
@@ -925,8 +932,9 @@ fn routing_key_to_subject(key: &RoutingKey) -> String {
             sequence,
         } => {
             format!(
-                "vlinder.{}.{}.res.{}.{}.{}.{}.{}",
-                timeline,
+                "vlinder.{}.{}.{}.res.{}.{}.{}.{}.{}",
+                session,
+                branch,
                 submission,
                 service.service_type(),
                 service.backend_str(),
@@ -936,45 +944,52 @@ fn routing_key_to_subject(key: &RoutingKey) -> String {
             )
         }
         RoutingKey::Delegate {
-            timeline,
+            session,
+            branch,
             submission,
             caller,
             target,
         } => {
             format!(
-                "vlinder.{}.{}.delegate.{}.{}",
-                timeline, submission, caller, target,
+                "vlinder.{}.{}.{}.delegate.{}.{}",
+                session, branch, submission, caller, target,
             )
         }
         RoutingKey::DelegateReply {
-            timeline,
+            session,
+            branch,
             submission,
             caller,
             target,
             nonce,
         } => {
             format!(
-                "vlinder.{}.{}.delegate-reply.{}.{}.{}",
-                timeline, submission, caller, target, nonce,
+                "vlinder.{}.{}.{}.delegate-reply.{}.{}.{}",
+                session, branch, submission, caller, target, nonce,
             )
         }
         RoutingKey::Repair {
-            timeline,
+            session,
+            branch,
             submission,
             harness,
             agent,
         } => {
             format!(
-                "vlinder.{}.{}.repair.{}.{}",
-                timeline, submission, harness, agent,
+                "vlinder.{}.{}.{}.repair.{}.{}",
+                session, branch, submission, harness, agent,
             )
         }
         RoutingKey::Fork {
-            timeline,
+            session,
+            branch,
             submission,
             agent_name,
         } => {
-            format!("vlinder.{}.{}.fork.{}", timeline, submission, agent_name,)
+            format!(
+                "vlinder.{}.{}.{}.fork.{}",
+                session, branch, submission, agent_name,
+            )
         }
     }
 }
@@ -982,77 +997,86 @@ fn routing_key_to_subject(key: &RoutingKey) -> String {
 /// Parse a NATS subject back into a `RoutingKey`.
 ///
 /// Inverse of `routing_key_to_subject`. Returns `None` for subjects
-/// that don't match the `vlinder.<timeline>.<submission>.<type>...` format.
+/// that don't match the `vlinder.{session}.{branch}.{submission}.{type}...` format.
 pub fn subject_to_routing_key(subject: &str) -> Option<RoutingKey> {
     let s: Vec<&str> = subject.split('.').collect();
-    if s.len() < 4 || s[0] != "vlinder" {
+    if s.len() < 5 || s[0] != "vlinder" {
         return None;
     }
 
-    let timeline = BranchId::from(s[1].parse::<i64>().unwrap_or(0));
-    let submission = SubmissionId::from(s[2].to_string());
+    let session = SessionId::try_from(s[1].to_string()).ok()?;
+    let branch = BranchId::from(s[2].parse::<i64>().unwrap_or(0));
+    let submission = SubmissionId::from(s[3].to_string());
 
-    match s[3] {
-        // vlinder.{timeline}.{submission}.invoke.{harness}.{runtime}.{agent}
-        "invoke" if s.len() == 7 => Some(RoutingKey::Invoke {
-            timeline,
+    match s[4] {
+        // vlinder.{session}.{branch}.{submission}.invoke.{harness}.{runtime}.{agent}
+        "invoke" if s.len() == 8 => Some(RoutingKey::Invoke {
+            session,
+            branch,
             submission,
-            harness: HarnessType::from_str(s[4]).ok()?,
-            runtime: RuntimeType::from_str(s[5]).ok()?,
-            agent: AgentId::new(s[6]),
-        }),
-        // vlinder.{timeline}.{submission}.req.{agent}.{svc}.{backend}.{op}.{seq}
-        "req" if s.len() == 9 => Some(RoutingKey::Request {
-            timeline,
-            submission,
-            agent: AgentId::new(s[4]),
-            service: ServiceBackend::from_parts(ServiceType::from_str(s[5]).ok()?, s[6])?,
-            operation: Operation::from_str(s[7]).ok()?,
-            sequence: Sequence::from(s[8].parse::<u32>().ok()?),
-        }),
-        // vlinder.{timeline}.{submission}.res.{svc}.{backend}.{agent}.{op}.{seq}
-        "res" if s.len() == 9 => Some(RoutingKey::Response {
-            timeline,
-            submission,
-            service: ServiceBackend::from_parts(ServiceType::from_str(s[4]).ok()?, s[5])?,
-            agent: AgentId::new(s[6]),
-            operation: Operation::from_str(s[7]).ok()?,
-            sequence: Sequence::from(s[8].parse::<u32>().ok()?),
-        }),
-        // vlinder.{timeline}.{submission}.complete.{agent}.{harness}
-        "complete" if s.len() == 6 => Some(RoutingKey::Complete {
-            timeline,
-            submission,
-            agent: AgentId::new(s[4]),
             harness: HarnessType::from_str(s[5]).ok()?,
+            runtime: RuntimeType::from_str(s[6]).ok()?,
+            agent: AgentId::new(s[7]),
         }),
-        // vlinder.{timeline}.{submission}.delegate.{caller}.{target}
-        "delegate" if s.len() == 6 => Some(RoutingKey::Delegate {
-            timeline,
+        // vlinder.{session}.{branch}.{submission}.req.{agent}.{svc}.{backend}.{op}.{seq}
+        "req" if s.len() == 10 => Some(RoutingKey::Request {
+            session,
+            branch,
             submission,
-            caller: AgentId::new(s[4]),
-            target: AgentId::new(s[5]),
-        }),
-        // vlinder.{timeline}.{submission}.delegate-reply.{caller}.{target}.{nonce}
-        "delegate-reply" if s.len() == 7 => Some(RoutingKey::DelegateReply {
-            timeline,
-            submission,
-            caller: AgentId::new(s[4]),
-            target: AgentId::new(s[5]),
-            nonce: Nonce::new(s[6]),
-        }),
-        // vlinder.{timeline}.{submission}.repair.{harness}.{agent}
-        "repair" if s.len() == 6 => Some(RoutingKey::Repair {
-            timeline,
-            submission,
-            harness: HarnessType::from_str(s[4]).ok()?,
             agent: AgentId::new(s[5]),
+            service: ServiceBackend::from_parts(ServiceType::from_str(s[6]).ok()?, s[7])?,
+            operation: Operation::from_str(s[8]).ok()?,
+            sequence: Sequence::from(s[9].parse::<u32>().ok()?),
         }),
-        // vlinder.{timeline}.{submission}.fork.{agent_name}
-        "fork" if s.len() == 5 => Some(RoutingKey::Fork {
-            timeline,
+        // vlinder.{session}.{branch}.{submission}.res.{svc}.{backend}.{agent}.{op}.{seq}
+        "res" if s.len() == 10 => Some(RoutingKey::Response {
+            session,
+            branch,
             submission,
-            agent_name: s[4].to_string(),
+            service: ServiceBackend::from_parts(ServiceType::from_str(s[5]).ok()?, s[6])?,
+            agent: AgentId::new(s[7]),
+            operation: Operation::from_str(s[8]).ok()?,
+            sequence: Sequence::from(s[9].parse::<u32>().ok()?),
+        }),
+        // vlinder.{session}.{branch}.{submission}.complete.{agent}.{harness}
+        "complete" if s.len() == 7 => Some(RoutingKey::Complete {
+            session,
+            branch,
+            submission,
+            agent: AgentId::new(s[5]),
+            harness: HarnessType::from_str(s[6]).ok()?,
+        }),
+        // vlinder.{session}.{branch}.{submission}.delegate.{caller}.{target}
+        "delegate" if s.len() == 7 => Some(RoutingKey::Delegate {
+            session,
+            branch,
+            submission,
+            caller: AgentId::new(s[5]),
+            target: AgentId::new(s[6]),
+        }),
+        // vlinder.{session}.{branch}.{submission}.delegate-reply.{caller}.{target}.{nonce}
+        "delegate-reply" if s.len() == 8 => Some(RoutingKey::DelegateReply {
+            session,
+            branch,
+            submission,
+            caller: AgentId::new(s[5]),
+            target: AgentId::new(s[6]),
+            nonce: Nonce::new(s[7]),
+        }),
+        // vlinder.{session}.{branch}.{submission}.repair.{harness}.{agent}
+        "repair" if s.len() == 7 => Some(RoutingKey::Repair {
+            session,
+            branch,
+            submission,
+            harness: HarnessType::from_str(s[5]).ok()?,
+            agent: AgentId::new(s[6]),
+        }),
+        // vlinder.{session}.{branch}.{submission}.fork.{agent_name}
+        "fork" if s.len() == 6 => Some(RoutingKey::Fork {
+            session,
+            branch,
+            submission,
+            agent_name: s[5].to_string(),
         }),
         _ => None,
     }
@@ -1191,11 +1215,12 @@ pub fn from_nats_headers(
 
     match key {
         RoutingKey::Invoke {
-            timeline,
+            branch,
             submission,
             harness,
             runtime,
             agent,
+            ..
         } => {
             let diagnostics = headers
                 .get("diagnostics")
@@ -1210,7 +1235,7 @@ pub fn from_nats_headers(
             Some(ObservableMessageHeaders::Invoke {
                 id,
                 protocol_version,
-                timeline: *timeline,
+                branch: *branch,
                 submission: submission.clone(),
                 session,
                 harness: *harness,
@@ -1222,12 +1247,13 @@ pub fn from_nats_headers(
             })
         }
         RoutingKey::Request {
-            timeline,
+            branch,
             submission,
             agent,
             service,
             operation,
             sequence,
+            ..
         } => {
             let diagnostics = headers
                 .get("diagnostics")
@@ -1242,7 +1268,7 @@ pub fn from_nats_headers(
             Some(ObservableMessageHeaders::Request {
                 id,
                 protocol_version,
-                timeline: *timeline,
+                branch: *branch,
                 submission: submission.clone(),
                 session,
                 agent_id: agent.clone(),
@@ -1255,12 +1281,13 @@ pub fn from_nats_headers(
             })
         }
         RoutingKey::Response {
-            timeline,
+            branch,
             submission,
             service,
             agent,
             operation,
             sequence,
+            ..
         } => {
             let diagnostics = headers
                 .get("diagnostics")
@@ -1275,7 +1302,7 @@ pub fn from_nats_headers(
             Some(ObservableMessageHeaders::Response {
                 id,
                 protocol_version,
-                timeline: *timeline,
+                branch: *branch,
                 submission: submission.clone(),
                 session,
                 agent_id: agent.clone(),
@@ -1290,10 +1317,11 @@ pub fn from_nats_headers(
             })
         }
         RoutingKey::Complete {
-            timeline,
+            branch,
             submission,
             agent,
             harness,
+            ..
         } => {
             let diagnostics = headers
                 .get("diagnostics")
@@ -1303,7 +1331,7 @@ pub fn from_nats_headers(
             Some(ObservableMessageHeaders::Complete {
                 id,
                 protocol_version,
-                timeline: *timeline,
+                branch: *branch,
                 submission: submission.clone(),
                 session,
                 agent_id: agent.clone(),
@@ -1313,10 +1341,11 @@ pub fn from_nats_headers(
             })
         }
         RoutingKey::Delegate {
-            timeline,
+            branch,
             submission,
             caller,
             target,
+            ..
         } => {
             let diagnostics = headers
                 .get("diagnostics")
@@ -1329,7 +1358,7 @@ pub fn from_nats_headers(
             Some(ObservableMessageHeaders::Delegate {
                 id,
                 protocol_version,
-                timeline: *timeline,
+                branch: *branch,
                 submission: submission.clone(),
                 session,
                 caller: caller.clone(),
@@ -1345,10 +1374,11 @@ pub fn from_nats_headers(
             None
         }
         RoutingKey::Repair {
-            timeline,
+            branch,
             submission,
             harness,
             agent,
+            ..
         } => {
             let dag_parent = DagNodeId::from(headers.get("dag-parent").cloned()?);
             let checkpoint = headers.get("checkpoint").cloned()?;
@@ -1362,7 +1392,7 @@ pub fn from_nats_headers(
             Some(ObservableMessageHeaders::Repair {
                 id,
                 protocol_version,
-                timeline: *timeline,
+                branch: *branch,
                 submission: submission.clone(),
                 session,
                 agent_id: agent.clone(),
@@ -1376,9 +1406,10 @@ pub fn from_nats_headers(
             })
         }
         RoutingKey::Fork {
-            timeline,
+            branch,
             submission,
             agent_name,
+            ..
         } => {
             let branch_name = headers.get("branch-name").cloned()?;
             let fork_point = DagNodeId::from(headers.get("fork-point").cloned()?);
@@ -1386,7 +1417,7 @@ pub fn from_nats_headers(
             Some(ObservableMessageHeaders::Fork {
                 id,
                 protocol_version,
-                timeline: *timeline,
+                branch: *branch,
                 submission: submission.clone(),
                 session,
                 agent_name: agent_name.clone(),

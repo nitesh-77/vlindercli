@@ -100,7 +100,7 @@ fn get(session_id_or_name: &str, branch_name: &str) {
 
     let branch_nodes: Vec<_> = nodes
         .into_iter()
-        .filter(|n| *n.timeline_id() == branch.id)
+        .filter(|n| *n.branch_id() == branch.id)
         .collect();
 
     if branch_nodes.is_empty() {

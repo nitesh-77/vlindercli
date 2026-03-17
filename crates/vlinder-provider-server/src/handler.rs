@@ -64,7 +64,7 @@ impl InvokeHandler {
         };
 
         let mut request = RequestMessage::new(
-            self.invoke.timeline,
+            self.invoke.branch,
             self.invoke.submission.clone(),
             self.invoke.session.clone(),
             self.invoke.agent_id.clone(),
@@ -127,7 +127,7 @@ impl InvokeHandler {
         let nonce = Nonce::generate();
 
         let delegate = DelegateMessage::new(
-            self.invoke.timeline,
+            self.invoke.branch,
             self.invoke.submission.clone(),
             self.invoke.session.clone(),
             caller.clone(),
@@ -201,7 +201,7 @@ impl InvokeHandler {
                 }
                 Err(_) => {
                     poll_count += 1;
-                    if poll_count % 100 == 0 {
+                    if poll_count.is_multiple_of(100) {
                         tracing::warn!(
                             handle = %handle, polls = poll_count,
                             elapsed = ?poll_start.elapsed(),

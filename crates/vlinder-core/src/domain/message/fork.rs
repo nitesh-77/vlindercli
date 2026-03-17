@@ -23,7 +23,7 @@ use super::PROTOCOL_VERSION;
 pub struct ForkMessage {
     pub id: MessageId,
     pub protocol_version: String,
-    pub timeline: BranchId,
+    pub branch: BranchId,
     pub submission: SubmissionId,
     pub session: SessionId,
     /// Agent that owns the session being forked (needed for git tree path).
@@ -36,7 +36,7 @@ pub struct ForkMessage {
 
 impl ForkMessage {
     pub fn new(
-        timeline: BranchId,
+        branch: BranchId,
         submission: SubmissionId,
         session: SessionId,
         agent_name: String,
@@ -46,7 +46,7 @@ impl ForkMessage {
         Self {
             id: MessageId::new(),
             protocol_version: PROTOCOL_VERSION.to_string(),
-            timeline,
+            branch,
             submission,
             session,
             agent_name,

@@ -210,7 +210,7 @@ impl DagStore for SqliteDagStore {
                 node.message.checkpoint(),
                 node.message.operation(),
                 message_blob,
-                node.timeline_id().as_i64(),
+                node.branch_id().as_i64(),
                 snapshot_json,
             ],
         ).map_err(|e| format!("insert_node failed: {}", e))?;

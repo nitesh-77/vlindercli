@@ -119,8 +119,8 @@ impl DagNode {
     pub fn protocol_version(&self) -> &str {
         self.message.protocol_version()
     }
-    pub fn timeline_id(&self) -> &super::BranchId {
-        self.message.timeline()
+    pub fn branch_id(&self) -> &super::BranchId {
+        self.message.branch()
     }
 }
 
@@ -435,7 +435,7 @@ impl DagStore for InMemoryDagStore {
         Ok(nodes
             .iter()
             .rev()
-            .filter(|n| *n.timeline_id() == branch_id)
+            .filter(|n| *n.branch_id() == branch_id)
             .find(|n| message_type.is_none_or(|mt| n.message_type() == mt))
             .cloned())
     }

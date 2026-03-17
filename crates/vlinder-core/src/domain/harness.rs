@@ -168,15 +168,7 @@ impl CoreHarness {
             last_complete_payload.as_deref(),
             input,
         );
-        let parent_submission = last_invoke_node
-            .as_ref()
-            .map(|n| n.submission_id().as_str().to_string())
-            .unwrap_or_default();
-        let submission = SubmissionId::content_addressed(
-            enriched_payload.as_bytes(),
-            session_id.as_str(),
-            &parent_submission,
-        );
+        let submission = SubmissionId::new();
         // State: prefer DAG's latest Complete, fall back to initial_state
         let last_state = last_complete_node
             .as_ref()

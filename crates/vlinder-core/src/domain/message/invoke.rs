@@ -32,7 +32,7 @@ mod base64_serde {
 pub struct InvokeMessage {
     pub id: MessageId,
     pub protocol_version: String,
-    pub timeline: BranchId,
+    pub branch: BranchId,
     pub submission: SubmissionId,
     pub session: SessionId,
     pub harness: HarnessType,
@@ -54,7 +54,7 @@ pub struct InvokeMessage {
 impl InvokeMessage {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        timeline: BranchId,
+        branch: BranchId,
         submission: SubmissionId,
         session: SessionId,
         harness: HarnessType,
@@ -68,7 +68,7 @@ impl InvokeMessage {
         Self {
             id: MessageId::new(),
             protocol_version: PROTOCOL_VERSION.to_string(),
-            timeline,
+            branch,
             submission,
             session,
             harness,
@@ -84,7 +84,8 @@ impl InvokeMessage {
     /// Produce the routing key for this message (ADR 096 §4).
     pub fn routing_key(&self) -> RoutingKey {
         RoutingKey::Invoke {
-            timeline: self.timeline,
+            session: self.session.clone(),
+            branch: self.branch,
             submission: self.submission.clone(),
             harness: self.harness,
             runtime: self.runtime,
@@ -99,7 +100,7 @@ impl InvokeMessage {
         state: Option<String>,
     ) -> CompleteMessage {
         CompleteMessage::new(
-            self.timeline,
+            self.branch,
             self.submission.clone(),
             self.session.clone(),
             self.agent_id.clone(),
@@ -118,7 +119,7 @@ impl InvokeMessage {
         diagnostics: RuntimeDiagnostics,
     ) -> CompleteMessage {
         CompleteMessage::new(
-            self.timeline,
+            self.branch,
             self.submission.clone(),
             self.session.clone(),
             self.agent_id.clone(),
@@ -135,7 +136,7 @@ impl ExpectsReply for InvokeMessage {
 
     fn create_reply(&self, payload: Vec<u8>) -> CompleteMessage {
         CompleteMessage::new(
-            self.timeline,
+            self.branch,
             self.submission.clone(),
             self.session.clone(),
             self.agent_id.clone(),
@@ -173,7 +174,7 @@ mod tests {
 
         assert_eq!(back.id.as_str(), msg.id.as_str());
         assert_eq!(back.protocol_version, msg.protocol_version);
-        assert_eq!(back.timeline, msg.timeline);
+        assert_eq!(back.branch, msg.branch);
         assert_eq!(back.submission, msg.submission);
         assert_eq!(back.session, msg.session);
         assert_eq!(back.harness, msg.harness);

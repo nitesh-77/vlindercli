@@ -15,7 +15,7 @@ use super::PROTOCOL_VERSION;
 pub struct DelegateMessage {
     pub id: MessageId,
     pub protocol_version: String,
-    pub timeline: BranchId,
+    pub branch: BranchId,
     pub submission: SubmissionId,
     pub session: SessionId,
     pub caller: AgentId,
@@ -35,7 +35,7 @@ pub struct DelegateMessage {
 impl DelegateMessage {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        timeline: BranchId,
+        branch: BranchId,
         submission: SubmissionId,
         session: SessionId,
         caller: AgentId,
@@ -48,7 +48,7 @@ impl DelegateMessage {
         Self {
             id: MessageId::new(),
             protocol_version: PROTOCOL_VERSION.to_string(),
-            timeline,
+            branch,
             submission,
             session,
             caller,
@@ -63,7 +63,8 @@ impl DelegateMessage {
     /// Produce the routing key for this message (ADR 096 §4).
     pub fn routing_key(&self) -> RoutingKey {
         RoutingKey::Delegate {
-            timeline: self.timeline,
+            session: self.session.clone(),
+            branch: self.branch,
             submission: self.submission.clone(),
             caller: self.caller.clone(),
             target: self.target.clone(),

@@ -39,7 +39,7 @@ impl RecordingQueue {
 
     /// Record a DAG node for the given observable message.
     fn record(&self, observable: &ObservableMessage) {
-        let branch_id = *observable.timeline();
+        let branch_id = *observable.branch();
 
         // Explicit dag_parent on Invoke/Fork overrides the latest node on the timeline.
         let dag_parent_override: Option<DagNodeId> = match observable {

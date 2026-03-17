@@ -17,7 +17,7 @@ use super::{ExpectsReply, PROTOCOL_VERSION};
 pub struct RequestMessage {
     pub id: MessageId,
     pub protocol_version: String,
-    pub timeline: BranchId,
+    pub branch: BranchId,
     pub submission: SubmissionId,
     pub session: SessionId,
     pub agent_id: AgentId,
@@ -40,7 +40,7 @@ pub struct RequestMessage {
 impl RequestMessage {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        timeline: BranchId,
+        branch: BranchId,
         submission: SubmissionId,
         session: SessionId,
         agent_id: AgentId,
@@ -54,7 +54,7 @@ impl RequestMessage {
         Self {
             id: MessageId::new(),
             protocol_version: PROTOCOL_VERSION.to_string(),
-            timeline,
+            branch,
             submission,
             session,
             agent_id,
@@ -71,7 +71,8 @@ impl RequestMessage {
     /// Produce the routing key for this message (ADR 096 §4).
     pub fn routing_key(&self) -> RoutingKey {
         RoutingKey::Request {
-            timeline: self.timeline,
+            session: self.session.clone(),
+            branch: self.branch,
             submission: self.submission.clone(),
             agent: self.agent_id.clone(),
             service: self.service,
