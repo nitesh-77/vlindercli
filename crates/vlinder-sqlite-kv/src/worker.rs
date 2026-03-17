@@ -49,9 +49,17 @@ impl KvWorker {
         }
     }
 
-    /// Get object storage for an agent, opening lazily if needed.
-    fn get_or_open(&self, agent_id: &str) -> Result<Arc<SqliteObjectStorage>, String> {
-        if let Some(storage) = self.stores.read().unwrap().get(agent_id) {
+    /// Get object storage for an agent+session, opening lazily if needed.
+    ///
+    /// Storage is scoped to the session: each session gets its own database
+    /// under `<agent_storage_dir>/sessions/<session_id>/objects.db`.
+    fn get_or_open(
+        &self,
+        agent_id: &str,
+        session_id: &str,
+    ) -> Result<Arc<SqliteObjectStorage>, String> {
+        let cache_key = format!("{}:{}", agent_id, session_id);
+        if let Some(storage) = self.stores.read().unwrap().get(&cache_key) {
             return Ok(storage.clone());
         }
 
@@ -62,24 +70,34 @@ impl KvWorker {
         let uri = agent
             .object_storage
             .ok_or_else(|| format!("agent has no object_storage declared: {}", agent_id))?;
-        let path = uri
+        let base_path = uri
             .path()
             .ok_or_else(|| format!("object_storage URI has no path: {}", uri.as_str()))?;
 
-        let storage = Arc::new(SqliteObjectStorage::open_at(std::path::Path::new(path))?);
+        let parent = std::path::Path::new(base_path)
+            .parent()
+            .ok_or_else(|| "object_storage path has no parent".to_string())?;
+        let session_path = parent.join("sessions").join(session_id).join("objects.db");
+
+        let storage = Arc::new(SqliteObjectStorage::open_at(&session_path)?);
         self.stores
             .write()
             .unwrap()
-            .insert(agent_id.to_string(), storage.clone());
+            .insert(cache_key, storage.clone());
         Ok(storage)
     }
 
-    /// Get or open a SqliteStateStore for an agent.
+    /// Get or open a SqliteStateStore for an agent+session.
     ///
-    /// Derives the state store path as a sibling of the object storage db:
-    /// e.g., `data/objects.db` → `data/state.db`.
-    fn get_or_open_state_store(&self, agent_id: &str) -> Result<Arc<SqliteStateStore>, String> {
-        if let Some(store) = self.state_stores.read().unwrap().get(agent_id) {
+    /// State store is co-located with the session-scoped object storage:
+    /// `<agent_storage_dir>/sessions/<session_id>/state.db`.
+    fn get_or_open_state_store(
+        &self,
+        agent_id: &str,
+        session_id: &str,
+    ) -> Result<Arc<SqliteStateStore>, String> {
+        let cache_key = format!("{}:{}", agent_id, session_id);
+        if let Some(store) = self.state_stores.read().unwrap().get(&cache_key) {
             return Ok(store.clone());
         }
 
@@ -99,12 +117,16 @@ impl KvWorker {
                 let parent = std::path::Path::new(db_path)
                     .parent()
                     .ok_or_else(|| "sqlite path has no parent".to_string())?;
-                parent.join("state.db")
+                parent.join("sessions").join(session_id).join("state.db")
             }
             Some("memory") => {
                 let dir = std::env::temp_dir().join("vlinder-state");
                 std::fs::create_dir_all(&dir).ok();
-                dir.join(format!("{}.db", agent_id.replace(['/', ':'], "_")))
+                dir.join(format!(
+                    "{}_{}.db",
+                    agent_id.replace(['/', ':'], "_"),
+                    session_id
+                ))
             }
             _ => return Err("unsupported storage scheme for state store".to_string()),
         };
@@ -113,7 +135,7 @@ impl KvWorker {
         self.state_stores
             .write()
             .unwrap()
-            .insert(agent_id.to_string(), store.clone());
+            .insert(cache_key, store.clone());
         Ok(store)
     }
 
@@ -253,7 +275,12 @@ impl KvWorker {
         // State comes from the envelope, not the payload.
         if let Some(ref state_hash) = request.state {
             if !state_hash.is_empty() {
-                return match self.versioned_get(request.agent_id.as_str(), state_hash, &req.path) {
+                return match self.versioned_get(
+                    request.agent_id.as_str(),
+                    request.session.as_str(),
+                    state_hash,
+                    &req.path,
+                ) {
                     Ok(Some(content)) => content,
                     Ok(None) => Vec::new(),
                     Err(e) => format!("[error] {}", e).into_bytes(),
@@ -262,7 +289,7 @@ impl KvWorker {
         }
 
         // Unversioned fallback
-        let store = match self.get_or_open(request.agent_id.as_str()) {
+        let store = match self.get_or_open(request.agent_id.as_str(), request.session.as_str()) {
             Ok(s) => s,
             Err(e) => return format!("[error] {}", e).into_bytes(),
         };
@@ -281,7 +308,7 @@ impl KvWorker {
             Err(e) => return (format!("[error] invalid request: {}", e).into_bytes(), None),
         };
 
-        let store = match self.get_or_open(request.agent_id.as_str()) {
+        let store = match self.get_or_open(request.agent_id.as_str(), request.session.as_str()) {
             Ok(s) => s,
             Err(e) => return (format!("[error] {}", e).into_bytes(), None),
         };
@@ -298,6 +325,7 @@ impl KvWorker {
         if let Some(ref parent_state) = request.state {
             return match self.versioned_put(
                 request.agent_id.as_str(),
+                request.session.as_str(),
                 parent_state,
                 &req.path,
                 content,
@@ -323,7 +351,12 @@ impl KvWorker {
         // Versioned list: resolve paths from the state snapshot
         if let Some(ref state_hash) = request.state {
             if !state_hash.is_empty() {
-                return match self.versioned_list(request.agent_id.as_str(), state_hash, &req.path) {
+                return match self.versioned_list(
+                    request.agent_id.as_str(),
+                    request.session.as_str(),
+                    state_hash,
+                    &req.path,
+                ) {
                     Ok(files) => serde_json::to_string(&files)
                         .map(|s| s.into_bytes())
                         .unwrap_or_else(|e| format!("[error] {}", e).into_bytes()),
@@ -333,7 +366,7 @@ impl KvWorker {
         }
 
         // Unversioned fallback
-        let store = match self.get_or_open(request.agent_id.as_str()) {
+        let store = match self.get_or_open(request.agent_id.as_str(), request.session.as_str()) {
             Ok(s) => s,
             Err(e) => return format!("[error] {}", e).into_bytes(),
         };
@@ -352,7 +385,7 @@ impl KvWorker {
             Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
         };
 
-        let store = match self.get_or_open(request.agent_id.as_str()) {
+        let store = match self.get_or_open(request.agent_id.as_str(), request.session.as_str()) {
             Ok(s) => s,
             Err(e) => return format!("[error] {}", e).into_bytes(),
         };
@@ -370,11 +403,12 @@ impl KvWorker {
     fn versioned_put(
         &self,
         agent_id: &str,
+        session_id: &str,
         parent_state: &str,
         path: &str,
         content: &[u8],
     ) -> Result<String, String> {
-        let state_store = self.get_or_open_state_store(agent_id)?;
+        let state_store = self.get_or_open_state_store(agent_id, session_id)?;
 
         // 1. Store value
         let value_hash = hash_value(content);
@@ -411,10 +445,11 @@ impl KvWorker {
     fn versioned_get(
         &self,
         agent_id: &str,
+        session_id: &str,
         state_hash: &str,
         path: &str,
     ) -> Result<Option<Vec<u8>>, String> {
-        let state_store = self.get_or_open_state_store(agent_id)?;
+        let state_store = self.get_or_open_state_store(agent_id, session_id)?;
 
         // Load state commit
         let commit = state_store
@@ -440,10 +475,11 @@ impl KvWorker {
     fn versioned_list(
         &self,
         agent_id: &str,
+        session_id: &str,
         state_hash: &str,
         prefix: &str,
     ) -> Result<Vec<String>, String> {
-        let state_store = self.get_or_open_state_store(agent_id)?;
+        let state_store = self.get_or_open_state_store(agent_id, session_id)?;
 
         let commit = state_store
             .get_state_commit(state_hash)?
