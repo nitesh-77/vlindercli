@@ -13,7 +13,7 @@ use crate::domain::workers::dag::build_dag_node;
 use crate::domain::{
     Acknowledgement, CompleteMessage, DagNodeId, DagStore, DelegateMessage, ForkMessage,
     InvokeMessage, MessageQueue, ObservableMessage, QueueError, RepairMessage, RequestMessage,
-    ResponseMessage, SubmissionId,
+    ResponseMessage, Snapshot, SubmissionId,
 };
 
 /// A `MessageQueue` decorator that synchronously records DAG nodes on send.
@@ -48,19 +48,34 @@ impl RecordingQueue {
             _ => None,
         };
 
-        // Look up parent ID: dag_parent override → latest node on branch
-        let parent_id = dag_parent_override.unwrap_or_else(|| {
-            self.store
-                .latest_node_on_branch(branch_id, None)
-                .unwrap_or_else(|e| {
-                    tracing::warn!(error = %e, branch = branch_id.as_i64(), "Failed to query latest node on branch");
+        // Look up parent node: dag_parent override → latest node on branch
+        let parent_node = dag_parent_override
+            .and_then(|id| {
+                self.store.get_node(&id).unwrap_or_else(|e| {
+                    tracing::warn!(error = %e, "Failed to look up dag_parent node");
                     None
                 })
-                .map(|n| n.id)
-                .unwrap_or_else(DagNodeId::root)
-        });
+            })
+            .or_else(|| {
+                self.store
+                    .latest_node_on_branch(branch_id, None)
+                    .unwrap_or_else(|e| {
+                        tracing::warn!(error = %e, branch = branch_id.as_i64(), "Failed to query latest node on branch");
+                        None
+                    })
+            });
 
-        let node = build_dag_node(observable, &parent_id);
+        let parent_id = parent_node
+            .as_ref()
+            .map(|n| n.id.clone())
+            .unwrap_or_else(DagNodeId::root);
+        let parent_state = parent_node
+            .as_ref()
+            .map(|n| &n.state)
+            .cloned()
+            .unwrap_or_else(Snapshot::empty);
+
+        let node = build_dag_node(observable, &parent_id, &parent_state);
         let node_id = node.id.clone();
 
         if let Err(e) = self.store.insert_node(&node) {
@@ -516,13 +531,16 @@ mod tests {
                 _: &str,
                 _: &crate::domain::SessionId,
                 _: Option<&crate::domain::DagNodeId>,
-            ) -> Result<i64, String> {
-                Ok(0)
+            ) -> Result<crate::domain::BranchId, String> {
+                Ok(crate::domain::BranchId::from(0))
             }
             fn get_branch_by_name(&self, _: &str) -> Result<Option<crate::domain::Branch>, String> {
                 Ok(None)
             }
-            fn get_branch(&self, _: i64) -> Result<Option<crate::domain::Branch>, String> {
+            fn get_branch(
+                &self,
+                _: crate::domain::BranchId,
+            ) -> Result<Option<crate::domain::Branch>, String> {
                 Ok(None)
             }
             fn list_sessions(&self) -> Result<Vec<crate::domain::SessionSummary>, String> {
@@ -539,7 +557,7 @@ mod tests {
             }
             fn latest_node_on_branch(
                 &self,
-                _: i64,
+                _: crate::domain::BranchId,
                 _: Option<crate::domain::MessageType>,
             ) -> Result<Option<crate::domain::DagNode>, String> {
                 Ok(None)

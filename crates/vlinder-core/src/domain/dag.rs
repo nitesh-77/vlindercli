@@ -34,6 +34,13 @@ impl Snapshot {
     pub fn empty() -> Self {
         Self(BTreeMap::new())
     }
+
+    /// Return a new snapshot with one store's state updated.
+    pub fn with_state(&self, instance: Instance, hash: StateHash) -> Self {
+        let mut map = self.0.clone();
+        map.insert(instance, hash);
+        Self(map)
+    }
 }
 
 /// The message types in the Vlinder protocol (ADR 044, 113).

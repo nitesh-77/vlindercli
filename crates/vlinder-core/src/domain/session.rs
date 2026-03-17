@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use chrono::{DateTime, Utc};
 
-use super::SessionId;
+use super::{BranchId, SessionId};
 
 /// A conversation session — container for branches.
 ///
@@ -22,14 +22,14 @@ pub struct Session {
     /// Agent name this session is with.
     pub agent: String,
     /// The canonical branch for this session.
-    pub default_branch: super::BranchId,
+    pub default_branch: BranchId,
     /// When this session was created.
     pub created_at: DateTime<Utc>,
 }
 
 impl Session {
     /// Create a new session with a generated petname.
-    pub fn new(id: SessionId, agent: impl Into<String>, default_branch: super::BranchId) -> Self {
+    pub fn new(id: SessionId, agent: impl Into<String>, default_branch: BranchId) -> Self {
         let name = id.petname();
         let agent = agent.into();
         Self {
@@ -51,11 +51,11 @@ mod tests {
         let session = Session::new(
             SessionId::try_from("d4761d76-dee4-4ebf-9df4-43b52efa4f78".to_string()).unwrap(),
             "pensieve",
-            super::BranchId::from(1),
+            BranchId::from(1),
         );
 
         assert_eq!(session.agent, "pensieve");
         assert_eq!(session.id.as_str(), "d4761d76-dee4-4ebf-9df4-43b52efa4f78");
-        assert_eq!(session.default_branch, super::BranchId::from(1));
+        assert_eq!(session.default_branch, BranchId::from(1));
     }
 }

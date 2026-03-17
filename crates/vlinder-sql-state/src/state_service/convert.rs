@@ -178,7 +178,7 @@ mod tests {
     use vlinder_core::domain::workers::dag::build_dag_node;
     use vlinder_core::domain::{
         AgentId, BranchId, DagNodeId, HarnessType, InvokeDiagnostics, InvokeMessage, RuntimeType,
-        SessionId, SubmissionId,
+        SessionId, Snapshot, SubmissionId,
     };
 
     fn sample_dag_node() -> DagNode {
@@ -197,7 +197,11 @@ mod tests {
             DagNodeId::root(),
         )
         .into();
-        build_dag_node(&msg, &DagNodeId::from("parent456".to_string()))
+        build_dag_node(
+            &msg,
+            &DagNodeId::from("parent456".to_string()),
+            &Snapshot::empty(),
+        )
     }
 
     #[test]
@@ -233,7 +237,7 @@ mod tests {
             DagNodeId::root(),
         )
         .into();
-        let node = build_dag_node(&msg, &DagNodeId::root());
+        let node = build_dag_node(&msg, &DagNodeId::root(), &Snapshot::empty());
 
         let proto_node: proto::DagNode = node.clone().into();
         let recovered: DagNode = proto_node.try_into().unwrap();

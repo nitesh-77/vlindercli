@@ -8,7 +8,7 @@
 use chrono::Utc;
 
 use crate::domain::message::ObservableMessage;
-use crate::domain::{hash_dag_node, DagNode, DagNodeId, Snapshot};
+use crate::domain::{hash_dag_node, DagNode, DagNodeId, Instance, Snapshot, StateHash};
 
 /// Build a `DagNode` from an `ObservableMessage` and Merkle chain state.
 ///
@@ -16,7 +16,11 @@ use crate::domain::{hash_dag_node, DagNode, DagNodeId, Snapshot};
 /// The snapshot is initialized from the message's state if present, otherwise
 /// empty. Callers that have the parent node should call `with_parent_snapshot`
 /// to inherit unchanged store states.
-pub fn build_dag_node(msg: &ObservableMessage, parent_id: &DagNodeId) -> DagNode {
+pub fn build_dag_node(
+    msg: &ObservableMessage,
+    parent_id: &DagNodeId,
+    parent_state: &Snapshot,
+) -> DagNode {
     let id = hash_dag_node(
         msg.payload(),
         parent_id,
@@ -25,11 +29,20 @@ pub fn build_dag_node(msg: &ObservableMessage, parent_id: &DagNodeId) -> DagNode
         msg.session(),
     );
 
+    // Inherit parent's snapshot, updating the KV store entry if this message
+    // carries a state hash.
+    let state = match msg.state() {
+        Some(s) if !s.is_empty() => {
+            parent_state.with_state(Instance::from("kv"), StateHash::from(s.to_string()))
+        }
+        _ => parent_state.clone(),
+    };
+
     DagNode {
         id,
         parent_id: parent_id.clone(),
         created_at: Utc::now(),
-        state: Snapshot::empty(),
+        state,
         message: msg.clone(),
     }
 }
@@ -155,7 +168,7 @@ mod tests {
     fn build_dag_node_from_invoke() {
         let msg = test_invoke(b"invoke-payload");
         let root = DagNodeId::root();
-        let node = build_dag_node(&msg, &root);
+        let node = build_dag_node(&msg, &root, &Snapshot::empty());
         assert_eq!(node.message_type(), MessageType::Invoke);
         let (from, to) = node.message.from_to();
         assert_eq!(from, "cli");
@@ -171,7 +184,7 @@ mod tests {
     fn build_dag_node_from_request() {
         let msg = test_request(b"request-payload");
         let parent = DagNodeId::from("parent-abc".to_string());
-        let node = build_dag_node(&msg, &parent);
+        let node = build_dag_node(&msg, &parent, &Snapshot::empty());
         assert_eq!(node.message_type(), MessageType::Request);
         let (from, to) = node.message.from_to();
         assert_eq!(from, "myagent");
@@ -183,7 +196,7 @@ mod tests {
     fn build_dag_node_from_response() {
         let msg = test_response(b"response-payload");
         let root = DagNodeId::root();
-        let node = build_dag_node(&msg, &root);
+        let node = build_dag_node(&msg, &root, &Snapshot::empty());
         assert_eq!(node.message_type(), MessageType::Response);
         let (from, to) = node.message.from_to();
         assert_eq!(from, "infer.ollama");
@@ -194,7 +207,7 @@ mod tests {
     fn build_dag_node_from_delegate() {
         let msg = test_delegate(b"delegate-payload");
         let root = DagNodeId::root();
-        let node = build_dag_node(&msg, &root);
+        let node = build_dag_node(&msg, &root, &Snapshot::empty());
         assert_eq!(node.message_type(), MessageType::Delegate);
         let (from, to) = node.message.from_to();
         assert_eq!(from, "coordinator");
@@ -208,7 +221,7 @@ mod tests {
             m.checkpoint = Some("summarize".to_string());
         }
         let root = DagNodeId::root();
-        let node = build_dag_node(&msg, &root);
+        let node = build_dag_node(&msg, &root, &Snapshot::empty());
         assert_eq!(node.message.checkpoint(), Some("summarize"));
     }
 
@@ -216,7 +229,7 @@ mod tests {
     fn build_dag_node_checkpoint_none_on_invoke() {
         let msg = test_invoke(b"payload");
         let root = DagNodeId::root();
-        let node = build_dag_node(&msg, &root);
+        let node = build_dag_node(&msg, &root, &Snapshot::empty());
         assert_eq!(node.message.checkpoint(), None);
     }
 
@@ -224,7 +237,7 @@ mod tests {
     fn build_dag_node_state_preserved() {
         let msg = test_complete(b"done", Some("state-hash".to_string()));
         let root = DagNodeId::root();
-        let node = build_dag_node(&msg, &root);
+        let node = build_dag_node(&msg, &root, &Snapshot::empty());
         assert_eq!(node.message.state(), Some("state-hash"));
     }
 
@@ -239,7 +252,7 @@ mod tests {
         let store = test_store();
         let msg = test_invoke(b"invoke-payload");
         let root = DagNodeId::root();
-        let node = build_dag_node(&msg, &root);
+        let node = build_dag_node(&msg, &root, &Snapshot::empty());
         store.insert_node(&node).unwrap();
 
         let nodes = store.get_session_nodes(&session()).unwrap();
@@ -256,17 +269,17 @@ mod tests {
         let mut last_id = DagNodeId::root();
 
         let msg1 = test_invoke(b"first");
-        let node1 = build_dag_node(&msg1, &last_id);
+        let node1 = build_dag_node(&msg1, &last_id, &Snapshot::empty());
         last_id = node1.id.clone();
         store.insert_node(&node1).unwrap();
 
         let msg2 = test_request(b"second");
-        let node2 = build_dag_node(&msg2, &last_id);
+        let node2 = build_dag_node(&msg2, &last_id, &node1.state);
         last_id = node2.id.clone();
         store.insert_node(&node2).unwrap();
 
         let msg3 = test_response(b"third");
-        let node3 = build_dag_node(&msg3, &last_id);
+        let node3 = build_dag_node(&msg3, &last_id, &node2.state);
         store.insert_node(&node3).unwrap();
 
         let nodes = store.get_session_nodes(&session()).unwrap();
@@ -282,7 +295,7 @@ mod tests {
 
         let msg1 = test_invoke(b"sess1-first");
         let root = DagNodeId::root();
-        let node1 = build_dag_node(&msg1, &root);
+        let node1 = build_dag_node(&msg1, &root, &Snapshot::empty());
         store.insert_node(&node1).unwrap();
 
         // Different session
@@ -303,11 +316,11 @@ mod tests {
             DagNodeId::root(),
         )
         .into();
-        let node2 = build_dag_node(&msg2, &root);
+        let node2 = build_dag_node(&msg2, &root, &Snapshot::empty());
         store.insert_node(&node2).unwrap();
 
         let msg3 = test_complete(b"sess1-second", None);
-        let node3 = build_dag_node(&msg3, &node1.id);
+        let node3 = build_dag_node(&msg3, &node1.id, &node1.state);
         store.insert_node(&node3).unwrap();
 
         let sess1_nodes = store.get_session_nodes(&session()).unwrap();

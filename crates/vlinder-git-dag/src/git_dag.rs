@@ -48,7 +48,7 @@ use chrono::{DateTime, Utc};
 use git2::{FileMode, Oid, Repository, RepositoryInitOptions, Signature, TreeBuilder};
 
 use vlinder_core::domain::workers::dag::build_dag_node;
-use vlinder_core::domain::{DagNodeId, DagWorker, ObservableMessage, Registry};
+use vlinder_core::domain::{DagNodeId, DagWorker, ObservableMessage, Registry, Snapshot};
 
 /// DAG worker that writes commits to a git repository.
 ///
@@ -300,7 +300,8 @@ impl GitDagWorker {
         }
 
         // Compute canonical hash and store it in the subtree
-        let dag_node = build_dag_node(msg, canonical_parent);
+        // TODO(ADR-116): look up parent snapshot from store once git-dag tracks state
+        let dag_node = build_dag_node(msg, canonical_parent, &Snapshot::empty());
         self.insert_field(&mut tb, "hash", dag_node.id.as_str())?;
 
         let tree_oid = tb
@@ -739,7 +740,7 @@ mod tests {
         InvokeDiagnostics, InvokeMessage, Nonce, ObservableMessage, Operation, RequestDiagnostics,
         RequestMessage, ResponseMessage, RuntimeDiagnostics, RuntimeInfo, RuntimeType, SecretStore,
         Sequence, ServiceBackend, ServiceDiagnostics, ServiceMetrics, ServiceType, SessionId,
-        SubmissionId,
+        Snapshot, SubmissionId,
     };
 
     fn test_agent_id() -> AgentId {
@@ -1558,8 +1559,11 @@ mod tests {
         let (mut worker, tmp) = test_worker();
         let (msg, ts) = test_invoke(b"my-payload", 1000);
 
-        let expected_node =
-            vlinder_core::domain::workers::dag::build_dag_node(&msg, &DagNodeId::root());
+        let expected_node = vlinder_core::domain::workers::dag::build_dag_node(
+            &msg,
+            &DagNodeId::root(),
+            &Snapshot::empty(),
+        );
 
         worker.on_observable_message(&msg, ts);
 
@@ -1576,7 +1580,11 @@ mod tests {
         let (mut worker, tmp) = test_worker();
 
         let (m1, t1) = test_invoke(b"first", 1000);
-        let expected1 = vlinder_core::domain::workers::dag::build_dag_node(&m1, &DagNodeId::root());
+        let expected1 = vlinder_core::domain::workers::dag::build_dag_node(
+            &m1,
+            &DagNodeId::root(),
+            &Snapshot::empty(),
+        );
         worker.on_observable_message(&m1, t1);
 
         let hash1 = show_session_file(tmp.path(), "001-cli-invoke", "hash").unwrap();
@@ -1586,6 +1594,7 @@ mod tests {
         let expected2 = vlinder_core::domain::workers::dag::build_dag_node(
             &m2,
             &DagNodeId::from(hash1.clone()),
+            &Snapshot::empty(),
         );
         worker.on_observable_message(&m2, t2);
 
@@ -1668,7 +1677,6 @@ mod tests {
             agent_name.to_string(),
             branch_name.to_string(),
             DagNodeId::from(fork_point.to_string()),
-            1,
         );
         let created_at = DateTime::from_timestamp(epoch_secs, 0).unwrap();
         (ObservableMessage::Fork(msg), created_at)
