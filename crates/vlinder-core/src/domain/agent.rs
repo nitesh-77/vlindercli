@@ -78,7 +78,7 @@ impl Agent {
             description: manifest.description,
             source: manifest.source,
             requirements: Requirements::from_config(manifest.requirements),
-            prompts: manifest.prompts.map(|p| p.into()),
+            prompts: manifest.prompts.map(std::convert::Into::into),
             id: Self::placeholder_id(&manifest.name),
             runtime,
             executable: manifest.executable,
@@ -131,7 +131,10 @@ impl Agent {
 
     /// Get the registry name for a model alias (ADR 094).
     pub fn model_name(&self, alias: &str) -> Option<&str> {
-        self.requirements.models.get(alias).map(|s| s.as_str())
+        self.requirements
+            .models
+            .get(alias)
+            .map(std::string::String::as_str)
     }
 }
 
@@ -167,8 +170,7 @@ impl From<ParseError> for LoadError {
     fn from(e: ParseError) -> Self {
         match e {
             ParseError::Io(e) => LoadError::Io(e),
-            ParseError::Toml(s) => LoadError::Parse(s),
-            ParseError::ExecutableNotFound(s) => LoadError::Parse(s),
+            ParseError::Toml(s) | ParseError::ExecutableNotFound(s) => LoadError::Parse(s),
         }
     }
 }

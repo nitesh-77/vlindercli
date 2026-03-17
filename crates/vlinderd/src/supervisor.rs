@@ -94,21 +94,18 @@ impl Supervisor {
                 std::thread::sleep(Duration::from_millis(50));
             }
 
-            match version {
-                Some((major, minor, patch)) => {
-                    tracing::info!(
-                        addr = %addr,
-                        version = %format!("{}.{}.{}", major, minor, patch),
-                        "Registry is ready"
-                    );
+            if let Some((major, minor, patch)) = version {
+                tracing::info!(
+                    addr = %addr,
+                    version = %format!("{}.{}.{}", major, minor, patch),
+                    "Registry is ready"
+                );
+            } else {
+                tracing::error!(addr = %addr, "Registry did not become ready within 10s");
+                for child in &mut workers {
+                    let _ = child.kill();
                 }
-                None => {
-                    tracing::error!(addr = %addr, "Registry did not become ready within 10s");
-                    for child in &mut workers {
-                        let _ = child.kill();
-                    }
-                    panic!("Registry failed to start — aborting distributed mode");
-                }
+                panic!("Registry failed to start — aborting distributed mode");
             }
         }
 
@@ -219,21 +216,18 @@ impl Supervisor {
                 std::thread::sleep(Duration::from_millis(50));
             }
 
-            match version {
-                Some((major, minor, patch)) => {
-                    tracing::info!(
-                        addr = %harness_addr,
-                        version = %format!("{}.{}.{}", major, minor, patch),
-                        "Harness service is ready"
-                    );
+            if let Some((major, minor, patch)) = version {
+                tracing::info!(
+                    addr = %harness_addr,
+                    version = %format!("{}.{}.{}", major, minor, patch),
+                    "Harness service is ready"
+                );
+            } else {
+                tracing::error!(addr = %harness_addr, "Harness service did not become ready within 10s");
+                for child in &mut workers {
+                    let _ = child.kill();
                 }
-                None => {
-                    tracing::error!(addr = %harness_addr, "Harness service did not become ready within 10s");
-                    for child in &mut workers {
-                        let _ = child.kill();
-                    }
-                    panic!("Harness failed to start — aborting distributed mode");
-                }
+                panic!("Harness failed to start — aborting distributed mode");
             }
         }
 

@@ -36,7 +36,7 @@ fn resolve_nats_config(secret_url: Option<&str>, fallback_nats_url: &str) -> Nat
     }
 }
 
-/// Try to build NatsConfig from the secret store. Returns None on any failure.
+/// Try to build `NatsConfig` from the secret store. Returns None on any failure.
 fn resolve_from_secrets(secret_url: &str) -> Option<NatsConfig> {
     use vlinder_core::domain::SecretStore;
     use vlinder_nats::secret_service::GrpcSecretClient;
@@ -53,9 +53,8 @@ fn resolve_from_secrets(secret_url: &str) -> Option<NatsConfig> {
         }
     };
 
-    let nats_url_bytes = match client.get("sidecar.nats.url") {
-        Ok(bytes) => bytes,
-        Err(_) => return None,
+    let Ok(nats_url_bytes) = client.get("sidecar.nats.url") else {
+        return None;
     };
 
     let nats_url = String::from_utf8(nats_url_bytes).ok()?;
@@ -91,7 +90,7 @@ pub fn connect_queue(
     let nats_config = resolve_nats_config(secret_url, nats_url);
     let inner = Arc::new(NatsQueue::connect(&nats_config)?);
     let store: Arc<dyn DagStore> = Arc::new(GrpcStateClient::connect(state_url).map_err(|e| {
-        QueueError::SendFailed(format!("state service at {} unreachable: {}", state_url, e))
+        QueueError::SendFailed(format!("state service at {state_url} unreachable: {e}"))
     })?);
     Ok(Arc::new(RecordingQueue::new(inner, store)))
 }
@@ -103,7 +102,7 @@ pub fn connect_registry(
     let url = if registry_url.starts_with("http://") || registry_url.starts_with("https://") {
         registry_url.to_string()
     } else {
-        format!("http://{}", registry_url)
+        format!("http://{registry_url}")
     };
     let client = GrpcRegistryClient::connect(&url)?;
     Ok(Arc::new(client))

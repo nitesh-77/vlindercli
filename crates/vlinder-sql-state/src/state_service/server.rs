@@ -78,7 +78,7 @@ impl StateService for StateServiceServer {
             .store
             .get_node(&DagNodeId::from(req.hash))
             .map_err(Status::internal)?
-            .map(|n| n.into());
+            .map(std::convert::Into::into);
 
         Ok(Response::new(GetNodeResponse { node }))
     }
@@ -96,7 +96,7 @@ impl StateService for StateServiceServer {
             )
             .map_err(Status::internal)?
             .into_iter()
-            .map(|n| n.into())
+            .map(std::convert::Into::into)
             .collect();
 
         Ok(Response::new(GetSessionNodesResponse { nodes }))
@@ -113,7 +113,7 @@ impl StateService for StateServiceServer {
             .get_children(&DagNodeId::from(req.parent_hash))
             .map_err(Status::internal)?
             .into_iter()
-            .map(|n| n.into())
+            .map(std::convert::Into::into)
             .collect();
 
         Ok(Response::new(GetChildrenResponse { nodes }))
@@ -149,7 +149,7 @@ impl StateService for StateServiceServer {
             .store
             .get_branch_by_name(&req.name)
             .map_err(Status::internal)?
-            .map(|b| b.into());
+            .map(std::convert::Into::into);
         Ok(Response::new(GetBranchResponse { branch }))
     }
 
@@ -162,7 +162,7 @@ impl StateService for StateServiceServer {
             .store
             .get_branch(vlinder_core::domain::BranchId::from(req.id))
             .map_err(Status::internal)?
-            .map(|b| b.into());
+            .map(std::convert::Into::into);
         Ok(Response::new(GetBranchResponse { branch }))
     }
 
@@ -179,7 +179,7 @@ impl StateService for StateServiceServer {
             .list_sessions()
             .map_err(Status::internal)?
             .into_iter()
-            .map(|s| s.into())
+            .map(std::convert::Into::into)
             .collect();
         Ok(Response::new(ListSessionsResponse { sessions }))
     }
@@ -194,7 +194,7 @@ impl StateService for StateServiceServer {
             .get_nodes_by_submission(&req.submission_id)
             .map_err(Status::internal)?
             .into_iter()
-            .map(|n| n.into())
+            .map(std::convert::Into::into)
             .collect();
         Ok(Response::new(GetNodesBySubmissionResponse { nodes }))
     }
@@ -208,7 +208,7 @@ impl StateService for StateServiceServer {
             .store
             .get_node_by_prefix(&req.prefix)
             .map_err(Status::internal)?
-            .map(|n| n.into());
+            .map(std::convert::Into::into);
         Ok(Response::new(GetNodeResponse { node }))
     }
 
@@ -224,7 +224,7 @@ impl StateService for StateServiceServer {
             )
             .map_err(Status::internal)?
             .into_iter()
-            .map(|b| b.into())
+            .map(std::convert::Into::into)
             .collect();
         Ok(Response::new(GetBranchesForSessionResponse { branches }))
     }
@@ -308,7 +308,7 @@ impl StateService for StateServiceServer {
                 message_type,
             )
             .map_err(Status::internal)?
-            .map(|n| n.into());
+            .map(std::convert::Into::into);
         Ok(Response::new(LatestNodeOnBranchResponse { node }))
     }
 

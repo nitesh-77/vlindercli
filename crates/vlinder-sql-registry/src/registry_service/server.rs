@@ -52,7 +52,7 @@ impl RegistryService for RegistryServiceServer {
             .ok_or_else(|| Status::invalid_argument("missing agent id"))?
             .into();
 
-        let agent = self.registry.get_agent(&id).map(|a| a.into());
+        let agent = self.registry.get_agent(&id).map(std::convert::Into::into);
 
         Ok(Response::new(GetAgentResponse { agent }))
     }
@@ -63,7 +63,10 @@ impl RegistryService for RegistryServiceServer {
     ) -> Result<Response<GetAgentResponse>, Status> {
         let req = request.into_inner();
 
-        let agent = self.registry.get_agent_by_name(&req.name).map(|a| a.into());
+        let agent = self
+            .registry
+            .get_agent_by_name(&req.name)
+            .map(std::convert::Into::into);
 
         Ok(Response::new(GetAgentResponse { agent }))
     }
@@ -129,7 +132,7 @@ impl RegistryService for RegistryServiceServer {
             .registry
             .get_agents()
             .into_iter()
-            .map(|a| a.into())
+            .map(std::convert::Into::into)
             .collect();
 
         Ok(Response::new(ListAgentsResponse { agents }))
@@ -165,7 +168,10 @@ impl RegistryService for RegistryServiceServer {
         request: Request<GetFleetRequest>,
     ) -> Result<Response<GetFleetResponse>, Status> {
         let req = request.into_inner();
-        let fleet = self.registry.get_fleet(&req.name).map(|f| f.into());
+        let fleet = self
+            .registry
+            .get_fleet(&req.name)
+            .map(std::convert::Into::into);
 
         Ok(Response::new(GetFleetResponse { fleet }))
     }
@@ -178,7 +184,7 @@ impl RegistryService for RegistryServiceServer {
             .registry
             .get_fleets()
             .into_iter()
-            .map(|f| f.into())
+            .map(std::convert::Into::into)
             .collect();
 
         Ok(Response::new(ListFleetsResponse { fleets }))
@@ -189,7 +195,10 @@ impl RegistryService for RegistryServiceServer {
         request: Request<GetModelRequest>,
     ) -> Result<Response<GetModelResponse>, Status> {
         let req = request.into_inner();
-        let model = self.registry.get_model(&req.name).map(|m| m.into());
+        let model = self
+            .registry
+            .get_model(&req.name)
+            .map(std::convert::Into::into);
 
         Ok(Response::new(GetModelResponse { model }))
     }
@@ -202,7 +211,7 @@ impl RegistryService for RegistryServiceServer {
             .registry
             .get_models()
             .into_iter()
-            .map(|m| m.into())
+            .map(std::convert::Into::into)
             .collect();
 
         Ok(Response::new(ListModelsResponse { models }))
@@ -285,7 +294,7 @@ impl RegistryService for RegistryServiceServer {
             .ok_or_else(|| Status::invalid_argument("missing job id"))?
             .into();
 
-        let job = self.registry.get_job(&job_id).map(|j| j.into());
+        let job = self.registry.get_job(&job_id).map(std::convert::Into::into);
 
         Ok(Response::new(GetJobResponse { job }))
     }
@@ -321,7 +330,7 @@ impl RegistryService for RegistryServiceServer {
             .registry
             .pending_jobs()
             .into_iter()
-            .map(|j| j.into())
+            .map(std::convert::Into::into)
             .collect();
 
         Ok(Response::new(ListPendingJobsResponse { jobs }))

@@ -14,7 +14,7 @@ pub fn load_and_register_model(path: &Path, registry: &dyn Registry) -> Result<M
         .map_err(|e| format!("Failed to load model manifest '{}': {}", path.display(), e))?;
     registry
         .register_model(model.clone())
-        .map_err(|e| format!("Failed to register model: {}", e))?;
+        .map_err(|e| format!("Failed to register model: {e}"))?;
     Ok(model)
 }
 
@@ -77,7 +77,7 @@ pub fn execute(cmd: ModelCommand) {
                 match load_and_register_model(Path::new(&name), &*registry) {
                     Ok(m) => m,
                     Err(e) => {
-                        eprintln!("{}", e);
+                        eprintln!("{e}");
                         return;
                     }
                 }
@@ -86,7 +86,7 @@ pub fn execute(cmd: ModelCommand) {
                     return;
                 };
                 if let Err(e) = registry.register_model(model.clone()) {
-                    eprintln!("Failed to register model: {}", e);
+                    eprintln!("Failed to register model: {e}");
                     return;
                 }
                 model
@@ -124,9 +124,9 @@ pub fn execute(cmd: ModelCommand) {
             let Some(registry) = registry else { return };
 
             match registry.delete_model(&name) {
-                Ok(true) => println!("Removed model '{}'", name),
-                Ok(false) => println!("Model '{}' not found", name),
-                Err(e) => eprintln!("Failed to remove model: {}", e),
+                Ok(true) => println!("Removed model '{name}'"),
+                Ok(false) => println!("Model '{name}' not found"),
+                Err(e) => eprintln!("Failed to remove model: {e}"),
             }
         }
     }
@@ -147,30 +147,27 @@ fn open_catalog_service(config: &CliConfig) -> Option<GrpcCatalogClient> {
     };
 
     if ping_catalog_service(&catalog_addr).is_none() {
-        eprintln!(
-            "Cannot reach catalog service at {}. Is the daemon running?",
-            catalog_addr
-        );
+        eprintln!("Cannot reach catalog service at {catalog_addr}. Is the daemon running?");
         return None;
     }
 
     match GrpcCatalogClient::connect(&catalog_addr) {
         Ok(client) => Some(client),
         Err(e) => {
-            eprintln!("Failed to connect to catalog service: {}", e);
+            eprintln!("Failed to connect to catalog service: {e}");
             None
         }
     }
 }
 
-/// Resolve a model by name from a catalog backend (Ollama, OpenRouter).
+/// Resolve a model by name from a catalog backend (Ollama, `OpenRouter`).
 fn resolve_from_catalog(name: &str, catalog: &str, config: &CliConfig) -> Option<Model> {
     let service = open_catalog_service(config)?;
 
     match service.resolve(catalog, name) {
         Ok(m) => Some(m),
         Err(e) => {
-            eprintln!("Failed to resolve model '{}': {}", name, e);
+            eprintln!("Failed to resolve model '{name}': {e}");
             None
         }
     }
@@ -183,15 +180,15 @@ fn list_available(catalog_name: &str, filter: Option<&str>, config: &CliConfig) 
 
     let available_catalogs = service.catalogs();
     let catalogs: Vec<&str> = if catalog_name == "all" {
-        available_catalogs.iter().map(|s| s.as_str()).collect()
+        available_catalogs
+            .iter()
+            .map(std::string::String::as_str)
+            .collect()
     } else if available_catalogs.iter().any(|c| c == catalog_name) {
         vec![catalog_name]
     } else {
         let names = available_catalogs.join(", ");
-        eprintln!(
-            "Unknown catalog: {}. Available: all, {}",
-            catalog_name, names
-        );
+        eprintln!("Unknown catalog: {catalog_name}. Available: all, {names}");
         return;
     };
 
@@ -221,14 +218,14 @@ fn list_available(catalog_name: &str, filter: Option<&str>, config: &CliConfig) 
                     let detail = if size.is_empty() {
                         String::new()
                     } else {
-                        format!(" ({})", size)
+                        format!(" ({size})")
                     };
                     println!("  {}{}", model.name, detail);
                 }
                 println!();
             }
             Err(e) => {
-                eprintln!("  {} — failed to list: {}", name, e);
+                eprintln!("  {name} — failed to list: {e}");
             }
         }
     }
@@ -245,7 +242,7 @@ mod tests {
         Arc::new(InMemoryRegistry::new(store))
     }
 
-    /// Write a model TOML that uses a URI model_path (no local file needed).
+    /// Write a model TOML that uses a URI `model_path` (no local file needed).
     fn write_model_toml(dir: &Path, filename: &str, name: &str, provider: &str, model_path: &str) {
         let models_dir = dir.join("models");
         std::fs::create_dir_all(&models_dir).unwrap();

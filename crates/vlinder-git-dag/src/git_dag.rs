@@ -126,6 +126,7 @@ impl GitDagWorker {
 
     /// Count message directories in a session subtree.
     /// Message dirs match the pattern `NNN-sender-type`.
+    #[allow(clippy::unused_self)]
     fn session_message_count(&self, session_tree: &git2::Tree) -> usize {
         session_tree
             .iter()
@@ -133,7 +134,7 @@ impl GitDagWorker {
                 entry.kind() == Some(git2::ObjectType::Tree)
                     && entry.name().is_some_and(|n| {
                         n.len() >= 4
-                            && n.as_bytes()[..3].iter().all(|b| b.is_ascii_digit())
+                            && n.as_bytes()[..3].iter().all(u8::is_ascii_digit)
                             && n.as_bytes()[3] == b'-'
                     })
             })
@@ -147,22 +148,20 @@ impl GitDagWorker {
         agent_name: &str,
         session_id: &str,
     ) -> String {
-        let agent_tree = match self.get_subtree(root_tree, agent_name) {
-            Some(t) => t,
-            None => return String::new(),
+        let Some(agent_tree) = self.get_subtree(root_tree, agent_name) else {
+            return String::new();
         };
-        let session_tree = match self.get_subtree(&agent_tree, session_id) {
-            Some(t) => t,
-            None => return String::new(),
+        let Some(session_tree) = self.get_subtree(&agent_tree, session_id) else {
+            return String::new();
         };
 
         let mut msg_dirs: Vec<String> = session_tree
             .iter()
             .filter(|e| e.kind() == Some(git2::ObjectType::Tree))
-            .filter_map(|e| e.name().map(|n| n.to_string()))
+            .filter_map(|e| e.name().map(std::string::ToString::to_string))
             .filter(|n| {
                 n.len() >= 4
-                    && n.as_bytes()[..3].iter().all(|b| b.is_ascii_digit())
+                    && n.as_bytes()[..3].iter().all(u8::is_ascii_digit)
                     && n.as_bytes()[3] == b'-'
             })
             .collect();
@@ -592,14 +591,17 @@ impl DagWorker for GitDagWorker {
                 msg.submission(),
             );
             if let Some(state) = message_state(msg) {
-                message.push_str(&format!("\nState: {}", state));
+                message.push_str("\nState: ");
+                message.push_str(state);
             }
             if let Some(checkpoint) = message_checkpoint(msg) {
-                message.push_str(&format!("\nCheckpoint: {}", checkpoint));
+                message.push_str("\nCheckpoint: ");
+                message.push_str(checkpoint);
             }
             let pv = msg.protocol_version();
             if !pv.is_empty() {
-                message.push_str(&format!("\nProtocol-Version: {}", pv));
+                message.push_str("\nProtocol-Version: ");
+                message.push_str(pv);
             }
 
             // 4. Author = message sender (ADR 069), committer = platform
@@ -748,8 +750,7 @@ fn message_state(msg: &ObservableMessage) -> Option<&str> {
         ObservableMessage::Complete(m) => m.state.as_deref(),
         ObservableMessage::Delegate(m) => m.state.as_deref(),
         ObservableMessage::Repair(m) => m.state.as_deref(),
-        ObservableMessage::Fork(_) => None,
-        ObservableMessage::Promote(_) => None,
+        ObservableMessage::Fork(_) | ObservableMessage::Promote(_) => None,
     }
 }
 

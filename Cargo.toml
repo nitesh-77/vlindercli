@@ -2,3 +2,17 @@
 resolver = "2"
 members = ["crates/vlinderd", "crates/vlinder-core", "crates/vlinder-harness", "crates/vlinder", "crates/vlinder-podman-sidecar", "crates/vlinder-provider-server", "crates/vlinder-infer-openrouter", "crates/vlinder-ollama", "crates/vlinder-sqlite-vec", "crates/vlinder-sqlite-kv", "crates/vlinder-podman-runtime", "crates/vlinder-nats-lambda-runtime", "crates/vlinder-nats", "crates/vlinder-sql-state", "crates/vlinder-catalog", "crates/vlinder-git-dag", "crates/vlinder-sql-registry", "crates/vlinder-lambda-adapter"]
 default-members = ["crates/vlinderd", "crates/vlinder", "crates/vlinder-podman-sidecar", "crates/vlinder-provider-server"]
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+# Tighten these later — too many to fix in one pass
+doc_markdown = "allow"              # 304 instances: domain terms in doc comments need backticks
+uninlined_format_args = "allow"     # 353 instances: format!("{}", x) → format!("{x}")
+cast_possible_truncation = "allow"  # 16 instances: u128→u64 casts in hash/nats code
+cast_precision_loss = "allow"       # 4 instances: u64→f64 in timing code
+default_trait_access = "allow"      # tonic-generated code uses Default::default()
+too_many_lines = "allow"            # structural refactors, not hygiene

@@ -174,7 +174,7 @@ impl KvWorker {
                     response_payload,
                     diag,
                 );
-                response.state = request.state.clone();
+                response.state.clone_from(&request.state);
                 let _ = self.queue.send_response(response);
                 let _ = ack();
                 true
@@ -229,7 +229,7 @@ impl KvWorker {
                     response_payload,
                     diag,
                 );
-                response.state = request.state.clone();
+                response.state.clone_from(&request.state);
                 let _ = self.queue.send_response(response);
                 let _ = ack();
                 true
@@ -256,7 +256,7 @@ impl KvWorker {
                     response_payload,
                     diag,
                 );
-                response.state = request.state.clone();
+                response.state.clone_from(&request.state);
                 let _ = self.queue.send_response(response);
                 let _ = ack();
                 true
@@ -357,9 +357,10 @@ impl KvWorker {
                     state_hash,
                     &req.path,
                 ) {
-                    Ok(files) => serde_json::to_string(&files)
-                        .map(|s| s.into_bytes())
-                        .unwrap_or_else(|e| format!("[error] {}", e).into_bytes()),
+                    Ok(files) => serde_json::to_string(&files).map_or_else(
+                        |e| format!("[error] {}", e).into_bytes(),
+                        std::string::String::into_bytes,
+                    ),
                     Err(e) => format!("[error] {}", e).into_bytes(),
                 };
             }
@@ -372,9 +373,10 @@ impl KvWorker {
         };
 
         match store.list_files(&req.path) {
-            Ok(files) => serde_json::to_string(&files)
-                .map(|s| s.into_bytes())
-                .unwrap_or_else(|e| format!("[error] {}", e).into_bytes()),
+            Ok(files) => serde_json::to_string(&files).map_or_else(
+                |e| format!("[error] {}", e).into_bytes(),
+                std::string::String::into_bytes,
+            ),
             Err(e) => format!("[error] {}", e).into_bytes(),
         }
     }
@@ -462,9 +464,8 @@ impl KvWorker {
             .unwrap_or_default();
 
         // Look up path
-        let value_hash = match entries.get(path) {
-            Some(h) => h,
-            None => return Ok(None),
+        let Some(value_hash) = entries.get(path) else {
+            return Ok(None);
         };
 
         // Load value

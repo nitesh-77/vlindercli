@@ -84,7 +84,7 @@ impl InvokeHandler {
                 }
                 (response.status_code, response.payload.clone())
             }
-            Err(e) => (502, format!("queue error: {}", e).into_bytes()),
+            Err(e) => (502, format!("queue error: {e}").into_bytes()),
         }
     }
 
@@ -102,23 +102,21 @@ impl InvokeHandler {
     fn handle_delegate(&mut self, body: &[u8]) -> (u16, Vec<u8>) {
         let parsed: serde_json::Value = match serde_json::from_slice(body) {
             Ok(v) => v,
-            Err(e) => return (400, format!("invalid JSON: {}", e).into_bytes()),
+            Err(e) => return (400, format!("invalid JSON: {e}").into_bytes()),
         };
 
-        let target_name = match parsed.get("target").and_then(|v| v.as_str()) {
-            Some(t) => t,
-            None => return (400, b"missing 'target' field".to_vec()),
+        let Some(target_name) = parsed.get("target").and_then(|v| v.as_str()) else {
+            return (400, b"missing 'target' field".to_vec());
         };
 
-        let input = match parsed.get("input").and_then(|v| v.as_str()) {
-            Some(i) => i,
-            None => return (400, b"missing 'input' field".to_vec()),
+        let Some(input) = parsed.get("input").and_then(|v| v.as_str()) else {
+            return (400, b"missing 'input' field".to_vec());
         };
 
         if self.registry.get_agent_by_name(target_name).is_none() {
             return (
                 404,
-                format!("target agent '{}' not found", target_name).into_bytes(),
+                format!("target agent '{target_name}' not found").into_bytes(),
             );
         }
 
@@ -153,17 +151,17 @@ impl InvokeHandler {
         self.pending_replies.insert(handle.clone(), reply_key);
 
         if let Err(e) = self.queue.send_delegate(delegate) {
-            return (502, format!("delegate send error: {}", e).into_bytes());
+            return (502, format!("delegate send error: {e}").into_bytes());
         }
 
-        let response = format!(r#"{{"handle":"{}"}}"#, handle);
+        let response = format!(r#"{{"handle":"{handle}"}}"#);
         (200, response.into_bytes())
     }
 
     fn handle_wait(&mut self, body: &[u8]) -> (u16, Vec<u8>) {
         let parsed: serde_json::Value = match serde_json::from_slice(body) {
             Ok(v) => v,
-            Err(e) => return (400, format!("invalid JSON: {}", e).into_bytes()),
+            Err(e) => return (400, format!("invalid JSON: {e}").into_bytes()),
         };
 
         let handle = match parsed.get("handle").and_then(|v| v.as_str()) {
@@ -176,7 +174,7 @@ impl InvokeHandler {
             None => {
                 return (
                     404,
-                    format!("unknown delegation handle '{}'", handle).into_bytes(),
+                    format!("unknown delegation handle '{handle}'").into_bytes(),
                 )
             }
         };
@@ -186,29 +184,25 @@ impl InvokeHandler {
         let mut poll_count: u64 = 0;
 
         loop {
-            match self.queue.receive_delegate_reply(&reply_key) {
-                Ok((complete, ack)) => {
-                    let payload = complete.payload.clone();
-                    let _ = ack();
-                    self.pending_replies.remove(&handle);
-                    tracing::info!(
-                        event = "delegation.completed",
-                        handle = %handle, polls = poll_count,
-                        elapsed = ?poll_start.elapsed(),
-                        "Delegation result received via provider server"
-                    );
-                    return (200, payload);
-                }
-                Err(_) => {
-                    poll_count += 1;
-                    if poll_count.is_multiple_of(100) {
-                        tracing::warn!(
-                            handle = %handle, polls = poll_count,
-                            elapsed = ?poll_start.elapsed(),
-                            "wait: still waiting for delegation result"
-                        );
-                    }
-                }
+            if let Ok((complete, ack)) = self.queue.receive_delegate_reply(&reply_key) {
+                let payload = complete.payload.clone();
+                let _ = ack();
+                self.pending_replies.remove(&handle);
+                tracing::info!(
+                    event = "delegation.completed",
+                    handle = %handle, polls = poll_count,
+                    elapsed = ?poll_start.elapsed(),
+                    "Delegation result received via provider server"
+                );
+                return (200, payload);
+            }
+            poll_count += 1;
+            if poll_count.is_multiple_of(100) {
+                tracing::warn!(
+                    handle = %handle, polls = poll_count,
+                    elapsed = ?poll_start.elapsed(),
+                    "wait: still waiting for delegation result"
+                );
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
         }

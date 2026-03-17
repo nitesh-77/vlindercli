@@ -1,7 +1,7 @@
 //! Agent container health observation.
 //!
-//! Captures health check results as HealthSnapshots in a sliding window.
-//! The sidecar uses this during startup (wait_for_agent) and can poll
+//! Captures health check results as `HealthSnapshots` in a sliding window.
+//! The sidecar uses this during startup (`wait_for_agent`) and can poll
 //! between invocations.
 
 use std::time::{Duration, Instant};
@@ -48,10 +48,10 @@ pub fn build_diagnostics(
     port: u16,
     duration_ms: u64,
     container_id: &ContainerId,
-    image_ref: &Option<ImageRef>,
-    image_digest: &Option<ImageDigest>,
+    image_ref: Option<&ImageRef>,
+    image_digest: Option<&ImageDigest>,
 ) -> RuntimeDiagnostics {
-    let url = format!("http://127.0.0.1:{}/health", port);
+    let url = format!("http://127.0.0.1:{port}/health");
     check_once(&url, health);
     let snapshot = health.latest().cloned();
 
@@ -59,8 +59,8 @@ pub fn build_diagnostics(
         stderr: Vec::new(),
         runtime: RuntimeInfo::Container {
             engine_version: "sidecar".to_string(),
-            image_ref: image_ref.clone(),
-            image_digest: image_digest.clone(),
+            image_ref: image_ref.cloned(),
+            image_digest: image_digest.cloned(),
             container_id: container_id.clone(),
         },
         duration_ms,
@@ -70,14 +70,14 @@ pub fn build_diagnostics(
 
 /// Poll the agent's health endpoint until it returns 200 or the deadline passes.
 ///
-/// Every poll attempt is recorded as a HealthSnapshot — including
+/// Every poll attempt is recorded as a `HealthSnapshot` — including
 /// failures before the container is ready.
 pub fn wait_for_ready(
     health: &mut HealthWindow,
     port: u16,
     agent_name: &str,
 ) -> Result<(), String> {
-    let url = format!("http://127.0.0.1:{}/health", port);
+    let url = format!("http://127.0.0.1:{port}/health");
     let deadline = Instant::now() + Duration::from_secs(60);
 
     tracing::info!(
@@ -90,8 +90,7 @@ pub fn wait_for_ready(
     loop {
         if Instant::now() > deadline {
             return Err(format!(
-                "agent container did not become ready within 60 seconds (port {})",
-                port
+                "agent container did not become ready within 60 seconds (port {port})"
             ));
         }
 

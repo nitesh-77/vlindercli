@@ -114,7 +114,7 @@ fn deploy(path: Option<PathBuf>) {
 pub(super) fn deploy_agent_from_path(agent_dir: &Path, registry: &dyn Registry) -> Agent {
     let manifest_path = agent_dir.join("agent.toml");
     let manifest = AgentManifest::load(&manifest_path).unwrap_or_else(|e| {
-        eprintln!("Failed to load agent manifest: {:?}", e);
+        eprintln!("Failed to load agent manifest: {e:?}");
         std::process::exit(1);
     });
 
@@ -122,17 +122,17 @@ pub(super) fn deploy_agent_from_path(agent_dir: &Path, registry: &dyn Registry) 
     match auto_deploy_models(agent_dir, &manifest, registry) {
         Ok(deployed) => {
             for name in &deployed {
-                println!("  Model: {} (auto-deployed)", name);
+                println!("  Model: {name} (auto-deployed)");
             }
         }
         Err(e) => {
-            eprintln!("{}", e);
+            eprintln!("{e}");
             std::process::exit(1);
         }
     }
 
     registry.register_manifest(manifest).unwrap_or_else(|e| {
-        eprintln!("Failed to deploy agent: {}", e);
+        eprintln!("Failed to deploy agent: {e}");
         std::process::exit(1);
     })
 }
@@ -142,15 +142,9 @@ fn run(name: &str, session: Option<&str>, branch: Option<&str>) {
     let registry = connect_registry(&config);
 
     // Look up already-deployed agent by name (ADR 103)
-    let agent = match registry.get_agent_by_name(name) {
-        Some(a) => a,
-        None => {
-            eprintln!(
-                "Agent '{}' not found — deploy it first with: vlinder agent deploy",
-                name
-            );
-            std::process::exit(1);
-        }
+    let Some(agent) = registry.get_agent_by_name(name) else {
+        eprintln!("Agent '{name}' not found — deploy it first with: vlinder agent deploy");
+        std::process::exit(1);
     };
 
     let agent_id = agent.id.clone();
@@ -171,7 +165,7 @@ fn run(name: &str, session: Option<&str>, branch: Option<&str>) {
             // Existing session → resolve its default branch
             resolve_session_default(&config, session_name)
         }
-        (Some(_), Some(branch_name)) | (None, Some(branch_name)) => {
+        (Some(_) | None, Some(branch_name)) => {
             // Specific branch → resolve it directly
             resolve_branch(&config, branch_name)
         }
@@ -189,7 +183,7 @@ fn run(name: &str, session: Option<&str>, branch: Option<&str>) {
             dag_parent.clone(),
         ) {
             Ok(result) => result,
-            Err(e) => format!("[error] {}", e),
+            Err(e) => format!("[error] {e}"),
         }
     });
 }
@@ -213,11 +207,11 @@ fn resolve_session_default(
     let branch = store
         .get_branch(branch_id)
         .unwrap_or_else(|e| {
-            eprintln!("Failed to look up default branch: {}", e);
+            eprintln!("Failed to look up default branch: {e}");
             std::process::exit(1);
         })
         .unwrap_or_else(|| {
-            eprintln!("Default branch not found for session '{}'", session_name);
+            eprintln!("Default branch not found for session '{session_name}'");
             std::process::exit(1);
         });
 
@@ -246,32 +240,29 @@ fn resolve_branch(
     let branch = store
         .get_branch_by_name(branch_name)
         .unwrap_or_else(|e| {
-            eprintln!("Failed to look up branch: {}", e);
+            eprintln!("Failed to look up branch: {e}");
             std::process::exit(1);
         })
         .unwrap_or_else(|| {
-            eprintln!("Branch '{}' not found", branch_name);
+            eprintln!("Branch '{branch_name}' not found");
             std::process::exit(1);
         });
 
     let session_id = branch.session_id.clone();
     let (_, sealed, initial_state, dag_parent) = resolve_branch_tip(&*store, &branch, branch_name);
 
-    println!("On branch '{}'", branch_name);
+    println!("On branch '{branch_name}'");
     (session_id, branch.id, sealed, initial_state, dag_parent)
 }
 
-/// Read tip state and dag_parent from a branch.
+/// Read tip state and `dag_parent` from a branch.
 fn resolve_branch_tip(
     store: &dyn DagStore,
     branch: &vlinder_core::domain::Branch,
     branch_name: &str,
 ) -> (BranchId, bool, Option<String>, DagNodeId) {
     if branch.broken_at.is_some() {
-        eprintln!(
-            "Branch '{}' is sealed — cannot run on a sealed branch",
-            branch_name
-        );
+        eprintln!("Branch '{branch_name}' is sealed — cannot run on a sealed branch");
         std::process::exit(1);
     }
 
@@ -279,7 +270,7 @@ fn resolve_branch_tip(
     let tip_hash = store
         .latest_node_on_branch(branch.id, None)
         .unwrap_or_else(|e| {
-            eprintln!("Failed to query latest node on branch: {}", e);
+            eprintln!("Failed to query latest node on branch: {e}");
             std::process::exit(1);
         })
         .map(|n| n.id)
@@ -289,15 +280,15 @@ fn resolve_branch_tip(
     // Read state from the tip node
     let initial_state = if let Ok(Some(node)) = store.get_node(&tip_hash) {
         let state = node.message.state().unwrap_or("");
-        if !state.is_empty() {
+        if state.is_empty() {
+            None
+        } else {
             println!(
                 "Resuming '{}' from state {}…",
                 branch_name,
                 &state[..8.min(state.len())]
             );
             Some(state.to_string())
-        } else {
-            None
         }
     } else {
         None
@@ -318,7 +309,7 @@ fn resolve_session(store: &dyn DagStore, name_or_id: &str) -> vlinder_core::doma
     if let Some(session) = store.get_session_by_name(name_or_id).ok().flatten() {
         return session;
     }
-    eprintln!("Session '{}' not found", name_or_id);
+    eprintln!("Session '{name_or_id}' not found");
     std::process::exit(1);
 }
 
@@ -356,7 +347,7 @@ fn get(name: &str) {
     let Some(registry) = registry else { return };
 
     let Some(agent) = registry.get_agent_by_name(name) else {
-        eprintln!("Agent '{}' not found", name);
+        eprintln!("Agent '{name}' not found");
         return;
     };
 
@@ -365,15 +356,15 @@ fn get(name: &str) {
     println!("Executable:  {}", agent.executable);
     println!("Description: {}", agent.description);
     if let Some(ref storage) = agent.object_storage {
-        println!("Object storage: {}", storage);
+        println!("Object storage: {storage}");
     }
     if let Some(ref storage) = agent.vector_storage {
-        println!("Vector storage: {}", storage);
+        println!("Vector storage: {storage}");
     }
     if !agent.requirements.models.is_empty() {
         println!("Models:");
         for (alias, name) in &agent.requirements.models {
-            println!("  {} -> {}", alias, name);
+            println!("  {alias} -> {name}");
         }
     }
 }
@@ -384,9 +375,9 @@ fn delete(name: &str) {
     let Some(registry) = registry else { return };
 
     match registry.delete_agent(name) {
-        Ok(true) => println!("Deleted agent '{}'", name),
-        Ok(false) => eprintln!("Agent '{}' not found", name),
-        Err(e) => eprintln!("Error: {}", e),
+        Ok(true) => println!("Deleted agent '{name}'"),
+        Ok(false) => eprintln!("Agent '{name}' not found"),
+        Err(e) => eprintln!("Error: {e}"),
     }
 }
 
@@ -398,23 +389,22 @@ fn open_registry(config: &CliConfig) -> Option<Arc<dyn Registry>> {
 fn scaffold(language: &Language, name: &str) {
     let target = PathBuf::from(name);
     if target.exists() {
-        eprintln!("Error: directory '{}' already exists.", name);
+        eprintln!("Error: directory '{name}' already exists.");
         std::process::exit(1);
     }
 
     let suffix = language.repo_suffix();
     let url = format!(
-        "https://github.com/vlindercli/vlinder-agent-{}/archive/refs/heads/main.tar.gz",
-        suffix
+        "https://github.com/vlindercli/vlinder-agent-{suffix}/archive/refs/heads/main.tar.gz"
     );
 
-    println!("Downloading {} template…", language);
+    println!("Downloading {language} template…");
 
     // Download tarball to a temp file
     let tarball = match download_tarball(&url) {
         Ok(path) => path,
         Err(e) => {
-            eprintln!("Error: failed to download template: {}", e);
+            eprintln!("Error: failed to download template: {e}");
             eprintln!("Check your internet connection and try again.");
             std::process::exit(1);
         }
@@ -422,13 +412,13 @@ fn scaffold(language: &Language, name: &str) {
 
     // Create target directory
     if let Err(e) = std::fs::create_dir_all(&target) {
-        eprintln!("Error: failed to create directory '{}': {}", name, e);
+        eprintln!("Error: failed to create directory '{name}': {e}");
         std::process::exit(1);
     }
 
     // Extract tarball into target directory
     if let Err(e) = extract_tarball(&tarball, &target, suffix) {
-        eprintln!("Error: failed to extract template: {}", e);
+        eprintln!("Error: failed to extract template: {e}");
         // Clean up the empty directory we created
         let _ = std::fs::remove_dir_all(&target);
         std::process::exit(1);
@@ -441,27 +431,27 @@ fn scaffold(language: &Language, name: &str) {
     patch_file(&target.join("agent.toml"), "hello-agent", name);
     patch_file(&target.join("build.sh"), "hello-agent", name);
 
-    println!("Created agent '{}' from {} template.", name, language);
+    println!("Created agent '{name}' from {language} template.");
     println!();
     println!("Next steps:");
-    println!("  cd {}", name);
+    println!("  cd {name}");
     println!("  ./build.sh");
     println!("  vlinder agent deploy");
-    println!("  vlinder agent run {}", name);
+    println!("  vlinder agent run {name}");
 }
 
 /// Download a URL to a temporary file and return the path.
 fn download_tarball(url: &str) -> Result<PathBuf, String> {
-    let mut resp = ureq::get(url).call().map_err(|e| format!("{}", e))?;
+    let mut resp = ureq::get(url).call().map_err(|e| format!("{e}"))?;
 
     let tmp_dir = std::env::temp_dir();
     let tmp_path = tmp_dir.join("vlinder-template.tar.gz");
 
-    let mut file = std::fs::File::create(&tmp_path)
-        .map_err(|e| format!("failed to create temp file: {}", e))?;
+    let mut file =
+        std::fs::File::create(&tmp_path).map_err(|e| format!("failed to create temp file: {e}"))?;
 
     std::io::copy(&mut resp.body_mut().as_reader(), &mut file)
-        .map_err(|e| format!("failed to write temp file: {}", e))?;
+        .map_err(|e| format!("failed to write temp file: {e}"))?;
 
     Ok(tmp_path)
 }
@@ -481,28 +471,27 @@ fn extract_tarball(
             &target.display().to_string(),
         ])
         .status()
-        .map_err(|e| format!("failed to run tar: {}", e))?;
+        .map_err(|e| format!("failed to run tar: {e}"))?;
 
     if !status.success() {
         return Err("tar extraction failed".to_string());
     }
 
     // GitHub archives extract to vlinder-agent-{suffix}-main/
-    let nested = target.join(format!("vlinder-agent-{}-main", suffix));
+    let nested = target.join(format!("vlinder-agent-{suffix}-main"));
     if nested.exists() {
         // Move all files from nested dir up into target
         let entries = std::fs::read_dir(&nested)
-            .map_err(|e| format!("failed to read extracted directory: {}", e))?;
+            .map_err(|e| format!("failed to read extracted directory: {e}"))?;
 
         for entry in entries {
-            let entry = entry.map_err(|e| format!("failed to read entry: {}", e))?;
+            let entry = entry.map_err(|e| format!("failed to read entry: {e}"))?;
             let dest = target.join(entry.file_name());
-            std::fs::rename(entry.path(), dest)
-                .map_err(|e| format!("failed to move file: {}", e))?;
+            std::fs::rename(entry.path(), dest).map_err(|e| format!("failed to move file: {e}"))?;
         }
 
         std::fs::remove_dir_all(&nested)
-            .map_err(|e| format!("failed to clean up nested directory: {}", e))?;
+            .map_err(|e| format!("failed to clean up nested directory: {e}"))?;
     }
 
     Ok(())
@@ -533,12 +522,12 @@ pub(super) fn auto_deploy_models(
         .requirements
         .models
         .values()
-        .map(|s| s.as_str())
+        .map(std::string::String::as_str)
         .collect();
 
     let mut deployed = Vec::new();
     for model_name in &model_names {
-        let model_toml = models_dir.join(format!("{}.toml", model_name));
+        let model_toml = models_dir.join(format!("{model_name}.toml"));
         if model_toml.exists() {
             let model = super::model::load_and_register_model(&model_toml, registry)?;
             deployed.push(model.name);
@@ -565,7 +554,7 @@ mod tests {
         let content = format!(
             "name = \"{name}\"\ntype = \"inference\"\nprovider = \"{provider}\"\nmodel_path = \"{model_path}\"\n"
         );
-        std::fs::write(models_dir.join(format!("{}.toml", name)), content).unwrap();
+        std::fs::write(models_dir.join(format!("{name}.toml")), content).unwrap();
     }
 
     fn manifest_with_models(models: Vec<(&str, &str)>) -> AgentManifest {

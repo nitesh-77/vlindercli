@@ -6,6 +6,7 @@
 //! Uses typed messages exclusively for full observability.
 
 use std::collections::HashMap;
+use std::hash::BuildHasher;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -396,8 +397,7 @@ impl MessageQueue for NatsQueue {
                 branch: get_header(headers, "branch-id")
                     .ok()
                     .and_then(|s| s.parse::<i64>().ok())
-                    .map(BranchId::from)
-                    .unwrap_or(BranchId::from(1)),
+                    .map_or(BranchId::from(1), BranchId::from),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
                 session: SessionId::try_from(get_header(headers, "session-id")?)
                     .map_err(QueueError::ReceiveFailed)?,
@@ -453,8 +453,7 @@ impl MessageQueue for NatsQueue {
                 branch: get_header(headers, "branch-id")
                     .ok()
                     .and_then(|s| s.parse::<i64>().ok())
-                    .map(BranchId::from)
-                    .unwrap_or(BranchId::from(1)),
+                    .map_or(BranchId::from(1), BranchId::from),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
                 session: SessionId::try_from(get_header(headers, "session-id")?)
                     .map_err(QueueError::ReceiveFailed)?,
@@ -519,8 +518,7 @@ impl MessageQueue for NatsQueue {
                 branch: get_header(headers, "branch-id")
                     .ok()
                     .and_then(|s| s.parse::<i64>().ok())
-                    .map(BranchId::from)
-                    .unwrap_or(BranchId::from(1)),
+                    .map_or(BranchId::from(1), BranchId::from),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
                 session: SessionId::try_from(get_header(headers, "session-id")?)
                     .map_err(QueueError::ReceiveFailed)?,
@@ -576,8 +574,7 @@ impl MessageQueue for NatsQueue {
                 branch: get_header(headers, "branch-id")
                     .ok()
                     .and_then(|s| s.parse::<i64>().ok())
-                    .map(BranchId::from)
-                    .unwrap_or(BranchId::from(1)),
+                    .map_or(BranchId::from(1), BranchId::from),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
                 session: SessionId::try_from(get_header(headers, "session-id")?)
                     .map_err(QueueError::ReceiveFailed)?,
@@ -652,8 +649,7 @@ impl MessageQueue for NatsQueue {
                 branch: get_header(headers, "branch-id")
                     .ok()
                     .and_then(|s| s.parse::<i64>().ok())
-                    .map(BranchId::from)
-                    .unwrap_or(BranchId::from(1)),
+                    .map_or(BranchId::from(1), BranchId::from),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
                 session: SessionId::try_from(get_header(headers, "session-id")?)
                     .map_err(QueueError::ReceiveFailed)?,
@@ -729,8 +725,7 @@ impl MessageQueue for NatsQueue {
                 branch: get_header(headers, "branch-id")
                     .ok()
                     .and_then(|s| s.parse::<i64>().ok())
-                    .map(BranchId::from)
-                    .unwrap_or(BranchId::from(1)),
+                    .map_or(BranchId::from(1), BranchId::from),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
                 session: SessionId::try_from(get_header(headers, "session-id")?)
                     .map_err(QueueError::ReceiveFailed)?,
@@ -801,8 +796,7 @@ impl MessageQueue for NatsQueue {
                 branch: get_header(headers, "branch-id")
                     .ok()
                     .and_then(|s| s.parse::<i64>().ok())
-                    .map(BranchId::from)
-                    .unwrap_or(BranchId::from(1)),
+                    .map_or(BranchId::from(1), BranchId::from),
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
                 session: SessionId::try_from(get_header(headers, "session-id")?)
                     .map_err(QueueError::ReceiveFailed)?,
@@ -1245,9 +1239,9 @@ pub fn repair_to_nats_headers(msg: &RepairMessage) -> HashMap<String, String> {
 /// (agent, harness, service, etc.) — already parsed by `subject_to_routing_key`.
 /// The header map provides session-scoped fields (msg-id, session-id, state,
 /// diagnostics) that aren't part of routing.
-pub fn from_nats_headers(
+pub fn from_nats_headers<S: BuildHasher>(
     key: &RoutingKey,
-    headers: &HashMap<String, String>,
+    headers: &HashMap<String, String, S>,
 ) -> Option<vlinder_core::domain::ObservableMessageHeaders> {
     use vlinder_core::domain::ObservableMessageHeaders;
 
@@ -1497,7 +1491,7 @@ fn filter_to_consumer_name(filter: &str) -> String {
 fn get_header(headers: &async_nats::HeaderMap, key: &str) -> Result<String, QueueError> {
     headers
         .get(key)
-        .map(|v| v.to_string())
+        .map(std::string::ToString::to_string)
         .ok_or_else(|| QueueError::ReceiveFailed(format!("missing header: {}", key)))
 }
 

@@ -16,6 +16,7 @@
 //! vlinderd/src/storage/state_store.rs (SQLite persistence).
 
 use std::collections::HashMap;
+use std::hash::BuildHasher;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
@@ -46,7 +47,7 @@ pub fn hash_value(content: &[u8]) -> String {
 }
 
 /// Compute SHA-256 hash of a snapshot (sorted JSON of entries).
-pub fn hash_snapshot(entries: &HashMap<String, String>) -> String {
+pub fn hash_snapshot<S: BuildHasher>(entries: &HashMap<String, String, S>) -> String {
     let json = sorted_entries_json(entries);
     hash_value(json.as_bytes())
 }
@@ -58,7 +59,7 @@ pub fn hash_state_commit(snapshot_hash: &str, parent_hash: &str) -> String {
 }
 
 /// Produce deterministic JSON from entries by sorting keys.
-pub fn sorted_entries_json(entries: &HashMap<String, String>) -> String {
+pub fn sorted_entries_json<S: BuildHasher>(entries: &HashMap<String, String, S>) -> String {
     let mut sorted: Vec<(&String, &String)> = entries.iter().collect();
     sorted.sort_by_key(|(k, _)| k.as_str());
     let map: serde_json::Map<String, serde_json::Value> = sorted

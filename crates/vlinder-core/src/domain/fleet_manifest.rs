@@ -38,8 +38,7 @@ impl std::fmt::Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ParseError::Io(e) => write!(f, "{}", e),
-            ParseError::Toml(e) => write!(f, "{}", e),
-            ParseError::Validation(e) => write!(f, "{}", e),
+            ParseError::Toml(e) | ParseError::Validation(e) => write!(f, "{}", e),
         }
     }
 }

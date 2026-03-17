@@ -1,4 +1,4 @@
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() {
     // Embed git commit SHA at compile time (ADR 070).
     //
     // Fallback chain:
@@ -7,8 +7,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 3. "unknown" fallback (e.g., crates.io install with no .git)
     let sha = std::env::var("VLINDER_BUILD_SHA").unwrap_or_else(|_| git_sha());
     println!("cargo:rustc-env=VLINDER_GIT_SHA={}", sha);
-
-    Ok(())
 }
 
 fn git_sha() -> String {

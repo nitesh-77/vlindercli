@@ -52,15 +52,12 @@ impl OllamaWorker {
     pub fn tick(&self) -> bool {
         // Try each inference operation in turn.
         for op in [Operation::Run, Operation::Chat, Operation::Generate] {
-            match self
+            if let Ok((request, ack)) = self
                 .queue
                 .receive_request(ServiceBackend::Infer(InferenceBackendType::Ollama), op)
             {
-                Ok((request, ack)) => {
-                    self.process(request, ack, op);
-                    return true;
-                }
-                Err(_) => continue,
+                self.process(&request, ack, op);
+                return true;
             }
         }
 
@@ -69,7 +66,7 @@ impl OllamaWorker {
             ServiceBackend::Embed(EmbeddingBackendType::Ollama),
             Operation::Run,
         ) {
-            self.process_embed(request, ack);
+            self.process_embed(&request, ack);
             return true;
         }
 
@@ -78,7 +75,7 @@ impl OllamaWorker {
 
     fn process(
         &self,
-        request: RequestMessage,
+        request: &RequestMessage,
         ack: Box<dyn FnOnce() -> Result<(), vlinder_core::domain::QueueError> + Send>,
         operation: Operation,
     ) {
@@ -121,8 +118,8 @@ impl OllamaWorker {
         };
 
         let mut response =
-            ResponseMessage::from_request_with_diagnostics(&request, response_payload, diag);
-        response.state = request.state.clone();
+            ResponseMessage::from_request_with_diagnostics(request, response_payload, diag);
+        response.state.clone_from(&request.state);
         response.status_code = status_code;
         let _ = self.queue.send_response(response);
         let _ = ack();
@@ -150,8 +147,7 @@ impl OllamaWorker {
         let (ti, to) = resp
             .usage
             .as_ref()
-            .map(|u| (u.prompt_tokens, u.completion_tokens))
-            .unwrap_or((0, 0));
+            .map_or((0, 0), |u| (u.prompt_tokens, u.completion_tokens));
 
         let body = serde_json::to_vec(&resp).map_err(|e| WorkerError {
             status_code: 500,
@@ -237,7 +233,7 @@ impl OllamaWorker {
 
     fn process_embed(
         &self,
-        request: RequestMessage,
+        request: &RequestMessage,
         ack: Box<dyn FnOnce() -> Result<(), vlinder_core::domain::QueueError> + Send>,
     ) {
         let start = Instant::now();
@@ -258,8 +254,8 @@ impl OllamaWorker {
         };
 
         let mut response =
-            ResponseMessage::from_request_with_diagnostics(&request, response_payload, diag);
-        response.state = request.state.clone();
+            ResponseMessage::from_request_with_diagnostics(request, response_payload, diag);
+        response.state.clone_from(&request.state);
         response.status_code = status_code;
         let _ = self.queue.send_response(response);
         let _ = ack();
@@ -280,7 +276,7 @@ impl OllamaWorker {
                     body: error_json(&e),
                 })?;
 
-        let dimensions = resp.embeddings.first().map(|v| v.len() as u32).unwrap_or(0);
+        let dimensions = resp.embeddings.first().map_or(0, |v| v.len() as u32);
 
         let body = serde_json::to_vec(&resp).map_err(|e| WorkerError {
             status_code: 500,

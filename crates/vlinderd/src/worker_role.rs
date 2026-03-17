@@ -4,7 +4,7 @@
 //! role. The role determines which queues the worker subscribes to and what
 //! processing it performs.
 //!
-//! Workers read their role from the VLINDER_WORKER_ROLE environment variable.
+//! Workers read their role from the `VLINDER_WORKER_ROLE` environment variable.
 
 use std::fmt;
 use std::str::FromStr;
@@ -28,20 +28,20 @@ pub enum WorkerRole {
     /// Ollama inference service
     #[cfg(feature = "ollama")]
     InferenceOllama,
-    /// OpenRouter inference service (cloud LLMs)
+    /// `OpenRouter` inference service (cloud LLMs)
     #[cfg(feature = "openrouter")]
     InferenceOpenRouter,
-    /// SQLite object storage service
+    /// `SQLite` object storage service
     #[cfg(feature = "sqlite-kv")]
     StorageObjectSqlite,
     /// SQLite-vec vector storage service
     #[cfg(feature = "sqlite-vec")]
     StorageVectorSqlite,
-    /// Secret store service — gRPC interface to the SecretStore
+    /// Secret store service — gRPC interface to the `SecretStore`
     Secret,
-    /// State service — gRPC interface to the DagStore (ADR 079)
+    /// State service — gRPC interface to the `DagStore` (ADR 079)
     State,
-    /// Catalog service — gRPC interface to model catalogs (Ollama, OpenRouter)
+    /// Catalog service — gRPC interface to model catalogs (Ollama, `OpenRouter`)
     #[cfg(any(feature = "ollama", feature = "openrouter"))]
     Catalog,
     /// DAG git worker — writes messages as git commits for time-travel
@@ -51,7 +51,7 @@ pub enum WorkerRole {
 }
 
 impl WorkerRole {
-    /// Read worker role from VLINDER_WORKER_ROLE environment variable.
+    /// Read worker role from `VLINDER_WORKER_ROLE` environment variable.
     ///
     /// Returns None if the env var is not set or has an invalid value.
     pub fn from_env() -> Option<Self> {

@@ -39,7 +39,7 @@ pub enum Command {
         #[command(subcommand)]
         cmd: model::ModelCommand,
     },
-    /// Manage secrets (private keys, NKeys, API keys)
+    /// Manage secrets (private keys, `NKeys`, API keys)
     Secret {
         #[command(subcommand)]
         cmd: secret::SecretCommand,

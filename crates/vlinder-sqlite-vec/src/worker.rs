@@ -97,7 +97,7 @@ impl SqliteVecWorker {
                     response_payload,
                     diag,
                 );
-                response.state = request.state.clone();
+                response.state.clone_from(&request.state);
                 let _ = self.queue.send_response(response);
                 let _ = ack();
                 true
@@ -124,7 +124,7 @@ impl SqliteVecWorker {
                     response_payload,
                     diag,
                 );
-                response.state = request.state.clone();
+                response.state.clone_from(&request.state);
                 let _ = self.queue.send_response(response);
                 let _ = ack();
                 true
@@ -151,7 +151,7 @@ impl SqliteVecWorker {
                     response_payload,
                     diag,
                 );
-                response.state = request.state.clone();
+                response.state.clone_from(&request.state);
                 let _ = self.queue.send_response(response);
                 let _ = ack();
                 true
@@ -172,7 +172,7 @@ impl SqliteVecWorker {
         };
 
         match store.store_embedding(&req.key, &req.vector, &req.metadata) {
-            Ok(_) => b"ok".to_vec(),
+            Ok(()) => b"ok".to_vec(),
             Err(e) => format!("[error] {}", e).into_bytes(),
         }
     }
@@ -200,9 +200,10 @@ impl SqliteVecWorker {
                         })
                     })
                     .collect();
-                serde_json::to_string(&formatted)
-                    .map(|s| s.into_bytes())
-                    .unwrap_or_else(|e| format!("[error] {}", e).into_bytes())
+                serde_json::to_string(&formatted).map_or_else(
+                    |e| format!("[error] {}", e).into_bytes(),
+                    std::string::String::into_bytes,
+                )
             }
             Err(e) => format!("[error] {}", e).into_bytes(),
         }

@@ -16,10 +16,7 @@ pub fn connect_registry(config: &CliConfig) -> Arc<dyn Registry> {
     let registry_addr = normalize_addr(&config.daemon.registry_addr);
 
     if ping_registry(&registry_addr).is_none() {
-        eprintln!(
-            "Cannot reach registry at {}. Is the daemon running?",
-            registry_addr
-        );
+        eprintln!("Cannot reach registry at {registry_addr}. Is the daemon running?");
         std::process::exit(1);
     }
 
@@ -31,17 +28,14 @@ pub fn open_registry(config: &CliConfig) -> Option<Arc<dyn Registry>> {
     let registry_addr = normalize_addr(&config.daemon.registry_addr);
 
     if ping_registry(&registry_addr).is_none() {
-        eprintln!(
-            "Cannot reach registry at {}. Is the daemon running?",
-            registry_addr
-        );
+        eprintln!("Cannot reach registry at {registry_addr}. Is the daemon running?");
         return None;
     }
 
     match GrpcRegistryClient::connect(&registry_addr) {
         Ok(client) => Some(Arc::new(client)),
         Err(e) => {
-            eprintln!("Failed to connect to registry: {}", e);
+            eprintln!("Failed to connect to registry: {e}");
             None
         }
     }
@@ -52,17 +46,14 @@ pub fn connect_harness(config: &CliConfig) -> Box<dyn Harness> {
     let harness_addr = normalize_addr(&config.daemon.harness_addr);
 
     if ping_harness(&harness_addr).is_none() {
-        eprintln!(
-            "Cannot reach harness at {}. Is the daemon running?",
-            harness_addr
-        );
+        eprintln!("Cannot reach harness at {harness_addr}. Is the daemon running?");
         std::process::exit(1);
     }
 
     Box::new(GrpcHarnessClient::connect(&harness_addr).expect("Failed to connect to harness"))
 }
 
-/// Open the DagStore via gRPC state service.
+/// Open the `DagStore` via gRPC state service.
 pub fn open_dag_store(config: &CliConfig) -> Option<Box<dyn DagStore>> {
     let state_addr = normalize_addr(&config.daemon.state_addr);
     match GrpcStateClient::connect(&state_addr) {
@@ -79,6 +70,6 @@ fn normalize_addr(addr: &str) -> String {
     if addr.starts_with("http://") || addr.starts_with("https://") {
         addr.to_string()
     } else {
-        format!("http://{}", addr)
+        format!("http://{addr}")
     }
 }

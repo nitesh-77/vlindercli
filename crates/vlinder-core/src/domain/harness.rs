@@ -146,7 +146,7 @@ impl CoreHarness {
         agent_id: &ResourceId,
         input: &str,
         session_id: &SessionId,
-        timeline: &BranchId,
+        timeline: BranchId,
         sealed: bool,
         initial_state: Option<&str>,
         dag_parent: &DagNodeId,
@@ -170,14 +170,14 @@ impl CoreHarness {
 
         let last_invoke_node = self
             .store
-            .latest_node_on_branch(*timeline, Some(MessageType::Invoke))
+            .latest_node_on_branch(timeline, Some(MessageType::Invoke))
             .unwrap_or(None);
         let last_invoke_payload = last_invoke_node
             .as_ref()
             .map(|n| String::from_utf8_lossy(n.payload()).to_string());
         let last_complete_node = self
             .store
-            .latest_node_on_branch(*timeline, Some(MessageType::Complete))
+            .latest_node_on_branch(timeline, Some(MessageType::Complete))
             .unwrap_or(None);
         let last_complete_payload = last_complete_node
             .as_ref()
@@ -191,8 +191,8 @@ impl CoreHarness {
         // State: prefer DAG's latest Complete, fall back to initial_state
         let last_state = last_complete_node
             .as_ref()
-            .and_then(|n| n.message.state().map(|s| s.to_string()))
-            .or_else(|| initial_state.map(|s| s.to_string()));
+            .and_then(|n| n.message.state().map(std::string::ToString::to_string))
+            .or_else(|| initial_state.map(std::string::ToString::to_string));
 
         let job_id =
             self.registry
@@ -203,7 +203,7 @@ impl CoreHarness {
         };
 
         let invoke = InvokeMessage::new(
-            *timeline,
+            timeline,
             submission,
             session_id.clone(),
             self.harness_type(),
@@ -253,7 +253,7 @@ impl Harness for CoreHarness {
             agent_id,
             input,
             &session_id,
-            &timeline,
+            timeline,
             sealed,
             initial_state.as_deref(),
             &dag_parent,

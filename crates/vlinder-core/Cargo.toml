@@ -18,3 +18,6 @@ rand = "0.8"
 toml = "0.8"
 semver = "1"
 async-openai = { version = "0.32", default-features = false, features = ["chat-completion-types"] }
+
+[lints]
+workspace = true

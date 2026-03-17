@@ -49,8 +49,7 @@ impl Sidecar {
         let container_id = config
             .container_id
             .as_ref()
-            .map(ContainerId::new)
-            .unwrap_or_else(ContainerId::unknown);
+            .map_or_else(ContainerId::unknown, ContainerId::new);
 
         Ok(Self {
             dispatch: DispatchContext {
@@ -91,7 +90,8 @@ impl Sidecar {
                 {
                     Ok((response, ack)) => {
                         let _ = ack();
-                        match dispatch::handle_service_response(&self.dispatch, session, response) {
+                        match dispatch::handle_service_response(&self.dispatch, session, &response)
+                        {
                             Ok(InvokeOutcome::Done) => {}
                             Ok(InvokeOutcome::Pending(next)) => {
                                 durable_session = Some(*next);
@@ -129,7 +129,7 @@ impl Sidecar {
                     agent = %self.agent_name,
                     "Dispatching to container"
                 );
-                match dispatch::handle_invoke(&self.dispatch, &mut self.health, &invoke, &None) {
+                match dispatch::handle_invoke(&self.dispatch, &mut self.health, &invoke, None) {
                     Ok(InvokeOutcome::Done) => {}
                     Ok(InvokeOutcome::Pending(session)) => {
                         durable_session = Some(*session);
@@ -169,8 +169,12 @@ impl Sidecar {
                     DagNodeId::root(),
                 );
                 let reply_key = Some(delegate.reply_routing_key());
-                match dispatch::handle_invoke(&self.dispatch, &mut self.health, &invoke, &reply_key)
-                {
+                match dispatch::handle_invoke(
+                    &self.dispatch,
+                    &mut self.health,
+                    &invoke,
+                    reply_key.as_ref(),
+                ) {
                     Ok(InvokeOutcome::Done) => {}
                     Ok(InvokeOutcome::Pending(session)) => {
                         durable_session = Some(*session);

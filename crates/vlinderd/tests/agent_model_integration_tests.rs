@@ -49,8 +49,7 @@ fn model_values_are_plain_strings() {
         // Values are registry names, not URIs
         assert!(
             !name.contains("://"),
-            "model value should be a name, not a URI: {}",
-            name
+            "model value should be a name, not a URI: {name}"
         );
     }
 }

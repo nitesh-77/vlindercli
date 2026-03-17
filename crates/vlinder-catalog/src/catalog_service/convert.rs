@@ -12,7 +12,7 @@ impl From<domain::Model> for proto::Model {
         Self {
             id: m.id.to_string(),
             name: m.name,
-            model_type: model_type_to_proto(m.model_type) as i32,
+            model_type: model_type_to_proto(&m.model_type) as i32,
             provider: provider_to_proto(m.provider) as i32,
             model_path: m.model_path.to_string(),
             digest: m.digest,
@@ -73,7 +73,7 @@ impl From<proto::ModelInfo> for domain::ModelInfo {
 // Enum helpers
 // ============================================================================
 
-fn model_type_to_proto(mt: domain::ModelType) -> proto::ModelType {
+fn model_type_to_proto(mt: &domain::ModelType) -> proto::ModelType {
     match mt {
         domain::ModelType::Inference => proto::ModelType::Inference,
         domain::ModelType::Embedding => proto::ModelType::Embedding,

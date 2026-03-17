@@ -22,7 +22,7 @@ pub enum SessionCommand {
     Fork {
         /// Session ID containing the fork point
         session_id: String,
-        /// Canonical hash of the DagNode to fork from
+        /// Canonical hash of the `DagNode` to fork from
         #[arg(long)]
         from: String,
         /// Branch name for the new timeline
@@ -64,7 +64,7 @@ fn list(agent_name: &str) {
     let store = require_dag_store(&config);
 
     let sessions = store.list_sessions().unwrap_or_else(|e| {
-        eprintln!("Failed to list sessions: {}", e);
+        eprintln!("Failed to list sessions: {e}");
         std::process::exit(1);
     });
 
@@ -74,7 +74,7 @@ fn list(agent_name: &str) {
         .collect();
 
     if filtered.is_empty() {
-        println!("No sessions found for agent '{}'", agent_name);
+        println!("No sessions found for agent '{agent_name}'");
         return;
     }
 
@@ -109,12 +109,12 @@ fn get(session_id_or_name: &str) {
 
     let session_id = resolve_session_id(&*store, session_id_or_name);
     let nodes = store.get_session_nodes(&session_id).unwrap_or_else(|e| {
-        eprintln!("Failed to query session: {}", e);
+        eprintln!("Failed to query session: {e}");
         std::process::exit(1);
     });
 
     if nodes.is_empty() {
-        println!("No messages found for session {}", session_id);
+        println!("No messages found for session {session_id}");
         return;
     }
 
@@ -135,7 +135,7 @@ fn get(session_id_or_name: &str) {
 
     for sub_id in &turn_order {
         let messages = &turn_map[sub_id.as_str()];
-        println!("Turn {}", sub_id);
+        println!("Turn {sub_id}");
         for node in messages {
             let ts = node.created_at.format("%H:%M:%S%.3f");
             let (from, to) = node.message.from_to();
@@ -147,10 +147,10 @@ fn get(session_id_or_name: &str) {
                 format!("-> {}", to),
             ];
             if let Some(op) = node.message.operation() {
-                parts.push(format!("op:{}", op));
+                parts.push(format!("op:{op}"));
             }
             if let Some(ckpt) = node.message.checkpoint() {
-                parts.push(format!("ckpt:{}", ckpt));
+                parts.push(format!("ckpt:{ckpt}"));
             }
             println!("  {}", parts.join(" "));
         }
@@ -167,11 +167,11 @@ fn fork(session_id_or_name: &str, from_hash: &str, branch_name: &str) {
     let node = store
         .get_node_by_prefix(from_hash)
         .unwrap_or_else(|e| {
-            eprintln!("Failed to look up node: {}", e);
+            eprintln!("Failed to look up node: {e}");
             std::process::exit(1);
         })
         .unwrap_or_else(|| {
-            eprintln!("Node {} not found", from_hash);
+            eprintln!("Node {from_hash} not found");
             std::process::exit(1);
         });
 
@@ -187,7 +187,7 @@ fn fork(session_id_or_name: &str, from_hash: &str, branch_name: &str) {
 
     // Derive agent name from the session's Invoke message
     let agent_name = find_agent_name(&*store, &session_id).unwrap_or_else(|| {
-        eprintln!("Cannot determine agent name for session {}", session_id);
+        eprintln!("Cannot determine agent name for session {session_id}");
         std::process::exit(1);
     });
 
@@ -205,7 +205,7 @@ fn fork(session_id_or_name: &str, from_hash: &str, branch_name: &str) {
     harness
         .fork_timeline(params, session_id, timeline)
         .unwrap_or_else(|e| {
-            eprintln!("Failed to fork timeline: {}", e);
+            eprintln!("Failed to fork timeline: {e}");
             std::process::exit(1);
         });
 
@@ -225,11 +225,11 @@ fn promote(session_id_or_name: &str, branch_name: &str) {
     let branch = store
         .get_branch_by_name(branch_name)
         .unwrap_or_else(|e| {
-            eprintln!("Failed to look up branch: {}", e);
+            eprintln!("Failed to look up branch: {e}");
             std::process::exit(1);
         })
         .unwrap_or_else(|| {
-            eprintln!("Branch '{}' not found", branch_name);
+            eprintln!("Branch '{branch_name}' not found");
             std::process::exit(1);
         });
 
@@ -243,7 +243,7 @@ fn promote(session_id_or_name: &str, branch_name: &str) {
 
     // Derive agent name from the session's Invoke message
     let agent_name = find_agent_name(&*store, &session_id).unwrap_or_else(|| {
-        eprintln!("Cannot determine agent name for session {}", session_id);
+        eprintln!("Cannot determine agent name for session {session_id}");
         std::process::exit(1);
     });
 
@@ -254,20 +254,20 @@ fn promote(session_id_or_name: &str, branch_name: &str) {
     harness
         .promote_timeline(params, session_id, branch.id)
         .unwrap_or_else(|e| {
-            eprintln!("Failed to promote timeline: {}", e);
+            eprintln!("Failed to promote timeline: {e}");
             std::process::exit(1);
         });
 
-    println!("Promoted branch '{}' to main", branch_name);
+    println!("Promoted branch '{branch_name}' to main");
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Sort nodes in causal order by walking the parent_hash Merkle chain.
+/// Sort nodes in causal order by walking the `parent_hash` Merkle chain.
 ///
-/// Finds the root (empty parent_id) and follows children to produce
+/// Finds the root (empty `parent_id`) and follows children to produce
 /// a linear ordering that respects causality regardless of wall-clock time.
 fn causal_sort(nodes: &[vlinder_core::domain::DagNode]) -> Vec<vlinder_core::domain::DagNode> {
     let by_parent: std::collections::HashMap<&str, &vlinder_core::domain::DagNode> =
@@ -299,7 +299,7 @@ fn causal_sort(nodes: &[vlinder_core::domain::DagNode]) -> Vec<vlinder_core::dom
     sorted
 }
 
-/// Resolve a user-provided string (UUID or petname) to a SessionId.
+/// Resolve a user-provided string (UUID or petname) to a `SessionId`.
 fn resolve_session_id(store: &dyn DagStore, id_or_name: &str) -> SessionId {
     // If it's a valid UUID, use it directly
     if let Ok(session_id) = SessionId::try_from(id_or_name.to_string()) {
@@ -309,7 +309,7 @@ fn resolve_session_id(store: &dyn DagStore, id_or_name: &str) -> SessionId {
     if let Some(session) = store.get_session_by_name(id_or_name).ok().flatten() {
         return session.id;
     }
-    eprintln!("Session '{}' not found", id_or_name);
+    eprintln!("Session '{id_or_name}' not found");
     std::process::exit(1);
 }
 

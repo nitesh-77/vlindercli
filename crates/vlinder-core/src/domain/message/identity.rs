@@ -301,6 +301,7 @@ impl Sequence {
     }
 
     /// Get the next sequence number.
+    #[must_use]
     pub fn next(&self) -> Self {
         Self(self.0 + 1)
     }

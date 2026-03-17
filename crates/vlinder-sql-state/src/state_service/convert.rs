@@ -26,10 +26,16 @@ fn dag_node_to_proto(node: &DagNode) -> proto::DagNode {
         diagnostics: node.message.diagnostics_json(),
         stderr: node.message.stderr().to_vec(),
         created_at: node.created_at.to_rfc3339(),
-        state: node.message.state().map(|s| s.to_string()),
+        state: node.message.state().map(std::string::ToString::to_string),
         protocol_version: node.protocol_version().to_string(),
-        checkpoint: node.message.checkpoint().map(|s| s.to_string()),
-        operation: node.message.operation().map(|s| s.to_string()),
+        checkpoint: node
+            .message
+            .checkpoint()
+            .map(std::string::ToString::to_string),
+        operation: node
+            .message
+            .operation()
+            .map(std::string::ToString::to_string),
         message_blob,
     }
 }

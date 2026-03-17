@@ -38,9 +38,9 @@ impl ProviderServer {
         state: Arc<RwLock<Option<String>>>,
         port: u16,
     ) -> Self {
-        let bind = format!("0.0.0.0:{}", port);
+        let bind = format!("0.0.0.0:{port}");
         let server = tiny_http::Server::http(&bind)
-            .unwrap_or_else(|_| panic!("failed to bind provider server on port {}", port));
+            .unwrap_or_else(|_| panic!("failed to bind provider server on port {port}"));
         tracing::info!(
             event = "provider_server.listening",
             port = port,
@@ -55,7 +55,7 @@ impl ProviderServer {
             })
             .collect();
 
-        let runtime_host = format!("runtime.vlinder.local:{}", port);
+        let runtime_host = format!("runtime.vlinder.local:{port}");
 
         let shutdown_signal = Arc::new(AtomicBool::new(false));
         let should_stop = Arc::clone(&shutdown_signal);
@@ -87,6 +87,7 @@ impl Drop for ProviderServer {
 }
 
 /// The main request loop — recv, route, call handler, respond.
+#[allow(clippy::needless_pass_by_value)]
 fn request_loop(
     should_stop: Arc<AtomicBool>,
     server: tiny_http::Server,
@@ -130,7 +131,7 @@ fn request_loop(
                     .with_status_code(StatusCode(status));
                 let _ = request.respond(response);
             }
-            Ok(None) => continue,
+            Ok(None) => {}
             Err(_) => break,
         }
     }
@@ -143,8 +144,7 @@ fn extract_host(request: &tiny_http::Request) -> &str {
         .headers()
         .iter()
         .find(|h| h.field.as_str().as_str().eq_ignore_ascii_case("host"))
-        .map(|h| h.value.as_str())
-        .unwrap_or("")
+        .map_or("", |h| h.value.as_str())
 }
 
 /// Extract the X-Vlinder-Checkpoint header value, if present.

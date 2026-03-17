@@ -443,8 +443,7 @@ impl ObservableMessage {
             ObservableMessage::Complete(m) => &m.payload,
             ObservableMessage::Delegate(m) => &m.payload,
             ObservableMessage::Repair(m) => &m.payload,
-            ObservableMessage::Fork(_) => &[],
-            ObservableMessage::Promote(_) => &[],
+            ObservableMessage::Fork(_) | ObservableMessage::Promote(_) => &[],
         }
     }
 
@@ -460,8 +459,7 @@ impl ObservableMessage {
             ObservableMessage::Complete(m) => m.payload = payload,
             ObservableMessage::Delegate(m) => m.payload = payload,
             ObservableMessage::Repair(m) => m.payload = payload,
-            ObservableMessage::Fork(_) => {}
-            ObservableMessage::Promote(_) => {}
+            ObservableMessage::Fork(_) | ObservableMessage::Promote(_) => {}
         }
     }
 
@@ -500,8 +498,7 @@ impl ObservableMessage {
             ObservableMessage::Complete(m) => m.state.as_deref(),
             ObservableMessage::Delegate(m) => m.state.as_deref(),
             ObservableMessage::Repair(m) => m.state.as_deref(),
-            ObservableMessage::Fork(_) => None,
-            ObservableMessage::Promote(_) => None,
+            ObservableMessage::Fork(_) | ObservableMessage::Promote(_) => None,
         }
     }
 

@@ -56,6 +56,7 @@ impl InMemoryRegistry {
     }
 
     /// Internal: check if runtime is available for agent (needs read lock held).
+    #[allow(clippy::unused_self)]
     fn select_runtime_internal(&self, agent: &Agent, state: &RegistryState) -> Option<RuntimeType> {
         if state.available_runtimes.contains(&agent.runtime) {
             Some(agent.runtime)
@@ -254,9 +255,8 @@ impl Registry for InMemoryRegistry {
                 if *stored_manifest == manifest {
                     // Same manifest → idempotent, return existing agent
                     return Ok(state.agents.get(&agent_id).unwrap().clone());
-                } else {
-                    return Err(RegistrationError::ConfigMismatch(manifest.name.clone()));
                 }
+                return Err(RegistrationError::ConfigMismatch(manifest.name.clone()));
             }
         }
 

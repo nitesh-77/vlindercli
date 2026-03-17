@@ -40,12 +40,12 @@ fn scaffold(name: &str) {
     let target = std::path::Path::new(name);
 
     if target.exists() {
-        eprintln!("Error: directory '{}' already exists.", name);
+        eprintln!("Error: directory '{name}' already exists.");
         std::process::exit(1);
     }
 
     std::fs::create_dir(target).unwrap_or_else(|e| {
-        eprintln!("Error: failed to create directory '{}': {}", name, e);
+        eprintln!("Error: failed to create directory '{name}': {e}");
         std::process::exit(1);
     });
 
@@ -69,19 +69,19 @@ fn scaffold(name: &str) {
     );
 
     std::fs::write(target.join("fleet.toml"), fleet_toml).unwrap_or_else(|e| {
-        eprintln!("Error: failed to write fleet.toml: {}", e);
+        eprintln!("Error: failed to write fleet.toml: {e}");
         std::process::exit(1);
     });
 
-    println!("Created fleet '{}'.", name);
+    println!("Created fleet '{name}'.");
     println!();
     println!("Next steps:");
-    println!("  cd {}", name);
+    println!("  cd {name}");
     println!("  mkdir -p agents");
     println!("  vlinder agent new <language> agents/<agent-name>");
     println!("  # repeat for each agent, then update fleet.toml");
     println!("  vlinder fleet deploy");
-    println!("  vlinder fleet run {}", name);
+    println!("  vlinder fleet run {name}");
 }
 
 pub fn deploy(path: Option<PathBuf>) {
@@ -107,7 +107,7 @@ pub fn deploy(path: Option<PathBuf>) {
     // Deploy fleet-level models from <fleet_dir>/models/*.toml
     let fleet_models = deploy_fleet_models(&absolute_path, &*registry);
     for name in &fleet_models {
-        println!("  Model: {} (fleet-level)", name);
+        println!("  Model: {name} (fleet-level)");
     }
 
     for (name, agent_entry) in &manifest.agents {
@@ -118,7 +118,7 @@ pub fn deploy(path: Option<PathBuf>) {
 
     // Build Fleet from manifest + registry, then register
     let fleet = Fleet::from_manifest(manifest, &*registry).unwrap_or_else(|e| {
-        eprintln!("Failed to build fleet: {}", e);
+        eprintln!("Failed to build fleet: {e}");
         std::process::exit(1);
     });
 
@@ -126,11 +126,11 @@ pub fn deploy(path: Option<PathBuf>) {
     let entry_id = fleet.entry.clone();
 
     registry.register_fleet(fleet).unwrap_or_else(|e| {
-        eprintln!("Failed to register fleet: {}", e);
+        eprintln!("Failed to register fleet: {e}");
         std::process::exit(1);
     });
 
-    println!("Deployed fleet '{}' (entry: {})", fleet_name, entry_id);
+    println!("Deployed fleet '{fleet_name}' (entry: {entry_id})");
 }
 
 /// Deploy all models found in `<fleet_dir>/models/*.toml`.
@@ -146,21 +146,21 @@ fn deploy_fleet_models(fleet_dir: &Path, registry: &dyn Registry) -> Vec<String>
 
     let mut entries: Vec<_> = std::fs::read_dir(&models_dir)
         .unwrap_or_else(|e| {
-            eprintln!("Failed to read fleet models directory: {}", e);
+            eprintln!("Failed to read fleet models directory: {e}");
             std::process::exit(1);
         })
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
         .filter(|e| e.path().extension().is_some_and(|ext| ext == "toml"))
         .collect();
 
-    entries.sort_by_key(|e| e.file_name());
+    entries.sort_by_key(std::fs::DirEntry::file_name);
 
     let mut deployed = Vec::new();
     for entry in entries {
         match super::model::load_and_register_model(&entry.path(), registry) {
             Ok(model) => deployed.push(model.name),
             Err(e) => {
-                eprintln!("{}", e);
+                eprintln!("{e}");
                 std::process::exit(1);
             }
         }
@@ -173,15 +173,9 @@ pub fn run(name: &str) {
     let config = CliConfig::load();
     let registry = connect_registry(&config);
 
-    let fleet = match registry.get_fleet(name) {
-        Some(f) => f,
-        None => {
-            eprintln!(
-                "Fleet '{}' not found — deploy it first with: vlinder fleet deploy",
-                name
-            );
-            std::process::exit(1);
-        }
+    let Some(fleet) = registry.get_fleet(name) else {
+        eprintln!("Fleet '{name}' not found — deploy it first with: vlinder fleet deploy");
+        std::process::exit(1);
     };
 
     let entry_agent_id = fleet.entry.clone();
@@ -205,7 +199,7 @@ pub fn run(name: &str) {
 
     // Run REPL with synchronous run_agent (ADR 092)
     repl::run(|input| {
-        let enriched_input = format!("{}\n\n{}", fleet_context, input);
+        let enriched_input = format!("{fleet_context}\n\n{input}");
         match harness.run_agent(
             &entry_agent_id,
             &enriched_input,
@@ -216,7 +210,7 @@ pub fn run(name: &str) {
             DagNodeId::root(),
         ) {
             Ok(result) => result,
-            Err(e) => format!("[error] {}", e),
+            Err(e) => format!("[error] {e}"),
         }
     });
 }

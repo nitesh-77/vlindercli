@@ -1,15 +1,15 @@
 //! Dual-output trace logging for the sidecar.
 //!
 //! Logs are emitted immediately via `tracing` (visible in `podman logs`)
-//! AND collected in a `Vec<String>` that becomes part of the CompleteMessage
+//! AND collected in a `Vec<String>` that becomes part of the `CompleteMessage`
 //! diagnostics. This ensures that if the sidecar hangs mid-operation, the
 //! last log line in `podman logs` shows exactly what it was doing.
 //!
 //! Usage:
-//!   let mut trace = TraceLog::new();
+//!   let mut trace = `TraceLog::new()`;
 //!   trace.log("Posting to agent container");
 //!   // ... do work ...
-//!   let lines: Vec<String> = trace.finish();
+//!   let lines: Vec<String> = `trace.finish()`;
 
 /// Collects trace lines and emits each one immediately via tracing.
 pub struct TraceLog {

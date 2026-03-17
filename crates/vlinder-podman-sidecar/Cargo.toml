@@ -17,3 +17,6 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 semver = "1"
 ureq = "2"
+
+[lints]
+workspace = true

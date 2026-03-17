@@ -326,7 +326,7 @@ impl DagStore for SqliteDagStore {
             rusqlite::params![
                 name,
                 session_id.as_str(),
-                fork_point.map(|fp| fp.as_str()),
+                fork_point.map(vlinder_core::domain::DagNodeId::as_str),
                 Utc::now().to_rfc3339()
             ],
         )
@@ -467,34 +467,31 @@ impl DagStore for SqliteDagStore {
         let conn = self.conn.lock().unwrap();
         let branch_id_str = branch_id.to_string();
 
-        match message_type {
-            Some(mt) => {
-                let mut stmt = conn
-                    .prepare(&format!(
-                        "SELECT {} FROM dag_nodes WHERE timeline_id = ?1 AND message_type = ?2 ORDER BY created_at DESC LIMIT 1",
-                        DAG_NODE_COLUMNS
-                    ))
-                    .map_err(|e| format!("latest_node_on_branch prepare failed: {}", e))?;
+        if let Some(mt) = message_type {
+            let mut stmt = conn
+                .prepare(&format!(
+                    "SELECT {} FROM dag_nodes WHERE timeline_id = ?1 AND message_type = ?2 ORDER BY created_at DESC LIMIT 1",
+                    DAG_NODE_COLUMNS
+                ))
+                .map_err(|e| format!("latest_node_on_branch prepare failed: {}", e))?;
 
-                stmt.query_row(
-                    rusqlite::params![branch_id_str, mt.as_str()],
-                    row_to_dag_node,
-                )
+            stmt.query_row(
+                rusqlite::params![branch_id_str, mt.as_str()],
+                row_to_dag_node,
+            )
+            .optional()
+            .map_err(|e| format!("latest_node_on_branch query failed: {}", e))
+        } else {
+            let mut stmt = conn
+                .prepare(&format!(
+                    "SELECT {} FROM dag_nodes WHERE timeline_id = ?1 ORDER BY created_at DESC LIMIT 1",
+                    DAG_NODE_COLUMNS
+                ))
+                .map_err(|e| format!("latest_node_on_branch prepare failed: {}", e))?;
+
+            stmt.query_row(rusqlite::params![branch_id_str], row_to_dag_node)
                 .optional()
                 .map_err(|e| format!("latest_node_on_branch query failed: {}", e))
-            }
-            None => {
-                let mut stmt = conn
-                    .prepare(&format!(
-                        "SELECT {} FROM dag_nodes WHERE timeline_id = ?1 ORDER BY created_at DESC LIMIT 1",
-                        DAG_NODE_COLUMNS
-                    ))
-                    .map_err(|e| format!("latest_node_on_branch prepare failed: {}", e))?;
-
-                stmt.query_row(rusqlite::params![branch_id_str], row_to_dag_node)
-                    .optional()
-                    .map_err(|e| format!("latest_node_on_branch query failed: {}", e))
-            }
         }
     }
 

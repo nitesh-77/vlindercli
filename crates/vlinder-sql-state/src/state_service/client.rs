@@ -101,7 +101,7 @@ impl DagStore for GrpcStateClient {
             .into_inner()
             .nodes
             .into_iter()
-            .map(|n| n.try_into())
+            .map(std::convert::TryInto::try_into)
             .collect()
     }
 
@@ -120,7 +120,7 @@ impl DagStore for GrpcStateClient {
             .into_inner()
             .nodes
             .into_iter()
-            .map(|n| n.try_into())
+            .map(std::convert::TryInto::try_into)
             .collect()
     }
 
@@ -137,7 +137,7 @@ impl DagStore for GrpcStateClient {
         let request = proto::CreateBranchRequest {
             name: name.to_string(),
             session_id: session_id.as_str().to_string(),
-            fork_point: fork_point.map(|fp| fp.to_string()),
+            fork_point: fork_point.map(std::string::ToString::to_string),
         };
         let mut client = self.client.clone();
         let response = self
@@ -188,7 +188,7 @@ impl DagStore for GrpcStateClient {
             .into_inner()
             .sessions
             .into_iter()
-            .map(|s| s.try_into())
+            .map(std::convert::TryInto::try_into)
             .collect()
     }
 
@@ -207,7 +207,7 @@ impl DagStore for GrpcStateClient {
             .into_inner()
             .nodes
             .into_iter()
-            .map(|n| n.try_into())
+            .map(std::convert::TryInto::try_into)
             .collect()
     }
 
@@ -246,7 +246,7 @@ impl DagStore for GrpcStateClient {
             .into_inner()
             .branches
             .into_iter()
-            .map(|b| b.try_into())
+            .map(std::convert::TryInto::try_into)
             .collect()
     }
 

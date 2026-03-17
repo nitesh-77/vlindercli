@@ -28,7 +28,7 @@ pub enum QueueBackend {
     Memory,
 }
 
-/// State backend selector (DagStore).
+/// State backend selector (`DagStore`).
 ///
 /// Same gating strategy as `QueueBackend`: `Grpc` in prod, `Memory` in tests.
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
@@ -42,7 +42,7 @@ pub enum StateBackend {
 /// Registry backend selector.
 ///
 /// Same gating strategy: `Grpc` in prod (connects to registry service),
-/// `Memory` in tests (in-process InMemoryRegistry).
+/// `Memory` in tests (in-process `InMemoryRegistry`).
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum RegistryBackend {
@@ -128,7 +128,7 @@ pub struct OllamaConfig {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct OpenRouterConfig {
-    /// OpenRouter API endpoint
+    /// `OpenRouter` API endpoint
     pub endpoint: String,
     /// API key for authentication
     pub api_key: String,
@@ -148,7 +148,7 @@ impl QueueConfig {
     /// Produce the NATS connection config consumed by vlinder-nats.
     ///
     /// Single mapping point — factories and workers call this instead
-    /// of reaching into nats_url/nats_creds directly.
+    /// of reaching into `nats_url/nats_creds` directly.
     pub fn nats_config(&self) -> vlinder_nats::NatsConfig {
         vlinder_nats::NatsConfig {
             url: self.nats_url.clone(),
@@ -235,7 +235,7 @@ pub struct AgentWorkerCounts {
 pub struct InferenceWorkerCounts {
     /// Ollama inference workers
     pub ollama: u32,
-    /// OpenRouter inference workers
+    /// `OpenRouter` inference workers
     pub openrouter: u32,
 }
 
@@ -253,7 +253,7 @@ pub struct StorageWorkerCounts {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct ObjectStorageWorkerCounts {
-    /// SQLite object storage workers
+    /// `SQLite` object storage workers
     pub sqlite: u32,
 }
 
@@ -431,14 +431,13 @@ impl Config {
     /// Panics if no config file exists — run `vlinder init` first.
     fn load_from_file() -> Self {
         let config_path = config_path();
-        if !config_path.exists() {
-            panic!(
-                "Config file not found: {}\n\
-                 Run `vlinder init` or create it manually.\n\
-                 Required sections: [queue] (backend), [state] (backend)",
-                config_path.display()
-            );
-        }
+        assert!(
+            config_path.exists(),
+            "Config file not found: {}\n\
+             Run `vlinder init` or create it manually.\n\
+             Required sections: [queue] (backend), [state] (backend)",
+            config_path.display()
+        );
         let contents = std::fs::read_to_string(&config_path)
             .unwrap_or_else(|e| panic!("Cannot read {}: {}", config_path.display(), e));
         toml::from_str(&contents)
@@ -593,10 +592,10 @@ impl Config {
         }
     }
 
-    /// Build tracing EnvFilter from config.
+    /// Build tracing `EnvFilter` from config.
     ///
     /// The configured level applies to vlinderd only. External crates
-    /// (async_nats, tonic, hyper, etc.) are suppressed to warn so they
+    /// (`async_nats`, tonic, hyper, etc.) are suppressed to warn so they
     /// don't pollute the user's terminal.
     pub fn tracing_filter(&self) -> String {
         format!("warn,vlinderd={}", self.logging.level)
@@ -664,16 +663,15 @@ pub fn config_path() -> PathBuf {
 /// Base directory for vlinder data (agents, models, storage).
 ///
 /// Resolution order:
-/// 1. Env var VLINDER_DIR (for project-local or CI)
+/// 1. Env var `VLINDER_DIR` (for project-local or CI)
 /// 2. Default: ~/.vlinder
 pub fn vlinder_dir() -> PathBuf {
-    std::env::var("VLINDER_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            dirs::home_dir()
-                .expect("Could not determine home directory")
-                .join(".vlinder")
-        })
+    match std::env::var("VLINDER_DIR") {
+        Ok(v) => PathBuf::from(v),
+        Err(_) => dirs::home_dir()
+            .expect("Could not determine home directory")
+            .join(".vlinder"),
+    }
 }
 
 pub fn agents_dir() -> PathBuf {
@@ -689,11 +687,11 @@ pub fn agent_dir(name: &str) -> PathBuf {
 }
 
 pub fn agent_manifest_path(name: &str) -> PathBuf {
-    agent_dir(name).join(format!("{}-agent.toml", name))
+    agent_dir(name).join(format!("{name}-agent.toml"))
 }
 
 pub fn agent_db_path(name: &str) -> PathBuf {
-    agent_dir(name).join(format!("{}.db", name))
+    agent_dir(name).join(format!("{name}.db"))
 }
 
 pub fn conversations_dir() -> PathBuf {

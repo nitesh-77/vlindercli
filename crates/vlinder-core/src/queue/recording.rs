@@ -67,8 +67,7 @@ impl RecordingQueue {
 
         let parent_id = parent_node
             .as_ref()
-            .map(|n| n.id.clone())
-            .unwrap_or_else(DagNodeId::root);
+            .map_or_else(DagNodeId::root, |n| n.id.clone());
         let parent_state = parent_node
             .as_ref()
             .map(|n| &n.state)

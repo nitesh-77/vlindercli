@@ -1,7 +1,7 @@
 //! CLI-specific configuration — reads ~/.vlinder/client.toml.
 //!
 //! Resolution order (highest priority first):
-//! 1. Environment variable: VLINDER_DAEMON_<KEY> (or VLINDER_DISTRIBUTED_<KEY> fallback)
+//! 1. Environment variable: `VLINDER_DAEMON`_<KEY> (or `VLINDER_DISTRIBUTED`_<KEY> fallback)
 //! 2. Config file: ~/.vlinder/client.toml
 //! 3. Default value
 
@@ -32,6 +32,7 @@ pub struct LoggingConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
+#[allow(clippy::struct_field_names)]
 pub struct DaemonConfig {
     pub registry_addr: String,
     pub harness_addr: String,
@@ -140,15 +141,14 @@ fn env_with_fallback(primary: &str, fallback: &str, default: &str) -> String {
 
 /// Base directory for vlinder data.
 ///
-/// Resolution: VLINDER_DIR env var → ~/.vlinder
+/// Resolution: `VLINDER_DIR` env var → ~/.vlinder
 pub fn vlinder_dir() -> PathBuf {
-    std::env::var("VLINDER_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            dirs::home_dir()
-                .expect("Could not determine home directory")
-                .join(".vlinder")
-        })
+    match std::env::var("VLINDER_DIR") {
+        Ok(v) => PathBuf::from(v),
+        Err(_) => dirs::home_dir()
+            .expect("Could not determine home directory")
+            .join(".vlinder"),
+    }
 }
 
 pub fn logs_dir() -> PathBuf {

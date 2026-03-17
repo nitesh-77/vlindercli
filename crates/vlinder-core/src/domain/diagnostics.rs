@@ -234,8 +234,7 @@ impl HealthWindow {
         while self
             .snapshots
             .front()
-            .map(|s| s.timestamp_ms < cutoff)
-            .unwrap_or(false)
+            .is_some_and(|s| s.timestamp_ms < cutoff)
         {
             self.snapshots.pop_front();
         }
@@ -253,7 +252,7 @@ impl HealthWindow {
 
     /// Whether the most recent snapshot indicates a healthy agent.
     pub fn is_healthy(&self) -> bool {
-        self.latest().map(|s| s.status_code == 200).unwrap_or(false)
+        self.latest().is_some_and(|s| s.status_code == 200)
     }
 
     /// Number of snapshots currently in the window.

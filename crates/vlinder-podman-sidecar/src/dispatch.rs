@@ -1,7 +1,7 @@
 //! Dispatch — handles a single agent invocation.
 //!
 //! Sets up the provider server, POSTs to the agent container, and builds
-//! the CompleteMessage from the response.
+//! the `CompleteMessage` from the response.
 //!
 //! Durable agents (ADR 111) return JSON actions with X-Vlinder-Mode: durable.
 //! The sidecar sends service requests to the queue and delivers responses
@@ -47,7 +47,7 @@ pub struct DurableSession {
 
 /// Result of handling an invoke or a service response.
 pub enum InvokeOutcome {
-    /// Invocation fully handled — CompleteMessage sent.
+    /// Invocation fully handled — `CompleteMessage` sent.
     Done,
     /// Durable mode — waiting for a service response.
     Pending(Box<DurableSession>),
@@ -58,7 +58,7 @@ pub fn handle_invoke(
     ctx: &DispatchContext,
     health: &mut HealthWindow,
     invoke: &InvokeMessage,
-    reply_key: &Option<RoutingKey>,
+    reply_key: Option<&RoutingKey>,
 ) -> Result<InvokeOutcome, String> {
     let started_at = Instant::now();
     let mut trace = TraceLog::new();
@@ -95,14 +95,13 @@ pub fn handle_invoke(
         Ok(response) => {
             let is_durable = response
                 .header("X-Vlinder-Mode")
-                .map(|v| v == "durable")
-                .unwrap_or(false);
+                .is_some_and(|v| v == "durable");
 
             let mut output = Vec::new();
             response
                 .into_reader()
                 .read_to_end(&mut output)
-                .map_err(|e| format!("Failed to read agent response body: {}", e))?;
+                .map_err(|e| format!("Failed to read agent response body: {e}"))?;
             trace.log(format!(
                 "Agent responded ({} bytes, {}ms)",
                 output.len(),
@@ -126,7 +125,7 @@ pub fn handle_invoke(
                 let sequence = SequenceCounter::new();
                 handle_action(
                     ctx,
-                    output,
+                    &output,
                     invoke,
                     reply_key,
                     checkpoint_hosts,
@@ -142,8 +141,8 @@ pub fn handle_invoke(
                     ctx.container_port,
                     duration_ms,
                     &ctx.container_id,
-                    &ctx.image_ref,
-                    &ctx.image_digest,
+                    ctx.image_ref.as_ref(),
+                    ctx.image_digest.as_ref(),
                 );
                 trace.log("Sending complete");
                 let complete =
@@ -164,14 +163,14 @@ pub fn handle_invoke(
                 "Agent container returned an error"
             );
             let complete = invoke
-                .create_reply(format!("[error] agent container error: {}", err_body).into_bytes());
+                .create_reply(format!("[error] agent container error: {err_body}").into_bytes());
             send_reply(&ctx.queue, complete, reply_key);
-            Err(format!("Agent returned error: {}", err_body))
+            Err(format!("Agent returned error: {err_body}"))
         }
         Err(e) => {
-            let msg = format!("Request to agent failed: {}", e);
+            let msg = format!("Request to agent failed: {e}");
             tracing::warn!(event = "container.unreachable", error = %msg);
-            let complete = invoke.create_reply(format!("[error] {}", msg).into_bytes());
+            let complete = invoke.create_reply(format!("[error] {msg}").into_bytes());
             send_reply(&ctx.queue, complete, reply_key);
             Err(msg)
         }
@@ -184,7 +183,7 @@ pub fn handle_invoke(
 pub fn handle_service_response(
     ctx: &DispatchContext,
     session: DurableSession,
-    response: ResponseMessage,
+    response: &ResponseMessage,
 ) -> Result<InvokeOutcome, String> {
     let mut trace = TraceLog::new();
 
@@ -207,8 +206,8 @@ pub fn handle_service_response(
         "result": result_json,
     });
 
-    let callback_bytes = serde_json::to_vec(&callback)
-        .map_err(|e| format!("Failed to serialize callback: {}", e))?;
+    let callback_bytes =
+        serde_json::to_vec(&callback).map_err(|e| format!("Failed to serialize callback: {e}"))?;
 
     let client = ureq::Agent::new();
     let agent_url = format!("http://127.0.0.1:{}/invoke", ctx.container_port);
@@ -228,7 +227,7 @@ pub fn handle_service_response(
             let mut output = Vec::new();
             resp.into_reader()
                 .read_to_end(&mut output)
-                .map_err(|e| format!("Failed to read callback response: {}", e))?;
+                .map_err(|e| format!("Failed to read callback response: {e}"))?;
             trace.log(format!(
                 "Callback responded ({} bytes, {}ms elapsed)",
                 output.len(),
@@ -237,21 +236,21 @@ pub fn handle_service_response(
 
             handle_action(
                 ctx,
-                output,
+                &output,
                 &session.invoke,
-                &session.reply_key,
+                session.reply_key.as_ref(),
                 session.hosts,
                 session.sequence,
                 session.started_at,
             )
         }
         Err(e) => {
-            let msg = format!("Callback to agent failed: {}", e);
+            let msg = format!("Callback to agent failed: {e}");
             trace.log(&msg);
             let complete = session
                 .invoke
-                .create_reply(format!("[error] {}", msg).into_bytes());
-            send_reply(&ctx.queue, complete, &session.reply_key);
+                .create_reply(format!("[error] {msg}").into_bytes());
+            send_reply(&ctx.queue, complete, session.reply_key.as_ref());
             Err(msg)
         }
     }
@@ -317,7 +316,7 @@ pub fn handle_repair(
 
     ctx.queue
         .send_request(request.clone())
-        .map_err(|e| format!("Failed to send repair request: {}", e))?;
+        .map_err(|e| format!("Failed to send repair request: {e}"))?;
 
     // Build a synthetic InvokeMessage so DurableSession can create
     // CompleteMessage replies when the agent finishes.
@@ -355,17 +354,17 @@ pub fn handle_repair(
 /// Parse and execute a JSON action from the agent.
 fn handle_action(
     ctx: &DispatchContext,
-    action_bytes: Vec<u8>,
+    action_bytes: &[u8],
     invoke: &InvokeMessage,
-    reply_key: &Option<RoutingKey>,
+    reply_key: Option<&RoutingKey>,
     hosts: Vec<ProviderHost>,
     sequence: SequenceCounter,
     started_at: Instant,
 ) -> Result<InvokeOutcome, String> {
     let mut trace = TraceLog::new();
 
-    let action: serde_json::Value = serde_json::from_slice(&action_bytes)
-        .map_err(|e| format!("Failed to parse action: {}", e))?;
+    let action: serde_json::Value =
+        serde_json::from_slice(action_bytes).map_err(|e| format!("Failed to parse action: {e}"))?;
 
     let action_type = action["action"]
         .as_str()
@@ -398,11 +397,11 @@ fn handle_action(
                 .ok_or("Missing 'then' in call action")?;
 
             let call_body = serde_json::to_vec(&action["json"])
-                .map_err(|e| format!("Failed to serialize call body: {}", e))?;
+                .map_err(|e| format!("Failed to serialize call body: {e}"))?;
 
             let (host, path) = parse_url_host_path(url)?;
             let route = match_route(&hosts, &host, &path)
-                .ok_or_else(|| format!("No route for {}:{}", host, path))?;
+                .ok_or_else(|| format!("No route for {host}:{path}"))?;
 
             let seq = sequence.next();
             let diagnostics = RequestDiagnostics {
@@ -438,28 +437,28 @@ fn handle_action(
 
             ctx.queue
                 .send_request(request.clone())
-                .map_err(|e| format!("Failed to send request: {}", e))?;
+                .map_err(|e| format!("Failed to send request: {e}"))?;
 
             Ok(InvokeOutcome::Pending(Box::new(DurableSession {
                 invoke: invoke.clone(),
-                reply_key: reply_key.clone(),
+                reply_key: reply_key.cloned(),
                 hosts,
                 sequence,
                 pending_request: request,
                 started_at,
             })))
         }
-        other => Err(format!("Unknown action: {}", other)),
+        other => Err(format!("Unknown action: {other}")),
     }
 }
 
-/// Route a CompleteMessage to the correct destination.
+/// Route a `CompleteMessage` to the correct destination.
 fn send_reply(
     queue: &Arc<dyn MessageQueue + Send + Sync>,
     complete: CompleteMessage,
-    reply_key: &Option<RoutingKey>,
+    reply_key: Option<&RoutingKey>,
 ) {
-    if let Some(ref key) = reply_key {
+    if let Some(key) = reply_key {
         queue.send_delegate_reply(complete, key).unwrap();
     } else {
         queue.send_complete(complete).unwrap();
@@ -471,7 +470,7 @@ fn parse_url_host_path(url: &str) -> Result<(String, String), String> {
     let without_scheme = url
         .strip_prefix("http://")
         .or_else(|| url.strip_prefix("https://"))
-        .ok_or_else(|| format!("URL missing scheme: {}", url))?;
+        .ok_or_else(|| format!("URL missing scheme: {url}"))?;
     match without_scheme.find('/') {
         Some(i) => Ok((
             without_scheme[..i].to_string(),

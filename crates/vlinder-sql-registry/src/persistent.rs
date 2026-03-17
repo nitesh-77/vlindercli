@@ -249,7 +249,7 @@ impl Registry for PersistentRegistry {
     }
 
     fn update_job_status(&self, id: &JobId, status: JobStatus) {
-        self.inner.update_job_status(id, status)
+        self.inner.update_job_status(id, status);
     }
 
     fn pending_jobs(&self) -> Vec<Job> {
@@ -259,23 +259,23 @@ impl Registry for PersistentRegistry {
     // --- Capability registration (delegate directly) ---
 
     fn register_runtime(&self, runtime_type: RuntimeType) {
-        self.inner.register_runtime(runtime_type)
+        self.inner.register_runtime(runtime_type);
     }
 
     fn register_object_storage(&self, storage_type: ObjectStorageType) {
-        self.inner.register_object_storage(storage_type)
+        self.inner.register_object_storage(storage_type);
     }
 
     fn register_vector_storage(&self, storage_type: VectorStorageType) {
-        self.inner.register_vector_storage(storage_type)
+        self.inner.register_vector_storage(storage_type);
     }
 
     fn register_inference_engine(&self, engine_type: Provider) {
-        self.inner.register_inference_engine(engine_type)
+        self.inner.register_inference_engine(engine_type);
     }
 
     fn register_embedding_engine(&self, engine_type: Provider) {
-        self.inner.register_embedding_engine(engine_type)
+        self.inner.register_embedding_engine(engine_type);
     }
 
     // --- Capability queries (delegate directly) ---

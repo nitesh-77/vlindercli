@@ -50,7 +50,10 @@ impl PodmanClient for PodmanCliClient {
             .iter()
             .flat_map(|alias| vec!["--add-host".to_string(), alias.clone()])
             .collect();
-        let add_host_refs: Vec<&str> = add_host_args.iter().map(|s| s.as_str()).collect();
+        let add_host_refs: Vec<&str> = add_host_args
+            .iter()
+            .map(std::string::String::as_str)
+            .collect();
         args.extend(add_host_refs);
 
         let output = Command::new("podman")

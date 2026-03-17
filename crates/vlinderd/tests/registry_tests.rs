@@ -127,7 +127,7 @@ fn delete_model_blocked_by_deployed_agent() {
             assert_eq!(name, "phi3");
             assert!(agents.contains(&"model-test-agent".to_string()));
         }
-        other => panic!("expected ModelInUse, got: {}", other),
+        other => panic!("expected ModelInUse, got: {other}"),
     }
 
     // Model still exists
@@ -179,7 +179,7 @@ fn register_model_rejected_without_inference_engine() {
             assert_eq!(prov, Provider::Ollama);
             assert_eq!(model, "phi3");
         }
-        other => panic!("expected InferenceEngineUnavailable, got: {}", other),
+        other => panic!("expected InferenceEngineUnavailable, got: {other}"),
     }
 }
 
@@ -204,7 +204,7 @@ fn register_model_rejected_without_embedding_engine() {
             assert_eq!(prov, Provider::Ollama);
             assert_eq!(model, "nomic-embed");
         }
-        other => panic!("expected EmbeddingEngineUnavailable, got: {}", other),
+        other => panic!("expected EmbeddingEngineUnavailable, got: {other}"),
     }
 }
 
@@ -247,7 +247,7 @@ fn register_agent_rejected_when_inference_model_has_no_service() {
         RegistrationError::InferenceServiceNotDeclared(model) => {
             assert_eq!(model, "phi3");
         }
-        other => panic!("expected InferenceServiceNotDeclared, got: {}", other),
+        other => panic!("expected InferenceServiceNotDeclared, got: {other}"),
     }
 }
 
@@ -286,7 +286,7 @@ fn register_agent_rejected_when_embedding_model_has_no_service() {
         RegistrationError::EmbeddingServiceNotDeclared(model) => {
             assert_eq!(model, "nomic-embed");
         }
-        other => panic!("expected EmbeddingServiceNotDeclared, got: {}", other),
+        other => panic!("expected EmbeddingServiceNotDeclared, got: {other}"),
     }
 }
 
@@ -314,7 +314,7 @@ fn register_agent_rejected_when_infer_service_has_no_model() {
     let result = registry.register_agent(agent);
     match result.unwrap_err() {
         RegistrationError::InferenceServiceWithoutModel => {}
-        other => panic!("expected InferenceServiceWithoutModel, got: {}", other),
+        other => panic!("expected InferenceServiceWithoutModel, got: {other}"),
     }
 }
 
@@ -342,6 +342,6 @@ fn register_agent_rejected_when_embed_service_has_no_model() {
     let result = registry.register_agent(agent);
     match result.unwrap_err() {
         RegistrationError::EmbeddingServiceWithoutModel => {}
-        other => panic!("expected EmbeddingServiceWithoutModel, got: {}", other),
+        other => panic!("expected EmbeddingServiceWithoutModel, got: {other}"),
     }
 }

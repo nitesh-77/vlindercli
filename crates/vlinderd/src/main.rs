@@ -1,7 +1,7 @@
 //! vlinderd — the Vlinder daemon process.
 //!
 //! Routes to one of two modes:
-//! - Worker: if VLINDER_WORKER_ROLE is set
+//! - Worker: if `VLINDER_WORKER_ROLE` is set
 //! - Supervisor: spawns and manages worker processes
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -41,7 +41,7 @@ fn run_as_worker(role: WorkerRole) {
     })
     .expect("Failed to set signal handler");
 
-    run_worker_loop(role, shutdown);
+    run_worker_loop(&role, &shutdown);
 }
 
 fn run_as_supervisor(config: &Config) {

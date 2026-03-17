@@ -20,8 +20,7 @@ pub fn build_hosts(agent: &Agent) -> Vec<ProviderHost> {
             .requirements
             .services
             .get(&ServiceType::Infer)
-            .map(|svc| svc.provider == Provider::OpenRouter)
-            .unwrap_or(false);
+            .is_some_and(|svc| svc.provider == Provider::OpenRouter);
 
         if needs_openrouter {
             hosts.push(vlinder_infer_openrouter::provider_host());
@@ -34,15 +33,13 @@ pub fn build_hosts(agent: &Agent) -> Vec<ProviderHost> {
             .requirements
             .services
             .get(&ServiceType::Infer)
-            .map(|svc| svc.provider == Provider::Ollama)
-            .unwrap_or(false);
+            .is_some_and(|svc| svc.provider == Provider::Ollama);
 
         let needs_ollama_embed = agent
             .requirements
             .services
             .get(&ServiceType::Embed)
-            .map(|svc| svc.provider == Provider::Ollama)
-            .unwrap_or(false);
+            .is_some_and(|svc| svc.provider == Provider::Ollama);
 
         if needs_ollama_infer || needs_ollama_embed {
             hosts.push(vlinder_ollama::provider_host(
@@ -58,8 +55,7 @@ pub fn build_hosts(agent: &Agent) -> Vec<ProviderHost> {
             .vector_storage
             .as_ref()
             .and_then(|uri| VectorStorageType::from_scheme(uri.scheme()))
-            .map(|t| t == VectorStorageType::SqliteVec)
-            .unwrap_or(false);
+            .is_some_and(|t| t == VectorStorageType::SqliteVec);
 
         if needs_sqlite_vec {
             hosts.push(vlinder_sqlite_vec::provider_host());

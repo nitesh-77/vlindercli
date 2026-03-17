@@ -1,5 +1,5 @@
 #![cfg(feature = "sqlite-kv")]
-//! Integration tests for SqliteObjectStorage.
+//! Integration tests for `SqliteObjectStorage`.
 //! Tests SQLite-specific behavior: persistence, isolation, security.
 
 use tempfile::TempDir;
@@ -36,7 +36,7 @@ fn sqlite_persistence() {
 }
 
 /// Security test: Agents cannot access host filesystem via path traversal.
-/// The storage is a virtual filesystem - paths are just keys in SQLite,
+/// The storage is a virtual filesystem - paths are just keys in `SQLite`,
 /// not real filesystem paths.
 #[test]
 fn sqlite_cannot_read_host_filesystem() {

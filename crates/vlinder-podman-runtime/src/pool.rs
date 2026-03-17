@@ -78,15 +78,14 @@ impl ContainerRuntime {
         ));
 
         let image_policy = ImagePolicy::from_config(&config.image_policy);
-        let podman: Box<dyn PodmanClient> = match resolve_socket(&config.podman_socket) {
-            Some(path) => {
-                tracing::info!(event = "podman.socket", path = %path.display(), "Using Podman socket API");
-                Box::new(PodmanApiClient::new(&path))
-            }
-            None => {
-                tracing::info!(event = "podman.cli", "Using Podman CLI");
-                Box::new(PodmanCliClient)
-            }
+        let podman: Box<dyn PodmanClient> = if let Some(path) =
+            resolve_socket(&config.podman_socket)
+        {
+            tracing::info!(event = "podman.socket", path = %path.display(), "Using Podman socket API");
+            Box::new(PodmanApiClient::new(&path))
+        } else {
+            tracing::info!(event = "podman.cli", "Using Podman CLI");
+            Box::new(PodmanCliClient)
         };
 
         let engine_version = podman.engine_version();

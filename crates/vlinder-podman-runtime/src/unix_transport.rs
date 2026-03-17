@@ -127,11 +127,8 @@ impl Transport for UnixTransport {
         // we'll get an error or 0 bytes.
         self.stream.set_nonblocking(true).ok();
         let mut buf = [0u8; 1];
-        let open = match self.stream.read(&mut buf) {
-            Err(e) if e.kind() == io::ErrorKind::WouldBlock => true,
-            Ok(0) => false,
-            _ => false,
-        };
+        let open =
+            matches!(self.stream.read(&mut buf), Err(e) if e.kind() == io::ErrorKind::WouldBlock);
         self.stream.set_nonblocking(false).ok();
         open
     }

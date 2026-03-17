@@ -31,7 +31,7 @@ impl ImageRef {
             return Err("image ref must not be empty".to_string());
         }
 
-        if s.chars().any(|c| c.is_whitespace()) {
+        if s.chars().any(char::is_whitespace) {
             return Err(format!("image ref must not contain whitespace: {}", s));
         }
 

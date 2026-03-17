@@ -28,9 +28,9 @@ pub fn from_config(config: &Config) -> Result<Arc<dyn MessageQueue + Send + Sync
 /// Create a queue with synchronous DAG recording (transactional outbox).
 ///
 /// Wraps the configured queue in a `RecordingQueue` that records
-/// DAG nodes into the DagStore on every send.
+/// DAG nodes into the `DagStore` on every send.
 ///
-/// In production, the DagStore is the gRPC State Service.
+/// In production, the `DagStore` is the gRPC State Service.
 /// In test builds with `StateBackend::Memory`, uses `InMemoryDagStore`.
 pub fn recording_from_config(
     config: &Config,
@@ -38,7 +38,7 @@ pub fn recording_from_config(
     let inner = from_config(config)?;
 
     let store = crate::state_factory::from_config(config)
-        .map_err(|e| QueueError::SendFailed(format!("state service unreachable: {}", e)))?;
+        .map_err(|e| QueueError::SendFailed(format!("state service unreachable: {e}")))?;
 
     Ok(Arc::new(RecordingQueue::new(inner, store)))
 }

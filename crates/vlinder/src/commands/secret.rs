@@ -35,7 +35,7 @@ fn open_store() -> Arc<dyn SecretStore> {
     match GrpcSecretClient::connect(addr) {
         Ok(client) => Arc::new(client),
         Err(e) => {
-            eprintln!("Failed to connect to secret service at {}: {}", addr, e);
+            eprintln!("Failed to connect to secret service at {addr}: {e}");
             process::exit(1);
         }
     }
@@ -44,18 +44,18 @@ fn open_store() -> Arc<dyn SecretStore> {
 fn put(name: &str) {
     let mut buf = Vec::new();
     if let Err(e) = io::stdin().read_to_end(&mut buf) {
-        eprintln!("Failed to read stdin: {}", e);
+        eprintln!("Failed to read stdin: {e}");
         process::exit(1);
     }
 
     let store = open_store();
 
     if let Err(e) = store.put(name, &buf) {
-        eprintln!("Failed to store secret: {}", e);
+        eprintln!("Failed to store secret: {e}");
         process::exit(1);
     }
 
-    eprintln!("Stored secret '{}'", name);
+    eprintln!("Stored secret '{name}'");
 }
 
 fn get(name: &str) {
@@ -64,12 +64,12 @@ fn get(name: &str) {
     match store.get(name) {
         Ok(value) => {
             if let Err(e) = io::stdout().write_all(&value) {
-                eprintln!("Failed to write to stdout: {}", e);
+                eprintln!("Failed to write to stdout: {e}");
                 process::exit(1);
             }
         }
         Err(e) => {
-            eprintln!("{}", e);
+            eprintln!("{e}");
             process::exit(1);
         }
     }
@@ -79,11 +79,11 @@ fn delete(name: &str) {
     let store = open_store();
 
     if let Err(e) = store.delete(name) {
-        eprintln!("{}", e);
+        eprintln!("{e}");
         process::exit(1);
     }
 
-    eprintln!("Deleted secret '{}'", name);
+    eprintln!("Deleted secret '{name}'");
 }
 
 fn exists(name: &str) {
@@ -98,7 +98,7 @@ fn exists(name: &str) {
             process::exit(1);
         }
         Err(e) => {
-            eprintln!("{}", e);
+            eprintln!("{e}");
             process::exit(1);
         }
     }

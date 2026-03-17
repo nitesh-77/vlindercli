@@ -1,4 +1,4 @@
-//! State factory — wires configuration to concrete DagStore implementations.
+//! State factory — wires configuration to concrete `DagStore` implementations.
 //!
 //! Follows the same pattern as `queue_factory`, `registry_factory`, and
 //! `secret_store_factory`.
@@ -8,7 +8,7 @@ use std::sync::Arc;
 use crate::config::{Config, StateBackend};
 use vlinder_core::domain::DagStore;
 
-/// Create a DagStore client from configuration.
+/// Create a `DagStore` client from configuration.
 ///
 /// Returns `GrpcStateClient` in production. In test builds, `Memory`
 /// backend returns an `InMemoryDagStore` (no network required).

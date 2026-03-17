@@ -1,4 +1,4 @@
-//! Model and ModelManifest tests.
+//! Model and `ModelManifest` tests.
 
 use vlinder_core::domain::{Model, ModelManifest, ModelType, ModelTypeConfig, Provider};
 

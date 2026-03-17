@@ -21,6 +21,8 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 
 #[cfg(feature = "server")]
+use std::fmt::Write as _;
+#[cfg(feature = "server")]
 use vlinder_core::domain::{DagStore, MessageType, SessionId};
 
 /// A running session viewer server.
@@ -43,17 +45,13 @@ impl SessionServer {
         let server = tiny_http::Server::http(format!("127.0.0.1:{}", port))
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::AddrInUse, e.to_string()))?;
 
-        let port = server
-            .server_addr()
-            .to_ip()
-            .map(|a| a.port())
-            .unwrap_or(port);
+        let port = server.server_addr().to_ip().map_or(port, |a| a.port());
 
         let stop_flag = Arc::new(AtomicBool::new(false));
         let stop = Arc::clone(&stop_flag);
 
         let handle = std::thread::spawn(move || {
-            run_server(server, &*store, stop);
+            run_server(&server, &*store, &stop);
         });
 
         Ok(Self {
@@ -89,7 +87,7 @@ impl Drop for SessionServer {
 // =============================================================================
 
 #[cfg(feature = "server")]
-fn run_server(server: tiny_http::Server, store: &dyn DagStore, stop: Arc<AtomicBool>) {
+fn run_server(server: &tiny_http::Server, store: &dyn DagStore, stop: &AtomicBool) {
     let timeout = std::time::Duration::from_millis(100);
     loop {
         if stop.load(Ordering::Relaxed) {
@@ -98,7 +96,7 @@ fn run_server(server: tiny_http::Server, store: &dyn DagStore, stop: Arc<AtomicB
 
         match server.recv_timeout(timeout) {
             Ok(Some(request)) => handle_request(request, store),
-            Ok(None) => continue, // timeout — check stop flag
+            Ok(None) => {} // timeout — check stop flag
             Err(_) => break,
         }
     }
@@ -120,26 +118,22 @@ fn handle_request(request: tiny_http::Request, store: &dyn DagStore) {
         let session = SessionId::try_from(raw_id.to_string())
             .ok()
             .and_then(|sid| store.get_session(&sid).ok().flatten());
-        match session {
-            Some(session) => match render_session(store, &session) {
-                Ok(body) => {
-                    let _ = request.respond(html_response(200, &body));
-                }
-                Err(_) => {
-                    let body = html_page(
-                        "Not Found",
-                        "<h1>Session not found</h1><p><a href=\"/\">&larr; Back</a></p>",
-                    );
-                    let _ = request.respond(html_response(404, &body));
-                }
-            },
-            None => {
+        if let Some(session) = session {
+            if let Ok(body) = render_session(store, &session) {
+                let _ = request.respond(html_response(200, &body));
+            } else {
                 let body = html_page(
                     "Not Found",
                     "<h1>Session not found</h1><p><a href=\"/\">&larr; Back</a></p>",
                 );
                 let _ = request.respond(html_response(404, &body));
             }
+        } else {
+            let body = html_page(
+                "Not Found",
+                "<h1>Session not found</h1><p><a href=\"/\">&larr; Back</a></p>",
+            );
+            let _ = request.respond(html_response(404, &body));
         }
     } else {
         let body = html_page("Not Found", "<h1>404</h1>");
@@ -153,14 +147,11 @@ fn handle_request(request: tiny_http::Request, store: &dyn DagStore) {
 
 #[cfg(feature = "server")]
 fn render_index(store: &dyn DagStore) -> String {
-    let sessions = match store.list_sessions() {
-        Ok(s) => s,
-        Err(_) => {
-            return html_page(
-                "Vlinder Sessions",
-                "<h1>Sessions</h1><p>Error loading sessions.</p>",
-            )
-        }
+    let Ok(sessions) = store.list_sessions() else {
+        return html_page(
+            "Vlinder Sessions",
+            "<h1>Sessions</h1><p>Error loading sessions.</p>",
+        );
     };
 
     if sessions.is_empty() {
@@ -179,17 +170,18 @@ fn render_index(store: &dyn DagStore) -> String {
             ""
         };
 
-        items.push_str(&format!(
+        let _ = writeln!(
+            items,
             "<li><a href=\"/session/{session_id}\">\
              <strong>{agent}</strong>\
              <span class=\"meta\">{datetime} &middot; {turns} messages {status}</span>\
-             </a></li>\n",
+             </a></li>",
             session_id = html_escape(s.session_id.as_str()),
             agent = html_escape(&s.agent_name),
             datetime = html_escape(&datetime),
             turns = s.message_count,
             status = status,
-        ));
+        );
     }
 
     html_page(
@@ -215,8 +207,7 @@ fn render_session(
 
     let is_open = nodes
         .last()
-        .map(|n| n.message_type() != MessageType::Complete)
-        .unwrap_or(false);
+        .is_some_and(|n| n.message_type() != MessageType::Complete);
 
     let mut messages = String::new();
 
@@ -229,10 +220,11 @@ fn render_session(
             .find(|n| n.message_type() == MessageType::Invoke)
         {
             let payload = String::from_utf8_lossy(last_invoke.payload());
-            messages.push_str(&format!(
-                "<div class=\"open-indicator\">Pending: {}</div>\n",
+            let _ = writeln!(
+                messages,
+                "<div class=\"open-indicator\">Pending: {}</div>",
                 html_escape(&payload)
-            ));
+            );
         }
     }
 
@@ -241,26 +233,28 @@ fn render_session(
             MessageType::Invoke => {
                 let payload = String::from_utf8_lossy(node.payload());
                 let ts = node.created_at.format("%Y-%m-%d %H:%M:%S").to_string();
-                messages.push_str(&format!(
+                let _ = writeln!(
+                    messages,
                     "<div class=\"msg user\">\
                      <div class=\"role\">User <span class=\"ts\">{}</span></div>\
                      <pre>{}</pre>\
-                     </div>\n",
+                     </div>",
                     html_escape(&ts),
                     html_escape(&payload),
-                ));
+                );
             }
             MessageType::Complete => {
                 let payload = String::from_utf8_lossy(node.payload());
                 let ts = node.created_at.format("%Y-%m-%d %H:%M:%S").to_string();
-                messages.push_str(&format!(
+                let _ = writeln!(
+                    messages,
                     "<div class=\"msg agent\">\
                      <div class=\"role\">Agent <span class=\"ts\">{}</span></div>\
                      <pre>{}</pre>\
-                     </div>\n",
+                     </div>",
                     html_escape(&ts),
                     html_escape(&payload),
-                ));
+                );
             }
             _ => {} // Skip Request/Response/Delegate — internal protocol messages
         }
@@ -285,7 +279,7 @@ fn render_session(
 // =============================================================================
 
 #[cfg(feature = "server")]
-const CSS: &str = r#"
+const CSS: &str = r"
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
     font-family: system-ui, -apple-system, sans-serif;
@@ -325,7 +319,7 @@ pre {
     border-radius: 6px; padding: 0.6em 1em; margin-bottom: 1em;
     color: #e6a817; font-size: 0.9em;
 }
-"#;
+";
 
 #[cfg(feature = "server")]
 fn html_page(title: &str, body: &str) -> String {

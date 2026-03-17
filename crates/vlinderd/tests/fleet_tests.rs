@@ -99,10 +99,10 @@ fn minimal_agent(name: &str) -> vlinder_core::domain::Agent {
     vlinder_core::domain::Agent {
         id: vlinder_core::domain::Agent::placeholder_id(name),
         name: name.to_string(),
-        description: format!("{} agent", name),
+        description: format!("{name} agent"),
         source: None,
         runtime: RuntimeType::Container,
-        executable: format!("localhost/{}:latest", name),
+        executable: format!("localhost/{name}:latest"),
         image_digest: None,
         public_key: None,
         object_storage: None,
@@ -155,8 +155,7 @@ fn fleet_from_manifest_fails_when_agent_not_registered() {
     let err = format!("{}", result.unwrap_err());
     assert!(
         err.contains("upper"),
-        "error should mention missing agent: {}",
-        err
+        "error should mention missing agent: {err}"
     );
 }
 
@@ -170,8 +169,7 @@ fn fleet_from_manifest_fails_when_entry_not_registered() {
     let err = format!("{}", result.unwrap_err());
     assert!(
         err.contains("echo"),
-        "error should mention missing entry agent: {}",
-        err
+        "error should mention missing entry agent: {err}"
     );
 }
 
@@ -318,8 +316,7 @@ fn fleet_from_manifest_many_agents() {
         let id = registry.agent_id(name).unwrap();
         assert!(
             fleet.agents.contains(&id),
-            "fleet should contain agent '{}'",
-            name
+            "fleet should contain agent '{name}'"
         );
     }
 }
@@ -344,8 +341,7 @@ fn fleet_from_manifest_all_agents_missing() {
     let err = format!("{}", result.unwrap_err());
     assert!(
         err.contains("missing"),
-        "error should mention missing agent: {}",
-        err
+        "error should mention missing agent: {err}"
     );
 }
 
@@ -407,7 +403,7 @@ fn register_fleet_rejects_config_mismatch_different_entry() {
         vlinder_core::domain::RegistrationError::FleetConfigMismatch(name) => {
             assert_eq!(name, "test-fleet");
         }
-        other => panic!("expected FleetConfigMismatch, got: {}", other),
+        other => panic!("expected FleetConfigMismatch, got: {other}"),
     }
 }
 
@@ -440,7 +436,7 @@ fn register_fleet_rejects_config_mismatch_different_agents() {
         vlinder_core::domain::RegistrationError::FleetConfigMismatch(name) => {
             assert_eq!(name, "test-fleet");
         }
-        other => panic!("expected FleetConfigMismatch, got: {}", other),
+        other => panic!("expected FleetConfigMismatch, got: {other}"),
     }
 }
 
@@ -528,7 +524,7 @@ fn placeholder_id_has_expected_format() {
 fn load_error_display_io() {
     let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
     let err = vlinder_core::domain::FleetLoadError::Io(io_err);
-    let msg = format!("{}", err);
+    let msg = format!("{err}");
     assert!(msg.contains("IO error"));
     assert!(msg.contains("file not found"));
 }
@@ -536,7 +532,7 @@ fn load_error_display_io() {
 #[test]
 fn load_error_display_parse() {
     let err = vlinder_core::domain::FleetLoadError::Parse("bad toml".to_string());
-    let msg = format!("{}", err);
+    let msg = format!("{err}");
     assert!(msg.contains("parse error"));
     assert!(msg.contains("bad toml"));
 }
@@ -544,7 +540,7 @@ fn load_error_display_parse() {
 #[test]
 fn load_error_display_validation() {
     let err = vlinder_core::domain::FleetLoadError::Validation("entry not found".to_string());
-    let msg = format!("{}", err);
+    let msg = format!("{err}");
     assert!(msg.contains("validation error"));
     assert!(msg.contains("entry not found"));
 }

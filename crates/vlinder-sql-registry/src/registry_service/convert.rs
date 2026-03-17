@@ -195,11 +195,11 @@ impl TryFrom<proto::Agent> for Agent {
             object_storage: agent
                 .object_storage
                 .and_then(|cfg| cfg.resource_id)
-                .map(|r| r.into()),
+                .map(std::convert::Into::into),
             vector_storage: agent
                 .vector_storage
                 .and_then(|cfg| cfg.resource_id)
-                .map(|r| r.into()),
+                .map(std::convert::Into::into),
             source: None,
             prompts: None,
             image_digest: None,
@@ -218,7 +218,11 @@ impl From<Fleet> for proto::Fleet {
             id: Some(fleet.id.into()),
             name: fleet.name,
             entry: Some(fleet.entry.into()),
-            agents: fleet.agents.into_iter().map(|a| a.into()).collect(),
+            agents: fleet
+                .agents
+                .into_iter()
+                .map(std::convert::Into::into)
+                .collect(),
         }
     }
 }
@@ -231,7 +235,11 @@ impl TryFrom<proto::Fleet> for Fleet {
             id: fleet.id.ok_or("missing fleet id")?.into(),
             name: fleet.name,
             entry: fleet.entry.ok_or("missing fleet entry")?.into(),
-            agents: fleet.agents.into_iter().map(|a| a.into()).collect(),
+            agents: fleet
+                .agents
+                .into_iter()
+                .map(std::convert::Into::into)
+                .collect(),
         })
     }
 }
@@ -284,9 +292,8 @@ impl From<ModelType> for proto::ModelType {
 impl From<proto::ModelType> for ModelType {
     fn from(t: proto::ModelType) -> Self {
         match t {
-            proto::ModelType::Inference => ModelType::Inference,
+            proto::ModelType::Inference | proto::ModelType::Unspecified => ModelType::Inference,
             proto::ModelType::Embedding => ModelType::Embedding,
-            proto::ModelType::Unspecified => ModelType::Inference, // Default
         }
     }
 }
@@ -323,11 +330,10 @@ impl TryFrom<proto::Job> for Job {
             proto::JobStatus::try_from(job.status).map_err(|_| "invalid job status")?;
 
         let status = match proto_status {
-            proto::JobStatus::Pending => JobStatus::Pending,
+            proto::JobStatus::Pending | proto::JobStatus::Unspecified => JobStatus::Pending,
             proto::JobStatus::Running => JobStatus::Running,
             proto::JobStatus::Completed => JobStatus::Completed(job.output.unwrap_or_default()),
             proto::JobStatus::Failed => JobStatus::Failed(job.output.unwrap_or_default()),
-            proto::JobStatus::Unspecified => JobStatus::Pending,
         };
 
         Ok(Self {
@@ -354,11 +360,10 @@ impl From<JobStatus> for proto::JobStatus {
 impl From<proto::JobStatus> for JobStatus {
     fn from(s: proto::JobStatus) -> Self {
         match s {
-            proto::JobStatus::Pending => JobStatus::Pending,
+            proto::JobStatus::Pending | proto::JobStatus::Unspecified => JobStatus::Pending,
             proto::JobStatus::Running => JobStatus::Running,
             proto::JobStatus::Completed => JobStatus::Completed(String::new()),
             proto::JobStatus::Failed => JobStatus::Failed(String::new()),
-            proto::JobStatus::Unspecified => JobStatus::Pending,
         }
     }
 }

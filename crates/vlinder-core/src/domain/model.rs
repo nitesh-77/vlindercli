@@ -123,8 +123,7 @@ impl From<ParseError> for LoadError {
     fn from(e: ParseError) -> Self {
         match e {
             ParseError::Io(e) => LoadError::Io(e),
-            ParseError::Toml(s) => LoadError::Parse(s),
-            ParseError::ModelPathNotFound(s) => LoadError::Parse(s),
+            ParseError::Toml(s) | ParseError::ModelPathNotFound(s) => LoadError::Parse(s),
         }
     }
 }

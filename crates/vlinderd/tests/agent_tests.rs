@@ -1,4 +1,4 @@
-//! Agent and AgentManifest tests.
+//! Agent and `AgentManifest` tests.
 
 use std::path::{Path, PathBuf};
 use vlinder_core::domain::{Agent, AgentManifest};

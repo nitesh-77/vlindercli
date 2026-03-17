@@ -1,5 +1,5 @@
 #![cfg(feature = "sqlite-vec")]
-//! Integration tests for SqliteVectorStorage.
+//! Integration tests for `SqliteVectorStorage`.
 //! Tests SQLite-specific behavior: persistence, sqlite-vec functionality.
 
 use tempfile::TempDir;

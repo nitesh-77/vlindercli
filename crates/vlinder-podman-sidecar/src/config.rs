@@ -29,9 +29,9 @@ pub struct SidecarConfig {
 impl SidecarConfig {
     /// Parse configuration from environment variables.
     ///
-    /// Required: VLINDER_AGENT, VLINDER_NATS_URL, VLINDER_REGISTRY_URL, VLINDER_STATE_URL.
-    /// Optional: VLINDER_CONTAINER_PORT (default 8080), VLINDER_IMAGE_REF,
-    /// VLINDER_IMAGE_DIGEST, VLINDER_CONTAINER_ID.
+    /// Required: `VLINDER_AGENT`, `VLINDER_NATS_URL`, `VLINDER_REGISTRY_URL`, `VLINDER_STATE_URL`.
+    /// Optional: `VLINDER_CONTAINER_PORT` (default 8080), `VLINDER_IMAGE_REF`,
+    /// `VLINDER_IMAGE_DIGEST`, `VLINDER_CONTAINER_ID`.
     pub fn from_env() -> Result<Self, String> {
         let agent = required_env("VLINDER_AGENT")?;
         let nats_url = required_env("VLINDER_NATS_URL")?;
@@ -63,7 +63,7 @@ impl SidecarConfig {
 }
 
 fn required_env(key: &str) -> Result<String, String> {
-    std::env::var(key).map_err(|_| format!("required env var {} not set", key))
+    std::env::var(key).map_err(|_| format!("required env var {key} not set"))
 }
 
 #[cfg(test)]

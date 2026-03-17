@@ -41,12 +41,12 @@ fn list(session_id_or_name: &str) {
     let branches = store
         .get_branches_for_session(&session_id)
         .unwrap_or_else(|e| {
-            eprintln!("Failed to query branches: {}", e);
+            eprintln!("Failed to query branches: {e}");
             std::process::exit(1);
         });
 
     if branches.is_empty() {
-        println!("No branches for session '{}'", session_id);
+        println!("No branches for session '{session_id}'");
         return;
     }
 
@@ -88,11 +88,11 @@ fn get(session_id_or_name: &str, branch_name: &str) {
     let branch = store
         .get_branch_by_name(branch_name)
         .unwrap_or_else(|e| {
-            eprintln!("Failed to look up branch: {}", e);
+            eprintln!("Failed to look up branch: {e}");
             std::process::exit(1);
         })
         .unwrap_or_else(|| {
-            eprintln!("Branch '{}' not found", branch_name);
+            eprintln!("Branch '{branch_name}' not found");
             std::process::exit(1);
         });
 
@@ -106,7 +106,7 @@ fn get(session_id_or_name: &str, branch_name: &str) {
 
     // Get all session nodes and filter to those on this branch's timeline
     let nodes = store.get_session_nodes(&session_id).unwrap_or_else(|e| {
-        eprintln!("Failed to query session nodes: {}", e);
+        eprintln!("Failed to query session nodes: {e}");
         std::process::exit(1);
     });
 
@@ -116,7 +116,7 @@ fn get(session_id_or_name: &str, branch_name: &str) {
         .collect();
 
     if branch_nodes.is_empty() {
-        println!("No messages on branch '{}'", branch_name);
+        println!("No messages on branch '{branch_name}'");
         return;
     }
 
@@ -135,7 +135,7 @@ fn get(session_id_or_name: &str, branch_name: &str) {
 
     for sub_id in &turn_order {
         let messages = &turn_map[sub_id.as_str()];
-        println!("Turn {}", sub_id);
+        println!("Turn {sub_id}");
         for node in messages {
             let ts = node.created_at.format("%H:%M:%S%.3f");
             let (from, to) = node.message.from_to();
@@ -147,10 +147,10 @@ fn get(session_id_or_name: &str, branch_name: &str) {
                 format!("-> {}", to),
             ];
             if let Some(op) = node.message.operation() {
-                parts.push(format!("op:{}", op));
+                parts.push(format!("op:{op}"));
             }
             if let Some(ckpt) = node.message.checkpoint() {
-                parts.push(format!("ckpt:{}", ckpt));
+                parts.push(format!("ckpt:{ckpt}"));
             }
             println!("  {}", parts.join(" "));
         }
@@ -176,11 +176,11 @@ fn resolve_session_id(store: &dyn DagStore, id_or_name: &str) -> SessionId {
     if let Some(session) = store.get_session_by_name(id_or_name).ok().flatten() {
         return session.id;
     }
-    eprintln!("Session '{}' not found", id_or_name);
+    eprintln!("Session '{id_or_name}' not found");
     std::process::exit(1);
 }
 
-/// Sort nodes in causal order by walking the parent_hash Merkle chain.
+/// Sort nodes in causal order by walking the `parent_hash` Merkle chain.
 fn causal_sort(nodes: &[vlinder_core::domain::DagNode]) -> Vec<vlinder_core::domain::DagNode> {
     let by_parent: std::collections::HashMap<&str, &vlinder_core::domain::DagNode> =
         nodes.iter().map(|n| (n.parent_id.as_str(), n)).collect();

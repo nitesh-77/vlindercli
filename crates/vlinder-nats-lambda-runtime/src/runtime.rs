@@ -44,7 +44,7 @@ impl LambdaRuntime {
         queue: Arc<dyn MessageQueue + Send + Sync>,
     ) -> Result<Self, LambdaError> {
         let client = AwsLambdaClient::new(&config.region)?;
-        Self::with_client(config, registry, queue, Box::new(client))
+        Ok(Self::with_client(config, registry, queue, Box::new(client)))
     }
 
     /// Create a runtime with an injected client (for testing).
@@ -53,7 +53,7 @@ impl LambdaRuntime {
         registry: Arc<dyn Registry>,
         queue: Arc<dyn MessageQueue + Send + Sync>,
         client: Box<dyn LambdaClient>,
-    ) -> Result<Self, LambdaError> {
+    ) -> Self {
         let registry_id = ResourceId::new(&config.registry_addr);
         let id = ResourceId::new(format!(
             "{}/runtimes/{}",
@@ -61,14 +61,14 @@ impl LambdaRuntime {
             RuntimeType::Lambda.as_str()
         ));
 
-        Ok(Self {
+        Self {
             id,
             queue,
             registry,
             functions: HashMap::new(),
             config: config.clone(),
             client,
-        })
+        }
     }
 
     /// Reconcile deployed functions with registry state.
@@ -424,7 +424,6 @@ mod tests {
         let config = test_config();
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
         LambdaRuntime::with_client(&config, registry, queue, Box::new(MockLambdaClient::new()))
-            .unwrap()
     }
 
     // ── Tests ───────────────────────────────────────────────────────
@@ -506,8 +505,7 @@ mod tests {
         let mock = MockLambdaClient::new();
         let config = test_config();
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
-        let mut runtime =
-            LambdaRuntime::with_client(&config, registry, queue, Box::new(mock)).unwrap();
+        let mut runtime = LambdaRuntime::with_client(&config, registry, queue, Box::new(mock));
 
         runtime.tick();
 
@@ -534,8 +532,7 @@ mod tests {
             registry,
             queue.clone(),
             Box::new(MockLambdaClient::new()),
-        )
-        .unwrap();
+        );
 
         // Deploy first.
         runtime.tick();
@@ -590,8 +587,7 @@ mod tests {
             registry,
             queue.clone(),
             Box::new(FailingLambdaClient),
-        )
-        .unwrap();
+        );
 
         // Deploy first (create_role/create_function succeed on FailingLambdaClient).
         runtime.tick();
@@ -692,8 +688,7 @@ mod tests {
             captured: captured.clone(),
         };
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
-        let mut runtime =
-            LambdaRuntime::with_client(&config, registry, queue, Box::new(client)).unwrap();
+        let mut runtime = LambdaRuntime::with_client(&config, registry, queue, Box::new(client));
 
         runtime.tick();
 

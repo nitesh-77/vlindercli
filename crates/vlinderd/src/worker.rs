@@ -5,7 +5,7 @@
 //!
 //! ## Usage
 //!
-//! Workers are spawned by the daemon with VLINDER_WORKER_ROLE set:
+//! Workers are spawned by the daemon with `VLINDER_WORKER_ROLE` set:
 //!
 //! ```bash
 //! VLINDER_WORKER_ROLE=agent-wasm vlinder daemon
@@ -33,32 +33,32 @@ fn grpc_registry_addr(config: &Config) -> String {
 ///
 /// This function blocks until shutdown is signaled. Workers should be run
 /// in separate processes spawned by the daemon.
-pub fn run_worker_loop(role: WorkerRole, shutdown: Arc<AtomicBool>) {
+pub fn run_worker_loop(role: &WorkerRole, shutdown: &Arc<AtomicBool>) {
     let config = Config::load();
 
     tracing::info!(role = %role, "Starting worker");
 
     match role {
-        WorkerRole::Registry => run_registry_worker(&config, &shutdown),
-        WorkerRole::Harness => run_harness_worker(&config, &shutdown),
+        WorkerRole::Registry => run_registry_worker(&config, shutdown),
+        WorkerRole::Harness => run_harness_worker(&config, shutdown),
         #[cfg(feature = "container")]
-        WorkerRole::AgentContainer => run_agent_container_worker(&config, &shutdown),
+        WorkerRole::AgentContainer => run_agent_container_worker(&config, shutdown),
         #[cfg(feature = "lambda")]
-        WorkerRole::AgentLambda => run_agent_lambda_worker(&config, &shutdown),
+        WorkerRole::AgentLambda => run_agent_lambda_worker(&config, shutdown),
         #[cfg(feature = "ollama")]
-        WorkerRole::InferenceOllama => run_inference_ollama_worker(&config, &shutdown),
+        WorkerRole::InferenceOllama => run_inference_ollama_worker(&config, shutdown),
         #[cfg(feature = "openrouter")]
-        WorkerRole::InferenceOpenRouter => run_inference_openrouter_worker(&config, &shutdown),
+        WorkerRole::InferenceOpenRouter => run_inference_openrouter_worker(&config, shutdown),
         #[cfg(feature = "sqlite-kv")]
-        WorkerRole::StorageObjectSqlite => run_storage_object_sqlite_worker(&config, &shutdown),
+        WorkerRole::StorageObjectSqlite => run_storage_object_sqlite_worker(&config, shutdown),
         #[cfg(feature = "sqlite-vec")]
-        WorkerRole::StorageVectorSqlite => run_storage_vector_sqlite_worker(&config, &shutdown),
-        WorkerRole::Secret => run_secret_worker(&config, &shutdown),
-        WorkerRole::State => run_state_worker(&config, &shutdown),
+        WorkerRole::StorageVectorSqlite => run_storage_vector_sqlite_worker(&config, shutdown),
+        WorkerRole::Secret => run_secret_worker(&config, shutdown),
+        WorkerRole::State => run_state_worker(&config, shutdown),
         #[cfg(any(feature = "ollama", feature = "openrouter"))]
-        WorkerRole::Catalog => run_catalog_worker(&config, &shutdown),
-        WorkerRole::DagGit => run_dag_git_worker(&config, &shutdown),
-        WorkerRole::SessionViewer => run_session_viewer_worker(&config, &shutdown),
+        WorkerRole::Catalog => run_catalog_worker(&config, shutdown),
+        WorkerRole::DagGit => run_dag_git_worker(&config, shutdown),
+        WorkerRole::SessionViewer => run_session_viewer_worker(&config, shutdown),
     }
 
     tracing::info!(role = %role, "Worker shutdown complete");
@@ -87,7 +87,7 @@ fn run_registry_worker(config: &Config, shutdown: &AtomicBool) {
     };
     let secret_store: Arc<dyn vlinder_core::domain::SecretStore> = Arc::new(
         GrpcSecretClient::connect(&secret_addr)
-            .unwrap_or_else(|e| panic!("Failed to connect to secret service: {}", e)),
+            .unwrap_or_else(|e| panic!("Failed to connect to secret service: {e}")),
     );
 
     let db_path = registry_db_path();
@@ -108,7 +108,7 @@ fn run_registry_worker(config: &Config, shutdown: &AtomicBool) {
     };
 
     let registry = PersistentRegistry::open(&db_path, &registry_config, secret_store)
-        .unwrap_or_else(|e| panic!("Failed to initialize registry: {}", e));
+        .unwrap_or_else(|e| panic!("Failed to initialize registry: {e}"));
 
     // Register non-engine capabilities (engines are registered by open())
     registry.register_runtime(RuntimeType::Container);
@@ -156,7 +156,7 @@ fn run_secret_worker(config: &Config, shutdown: &AtomicBool) {
     use vlinder_nats::secret_service::SecretServiceServer;
 
     let secret_store = crate::secret_store_factory::from_config(config)
-        .unwrap_or_else(|e| panic!("Failed to open secret store: {}", e));
+        .unwrap_or_else(|e| panic!("Failed to open secret store: {e}"));
 
     // Parse address, stripping http:// prefix if present
     let addr_str = config
@@ -343,9 +343,9 @@ fn run_inference_openrouter_worker(config: &Config, shutdown: &AtomicBool) {
 
 #[cfg(feature = "sqlite-kv")]
 fn run_storage_object_sqlite_worker(config: &Config, shutdown: &AtomicBool) {
-    use vlinder_sqlite_kv::KvWorker;
-
+    use vlinder_core::domain::{ObjectStorageType, ServiceBackend};
     use vlinder_sql_registry::registry_service::GrpcRegistryClient;
+    use vlinder_sqlite_kv::KvWorker;
 
     let queue =
         crate::queue_factory::recording_from_config(config).expect("Failed to create queue");
@@ -355,7 +355,6 @@ fn run_storage_object_sqlite_worker(config: &Config, shutdown: &AtomicBool) {
         GrpcRegistryClient::connect(&registry_addr).expect("Failed to connect to registry"),
     );
 
-    use vlinder_core::domain::{ObjectStorageType, ServiceBackend};
     let worker = KvWorker::new(
         queue,
         registry,
@@ -372,9 +371,9 @@ fn run_storage_object_sqlite_worker(config: &Config, shutdown: &AtomicBool) {
 
 #[cfg(feature = "sqlite-vec")]
 fn run_storage_vector_sqlite_worker(config: &Config, shutdown: &AtomicBool) {
-    use vlinder_sqlite_vec::SqliteVecWorker;
-
+    use vlinder_core::domain::{ServiceBackend, VectorStorageType};
     use vlinder_sql_registry::registry_service::GrpcRegistryClient;
+    use vlinder_sqlite_vec::SqliteVecWorker;
 
     let queue =
         crate::queue_factory::recording_from_config(config).expect("Failed to create queue");
@@ -384,7 +383,6 @@ fn run_storage_vector_sqlite_worker(config: &Config, shutdown: &AtomicBool) {
         GrpcRegistryClient::connect(&registry_addr).expect("Failed to connect to registry"),
     );
 
-    use vlinder_core::domain::{ServiceBackend, VectorStorageType};
     let worker = SqliteVecWorker::new(
         queue,
         registry,
@@ -407,8 +405,8 @@ fn run_state_worker(config: &Config, shutdown: &AtomicBool) {
     use vlinder_sql_state::SqliteDagStore;
 
     let db_path = dag_db_path();
-    let store = SqliteDagStore::open(&db_path)
-        .unwrap_or_else(|e| panic!("Failed to open DAG store: {}", e));
+    let store =
+        SqliteDagStore::open(&db_path).unwrap_or_else(|e| panic!("Failed to open DAG store: {e}"));
 
     let store: Arc<dyn DagStore> = Arc::new(store);
 
@@ -540,11 +538,11 @@ fn run_dag_git_worker(config: &Config, shutdown: &AtomicBool) {
                 .expires(std::time::Duration::from_millis(100))
                 .messages()
                 .await
-                .map_err(|e| format!("fetch failed: {}", e))?;
+                .map_err(|e| format!("fetch failed: {e}"))?;
 
             match messages.next().await {
                 Some(Ok(msg)) => Ok(Some(msg)),
-                Some(Err(e)) => Err(format!("message error: {}", e)),
+                Some(Err(e)) => Err(format!("message error: {e}")),
                 None => Ok(None),
             }
         });

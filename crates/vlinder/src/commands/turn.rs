@@ -29,12 +29,12 @@ fn get(submission_id: &str) {
     let nodes = store
         .get_nodes_by_submission(submission_id)
         .unwrap_or_else(|e| {
-            eprintln!("Failed to query turn: {}", e);
+            eprintln!("Failed to query turn: {e}");
             std::process::exit(1);
         });
 
     if nodes.is_empty() {
-        println!("No messages found for submission {}", submission_id);
+        println!("No messages found for submission {submission_id}");
         return;
     }
 
@@ -43,24 +43,24 @@ fn get(submission_id: &str) {
         println!("Hash:       {}", node.id);
         println!("Parent:     {}", node.parent_id);
         println!("Type:       {}", node.message_type().as_str());
-        println!("From:       {}", from);
-        println!("To:         {}", to);
+        println!("From:       {from}");
+        println!("To:         {to}");
         println!("Session:    {}", node.session_id());
         if let Some(op) = node.message.operation() {
-            println!("Operation:  {}", op);
+            println!("Operation:  {op}");
         }
         if let Some(ckpt) = node.message.checkpoint() {
-            println!("Checkpoint: {}", ckpt);
+            println!("Checkpoint: {ckpt}");
         }
         if let Some(state) = node.message.state() {
-            println!("State:      {}", state);
+            println!("State:      {state}");
         }
         println!("Created:    {}", node.created_at);
         let payload = node.payload();
         match std::str::from_utf8(payload) {
-            Ok(text) if !text.is_empty() => println!("Payload:    {}", text),
+            Ok(text) if !text.is_empty() => println!("Payload:    {text}"),
             _ if !payload.is_empty() => {
-                println!("Payload:    <{} bytes binary>", payload.len())
+                println!("Payload:    <{} bytes binary>", payload.len());
             }
             _ => {}
         }

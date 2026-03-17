@@ -70,7 +70,7 @@ impl std::error::Error for CatalogError {}
 /// Where `ModelCatalog` represents a single source (Ollama, OpenRouter),
 /// `CatalogService` aggregates multiple sources and routes by catalog name.
 pub trait CatalogService: Send + Sync {
-    /// List available catalog names (e.g. ["ollama", "openrouter"]).
+    /// List available catalog names (e.g. `["ollama", "openrouter"]`).
     fn catalogs(&self) -> Vec<String>;
 
     /// Resolve a model by name from a specific catalog.

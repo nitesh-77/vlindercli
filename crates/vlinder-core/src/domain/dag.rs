@@ -37,6 +37,7 @@ impl Snapshot {
     }
 
     /// Return a new snapshot with one store's state updated.
+    #[must_use]
     pub fn with_state(&self, instance: Instance, hash: StateHash) -> Self {
         let mut map = self.0.clone();
         map.insert(instance, hash);
@@ -350,7 +351,7 @@ impl DagStore for InMemoryDagStore {
         fork_point: Option<&super::DagNodeId>,
     ) -> Result<super::BranchId, String> {
         let mut branches = self.branches.lock().unwrap();
-        let id = super::BranchId::from(branches.len() as i64 + 1);
+        let id = super::BranchId::from(i64::try_from(branches.len()).unwrap_or(i64::MAX) + 1);
         branches.push(Branch {
             id,
             name: name.to_string(),
@@ -403,8 +404,7 @@ impl DagStore for InMemoryDagStore {
                     .count();
                 let is_open = nodes
                     .last()
-                    .map(|n| n.message_type() != MessageType::Complete)
-                    .unwrap_or(false);
+                    .is_some_and(|n| n.message_type() != MessageType::Complete);
                 SessionSummary {
                     session_id,
                     agent_name,

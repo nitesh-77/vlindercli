@@ -282,11 +282,10 @@ impl Registry for GrpcRegistryClient {
             .block_on(async { client.create_job(request).await });
 
         match response {
-            Ok(resp) => resp
-                .into_inner()
-                .job_id
-                .map(|id| id.into())
-                .unwrap_or_else(|| JobId::from_string("error".to_string())),
+            Ok(resp) => resp.into_inner().job_id.map_or_else(
+                || JobId::from_string("error".to_string()),
+                std::convert::Into::into,
+            ),
             Err(_) => JobId::from_string("error".to_string()),
         }
     }
