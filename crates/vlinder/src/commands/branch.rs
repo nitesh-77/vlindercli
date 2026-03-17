@@ -50,13 +50,25 @@ fn list(session_id_or_name: &str) {
         return;
     }
 
-    println!("{:<4} {:<24} {:<10} FORK_POINT", "ID", "BRANCH", "STATUS");
+    // Count turns (distinct submissions) per branch
+    let nodes = store.get_session_nodes(&session_id).unwrap_or_default();
+    let turn_counts: std::collections::HashMap<vlinder_core::domain::BranchId, usize> = {
+        let mut per_branch: std::collections::HashMap<
+            vlinder_core::domain::BranchId,
+            std::collections::HashSet<String>,
+        > = std::collections::HashMap::new();
+        for n in &nodes {
+            per_branch
+                .entry(*n.branch_id())
+                .or_default()
+                .insert(n.submission_id().as_str().to_string());
+        }
+        per_branch.into_iter().map(|(k, v)| (k, v.len())).collect()
+    };
+
+    println!("{:<4} {:<24} {:>5} FORK_POINT", "ID", "BRANCH", "TURNS");
     for b in &branches {
-        let status = if b.broken_at.is_some() {
-            "sealed"
-        } else {
-            "active"
-        };
+        let turns = turn_counts.get(&b.id).copied().unwrap_or(0);
         let fork = match &b.fork_point {
             Some(h) => {
                 let s = h.as_str();
@@ -64,7 +76,7 @@ fn list(session_id_or_name: &str) {
             }
             None => "-",
         };
-        println!("{:<4} {:<24} {:<10} {}", b.id, b.name, status, fork);
+        println!("{:<4} {:<24} {:>5} {}", b.id, b.name, turns, fork);
     }
 }
 

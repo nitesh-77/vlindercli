@@ -70,24 +70,26 @@ fn list(agent_name: &str) {
     }
 
     println!(
-        "{:<28} {:<40} {:<24} {:>8} STATUS",
-        "NAME", "SESSION_ID", "STARTED", "MESSAGES"
+        "{:<28} {:<40} {:<24} {:>8}",
+        "NAME", "SESSION_ID", "STARTED", "BRANCHES"
     );
     for s in &filtered {
-        let status = if s.is_open { "open" } else { "closed" };
         let name = store
             .get_session(&s.session_id)
             .ok()
             .flatten()
             .map(|sess| sess.name)
             .unwrap_or_default();
+        let branch_count = store
+            .get_branches_for_session(&s.session_id)
+            .map(|b| b.len())
+            .unwrap_or(0);
         println!(
-            "{:<28} {:<40} {:<24} {:>8} {}",
+            "{:<28} {:<40} {:<24} {:>8}",
             name,
             s.session_id,
             s.started_at.format("%Y-%m-%d %H:%M:%S"),
-            s.message_count,
-            status,
+            branch_count,
         );
     }
 }
