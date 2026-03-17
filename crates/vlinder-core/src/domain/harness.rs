@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use crate::domain::{
     BranchId, DagNodeId, DagStore, ForkMessage, HarnessType, InvokeDiagnostics, InvokeMessage,
-    JobId, JobStatus, MessageQueue, MessageType, Registry, ResourceId, SessionId,
+    JobId, JobStatus, MessageQueue, MessageType, PromoteMessage, Registry, ResourceId, SessionId,
     SessionStartMessage, SubmissionId,
 };
 
@@ -55,6 +55,17 @@ pub trait Harness {
         session_id: SessionId,
         timeline: BranchId,
     ) -> Result<(), String>;
+
+    /// Promote a branch to main by sending a PromoteMessage through the queue.
+    ///
+    /// Fire-and-forget: both SQL (via RecordingQueue) and git (via
+    /// GitDagWorker) react to the message. No response is expected.
+    fn promote_timeline(
+        &self,
+        params: PromoteParams,
+        session_id: SessionId,
+        timeline: BranchId,
+    ) -> Result<(), String>;
 }
 
 /// Parameters for `Harness::fork_timeline()`.
@@ -65,6 +76,14 @@ pub struct ForkParams {
     pub agent_name: String,
     pub branch_name: String,
     pub fork_point: DagNodeId,
+}
+
+/// Parameters for `Harness::promote_timeline()`.
+///
+/// The CLI reads these from the DagStore (branch lookup + session context).
+/// The harness wraps them in a PromoteMessage and sends through the queue.
+pub struct PromoteParams {
+    pub agent_name: String,
 }
 
 /// Build an enriched payload from DAG-derived history.
@@ -271,6 +290,21 @@ impl Harness for CoreHarness {
 
         self.queue
             .send_fork(fork_msg)
+            .map_err(|e| format!("queue error: {}", e))
+    }
+
+    fn promote_timeline(
+        &self,
+        params: PromoteParams,
+        session_id: SessionId,
+        timeline: BranchId,
+    ) -> Result<(), String> {
+        let submission = SubmissionId::new();
+
+        let promote_msg = PromoteMessage::new(timeline, submission, session_id, params.agent_name);
+
+        self.queue
+            .send_promote(promote_msg)
             .map_err(|e| format!("queue error: {}", e))
     }
 }

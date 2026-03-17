@@ -498,9 +498,59 @@ impl DagStore for SqliteDagStore {
         }
     }
 
+    fn rename_branch(&self, id: BranchId, new_name: &str) -> Result<(), String> {
+        let conn = self.conn.lock().unwrap();
+        let rows = conn
+            .execute(
+                "UPDATE branches SET name = ?1 WHERE id = ?2",
+                rusqlite::params![new_name, id.as_i64()],
+            )
+            .map_err(|e| format!("rename_branch failed: {}", e))?;
+        if rows == 0 {
+            return Err(format!("branch {} not found", id));
+        }
+        Ok(())
+    }
+
+    fn seal_branch(
+        &self,
+        id: BranchId,
+        broken_at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<(), String> {
+        let conn = self.conn.lock().unwrap();
+        let rows = conn
+            .execute(
+                "UPDATE branches SET broken_at = ?1 WHERE id = ?2",
+                rusqlite::params![broken_at.to_rfc3339(), id.as_i64()],
+            )
+            .map_err(|e| format!("seal_branch failed: {}", e))?;
+        if rows == 0 {
+            return Err(format!("branch {} not found", id));
+        }
+        Ok(())
+    }
+
     // -------------------------------------------------------------------------
     // Session CRUD
     // -------------------------------------------------------------------------
+
+    fn update_session_default_branch(
+        &self,
+        session_id: &SessionId,
+        branch_id: BranchId,
+    ) -> Result<(), String> {
+        let conn = self.conn.lock().unwrap();
+        let rows = conn
+            .execute(
+                "UPDATE sessions SET default_branch = ?1 WHERE id = ?2",
+                rusqlite::params![branch_id.as_i64(), session_id.as_str()],
+            )
+            .map_err(|e| format!("update_session_default_branch failed: {}", e))?;
+        if rows == 0 {
+            return Err(format!("session {} not found", session_id));
+        }
+        Ok(())
+    }
 
     fn create_session(&self, session: &Session) -> Result<(), String> {
         let conn = self.conn.lock().unwrap();

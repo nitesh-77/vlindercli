@@ -251,6 +251,13 @@ pub enum RoutingKey {
         submission: SubmissionId,
         agent_name: String,
     },
+    /// Promote: CLI → Platform (promote a branch to main).
+    Promote {
+        session: SessionId,
+        branch: BranchId,
+        submission: SubmissionId,
+        agent_name: String,
+    },
 }
 
 impl RoutingKey {
@@ -314,7 +321,8 @@ impl RoutingKey {
             | RoutingKey::Response { .. }
             | RoutingKey::DelegateReply { .. }
             | RoutingKey::Repair { .. }
-            | RoutingKey::Fork { .. } => None,
+            | RoutingKey::Fork { .. }
+            | RoutingKey::Promote { .. } => None,
         }
     }
 }

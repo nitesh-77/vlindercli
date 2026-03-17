@@ -271,6 +271,72 @@ impl DagStore for GrpcStateClient {
         }
     }
 
+    fn rename_branch(
+        &self,
+        id: vlinder_core::domain::BranchId,
+        new_name: &str,
+    ) -> Result<(), String> {
+        let request = proto::RenameBranchRequest {
+            id: id.as_i64(),
+            new_name: new_name.to_string(),
+        };
+        let mut client = self.client.clone();
+        let response = self
+            .runtime
+            .block_on(async { client.rename_branch(request).await })
+            .map_err(|e| e.to_string())?;
+        let resp = response.into_inner();
+        if resp.success {
+            Ok(())
+        } else {
+            Err(resp.error.unwrap_or_else(|| "unknown error".to_string()))
+        }
+    }
+
+    fn seal_branch(
+        &self,
+        id: vlinder_core::domain::BranchId,
+        broken_at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<(), String> {
+        let request = proto::SealBranchRequest {
+            id: id.as_i64(),
+            broken_at: broken_at.to_rfc3339(),
+        };
+        let mut client = self.client.clone();
+        let response = self
+            .runtime
+            .block_on(async { client.seal_branch(request).await })
+            .map_err(|e| e.to_string())?;
+        let resp = response.into_inner();
+        if resp.success {
+            Ok(())
+        } else {
+            Err(resp.error.unwrap_or_else(|| "unknown error".to_string()))
+        }
+    }
+
+    fn update_session_default_branch(
+        &self,
+        session_id: &vlinder_core::domain::SessionId,
+        branch_id: vlinder_core::domain::BranchId,
+    ) -> Result<(), String> {
+        let request = proto::UpdateSessionDefaultBranchRequest {
+            session_id: session_id.as_str().to_string(),
+            branch_id: branch_id.as_i64(),
+        };
+        let mut client = self.client.clone();
+        let response = self
+            .runtime
+            .block_on(async { client.update_session_default_branch(request).await })
+            .map_err(|e| e.to_string())?;
+        let resp = response.into_inner();
+        if resp.success {
+            Ok(())
+        } else {
+            Err(resp.error.unwrap_or_else(|| "unknown error".to_string()))
+        }
+    }
+
     fn create_session(&self, session: &vlinder_core::domain::Session) -> Result<(), String> {
         let mut client = self.client.clone();
         let req = proto::CreateSessionRequest {

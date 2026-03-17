@@ -6,10 +6,12 @@ use tonic::{Request, Response, Status};
 
 use super::proto::{
     self, harness_server::Harness as HarnessService, ForkTimelineRequest, ForkTimelineResponse,
-    PingRequest, RunAgentRequest, RunAgentResponse, SemVer, StartSessionRequest,
-    StartSessionResponse,
+    PingRequest, PromoteTimelineRequest, PromoteTimelineResponse, RunAgentRequest,
+    RunAgentResponse, SemVer, StartSessionRequest, StartSessionResponse,
 };
-use vlinder_core::domain::{BranchId, DagNodeId, ForkParams, Harness, ResourceId, SessionId};
+use vlinder_core::domain::{
+    BranchId, DagNodeId, ForkParams, Harness, PromoteParams, ResourceId, SessionId,
+};
 
 /// gRPC server that wraps a Harness implementation.
 ///
@@ -120,6 +122,31 @@ impl HarnessService for HarnessServiceServer {
         match result {
             Ok(()) => Ok(Response::new(ForkTimelineResponse { error: None })),
             Err(e) => Ok(Response::new(ForkTimelineResponse { error: Some(e) })),
+        }
+    }
+
+    async fn promote_timeline(
+        &self,
+        request: Request<PromoteTimelineRequest>,
+    ) -> Result<Response<PromoteTimelineResponse>, Status> {
+        let req = request.into_inner();
+        let harness = Arc::clone(&self.harness);
+
+        let result = tokio::task::spawn_blocking(move || {
+            let params = PromoteParams {
+                agent_name: req.agent_name,
+            };
+            let session_id = SessionId::try_from(req.session_id)
+                .map_err(|e| format!("invalid session_id: {}", e))?;
+            let timeline = BranchId::from(req.timeline_id.parse::<i64>().unwrap_or(0));
+            harness.promote_timeline(params, session_id, timeline)
+        })
+        .await
+        .map_err(|e| Status::internal(format!("spawn_blocking failed: {}", e)))?;
+
+        match result {
+            Ok(()) => Ok(Response::new(PromoteTimelineResponse { error: None })),
+            Err(e) => Ok(Response::new(PromoteTimelineResponse { error: Some(e) })),
         }
     }
 }

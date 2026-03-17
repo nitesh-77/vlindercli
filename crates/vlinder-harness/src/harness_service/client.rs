@@ -4,7 +4,7 @@ use tonic::transport::Channel;
 
 use super::proto::{self, harness_client::HarnessClient};
 use vlinder_core::domain::{
-    BranchId, DagNodeId, ForkParams, Harness, HarnessType, ResourceId, SessionId,
+    BranchId, DagNodeId, ForkParams, Harness, HarnessType, PromoteParams, ResourceId, SessionId,
 };
 
 /// Ping a harness service at the given address, returning its protocol version.
@@ -119,6 +119,32 @@ impl Harness for GrpcHarnessClient {
         let response = self
             .runtime
             .block_on(async { client.fork_timeline(request).await })
+            .map_err(|e| format!("gRPC error: {}", e))?;
+
+        let resp = response.into_inner();
+        if let Some(error) = resp.error {
+            Err(error)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn promote_timeline(
+        &self,
+        params: PromoteParams,
+        session_id: SessionId,
+        timeline: BranchId,
+    ) -> Result<(), String> {
+        let request = proto::PromoteTimelineRequest {
+            agent_name: params.agent_name,
+            timeline_id: timeline.to_string(),
+            session_id: session_id.as_str().to_string(),
+        };
+
+        let mut client = self.client.clone();
+        let response = self
+            .runtime
+            .block_on(async { client.promote_timeline(request).await })
             .map_err(|e| format!("gRPC error: {}", e))?;
 
         let resp = response.into_inner();

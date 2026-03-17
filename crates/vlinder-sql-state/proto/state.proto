@@ -34,6 +34,13 @@ service StateService {
 
   // Branch head query
   rpc LatestNodeOnBranch(LatestNodeOnBranchRequest) returns (LatestNodeOnBranchResponse);
+
+  // Branch mutation
+  rpc RenameBranch(RenameBranchRequest) returns (RenameBranchResponse);
+  rpc SealBranch(SealBranchRequest) returns (SealBranchResponse);
+
+  // Session mutation
+  rpc UpdateSessionDefaultBranch(UpdateSessionDefaultBranchRequest) returns (UpdateSessionDefaultBranchResponse);
 }
 
 // =============================================================================
@@ -166,3 +173,29 @@ message LatestNodeOnBranchRequest {
   optional string message_type = 2;  // e.g. "invoke", "complete"; omit for any type
 }
 message LatestNodeOnBranchResponse { optional DagNode node = 1; }
+
+// =============================================================================
+// Branch Mutation
+// =============================================================================
+
+message RenameBranchRequest {
+  int64 id = 1;
+  string new_name = 2;
+}
+message RenameBranchResponse { bool success = 1; optional string error = 2; }
+
+message SealBranchRequest {
+  int64 id = 1;
+  string broken_at = 2;  // ISO-8601
+}
+message SealBranchResponse { bool success = 1; optional string error = 2; }
+
+// =============================================================================
+// Session Mutation
+// =============================================================================
+
+message UpdateSessionDefaultBranchRequest {
+  string session_id = 1;
+  int64 branch_id = 2;
+}
+message UpdateSessionDefaultBranchResponse { bool success = 1; optional string error = 2; }

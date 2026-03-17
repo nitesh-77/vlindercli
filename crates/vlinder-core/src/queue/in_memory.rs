@@ -279,6 +279,12 @@ impl MessageQueue for InMemoryQueue {
         Ok(())
     }
 
+    fn send_promote(&self, _msg: crate::domain::PromoteMessage) -> Result<(), QueueError> {
+        // Promote is fire-and-forget — no consumer subscribes.
+        // RecordingQueue intercepts and records the DagNode before this is called.
+        Ok(())
+    }
+
     fn send_session_start(
         &self,
         _msg: crate::domain::SessionStartMessage,

@@ -16,6 +16,7 @@ pub mod fork;
 pub mod identity;
 pub mod invoke;
 pub mod observable;
+pub mod promote;
 pub mod repair;
 pub mod request;
 pub mod response;
@@ -31,6 +32,7 @@ pub use identity::{
 };
 pub use invoke::InvokeMessage;
 pub use observable::{ObservableMessage, ObservableMessageHeaders};
+pub use promote::PromoteMessage;
 pub use repair::RepairMessage;
 pub use request::RequestMessage;
 pub use response::ResponseMessage;

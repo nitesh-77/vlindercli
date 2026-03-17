@@ -12,8 +12,8 @@ use std::sync::Arc;
 use crate::domain::workers::dag::build_dag_node;
 use crate::domain::{
     Acknowledgement, CompleteMessage, DagNodeId, DagStore, DelegateMessage, ForkMessage,
-    InvokeMessage, MessageQueue, ObservableMessage, QueueError, RepairMessage, RequestMessage,
-    ResponseMessage, Snapshot, SubmissionId,
+    InvokeMessage, MessageQueue, ObservableMessage, PromoteMessage, QueueError, RepairMessage,
+    RequestMessage, ResponseMessage, Snapshot, SubmissionId,
 };
 
 /// A `MessageQueue` decorator that synchronously records DAG nodes on send.
@@ -220,6 +220,54 @@ impl MessageQueue for RecordingQueue {
         }
 
         self.inner.send_fork(msg)
+    }
+
+    fn send_promote(&self, msg: PromoteMessage) -> Result<(), QueueError> {
+        self.record(&msg.clone().into());
+
+        // Promote the branch: seal old main, rename promoted branch to "main".
+        let branch_to_promote = self.store.get_branch(msg.branch).ok().flatten();
+
+        let old_main = self
+            .store
+            .get_branch_by_name("main")
+            .ok()
+            .flatten()
+            .filter(|b| b.session_id == msg.session);
+
+        if let Some(old) = old_main {
+            let sealed_name = format!("broken-{}", chrono::Utc::now().format("%Y%m%d-%H%M%S"));
+            if let Err(e) = self.store.seal_branch(old.id, chrono::Utc::now()) {
+                tracing::warn!(error = %e, branch = old.id.as_i64(), "Failed to seal old main");
+            }
+            if let Err(e) = self.store.rename_branch(old.id, &sealed_name) {
+                tracing::warn!(error = %e, branch = old.id.as_i64(), "Failed to rename old main");
+            }
+            tracing::info!(
+                old_main_id = old.id.as_i64(),
+                sealed_name = %sealed_name,
+                "Sealed old main branch"
+            );
+        }
+
+        if let Some(promoted) = branch_to_promote {
+            if let Err(e) = self.store.rename_branch(promoted.id, "main") {
+                tracing::warn!(error = %e, branch = promoted.id.as_i64(), "Failed to rename promoted branch to main");
+            }
+            if let Err(e) = self
+                .store
+                .update_session_default_branch(&msg.session, promoted.id)
+            {
+                tracing::warn!(error = %e, "Failed to update session default branch");
+            }
+            tracing::info!(
+                branch_id = promoted.id.as_i64(),
+                old_name = %promoted.name,
+                "Promoted branch to main"
+            );
+        }
+
+        self.inner.send_promote(msg)
     }
 
     fn send_session_start(

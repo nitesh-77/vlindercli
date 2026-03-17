@@ -1,7 +1,7 @@
 use clap::Subcommand;
 
 use crate::config::CliConfig;
-use vlinder_core::domain::{BranchId, DagStore, ForkParams, MessageType, SessionId};
+use vlinder_core::domain::{BranchId, DagStore, ForkParams, MessageType, PromoteParams, SessionId};
 
 use super::connect::{connect_harness, open_dag_store};
 
@@ -29,6 +29,14 @@ pub enum SessionCommand {
         #[arg(long)]
         name: String,
     },
+    /// Promote a branch to main
+    Promote {
+        /// Session ID or petname
+        session_id: String,
+        /// Branch name to promote
+        #[arg(long)]
+        branch: String,
+    },
 }
 
 pub fn execute(cmd: SessionCommand) {
@@ -40,6 +48,7 @@ pub fn execute(cmd: SessionCommand) {
             from,
             name,
         } => fork(&session_id, &from, &name),
+        SessionCommand::Promote { session_id, branch } => promote(&session_id, &branch),
     }
 }
 
@@ -205,6 +214,51 @@ fn fork(session_id_or_name: &str, from_hash: &str, branch_name: &str) {
         branch_name,
         &node.id.as_str()[..8]
     );
+}
+
+fn promote(session_id_or_name: &str, branch_name: &str) {
+    let config = CliConfig::load();
+    let store = require_dag_store(&config);
+    let session_id = resolve_session_id(&*store, session_id_or_name);
+
+    // Verify the branch exists and belongs to this session
+    let branch = store
+        .get_branch_by_name(branch_name)
+        .unwrap_or_else(|e| {
+            eprintln!("Failed to look up branch: {}", e);
+            std::process::exit(1);
+        })
+        .unwrap_or_else(|| {
+            eprintln!("Branch '{}' not found", branch_name);
+            std::process::exit(1);
+        });
+
+    if branch.session_id != session_id {
+        eprintln!(
+            "Branch '{}' belongs to session {}, not {}",
+            branch_name, branch.session_id, session_id
+        );
+        std::process::exit(1);
+    }
+
+    // Derive agent name from the session's Invoke message
+    let agent_name = find_agent_name(&*store, &session_id).unwrap_or_else(|| {
+        eprintln!("Cannot determine agent name for session {}", session_id);
+        std::process::exit(1);
+    });
+
+    let harness = connect_harness(&config);
+
+    let params = PromoteParams { agent_name };
+
+    harness
+        .promote_timeline(params, session_id, branch.id)
+        .unwrap_or_else(|e| {
+            eprintln!("Failed to promote timeline: {}", e);
+            std::process::exit(1);
+        });
+
+    println!("Promoted branch '{}' to main", branch_name);
 }
 
 // ---------------------------------------------------------------------------

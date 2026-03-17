@@ -54,6 +54,7 @@ pub enum MessageType {
     Delegate,
     Repair,
     Fork,
+    Promote,
 }
 
 impl MessageType {
@@ -66,6 +67,7 @@ impl MessageType {
             MessageType::Delegate => "delegate",
             MessageType::Repair => "repair",
             MessageType::Fork => "fork",
+            MessageType::Promote => "promote",
         }
     }
 }
@@ -84,6 +86,7 @@ impl std::str::FromStr for MessageType {
             "delegate" => Ok(MessageType::Delegate),
             "repair" => Ok(MessageType::Repair),
             "fork" => Ok(MessageType::Fork),
+            "promote" => Ok(MessageType::Promote),
             _ => Err(format!("unknown message type: {}", s)),
         }
     }
@@ -237,6 +240,19 @@ pub trait DagStore: Send + Sync {
         branch_id: super::BranchId,
         message_type: Option<MessageType>,
     ) -> Result<Option<DagNode>, String>;
+
+    /// Rename a branch.
+    fn rename_branch(&self, id: super::BranchId, new_name: &str) -> Result<(), String>;
+
+    /// Mark a branch as broken (sealed). Sets `broken_at` to the given timestamp.
+    fn seal_branch(&self, id: super::BranchId, broken_at: DateTime<Utc>) -> Result<(), String>;
+
+    /// Update a session's default branch.
+    fn update_session_default_branch(
+        &self,
+        session_id: &super::SessionId,
+        branch_id: super::BranchId,
+    ) -> Result<(), String>;
 
     // -------------------------------------------------------------------------
     // Session CRUD
@@ -440,6 +456,40 @@ impl DagStore for InMemoryDagStore {
             .cloned())
     }
 
+    fn rename_branch(&self, id: super::BranchId, new_name: &str) -> Result<(), String> {
+        let mut branches = self.branches.lock().unwrap();
+        let branch = branches
+            .iter_mut()
+            .find(|b| b.id == id)
+            .ok_or_else(|| format!("branch {} not found", id))?;
+        branch.name = new_name.to_string();
+        Ok(())
+    }
+
+    fn seal_branch(&self, id: super::BranchId, broken_at: DateTime<Utc>) -> Result<(), String> {
+        let mut branches = self.branches.lock().unwrap();
+        let branch = branches
+            .iter_mut()
+            .find(|b| b.id == id)
+            .ok_or_else(|| format!("branch {} not found", id))?;
+        branch.broken_at = Some(broken_at);
+        Ok(())
+    }
+
+    fn update_session_default_branch(
+        &self,
+        session_id: &super::SessionId,
+        branch_id: super::BranchId,
+    ) -> Result<(), String> {
+        let mut sessions = self.sessions.lock().unwrap();
+        let session = sessions
+            .iter_mut()
+            .find(|s| s.id == *session_id)
+            .ok_or_else(|| format!("session {} not found", session_id))?;
+        session.default_branch = branch_id;
+        Ok(())
+    }
+
     fn create_session(&self, session: &Session) -> Result<(), String> {
         let mut sessions = self.sessions.lock().unwrap();
         if sessions
@@ -480,6 +530,7 @@ mod tests {
             MessageType::Delegate,
             MessageType::Repair,
             MessageType::Fork,
+            MessageType::Promote,
         ] {
             assert_eq!(MessageType::from_str(mt.as_str()), Ok(mt));
         }

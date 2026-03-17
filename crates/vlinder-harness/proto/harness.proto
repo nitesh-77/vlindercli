@@ -19,6 +19,9 @@ service Harness {
 
   // Create a timeline fork by sending ForkMessage through the queue.
   rpc ForkTimeline(ForkTimelineRequest) returns (ForkTimelineResponse);
+
+  // Promote a branch to main by sending PromoteMessage through the queue.
+  rpc PromoteTimeline(PromoteTimelineRequest) returns (PromoteTimelineResponse);
 }
 
 // =============================================================================
@@ -70,5 +73,15 @@ message ForkTimelineRequest {
 }
 
 message ForkTimelineResponse {
+  optional string error = 1;
+}
+
+message PromoteTimelineRequest {
+  string agent_name = 1;
+  string timeline_id = 2;
+  string session_id = 3;
+}
+
+message PromoteTimelineResponse {
   optional string error = 1;
 }

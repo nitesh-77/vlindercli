@@ -297,6 +297,9 @@ impl GitDagWorker {
                 self.insert_field(&mut tb, "branch_name", &m.branch_name)?;
                 self.insert_field(&mut tb, "fork_point", m.fork_point.as_str())?;
             }
+            ObservableMessage::Promote(_) => {
+                self.insert_field(&mut tb, "type", "promote")?;
+            }
         }
 
         // Compute canonical hash and store it in the subtree
@@ -645,6 +648,33 @@ impl DagWorker for GitDagWorker {
                 );
             }
 
+            // 7b. Promote-specific: rename git branches
+            if let ObservableMessage::Promote(_promote_msg) = msg {
+                let commit = self
+                    .repo
+                    .find_commit(commit_oid)
+                    .map_err(|e| format!("find promote commit failed: {}", e))?;
+
+                // Rename old main to broken-{date}
+                let sealed_name = format!("broken-{}", chrono::Utc::now().format("%Y%m%d-%H%M%S"));
+                if let Ok(mut old_main) = self.repo.find_branch("main", git2::BranchType::Local) {
+                    old_main
+                        .rename(&sealed_name, false)
+                        .map_err(|e| format!("rename main to '{}' failed: {}", sealed_name, e))?;
+                }
+
+                // Create new main at this commit
+                self.repo
+                    .branch("main", &commit, true)
+                    .map_err(|e| format!("create promoted main branch failed: {}", e))?;
+
+                tracing::info!(
+                    commit = %commit_oid,
+                    sealed_name = %sealed_name,
+                    "Promoted branch to main in git"
+                );
+            }
+
             // 8. Sync working tree so `ls` shows the folder structure
             self.repo
                 .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
@@ -691,6 +721,7 @@ fn message_routing(msg: &ObservableMessage) -> (String, String, &'static str) {
             "repair",
         ),
         ObservableMessage::Fork(m) => ("platform".to_string(), m.branch_name.clone(), "fork"),
+        ObservableMessage::Promote(m) => ("platform".to_string(), m.agent_name.clone(), "promote"),
     }
 }
 
@@ -704,6 +735,7 @@ fn message_agent_name(msg: &ObservableMessage) -> String {
         ObservableMessage::Delegate(m) => m.target.to_string(),
         ObservableMessage::Repair(m) => m.agent_id.to_string(),
         ObservableMessage::Fork(m) => m.agent_name.clone(),
+        ObservableMessage::Promote(m) => m.agent_name.clone(),
     }
 }
 
@@ -717,6 +749,7 @@ fn message_state(msg: &ObservableMessage) -> Option<&str> {
         ObservableMessage::Delegate(m) => m.state.as_deref(),
         ObservableMessage::Repair(m) => m.state.as_deref(),
         ObservableMessage::Fork(_) => None,
+        ObservableMessage::Promote(_) => None,
     }
 }
 

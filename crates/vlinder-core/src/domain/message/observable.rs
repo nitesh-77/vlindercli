@@ -19,6 +19,7 @@ use super::identity::{
     BranchId, DagNodeId, HarnessType, MessageId, Sequence, SessionId, SubmissionId,
 };
 use super::invoke::InvokeMessage;
+use super::promote::PromoteMessage;
 use super::repair::RepairMessage;
 use super::request::RequestMessage;
 use super::response::ResponseMessage;
@@ -36,6 +37,7 @@ pub enum ObservableMessage {
     Delegate(DelegateMessage),
     Repair(RepairMessage),
     Fork(ForkMessage),
+    Promote(PromoteMessage),
 }
 
 /// Message metadata without payload.
@@ -138,6 +140,14 @@ pub enum ObservableMessageHeaders {
         agent_name: String,
         branch_name: String,
         fork_point: DagNodeId,
+    },
+    Promote {
+        id: MessageId,
+        protocol_version: String,
+        branch: BranchId,
+        submission: SubmissionId,
+        session: SessionId,
+        agent_name: String,
     },
 }
 
@@ -326,6 +336,21 @@ impl ObservableMessageHeaders {
                 branch_name,
                 fork_point,
             }),
+            Self::Promote {
+                id,
+                protocol_version,
+                branch,
+                submission,
+                session,
+                agent_name,
+            } => ObservableMessage::Promote(PromoteMessage {
+                id,
+                protocol_version,
+                branch,
+                submission,
+                session,
+                agent_name,
+            }),
         }
     }
 }
@@ -340,6 +365,7 @@ impl ObservableMessage {
             ObservableMessage::Delegate(_) => MessageType::Delegate,
             ObservableMessage::Repair(_) => MessageType::Repair,
             ObservableMessage::Fork(_) => MessageType::Fork,
+            ObservableMessage::Promote(_) => MessageType::Promote,
         }
     }
 
@@ -352,6 +378,7 @@ impl ObservableMessage {
             ObservableMessage::Delegate(m) => &m.protocol_version,
             ObservableMessage::Repair(m) => &m.protocol_version,
             ObservableMessage::Fork(m) => &m.protocol_version,
+            ObservableMessage::Promote(m) => &m.protocol_version,
         }
     }
 
@@ -364,6 +391,7 @@ impl ObservableMessage {
             ObservableMessage::Delegate(m) => &m.id,
             ObservableMessage::Repair(m) => &m.id,
             ObservableMessage::Fork(m) => &m.id,
+            ObservableMessage::Promote(m) => &m.id,
         }
     }
 
@@ -376,6 +404,7 @@ impl ObservableMessage {
             ObservableMessage::Delegate(m) => &m.submission,
             ObservableMessage::Repair(m) => &m.submission,
             ObservableMessage::Fork(m) => &m.submission,
+            ObservableMessage::Promote(m) => &m.submission,
         }
     }
 
@@ -388,6 +417,7 @@ impl ObservableMessage {
             ObservableMessage::Delegate(m) => &m.branch,
             ObservableMessage::Repair(m) => &m.branch,
             ObservableMessage::Fork(m) => &m.branch,
+            ObservableMessage::Promote(m) => &m.branch,
         }
     }
 
@@ -400,6 +430,7 @@ impl ObservableMessage {
             ObservableMessage::Delegate(m) => &m.session,
             ObservableMessage::Repair(m) => &m.session,
             ObservableMessage::Fork(m) => &m.session,
+            ObservableMessage::Promote(m) => &m.session,
         }
     }
 
@@ -413,6 +444,7 @@ impl ObservableMessage {
             ObservableMessage::Delegate(m) => &m.payload,
             ObservableMessage::Repair(m) => &m.payload,
             ObservableMessage::Fork(_) => &[],
+            ObservableMessage::Promote(_) => &[],
         }
     }
 
@@ -429,6 +461,7 @@ impl ObservableMessage {
             ObservableMessage::Delegate(m) => m.payload = payload,
             ObservableMessage::Repair(m) => m.payload = payload,
             ObservableMessage::Fork(_) => {}
+            ObservableMessage::Promote(_) => {}
         }
     }
 
@@ -454,6 +487,7 @@ impl ObservableMessage {
                 (m.harness.as_str().to_string(), m.agent_id.to_string())
             }
             ObservableMessage::Fork(m) => ("platform".to_string(), m.agent_name.clone()),
+            ObservableMessage::Promote(m) => ("platform".to_string(), m.agent_name.clone()),
         }
     }
 
@@ -467,6 +501,7 @@ impl ObservableMessage {
             ObservableMessage::Delegate(m) => m.state.as_deref(),
             ObservableMessage::Repair(m) => m.state.as_deref(),
             ObservableMessage::Fork(_) => None,
+            ObservableMessage::Promote(_) => None,
         }
     }
 
@@ -498,7 +533,9 @@ impl ObservableMessage {
             ObservableMessage::Response(m) => serde_json::to_vec(&m.diagnostics),
             ObservableMessage::Complete(m) => serde_json::to_vec(&m.diagnostics),
             ObservableMessage::Delegate(m) => serde_json::to_vec(&m.diagnostics),
-            ObservableMessage::Repair(_) | ObservableMessage::Fork(_) => return Vec::new(),
+            ObservableMessage::Repair(_)
+            | ObservableMessage::Fork(_)
+            | ObservableMessage::Promote(_) => return Vec::new(),
         };
         json.unwrap_or_default()
     }
@@ -552,5 +589,11 @@ impl From<RepairMessage> for ObservableMessage {
 impl From<ForkMessage> for ObservableMessage {
     fn from(msg: ForkMessage) -> Self {
         ObservableMessage::Fork(msg)
+    }
+}
+
+impl From<PromoteMessage> for ObservableMessage {
+    fn from(msg: PromoteMessage) -> Self {
+        ObservableMessage::Promote(msg)
     }
 }

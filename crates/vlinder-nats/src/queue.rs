@@ -859,6 +859,32 @@ impl MessageQueue for NatsQueue {
         })
     }
 
+    fn send_promote(&self, msg: vlinder_core::domain::PromoteMessage) -> Result<(), QueueError> {
+        let subject = routing_key_to_subject(&RoutingKey::Promote {
+            session: msg.session.clone(),
+            branch: msg.branch,
+            submission: msg.submission.clone(),
+            agent_name: msg.agent_name.clone(),
+        });
+
+        self.inner.runtime.block_on(async {
+            let mut headers = async_nats::HeaderMap::new();
+            headers.insert("msg-id", msg.id.as_str());
+            headers.insert("protocol-version", msg.protocol_version.as_str());
+            headers.insert("session-id", msg.session.as_str());
+
+            self.inner
+                .jetstream
+                .publish_with_headers(subject, headers, "".into())
+                .await
+                .map_err(|e| QueueError::SendFailed(e.to_string()))?
+                .await
+                .map_err(|e| QueueError::SendFailed(e.to_string()))?;
+
+            Ok(())
+        })
+    }
+
     fn send_session_start(
         &self,
         _msg: vlinder_core::domain::SessionStartMessage,
@@ -991,6 +1017,17 @@ fn routing_key_to_subject(key: &RoutingKey) -> String {
                 session, branch, submission, agent_name,
             )
         }
+        RoutingKey::Promote {
+            session,
+            branch,
+            submission,
+            agent_name,
+        } => {
+            format!(
+                "vlinder.{}.{}.{}.promote.{}",
+                session, branch, submission, agent_name,
+            )
+        }
     }
 }
 
@@ -1073,6 +1110,13 @@ pub fn subject_to_routing_key(subject: &str) -> Option<RoutingKey> {
         }),
         // vlinder.{session}.{branch}.{submission}.fork.{agent_name}
         "fork" if s.len() == 6 => Some(RoutingKey::Fork {
+            session,
+            branch,
+            submission,
+            agent_name: s[5].to_string(),
+        }),
+        // vlinder.{session}.{branch}.{submission}.promote.{agent_name}
+        "promote" if s.len() == 6 => Some(RoutingKey::Promote {
             session,
             branch,
             submission,
@@ -1425,6 +1469,19 @@ pub fn from_nats_headers(
                 fork_point,
             })
         }
+        RoutingKey::Promote {
+            branch,
+            submission,
+            agent_name,
+            ..
+        } => Some(ObservableMessageHeaders::Promote {
+            id,
+            protocol_version,
+            branch: *branch,
+            submission: submission.clone(),
+            session,
+            agent_name: agent_name.clone(),
+        }),
     }
 }
 

@@ -11,8 +11,8 @@
 
 use super::{
     AgentId, CompleteMessage, DelegateMessage, ForkMessage, HarnessType, InvokeMessage, Operation,
-    RepairMessage, RequestMessage, ResourceId, ResponseMessage, RoutingKey, ServiceBackend,
-    SubmissionId,
+    PromoteMessage, RepairMessage, RequestMessage, ResourceId, ResponseMessage, RoutingKey,
+    ServiceBackend, SubmissionId,
 };
 use std::fmt;
 
@@ -144,6 +144,12 @@ pub trait MessageQueue {
     /// Creates a new timeline branch in the DAG. Both SQL and git projections
     /// react to this message.
     fn send_fork(&self, msg: ForkMessage) -> Result<(), QueueError>;
+
+    /// Send a PromoteMessage (CLI → Platform).
+    ///
+    /// Promotes a branch to main. Both SQL and git projections react to
+    /// this message.
+    fn send_promote(&self, msg: PromoteMessage) -> Result<(), QueueError>;
 
     /// Send a SessionStartMessage (CLI → Platform).
     ///

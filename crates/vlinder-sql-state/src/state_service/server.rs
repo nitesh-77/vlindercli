@@ -11,7 +11,9 @@ use super::proto::{
     GetNodeResponse, GetNodesBySubmissionRequest, GetNodesBySubmissionResponse,
     GetSessionByNameRequest, GetSessionNodesRequest, GetSessionNodesResponse, GetSessionRequest,
     GetSessionResponse, InsertNodeRequest, InsertNodeResponse, LatestNodeOnBranchRequest,
-    LatestNodeOnBranchResponse, ListSessionsRequest, ListSessionsResponse, PingRequest, SemVer,
+    LatestNodeOnBranchResponse, ListSessionsRequest, ListSessionsResponse, PingRequest,
+    RenameBranchRequest, RenameBranchResponse, SealBranchRequest, SealBranchResponse, SemVer,
+    UpdateSessionDefaultBranchRequest, UpdateSessionDefaultBranchResponse,
 };
 use vlinder_core::domain::{DagNodeId, DagStore, MessageType, SessionId};
 
@@ -308,6 +310,79 @@ impl StateService for StateServiceServer {
             .map_err(Status::internal)?
             .map(|n| n.into());
         Ok(Response::new(LatestNodeOnBranchResponse { node }))
+    }
+
+    // -------------------------------------------------------------------------
+    // Branch mutation RPCs
+    // -------------------------------------------------------------------------
+
+    async fn rename_branch(
+        &self,
+        request: Request<RenameBranchRequest>,
+    ) -> Result<Response<RenameBranchResponse>, Status> {
+        let req = request.into_inner();
+        match self
+            .store
+            .rename_branch(vlinder_core::domain::BranchId::from(req.id), &req.new_name)
+        {
+            Ok(()) => Ok(Response::new(RenameBranchResponse {
+                success: true,
+                error: None,
+            })),
+            Err(e) => Ok(Response::new(RenameBranchResponse {
+                success: false,
+                error: Some(e),
+            })),
+        }
+    }
+
+    async fn seal_branch(
+        &self,
+        request: Request<SealBranchRequest>,
+    ) -> Result<Response<SealBranchResponse>, Status> {
+        let req = request.into_inner();
+        let broken_at: chrono::DateTime<chrono::Utc> = req
+            .broken_at
+            .parse()
+            .map_err(|e| Status::invalid_argument(format!("invalid broken_at: {}", e)))?;
+        match self
+            .store
+            .seal_branch(vlinder_core::domain::BranchId::from(req.id), broken_at)
+        {
+            Ok(()) => Ok(Response::new(SealBranchResponse {
+                success: true,
+                error: None,
+            })),
+            Err(e) => Ok(Response::new(SealBranchResponse {
+                success: false,
+                error: Some(e),
+            })),
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Session mutation RPCs
+    // -------------------------------------------------------------------------
+
+    async fn update_session_default_branch(
+        &self,
+        request: Request<UpdateSessionDefaultBranchRequest>,
+    ) -> Result<Response<UpdateSessionDefaultBranchResponse>, Status> {
+        let req = request.into_inner();
+        let session_id = SessionId::try_from(req.session_id).map_err(Status::invalid_argument)?;
+        match self.store.update_session_default_branch(
+            &session_id,
+            vlinder_core::domain::BranchId::from(req.branch_id),
+        ) {
+            Ok(()) => Ok(Response::new(UpdateSessionDefaultBranchResponse {
+                success: true,
+                error: None,
+            })),
+            Err(e) => Ok(Response::new(UpdateSessionDefaultBranchResponse {
+                success: false,
+                error: Some(e),
+            })),
+        }
     }
 }
 
