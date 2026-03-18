@@ -542,10 +542,9 @@ mod tests {
             description = "Test agent for KV storage"
             runtime = "container"
             executable = "localhost/test-agent:latest"
-            object_storage = "{}"
+            object_storage = "{uri}"
             [requirements]
             "#,
-            uri
         );
         Agent::from_toml(&manifest).unwrap()
     }
@@ -648,7 +647,7 @@ mod tests {
             Operation::Put,
             Sequence::first(),
             serde_json::to_vec(&put_payload).unwrap(),
-            Some("".to_string()), // root state via envelope
+            Some(String::new()), // root state via envelope
             test_request_diag(),
         );
 
@@ -698,7 +697,7 @@ mod tests {
             Operation::Put,
             Sequence::first(),
             serde_json::to_vec(&put1).unwrap(),
-            Some("".to_string()),
+            Some(String::new()),
             test_request_diag(),
         );
         queue.send_request(req1.clone()).unwrap();
@@ -782,7 +781,7 @@ mod tests {
             Operation::Put,
             Sequence::first(),
             serde_json::to_vec(&serde_json::json!({"path": "/a.txt", "content": "aaa"})).unwrap(),
-            Some("".to_string()),
+            Some(String::new()),
             test_request_diag(),
         );
         queue.send_request(req1.clone()).unwrap();

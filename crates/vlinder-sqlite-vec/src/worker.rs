@@ -270,10 +270,9 @@ mod tests {
             description = "Test agent for vector storage"
             runtime = "container"
             executable = "localhost/test-agent:latest"
-            vector_storage = "{}"
+            vector_storage = "{uri}"
             [requirements]
             "#,
-            uri
         );
         Agent::from_toml(&manifest).unwrap()
     }
@@ -296,7 +295,7 @@ mod tests {
             ServiceBackend::Vec(VectorStorageType::SqliteVec),
         );
 
-        let embedding: Vec<f32> = (0..768).map(|i| i as f32 * 0.001).collect();
+        let embedding: Vec<f32> = (0_i16..768).map(|i| f32::from(i) * 0.001).collect();
         let store_payload = serde_json::json!({
             "key": "doc1",
             "vector": embedding,
@@ -369,7 +368,7 @@ mod tests {
             ServiceBackend::Vec(VectorStorageType::SqliteVec),
         );
 
-        let embedding: Vec<f32> = (0..768).map(|i| i as f32 * 0.001).collect();
+        let embedding: Vec<f32> = (0_i16..768).map(|i| f32::from(i) * 0.001).collect();
         let store_payload = serde_json::json!({
             "key": "doc1",
             "vector": embedding,
