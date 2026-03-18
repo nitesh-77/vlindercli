@@ -15,10 +15,13 @@ use vlinder_core::domain::{
 pub fn check_once(url: &str, health: &mut HealthWindow) -> Option<u16> {
     let client = ureq::Agent::new();
     let check_start = Instant::now();
-    let timestamp_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64;
+    let timestamp_ms = u64::try_from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis(),
+    )
+    .unwrap_or(u64::MAX);
 
     let status_code = match client.get(url).call() {
         Ok(_) => 200,
@@ -28,7 +31,7 @@ pub fn check_once(url: &str, health: &mut HealthWindow) -> Option<u16> {
 
     health.push(HealthSnapshot {
         timestamp_ms,
-        latency_ms: check_start.elapsed().as_millis() as u64,
+        latency_ms: u64::try_from(check_start.elapsed().as_millis()).unwrap_or(u64::MAX),
         status_code,
     });
 

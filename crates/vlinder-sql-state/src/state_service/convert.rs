@@ -171,7 +171,7 @@ impl TryFrom<proto::SessionSummary> for SessionSummary {
             session_id: SessionId::try_from(s.session_id)?,
             agent_name: s.agent_name,
             started_at,
-            message_count: s.message_count as usize,
+            message_count: usize::try_from(s.message_count).unwrap_or(0),
             is_open: s.is_open,
         })
     }

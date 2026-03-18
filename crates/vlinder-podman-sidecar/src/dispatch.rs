@@ -135,7 +135,8 @@ pub fn handle_invoke(
             } else {
                 // Unmanaged mode — response is the final output.
                 let final_state = provider_server.final_state();
-                let duration_ms = started_at.elapsed().as_millis() as u64;
+                let duration_ms =
+                    u64::try_from(started_at.elapsed().as_millis()).unwrap_or(u64::MAX);
                 let diagnostics = health::build_diagnostics(
                     health,
                     ctx.container_port,
@@ -286,11 +287,14 @@ pub fn handle_repair(
     let diagnostics = RequestDiagnostics {
         sequence: repair.sequence.as_u32(),
         endpoint: format!("/{}", repair.service.service_type().as_str()),
-        request_bytes: repair.payload.len() as u64,
-        received_at_ms: std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64,
+        request_bytes: u64::try_from(repair.payload.len()).unwrap_or(u64::MAX),
+        received_at_ms: u64::try_from(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis(),
+        )
+        .unwrap_or(u64::MAX),
     };
 
     let mut request = RequestMessage::new(
@@ -407,11 +411,14 @@ fn handle_action(
             let diagnostics = RequestDiagnostics {
                 sequence: seq.as_u32(),
                 endpoint: format!("/{}", route.service_backend.service_type().as_str()),
-                request_bytes: call_body.len() as u64,
-                received_at_ms: std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis() as u64,
+                request_bytes: u64::try_from(call_body.len()).unwrap_or(u64::MAX),
+                received_at_ms: u64::try_from(
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis(),
+                )
+                .unwrap_or(u64::MAX),
             };
 
             let mut request = RequestMessage::new(

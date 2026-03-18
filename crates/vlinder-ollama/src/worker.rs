@@ -104,7 +104,7 @@ impl OllamaWorker {
             ),
         };
 
-        let duration_ms = start.elapsed().as_millis() as u64;
+        let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
 
         let diag = ServiceDiagnostics {
             service: ServiceType::Infer,
@@ -244,7 +244,7 @@ impl OllamaWorker {
             Err(e) => (e.body, e.status_code, 0, String::new()),
         };
 
-        let duration_ms = start.elapsed().as_millis() as u64;
+        let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
 
         let diag = ServiceDiagnostics {
             service: ServiceType::Embed,
@@ -276,7 +276,10 @@ impl OllamaWorker {
                     body: error_json(&e),
                 })?;
 
-        let dimensions = resp.embeddings.first().map_or(0, |v| v.len() as u32);
+        let dimensions = resp
+            .embeddings
+            .first()
+            .map_or(0, |v| u32::try_from(v.len()).unwrap_or(u32::MAX));
 
         let body = serde_json::to_vec(&resp).map_err(|e| WorkerError {
             status_code: 500,

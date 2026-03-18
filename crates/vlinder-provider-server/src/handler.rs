@@ -51,10 +51,13 @@ impl InvokeHandler {
         checkpoint: Option<String>,
     ) -> (u16, Vec<u8>) {
         let seq = self.sequence.next();
-        let received_at_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
+        let received_at_ms = u64::try_from(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis(),
+        )
+        .unwrap_or(u64::MAX);
 
         let diagnostics = RequestDiagnostics {
             sequence: seq.as_u32(),

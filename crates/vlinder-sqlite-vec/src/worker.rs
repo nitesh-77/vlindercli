@@ -84,7 +84,7 @@ impl SqliteVecWorker {
             Ok((request, ack)) => {
                 let start = std::time::Instant::now();
                 let response_payload = self.handle_store(&request);
-                let duration_ms = start.elapsed().as_millis() as u64;
+                let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
                 let diag = ServiceDiagnostics::storage(
                     self.service.service_type(),
                     self.service.backend_str(),
@@ -111,7 +111,7 @@ impl SqliteVecWorker {
             Ok((request, ack)) => {
                 let start = std::time::Instant::now();
                 let response_payload = self.handle_search(&request);
-                let duration_ms = start.elapsed().as_millis() as u64;
+                let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
                 let diag = ServiceDiagnostics::storage(
                     self.service.service_type(),
                     self.service.backend_str(),
@@ -138,7 +138,7 @@ impl SqliteVecWorker {
             Ok((request, ack)) => {
                 let start = std::time::Instant::now();
                 let response_payload = self.handle_delete(&request);
-                let duration_ms = start.elapsed().as_millis() as u64;
+                let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
                 let diag = ServiceDiagnostics::storage(
                     self.service.service_type(),
                     self.service.backend_str(),

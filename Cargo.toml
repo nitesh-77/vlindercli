@@ -12,7 +12,7 @@ missing_panics_doc = "allow"
 # Tighten these later — too many to fix in one pass
 doc_markdown = "warn"
 uninlined_format_args = "warn"
-cast_possible_truncation = "allow"  # 16 instances: u128→u64 casts in hash/nats code
+cast_possible_truncation = "warn"
 cast_precision_loss = "allow"       # 4 instances: u64→f64 in timing code
 default_trait_access = "allow"      # tonic-generated code uses Default::default()
 too_many_lines = "allow"            # structural refactors, not hygiene

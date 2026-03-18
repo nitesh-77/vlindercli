@@ -58,7 +58,7 @@ impl OpenRouterWorker {
                         Err(e) => (e.body, e.status_code, 0, 0, String::new()),
                     };
 
-                let duration_ms = start.elapsed().as_millis() as u64;
+                let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
 
                 let diag = ServiceDiagnostics {
                     service: ServiceType::Infer,
