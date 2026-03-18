@@ -4,7 +4,7 @@ use vlinder_core::domain::{ModelCatalog, Provider};
 use vlinder_ollama::OllamaCatalog;
 
 #[test]
-#[ignore] // Run via: just run-integration-tests
+#[ignore = "requires running Ollama server"]
 fn lists_models_from_ollama() {
     let catalog = OllamaCatalog::new("http://localhost:11434");
     let models = catalog.list();
@@ -12,7 +12,7 @@ fn lists_models_from_ollama() {
 }
 
 #[test]
-#[ignore] // Run via: just run-integration-tests
+#[ignore = "requires running Ollama server"]
 fn resolves_model_from_ollama() {
     let catalog = OllamaCatalog::new("http://localhost:11434");
     let model = catalog.resolve("phi3");

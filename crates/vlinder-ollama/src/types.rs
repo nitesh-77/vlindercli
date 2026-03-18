@@ -107,7 +107,7 @@ mod tests {
             "model": "llama3.2",
             "message": {"role": "assistant", "content": "hi"},
             "done": true,
-            "total_duration": 500000000,
+            "total_duration": 500_000_000,
             "prompt_eval_count": 10,
             "eval_count": 5
         });
@@ -148,7 +148,7 @@ mod tests {
             "model": "llama3.2",
             "response": "Because of Rayleigh scattering.",
             "done": true,
-            "total_duration": 300000000,
+            "total_duration": 300_000_000,
             "prompt_eval_count": 8,
             "eval_count": 12
         });
