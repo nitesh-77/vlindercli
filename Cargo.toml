@@ -9,10 +9,4 @@ module_name_repetitions = "allow"
 must_use_candidate = "allow"
 missing_errors_doc = "allow"
 missing_panics_doc = "allow"
-# Tighten these later — too many to fix in one pass
-doc_markdown = "warn"
-uninlined_format_args = "warn"
-cast_possible_truncation = "warn"
-cast_precision_loss = "warn"
-default_trait_access = "warn"
 too_many_lines = "allow"            # structural refactors, not hygiene
