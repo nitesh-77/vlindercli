@@ -13,6 +13,6 @@ missing_panics_doc = "allow"
 doc_markdown = "warn"
 uninlined_format_args = "warn"
 cast_possible_truncation = "warn"
-cast_precision_loss = "allow"       # 4 instances: u64→f64 in timing code
+cast_precision_loss = "warn"
 default_trait_access = "allow"      # tonic-generated code uses Default::default()
 too_many_lines = "allow"            # structural refactors, not hygiene

@@ -6,6 +6,7 @@ use tempfile::TempDir;
 use vlinder_sqlite_vec::SqliteVectorStorage;
 
 /// Create a 768-dim test vector
+#[allow(clippy::cast_precision_loss)] // index < 768, lossless in f32
 fn make_test_vector(seed: f32) -> Vec<f32> {
     (0..768).map(|i| (i as f32 * seed).sin()).collect()
 }

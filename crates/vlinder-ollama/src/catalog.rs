@@ -89,6 +89,7 @@ impl ModelCatalog for OllamaCatalog {
     }
 }
 
+#[allow(clippy::cast_precision_loss)] // display-only: sub-byte precision irrelevant
 fn format_size(bytes: u64) -> String {
     const GB: u64 = 1024 * 1024 * 1024;
     const MB: u64 = 1024 * 1024;
