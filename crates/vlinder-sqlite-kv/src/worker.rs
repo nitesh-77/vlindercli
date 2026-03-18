@@ -568,6 +568,8 @@ mod tests {
             ServiceBackend::Kv(ObjectStorageType::Sqlite),
         );
 
+        let session = SessionId::new();
+
         // Put request — no base64, plain string
         let put_payload = serde_json::json!({
             "path": "/hello.txt",
@@ -576,7 +578,7 @@ mod tests {
         let put_request = RequestMessage::new(
             BranchId::from(1),
             test_submission(),
-            SessionId::new(),
+            session.clone(),
             test_agent_id(),
             ServiceBackend::Kv(ObjectStorageType::Sqlite),
             Operation::Put,
@@ -597,7 +599,7 @@ mod tests {
         let get_request = RequestMessage::new(
             BranchId::from(1),
             test_submission(),
-            SessionId::new(),
+            session,
             test_agent_id(),
             ServiceBackend::Kv(ObjectStorageType::Sqlite),
             Operation::Get,
@@ -683,12 +685,14 @@ mod tests {
             ServiceBackend::Kv(ObjectStorageType::Sqlite),
         );
 
+        let session = SessionId::new();
+
         // First put
         let put1 = serde_json::json!({"path": "/a.txt", "content": "aaa"});
         let req1 = RequestMessage::new(
             BranchId::from(1),
             test_submission(),
-            SessionId::new(),
+            session.clone(),
             test_agent_id(),
             ServiceBackend::Kv(ObjectStorageType::Sqlite),
             Operation::Put,
@@ -709,7 +713,7 @@ mod tests {
         let req2 = RequestMessage::new(
             BranchId::from(1),
             test_submission(),
-            SessionId::new(),
+            session.clone(),
             test_agent_id(),
             ServiceBackend::Kv(ObjectStorageType::Sqlite),
             Operation::Put,
@@ -733,7 +737,7 @@ mod tests {
         let get_req = RequestMessage::new(
             BranchId::from(1),
             test_submission(),
-            SessionId::new(),
+            session,
             test_agent_id(),
             ServiceBackend::Kv(ObjectStorageType::Sqlite),
             Operation::Get,
