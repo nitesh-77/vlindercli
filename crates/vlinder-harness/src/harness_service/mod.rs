@@ -14,8 +14,13 @@ pub use client::{ping_harness, GrpcHarnessClient};
 #[cfg(feature = "server")]
 pub use server::HarnessServiceServer;
 
-/// Generated protobuf types.
-#[allow(clippy::doc_markdown, clippy::default_trait_access)]
+/// Generated protobuf types — tonic does not emit `#[automatically_derived]` yet,
+/// so we suppress pedantic lints manually until it does.
+#[allow(
+    clippy::doc_markdown,
+    clippy::default_trait_access,
+    clippy::too_many_lines
+)]
 pub mod proto {
     tonic::include_proto!("vlinder.harness");
 }
