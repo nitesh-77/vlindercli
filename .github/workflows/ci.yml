@@ -23,7 +23,7 @@ jobs:
       - name: Check formatting
         run: cargo fmt --check
       - name: Clippy
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
   test:
     name: Test
@@ -35,7 +35,7 @@ jobs:
       - name: Install build dependencies
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - name: Run tests
-        run: cargo test
+        run: cargo test --workspace
 
   licenses:
     name: License check
