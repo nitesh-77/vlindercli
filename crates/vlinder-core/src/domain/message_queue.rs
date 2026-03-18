@@ -241,8 +241,8 @@ pub enum QueueError {
 impl fmt::Display for QueueError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            QueueError::SendFailed(msg) => write!(f, "send failed: {}", msg),
-            QueueError::ReceiveFailed(msg) => write!(f, "receive failed: {}", msg),
+            QueueError::SendFailed(msg) => write!(f, "send failed: {msg}"),
+            QueueError::ReceiveFailed(msg) => write!(f, "receive failed: {msg}"),
             QueueError::Timeout => write!(f, "receive timed out"),
         }
     }

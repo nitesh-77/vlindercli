@@ -262,7 +262,7 @@ impl Registry for InMemoryRegistry {
 
         // New agent: convert manifest → agent, validate via register_agent
         let agent = Agent::from_manifest(manifest.clone())
-            .map_err(|e| RegistrationError::Persistence(format!("{:?}", e)))?;
+            .map_err(|e| RegistrationError::Persistence(format!("{e:?}")))?;
         self.register_agent(agent)?;
 
         // Store manifest alongside the agent

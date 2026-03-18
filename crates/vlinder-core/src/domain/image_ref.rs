@@ -32,11 +32,11 @@ impl ImageRef {
         }
 
         if s.chars().any(char::is_whitespace) {
-            return Err(format!("image ref must not contain whitespace: {}", s));
+            return Err(format!("image ref must not contain whitespace: {s}"));
         }
 
         if !s.contains('/') {
-            return Err(format!("image ref must contain at least one '/': {}", s));
+            return Err(format!("image ref must contain at least one '/': {s}"));
         }
 
         Ok(ImageRef(s))

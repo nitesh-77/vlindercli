@@ -14,7 +14,7 @@ impl SqliteVectorStorage {
     pub fn open_at(db_path: &std::path::Path) -> Result<Self, String> {
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent)
-                .map_err(|e| format!("failed to create storage directory: {}", e))?;
+                .map_err(|e| format!("failed to create storage directory: {e}"))?;
         }
 
         unsafe {
@@ -25,10 +25,10 @@ impl SqliteVectorStorage {
         }
 
         let conn =
-            Connection::open(db_path).map_err(|e| format!("failed to open database: {}", e))?;
+            Connection::open(db_path).map_err(|e| format!("failed to open database: {e}"))?;
 
         conn.execute_batch("PRAGMA journal_mode=WAL;")
-            .map_err(|e| format!("failed to set WAL mode: {}", e))?;
+            .map_err(|e| format!("failed to set WAL mode: {e}"))?;
 
         conn.execute(
             "CREATE VIRTUAL TABLE IF NOT EXISTS vec_items USING vec0(
@@ -38,7 +38,7 @@ impl SqliteVectorStorage {
             )",
             [],
         )
-        .map_err(|e| format!("failed to create vec_items table: {}", e))?;
+        .map_err(|e| format!("failed to create vec_items table: {e}"))?;
 
         Ok(SqliteVectorStorage {
             conn: Arc::new(Mutex::new(conn)),
@@ -59,7 +59,7 @@ impl SqliteVectorStorage {
             "INSERT INTO vec_items (key, embedding, metadata) VALUES (?, ?, ?)",
             params![key, vector.as_bytes(), metadata],
         )
-        .map_err(|e| format!("failed to store embedding: {}", e))?;
+        .map_err(|e| format!("failed to store embedding: {e}"))?;
         Ok(())
     }
 
@@ -84,7 +84,7 @@ impl SqliteVectorStorage {
              ORDER BY distance
              LIMIT ?",
             )
-            .map_err(|e| format!("failed to prepare search query: {}", e))?;
+            .map_err(|e| format!("failed to prepare search query: {e}"))?;
 
         let rows = stmt
             .query_map(params![query_vector.as_bytes(), limit], |row| {
@@ -94,11 +94,11 @@ impl SqliteVectorStorage {
                     row.get::<_, f64>(2)?,
                 ))
             })
-            .map_err(|e| format!("failed to search: {}", e))?;
+            .map_err(|e| format!("failed to search: {e}"))?;
 
         let mut results = Vec::new();
         for result in rows {
-            results.push(result.map_err(|e| format!("failed to get result: {}", e))?);
+            results.push(result.map_err(|e| format!("failed to get result: {e}"))?);
         }
         Ok(results)
     }
@@ -107,7 +107,7 @@ impl SqliteVectorStorage {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let rows_affected = conn
             .execute("DELETE FROM vec_items WHERE key = ?", params![key])
-            .map_err(|e| format!("failed to delete embedding: {}", e))?;
+            .map_err(|e| format!("failed to delete embedding: {e}"))?;
         Ok(rows_affected > 0)
     }
 }

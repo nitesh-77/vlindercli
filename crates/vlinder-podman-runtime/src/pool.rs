@@ -160,7 +160,7 @@ impl ContainerRuntime {
             "sqlite-kv.vlinder.local:127.0.0.1".to_string(),
         ];
 
-        let pod_name = format!("vlinder-{}", name);
+        let pod_name = format!("vlinder-{name}");
         let pod_id = self
             .podman
             .pod_create(&pod_name, &host_aliases)
@@ -351,16 +351,16 @@ impl ContainerRuntime {
         let mut volume_names = Vec::new();
 
         for (mount_name, mount) in &agent.requirements.mounts {
-            let vol_name = format!("vlinder-mount-{}-{}", agent_name, mount_name);
+            let vol_name = format!("vlinder-mount-{agent_name}-{mount_name}");
 
             // Parse "bucket/prefix" → ("bucket", "/prefix")
             // s3fs device format: `bucket:/path` mounts only objects under that prefix.
             let (bucket, prefix) = match mount.s3.split_once('/') {
-                Some((b, p)) => (b, format!("/{}", p)),
+                Some((b, p)) => (b, format!("/{p}")),
                 None => (mount.s3.as_str(), "/".to_string()),
             };
 
-            let device = format!("{}:{}", bucket, prefix);
+            let device = format!("{bucket}:{prefix}");
             let raw_endpoint = mount
                 .endpoint
                 .as_deref()
@@ -372,8 +372,7 @@ impl ContainerRuntime {
 
             // See doc comment above for why each option is here.
             let mut mount_flags = vec![format!(
-                "ro,url={},connect_timeout=10,compat_dir,allow_other",
-                endpoint
+                "ro,url={endpoint},connect_timeout=10,compat_dir,allow_other"
             )];
 
             if mount.endpoint.is_some() {
@@ -390,7 +389,7 @@ impl ContainerRuntime {
                 // pass as mount option, clean up on teardown) is fully wired.
                 let credentials = "test:test";
                 let passwd_path = write_s3_credentials(&vol_name, credentials)?;
-                mount_flags.push(format!("passwd_file={}", passwd_path));
+                mount_flags.push(format!("passwd_file={passwd_path}"));
             }
 
             let mount_opts = mount_flags.join(",");
@@ -403,7 +402,7 @@ impl ContainerRuntime {
 
             self.podman
                 .volume_create(&vol_name, "local", &options)
-                .map_err(|e| format!("failed to create volume {}: {}", vol_name, e))?;
+                .map_err(|e| format!("failed to create volume {vol_name}: {e}"))?;
 
             tracing::info!(
                 event = "volume.created",
@@ -612,7 +611,7 @@ mod tests {
         let s3 = "vlinder-support/v0.1.0/";
         let (bucket, prefix) = s3.split_once('/').unwrap();
         assert_eq!(bucket, "vlinder-support");
-        assert_eq!(format!("/{}", prefix), "/v0.1.0/");
+        assert_eq!(format!("/{prefix}"), "/v0.1.0/");
     }
 
     #[test]

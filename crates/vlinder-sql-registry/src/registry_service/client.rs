@@ -223,7 +223,7 @@ impl Registry for GrpcRegistryClient {
     }
 
     fn model_id(&self, name: &str) -> ResourceId {
-        ResourceId::new(format!("model://{}", name))
+        ResourceId::new(format!("model://{name}"))
     }
 
     fn delete_model(&self, name: &str) -> Result<bool, RegistrationError> {

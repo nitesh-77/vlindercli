@@ -46,7 +46,7 @@ impl PodmanClient for PodmanApiClient {
 
     fn image_digest(&self, image_ref: &ImageRef) -> Option<ImageDigest> {
         let encoded = url_encode(image_ref.as_str());
-        let url = format!("{}/images/{}/json", API_BASE, encoded);
+        let url = format!("{API_BASE}/images/{encoded}/json");
         let mut resp = self.agent.get(&url).call().ok()?;
         if resp.status().as_u16() != 200 {
             return None;
@@ -58,7 +58,7 @@ impl PodmanClient for PodmanApiClient {
     // ── Pod operations ────────────────────────────────────────────────
 
     fn pod_create(&self, name: &str, host_aliases: &[String]) -> Result<PodId, PodmanError> {
-        let url = format!("{}/pods/create", API_BASE);
+        let url = format!("{API_BASE}/pods/create");
         let hostadd = if host_aliases.is_empty() {
             None
         } else {
@@ -73,21 +73,20 @@ impl PodmanClient for PodmanApiClient {
             .agent
             .post(&url)
             .send_json(&spec)
-            .map_err(|e| PodmanError::Run(format!("pod create failed: {}", e)))?;
+            .map_err(|e| PodmanError::Run(format!("pod create failed: {e}")))?;
 
         let status = resp.status().as_u16();
         if status != 200 && status != 201 {
             let body = resp.body_mut().read_to_string().unwrap_or_default();
             return Err(PodmanError::Run(format!(
-                "pod create HTTP {}: {}",
-                status, body
+                "pod create HTTP {status}: {body}",
             )));
         }
 
         let created: PodCreateResponse = resp
             .body_mut()
             .read_json()
-            .map_err(|e| PodmanError::Run(format!("failed to parse pod create response: {}", e)))?;
+            .map_err(|e| PodmanError::Run(format!("failed to parse pod create response: {e}")))?;
 
         Ok(PodId::new(created.id))
     }
@@ -126,24 +125,23 @@ impl PodmanClient for PodmanApiClient {
             },
         };
 
-        let url = format!("{}/containers/create", API_BASE);
+        let url = format!("{API_BASE}/containers/create");
         let mut resp = self
             .agent
             .post(&url)
             .send_json(&spec)
-            .map_err(|e| PodmanError::Run(format!("container create in pod failed: {}", e)))?;
+            .map_err(|e| PodmanError::Run(format!("container create in pod failed: {e}")))?;
 
         let status = resp.status().as_u16();
         if status != 201 {
             let body = resp.body_mut().read_to_string().unwrap_or_default();
             return Err(PodmanError::Run(format!(
-                "container create in pod HTTP {}: {}",
-                status, body
+                "container create in pod HTTP {status}: {body}",
             )));
         }
 
         let created: ContainerCreateResponse = resp.body_mut().read_json().map_err(|e| {
-            PodmanError::Run(format!("failed to parse container create response: {}", e))
+            PodmanError::Run(format!("failed to parse container create response: {e}"))
         })?;
 
         Ok(ContainerId::new(created.id))
@@ -170,19 +168,18 @@ impl PodmanClient for PodmanApiClient {
             },
         };
 
-        let url = format!("{}/volumes/create", API_BASE);
+        let url = format!("{API_BASE}/volumes/create");
         let mut resp = self
             .agent
             .post(&url)
             .send_json(&spec)
-            .map_err(|e| PodmanError::Run(format!("volume create failed: {}", e)))?;
+            .map_err(|e| PodmanError::Run(format!("volume create failed: {e}")))?;
 
         let status = resp.status().as_u16();
         if status != 201 {
             let body = resp.body_mut().read_to_string().unwrap_or_default();
             return Err(PodmanError::Run(format!(
-                "volume create HTTP {}: {}",
-                status, body
+                "volume create HTTP {status}: {body}",
             )));
         }
 
@@ -190,21 +187,21 @@ impl PodmanClient for PodmanApiClient {
     }
 
     fn volume_rm(&self, name: &str) {
-        let url = format!("{}/volumes/{}?force=true", API_BASE, name);
+        let url = format!("{API_BASE}/volumes/{name}?force=true");
         let _ = self.agent.delete(&url).call();
     }
 
     fn pod_start(&self, pod_id: &PodId) -> Result<(), PodmanError> {
-        let url = format!("{}/pods/{}/start", API_BASE, pod_id.as_str());
+        let url = format!("{API_BASE}/pods/{}/start", pod_id.as_str());
         let resp = self
             .agent
             .post(&url)
             .send("")
-            .map_err(|e| PodmanError::Run(format!("pod start failed: {}", e)))?;
+            .map_err(|e| PodmanError::Run(format!("pod start failed: {e}")))?;
 
         let status = resp.status().as_u16();
         if status != 200 && status != 204 && status != 304 {
-            return Err(PodmanError::Run(format!("pod start HTTP {}", status)));
+            return Err(PodmanError::Run(format!("pod start HTTP {status}")));
         }
 
         Ok(())
@@ -214,11 +211,11 @@ impl PodmanClient for PodmanApiClient {
         let id = pod_id.as_str();
 
         // Stop — fire and forget
-        let url = format!("{}/pods/{}/stop?t={}", API_BASE, id, timeout_secs);
+        let url = format!("{API_BASE}/pods/{id}/stop?t={timeout_secs}");
         let _ = self.agent.post(&url).send("");
 
         // Remove with force — fire and forget
-        let url = format!("{}/pods/{}?force=true", API_BASE, id);
+        let url = format!("{API_BASE}/pods/{id}?force=true");
         let _ = self.agent.delete(&url).call();
     }
 }

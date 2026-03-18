@@ -50,8 +50,8 @@ pub enum RepositoryError {
 impl std::fmt::Display for RepositoryError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            RepositoryError::Database(msg) => write!(f, "database error: {}", msg),
-            RepositoryError::Serialization(msg) => write!(f, "serialization error: {}", msg),
+            RepositoryError::Database(msg) => write!(f, "database error: {msg}"),
+            RepositoryError::Serialization(msg) => write!(f, "serialization error: {msg}"),
         }
     }
 }
@@ -189,7 +189,7 @@ impl StoredAgent {
             .map(|b64| base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b64))
             .transpose()
             .map_err(|e| {
-                RepositoryError::Serialization(format!("invalid public_key base64: {}", e))
+                RepositoryError::Serialization(format!("invalid public_key base64: {e}"))
             })?;
 
         Ok(Agent {

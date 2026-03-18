@@ -22,14 +22,14 @@ impl ImageDigest {
         let s = s.into();
         let hex = s
             .strip_prefix("sha256:")
-            .ok_or_else(|| format!("image digest must start with 'sha256:': {}", s))?;
+            .ok_or_else(|| format!("image digest must start with 'sha256:': {s}"))?;
 
         if hex.is_empty() {
-            return Err(format!("image digest has empty hex portion: {}", s));
+            return Err(format!("image digest has empty hex portion: {s}"));
         }
 
         if !hex.chars().all(|c| c.is_ascii_hexdigit()) {
-            return Err(format!("image digest contains non-hex characters: {}", s));
+            return Err(format!("image digest contains non-hex characters: {s}"));
         }
 
         Ok(ImageDigest(s))

@@ -59,13 +59,12 @@ impl PodmanClient for PodmanCliClient {
         let output = Command::new("podman")
             .args(&args)
             .output()
-            .map_err(|e| PodmanError::Run(format!("failed to spawn podman: {}", e)))?;
+            .map_err(|e| PodmanError::Run(format!("failed to spawn podman: {e}")))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(PodmanError::Run(format!(
-                "podman pod create failed: {}",
-                stderr
+                "podman pod create failed: {stderr}"
             )));
         }
 
@@ -88,12 +87,12 @@ impl PodmanClient for PodmanCliClient {
 
         for (k, v) in env_vars {
             args.push("--env".to_string());
-            args.push(format!("{}={}", k, v));
+            args.push(format!("{k}={v}"));
         }
 
         for (vol_name, container_path) in volumes {
             args.push("--volume".to_string());
-            args.push(format!("{}:{}:ro", vol_name, container_path));
+            args.push(format!("{vol_name}:{container_path}:ro"));
         }
 
         args.push(image.as_str().to_string());
@@ -101,13 +100,12 @@ impl PodmanClient for PodmanCliClient {
         let output = Command::new("podman")
             .args(&args)
             .output()
-            .map_err(|e| PodmanError::Run(format!("failed to spawn podman: {}", e)))?;
+            .map_err(|e| PodmanError::Run(format!("failed to spawn podman: {e}")))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(PodmanError::Run(format!(
-                "podman create in pod failed: {}",
-                stderr
+                "podman create in pod failed: {stderr}"
             )));
         }
 
@@ -130,7 +128,7 @@ impl PodmanClient for PodmanCliClient {
 
         for (k, v) in options {
             args.push("-o".to_string());
-            args.push(format!("{}={}", k, v));
+            args.push(format!("{k}={v}"));
         }
 
         args.push(name.to_string());
@@ -138,13 +136,12 @@ impl PodmanClient for PodmanCliClient {
         let output = Command::new("podman")
             .args(&args)
             .output()
-            .map_err(|e| PodmanError::Run(format!("failed to spawn podman: {}", e)))?;
+            .map_err(|e| PodmanError::Run(format!("failed to spawn podman: {e}")))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(PodmanError::Run(format!(
-                "podman volume create failed: {}",
-                stderr
+                "podman volume create failed: {stderr}"
             )));
         }
 
@@ -161,13 +158,12 @@ impl PodmanClient for PodmanCliClient {
         let output = Command::new("podman")
             .args(["pod", "start", pod_id.as_str()])
             .output()
-            .map_err(|e| PodmanError::Run(format!("failed to spawn podman: {}", e)))?;
+            .map_err(|e| PodmanError::Run(format!("failed to spawn podman: {e}")))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(PodmanError::Run(format!(
-                "podman pod start failed: {}",
-                stderr
+                "podman pod start failed: {stderr}"
             )));
         }
 

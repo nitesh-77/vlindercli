@@ -28,7 +28,7 @@ impl ModelCatalog for OllamaCatalog {
         let models = self.list()?;
         let info = models
             .iter()
-            .find(|m| m.name == name || m.name.starts_with(&format!("{}:", name)))
+            .find(|m| m.name == name || m.name.starts_with(&format!("{name}:")))
             .ok_or_else(|| CatalogError::NotFound(name.to_string()))?;
 
         // Determine model type from name heuristics
@@ -83,7 +83,7 @@ impl ModelCatalog for OllamaCatalog {
             .map(|models| {
                 models
                     .iter()
-                    .any(|m| m.name == name || m.name.starts_with(&format!("{}:", name)))
+                    .any(|m| m.name == name || m.name.starts_with(&format!("{name}:")))
             })
             .unwrap_or(false)
     }

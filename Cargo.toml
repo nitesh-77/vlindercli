@@ -11,7 +11,7 @@ missing_errors_doc = "allow"
 missing_panics_doc = "allow"
 # Tighten these later — too many to fix in one pass
 doc_markdown = "allow"              # 304 instances: domain terms in doc comments need backticks
-uninlined_format_args = "allow"     # 353 instances: format!("{}", x) → format!("{x}")
+uninlined_format_args = "warn"
 cast_possible_truncation = "allow"  # 16 instances: u128→u64 casts in hash/nats code
 cast_precision_loss = "allow"       # 4 instances: u64→f64 in timing code
 default_trait_access = "allow"      # tonic-generated code uses Default::default()

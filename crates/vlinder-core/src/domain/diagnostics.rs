@@ -461,7 +461,7 @@ mod tests {
             RuntimeInfo::Container { engine_version, .. } => {
                 assert_eq!(engine_version, "unknown");
             }
-            other => panic!("expected Container, got {:?}", other),
+            other => panic!("expected Container, got {other:?}"),
         }
     }
 

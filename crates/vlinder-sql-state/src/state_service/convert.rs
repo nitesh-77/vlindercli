@@ -63,14 +63,14 @@ impl TryFrom<proto::DagNode> for DagNode {
         let created_at: DateTime<Utc> = node
             .created_at
             .parse()
-            .map_err(|e| format!("invalid created_at: {}", e))?;
+            .map_err(|e| format!("invalid created_at: {e}"))?;
 
         let mut message: ObservableMessage = node
             .message_blob
             .as_ref()
             .ok_or_else(|| "missing message_blob".to_string())
             .and_then(|blob| {
-                serde_json::from_str(blob).map_err(|e| format!("invalid message_blob JSON: {}", e))
+                serde_json::from_str(blob).map_err(|e| format!("invalid message_blob JSON: {e}"))
             })?;
 
         // Payload is #[serde(skip)] on most message types, so it's lost
@@ -119,12 +119,12 @@ impl TryFrom<proto::Branch> for Branch {
         let created_at: DateTime<Utc> = b
             .created_at
             .parse()
-            .map_err(|e| format!("invalid created_at: {}", e))?;
+            .map_err(|e| format!("invalid created_at: {e}"))?;
         let broken_at = b
             .broken_at
             .map(|s| s.parse::<DateTime<Utc>>())
             .transpose()
-            .map_err(|e| format!("invalid broken_at: {}", e))?;
+            .map_err(|e| format!("invalid broken_at: {e}"))?;
 
         Ok(Self {
             id: BranchId::from(b.id),
@@ -165,7 +165,7 @@ impl TryFrom<proto::SessionSummary> for SessionSummary {
         let started_at: DateTime<Utc> = s
             .started_at
             .parse()
-            .map_err(|e| format!("invalid started_at: {}", e))?;
+            .map_err(|e| format!("invalid started_at: {e}"))?;
 
         Ok(Self {
             session_id: SessionId::try_from(s.session_id)?,

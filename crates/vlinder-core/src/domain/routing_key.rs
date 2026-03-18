@@ -58,7 +58,7 @@ impl std::str::FromStr for InferenceBackendType {
         match s {
             "ollama" => Ok(Self::Ollama),
             "openrouter" => Ok(Self::OpenRouter),
-            _ => Err(format!("unknown inference backend: {}", s)),
+            _ => Err(format!("unknown inference backend: {s}")),
         }
     }
 }
@@ -83,7 +83,7 @@ impl std::str::FromStr for EmbeddingBackendType {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "ollama" => Ok(Self::Ollama),
-            _ => Err(format!("unknown embedding backend: {}", s)),
+            _ => Err(format!("unknown embedding backend: {s}")),
         }
     }
 }

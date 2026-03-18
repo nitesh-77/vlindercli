@@ -73,10 +73,10 @@ impl GitDagWorker {
             Repository::open(repo_path)
         } else {
             std::fs::create_dir_all(repo_path)
-                .map_err(|e| format!("failed to create repo directory: {}", e))?;
+                .map_err(|e| format!("failed to create repo directory: {e}"))?;
             Repository::init_opts(repo_path, RepositoryInitOptions::new().initial_head("main"))
         }
-        .map_err(|e| format!("git repo open/init failed: {}", e))?;
+        .map_err(|e| format!("git repo open/init failed: {e}"))?;
 
         // Create an empty initial commit on main if the repo is fresh.
         // This gives `git checkout main` a clean working tree to return to.
@@ -85,9 +85,9 @@ impl GitDagWorker {
                 .treebuilder(None)
                 .and_then(|tb| tb.write())
                 .and_then(|oid| repo.find_tree(oid))
-                .map_err(|e| format!("empty tree failed: {}", e))?;
+                .map_err(|e| format!("empty tree failed: {e}"))?;
             let sig = Signature::now("vlinder", "vlinder@localhost")
-                .map_err(|e| format!("signature failed: {}", e))?;
+                .map_err(|e| format!("signature failed: {e}"))?;
             repo.commit(
                 Some("refs/heads/main"),
                 &sig,
@@ -96,7 +96,7 @@ impl GitDagWorker {
                 &empty_tree,
                 &[],
             )
-            .map_err(|e| format!("initial commit failed: {}", e))?;
+            .map_err(|e| format!("initial commit failed: {e}"))?;
         }
 
         Ok(Self {
@@ -168,7 +168,7 @@ impl GitDagWorker {
         msg_dirs.sort();
 
         if let Some(last_dir) = msg_dirs.last() {
-            let path = format!("{}/{}/{}/hash", agent_name, session_id, last_dir);
+            let path = format!("{agent_name}/{session_id}/{last_dir}/hash");
             if let Ok(entry) = root_tree.get_path(std::path::Path::new(&path)) {
                 if let Ok(blob) = self.repo.find_blob(entry.id()) {
                     return String::from_utf8_lossy(blob.content()).to_string();
@@ -190,7 +190,7 @@ impl GitDagWorker {
         let mut tb = self
             .repo
             .treebuilder(None)
-            .map_err(|e| format!("treebuilder failed: {}", e))?;
+            .map_err(|e| format!("treebuilder failed: {e}"))?;
 
         let created_at_str = created_at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
 
@@ -203,7 +203,7 @@ impl GitDagWorker {
         // Payload — raw bytes, every message has one
         let payload_oid = self.write_blob(msg.payload())?;
         tb.insert("payload", payload_oid, FileMode::Blob.into())
-            .map_err(|e| format!("insert payload failed: {}", e))?;
+            .map_err(|e| format!("insert payload failed: {e}"))?;
 
         // Type-specific fields + diagnostics
         match msg {
@@ -259,7 +259,7 @@ impl GitDagWorker {
                 if !m.diagnostics.stderr.is_empty() {
                     let oid = self.write_blob(&m.diagnostics.stderr)?;
                     tb.insert("stderr", oid, FileMode::Blob.into())
-                        .map_err(|e| format!("insert stderr failed: {}", e))?;
+                        .map_err(|e| format!("insert stderr failed: {e}"))?;
                 }
             }
             ObservableMessage::Delegate(m) => {
@@ -274,7 +274,7 @@ impl GitDagWorker {
                 if !m.diagnostics.runtime.stderr.is_empty() {
                     let oid = self.write_blob(&m.diagnostics.runtime.stderr)?;
                     tb.insert("stderr", oid, FileMode::Blob.into())
-                        .map_err(|e| format!("insert stderr failed: {}", e))?;
+                        .map_err(|e| format!("insert stderr failed: {e}"))?;
                 }
             }
             ObservableMessage::Repair(m) => {
@@ -308,7 +308,7 @@ impl GitDagWorker {
 
         let tree_oid = tb
             .write()
-            .map_err(|e| format!("write message subtree failed: {}", e))?;
+            .map_err(|e| format!("write message subtree failed: {e}"))?;
         Ok((tree_oid, dag_node.id.to_string()))
     }
 
@@ -353,23 +353,23 @@ impl GitDagWorker {
         // Build new message subtree
         let (msg_tree_oid, canonical_hash) =
             self.build_message_subtree(msg, created_at, canonical_parent)?;
-        let msg_dir = format!("{:03}-{}-{}", seq, from, msg_type);
+        let msg_dir = format!("{seq:03}-{from}-{msg_type}");
 
         // Build session subtree: existing messages + new one + timelines
         let mut session_tb = self
             .repo
             .treebuilder(existing_session_tree.as_ref())
-            .map_err(|e| format!("session treebuilder failed: {}", e))?;
+            .map_err(|e| format!("session treebuilder failed: {e}"))?;
         let _ = session_tb.remove("timelines");
         session_tb
             .insert(&msg_dir, msg_tree_oid, FileMode::Tree.into())
-            .map_err(|e| format!("insert message dir failed: {}", e))?;
+            .map_err(|e| format!("insert message dir failed: {e}"))?;
 
         // Build timelines subtree
         let mut timelines_tb = self
             .repo
             .treebuilder(existing_timelines_tree.as_ref())
-            .map_err(|e| format!("timelines treebuilder failed: {}", e))?;
+            .map_err(|e| format!("timelines treebuilder failed: {e}"))?;
 
         // Determine which timeline to append to
         let active_timeline = match msg {
@@ -382,7 +382,7 @@ impl GitDagWorker {
             if let Some(entry) = tl_tree.get_name(active_timeline) {
                 if let Ok(blob) = self.repo.find_blob(entry.id()) {
                     let existing = String::from_utf8_lossy(blob.content()).to_string();
-                    format!("{}\n{}", existing, msg_dir)
+                    format!("{existing}\n{msg_dir}")
                 } else {
                     msg_dir.clone()
                 }
@@ -396,7 +396,7 @@ impl GitDagWorker {
         let timeline_oid = self.write_blob(timeline_content.as_bytes())?;
         timelines_tb
             .insert(active_timeline, timeline_oid, FileMode::Blob.into())
-            .map_err(|e| format!("insert timeline '{}' failed: {}", active_timeline, e))?;
+            .map_err(|e| format!("insert timeline '{active_timeline}' failed: {e}"))?;
 
         // For fork: also ensure the main timeline index is preserved (it may not
         // have been touched) and set ACTIVE to the new branch
@@ -404,39 +404,39 @@ impl GitDagWorker {
         let active_oid = self.write_blob(active_value.as_bytes())?;
         timelines_tb
             .insert("ACTIVE", active_oid, FileMode::Blob.into())
-            .map_err(|e| format!("insert ACTIVE failed: {}", e))?;
+            .map_err(|e| format!("insert ACTIVE failed: {e}"))?;
 
         let timelines_tree_oid = timelines_tb
             .write()
-            .map_err(|e| format!("write timelines tree failed: {}", e))?;
+            .map_err(|e| format!("write timelines tree failed: {e}"))?;
         session_tb
             .insert("timelines", timelines_tree_oid, FileMode::Tree.into())
-            .map_err(|e| format!("insert timelines dir failed: {}", e))?;
+            .map_err(|e| format!("insert timelines dir failed: {e}"))?;
 
         let session_tree_oid = session_tb
             .write()
-            .map_err(|e| format!("write session tree failed: {}", e))?;
+            .map_err(|e| format!("write session tree failed: {e}"))?;
 
         // Build agent subtree
         let mut agent_tb = self
             .repo
             .treebuilder(existing_agent_tree.as_ref())
-            .map_err(|e| format!("agent treebuilder failed: {}", e))?;
+            .map_err(|e| format!("agent treebuilder failed: {e}"))?;
         agent_tb
             .insert(&session_id, session_tree_oid, FileMode::Tree.into())
-            .map_err(|e| format!("insert session dir failed: {}", e))?;
+            .map_err(|e| format!("insert session dir failed: {e}"))?;
         let agent_tree_oid = agent_tb
             .write()
-            .map_err(|e| format!("write agent tree failed: {}", e))?;
+            .map_err(|e| format!("write agent tree failed: {e}"))?;
 
         // Build root tree
         let mut root_tb = self
             .repo
             .treebuilder(parent_tree.as_ref())
-            .map_err(|e| format!("root treebuilder failed: {}", e))?;
+            .map_err(|e| format!("root treebuilder failed: {e}"))?;
         root_tb
             .insert(&agent_name, agent_tree_oid, FileMode::Tree.into())
-            .map_err(|e| format!("insert agent dir failed: {}", e))?;
+            .map_err(|e| format!("insert agent dir failed: {e}"))?;
 
         // Add top-level metadata from registry
         let _ = root_tb.remove("agent.toml");
@@ -473,7 +473,7 @@ impl GitDagWorker {
 
         let tree_oid = root_tb
             .write()
-            .map_err(|e| format!("write root tree failed: {}", e))?;
+            .map_err(|e| format!("write root tree failed: {e}"))?;
         Ok((tree_oid, canonical_hash))
     }
 
@@ -486,7 +486,7 @@ impl GitDagWorker {
         let mut tb = self
             .repo
             .treebuilder(None)
-            .map_err(|e| format!("treebuilder failed: {}", e))?;
+            .map_err(|e| format!("treebuilder failed: {e}"))?;
 
         let mut has_entries = false;
         for (alias, model_name) in models {
@@ -495,7 +495,7 @@ impl GitDagWorker {
                     let oid = self.write_blob(model_toml.as_bytes())?;
                     let filename = format!("{}.toml", alias.replace('/', "-"));
                     tb.insert(&filename, oid, FileMode::Blob.into())
-                        .map_err(|e| format!("insert model failed: {}", e))?;
+                        .map_err(|e| format!("insert model failed: {e}"))?;
                     has_entries = true;
                 }
             }
@@ -506,21 +506,21 @@ impl GitDagWorker {
         }
 
         tb.write()
-            .map_err(|e| format!("write models subtree failed: {}", e))
+            .map_err(|e| format!("write models subtree failed: {e}"))
     }
 
     /// Write a blob to the git object store.
     fn write_blob(&self, data: &[u8]) -> Result<Oid, String> {
         self.repo
             .blob(data)
-            .map_err(|e| format!("blob write failed: {}", e))
+            .map_err(|e| format!("blob write failed: {e}"))
     }
 
     /// Write a scalar string field as a blob and insert into a tree builder.
     fn insert_field(&self, tb: &mut TreeBuilder, name: &str, value: &str) -> Result<(), String> {
         let oid = self.write_blob(value.as_bytes())?;
         tb.insert(name, oid, FileMode::Blob.into())
-            .map_err(|e| format!("insert field '{}' failed: {}", name, e))?;
+            .map_err(|e| format!("insert field '{name}' failed: {e}"))?;
         Ok(())
     }
 
@@ -531,10 +531,10 @@ impl GitDagWorker {
         diagnostics: &T,
     ) -> Result<(), String> {
         let toml_str = toml::to_string_pretty(diagnostics)
-            .map_err(|e| format!("diagnostics TOML serialize failed: {}", e))?;
+            .map_err(|e| format!("diagnostics TOML serialize failed: {e}"))?;
         let oid = self.write_blob(toml_str.as_bytes())?;
         tb.insert("diagnostics.toml", oid, FileMode::Blob.into())
-            .map_err(|e| format!("insert diagnostics.toml failed: {}", e))?;
+            .map_err(|e| format!("insert diagnostics.toml failed: {e}"))?;
         Ok(())
     }
 }
@@ -553,10 +553,10 @@ impl DagWorker for GitDagWorker {
                     let commit = self
                         .repo
                         .find_commit(oid)
-                        .map_err(|e| format!("find commit failed: {}", e))?;
+                        .map_err(|e| format!("find commit failed: {e}"))?;
                     let tree = commit
                         .tree()
-                        .map_err(|e| format!("tree lookup failed: {}", e))?;
+                        .map_err(|e| format!("tree lookup failed: {e}"))?;
                     DagNodeId::from(self.session_canonical_hash_from_tree(
                         &tree,
                         &agent_name,
@@ -579,7 +579,7 @@ impl DagWorker for GitDagWorker {
             let tree = self
                 .repo
                 .find_tree(tree_oid)
-                .map_err(|e| format!("find tree failed: {}", e))?;
+                .map_err(|e| format!("find tree failed: {e}"))?;
 
             // 3. Build commit message with trailers for filtering
             let mut message = format!(
@@ -608,9 +608,9 @@ impl DagWorker for GitDagWorker {
             let author_email = format!("{}@{}", from, self.registry_host);
             let timestamp = git2::Time::new(created_at.timestamp(), 0);
             let author = Signature::new(&from, &author_email, &timestamp)
-                .map_err(|e| format!("author signature failed: {}", e))?;
+                .map_err(|e| format!("author signature failed: {e}"))?;
             let committer = Signature::new("vlinder", "vlinder@localhost", &timestamp)
-                .map_err(|e| format!("committer signature failed: {}", e))?;
+                .map_err(|e| format!("committer signature failed: {e}"))?;
 
             // 5. Parent: main HEAD (all commits on main)
             let parent_commit = parent_commit_oid.and_then(|oid| self.repo.find_commit(oid).ok());
@@ -629,14 +629,14 @@ impl DagWorker for GitDagWorker {
             let commit_oid = self
                 .repo
                 .commit(Some("HEAD"), &author, &committer, &message, &tree, &parents)
-                .map_err(|e| format!("commit failed: {}", e))?;
+                .map_err(|e| format!("commit failed: {e}"))?;
 
             // 7. Fork-specific: create a git branch at this commit
             if let ObservableMessage::Fork(fork_msg) = msg {
                 let commit = self
                     .repo
                     .find_commit(commit_oid)
-                    .map_err(|e| format!("find fork commit failed: {}", e))?;
+                    .map_err(|e| format!("find fork commit failed: {e}"))?;
                 self.repo
                     .branch(&fork_msg.branch_name, &commit, false)
                     .map_err(|e| {
@@ -655,20 +655,20 @@ impl DagWorker for GitDagWorker {
                 let commit = self
                     .repo
                     .find_commit(commit_oid)
-                    .map_err(|e| format!("find promote commit failed: {}", e))?;
+                    .map_err(|e| format!("find promote commit failed: {e}"))?;
 
                 // Rename old main to broken-{date}
                 let sealed_name = format!("broken-{}", chrono::Utc::now().format("%Y%m%d-%H%M%S"));
                 if let Ok(mut old_main) = self.repo.find_branch("main", git2::BranchType::Local) {
                     old_main
                         .rename(&sealed_name, false)
-                        .map_err(|e| format!("rename main to '{}' failed: {}", sealed_name, e))?;
+                        .map_err(|e| format!("rename main to '{sealed_name}' failed: {e}"))?;
                 }
 
                 // Create new main at this commit
                 self.repo
                     .branch("main", &commit, true)
-                    .map_err(|e| format!("create promoted main branch failed: {}", e))?;
+                    .map_err(|e| format!("create promoted main branch failed: {e}"))?;
 
                 tracing::info!(
                     commit = %commit_oid,
@@ -680,7 +680,7 @@ impl DagWorker for GitDagWorker {
             // 8. Sync working tree so `ls` shows the folder structure
             self.repo
                 .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
-                .map_err(|e| format!("checkout HEAD failed: {}", e))?;
+                .map_err(|e| format!("checkout HEAD failed: {e}"))?;
 
             tracing::debug!(commit = %commit_oid, session = %session_id, "Commit succeeded");
 

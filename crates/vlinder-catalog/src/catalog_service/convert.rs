@@ -84,7 +84,7 @@ fn model_type_from_proto(value: i32) -> Result<domain::ModelType, String> {
     match proto::ModelType::try_from(value) {
         Ok(proto::ModelType::Inference) => Ok(domain::ModelType::Inference),
         Ok(proto::ModelType::Embedding) => Ok(domain::ModelType::Embedding),
-        Ok(proto::ModelType::Unspecified) | Err(_) => Err(format!("invalid model type: {}", value)),
+        Ok(proto::ModelType::Unspecified) | Err(_) => Err(format!("invalid model type: {value}")),
     }
 }
 
@@ -99,6 +99,6 @@ fn provider_from_proto(value: i32) -> Result<domain::Provider, String> {
     match proto::Provider::try_from(value) {
         Ok(proto::Provider::Ollama) => Ok(domain::Provider::Ollama),
         Ok(proto::Provider::Openrouter) => Ok(domain::Provider::OpenRouter),
-        Ok(proto::Provider::Unspecified) | Err(_) => Err(format!("invalid provider: {}", value)),
+        Ok(proto::Provider::Unspecified) | Err(_) => Err(format!("invalid provider: {value}")),
     }
 }

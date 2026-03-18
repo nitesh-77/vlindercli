@@ -30,8 +30,8 @@ pub enum IdentityError {
 impl std::fmt::Display for IdentityError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            IdentityError::Store(e) => write!(f, "secret store error: {}", e),
-            IdentityError::InvalidKey(msg) => write!(f, "invalid key: {}", msg),
+            IdentityError::Store(e) => write!(f, "secret store error: {e}"),
+            IdentityError::InvalidKey(msg) => write!(f, "invalid key: {msg}"),
         }
     }
 }
@@ -48,7 +48,7 @@ impl From<SecretStoreError> for IdentityError {
 ///
 /// Convention: `agents/{name}/private-key` (see ADR 084, secret_store.rs).
 pub fn private_key_name(agent_name: &str) -> String {
-    format!("agents/{}/private-key", agent_name)
+    format!("agents/{agent_name}/private-key")
 }
 
 /// Ensure an agent has an Ed25519 identity.

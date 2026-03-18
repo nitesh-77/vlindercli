@@ -42,7 +42,7 @@ impl SessionServer {
     ///
     /// Binds to `127.0.0.1:{port}` (localhost only — this is a local dev tool).
     pub fn start(store: Arc<dyn DagStore>, port: u16) -> std::io::Result<Self> {
-        let server = tiny_http::Server::http(format!("127.0.0.1:{}", port))
+        let server = tiny_http::Server::http(format!("127.0.0.1:{port}"))
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::AddrInUse, e.to_string()))?;
 
         let port = server.server_addr().to_ip().map_or(port, |a| a.port());
@@ -186,10 +186,7 @@ fn render_index(store: &dyn DagStore) -> String {
 
     html_page(
         "Vlinder Sessions",
-        &format!(
-            "<h1>Sessions</h1>\n<ul class=\"session-list\">\n{}</ul>",
-            items
-        ),
+        &format!("<h1>Sessions</h1>\n<ul class=\"session-list\">\n{items}</ul>",),
     )
 }
 
@@ -439,7 +436,7 @@ mod tests {
             .build()
             .into();
         let mut resp = agent
-            .get(&format!("http://127.0.0.1:{}{}", port, path))
+            .get(&format!("http://127.0.0.1:{port}{path}"))
             .call()
             .unwrap();
         let status = resp.status().as_u16();

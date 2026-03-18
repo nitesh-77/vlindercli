@@ -49,10 +49,10 @@ impl SqliteVecWorker {
         let agent = self
             .registry
             .get_agent_by_name(agent_id)
-            .ok_or_else(|| format!("unknown agent: {}", agent_id))?;
+            .ok_or_else(|| format!("unknown agent: {agent_id}"))?;
         let uri = agent
             .vector_storage
-            .ok_or_else(|| format!("agent has no vector_storage declared: {}", agent_id))?;
+            .ok_or_else(|| format!("agent has no vector_storage declared: {agent_id}"))?;
         let path = uri
             .path()
             .ok_or_else(|| format!("vector_storage URI has no path: {}", uri.as_str()))?;
@@ -163,29 +163,29 @@ impl SqliteVecWorker {
     fn handle_store(&self, request: &RequestMessage) -> Vec<u8> {
         let req: SqliteVecStoreRequest = match serde_json::from_slice(request.payload.as_slice()) {
             Ok(r) => r,
-            Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
+            Err(e) => return format!("[error] invalid request: {e}").into_bytes(),
         };
 
         let store = match self.get_or_open(request.agent_id.as_str()) {
             Ok(s) => s,
-            Err(e) => return format!("[error] {}", e).into_bytes(),
+            Err(e) => return format!("[error] {e}").into_bytes(),
         };
 
         match store.store_embedding(&req.key, &req.vector, &req.metadata) {
             Ok(()) => b"ok".to_vec(),
-            Err(e) => format!("[error] {}", e).into_bytes(),
+            Err(e) => format!("[error] {e}").into_bytes(),
         }
     }
 
     fn handle_search(&self, request: &RequestMessage) -> Vec<u8> {
         let req: SqliteVecSearchRequest = match serde_json::from_slice(request.payload.as_slice()) {
             Ok(r) => r,
-            Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
+            Err(e) => return format!("[error] invalid request: {e}").into_bytes(),
         };
 
         let store = match self.get_or_open(request.agent_id.as_str()) {
             Ok(s) => s,
-            Err(e) => return format!("[error] {}", e).into_bytes(),
+            Err(e) => return format!("[error] {e}").into_bytes(),
         };
 
         match store.search_by_vector(&req.vector, req.limit) {
@@ -201,29 +201,29 @@ impl SqliteVecWorker {
                     })
                     .collect();
                 serde_json::to_string(&formatted).map_or_else(
-                    |e| format!("[error] {}", e).into_bytes(),
+                    |e| format!("[error] {e}").into_bytes(),
                     std::string::String::into_bytes,
                 )
             }
-            Err(e) => format!("[error] {}", e).into_bytes(),
+            Err(e) => format!("[error] {e}").into_bytes(),
         }
     }
 
     fn handle_delete(&self, request: &RequestMessage) -> Vec<u8> {
         let req: SqliteVecDeleteRequest = match serde_json::from_slice(request.payload.as_slice()) {
             Ok(r) => r,
-            Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
+            Err(e) => return format!("[error] invalid request: {e}").into_bytes(),
         };
 
         let store = match self.get_or_open(request.agent_id.as_str()) {
             Ok(s) => s,
-            Err(e) => return format!("[error] {}", e).into_bytes(),
+            Err(e) => return format!("[error] {e}").into_bytes(),
         };
 
         match store.delete_embedding(&req.key) {
             Ok(true) => b"ok".to_vec(),
             Ok(false) => b"not_found".to_vec(),
-            Err(e) => format!("[error] {}", e).into_bytes(),
+            Err(e) => format!("[error] {e}").into_bytes(),
         }
     }
 }

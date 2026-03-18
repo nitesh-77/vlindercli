@@ -26,9 +26,8 @@ struct NatsSecretStoreInner {
 impl NatsSecretStore {
     /// Connect to a NATS server and create/open the `vlinder-secrets` KV bucket.
     pub fn connect(config: &crate::NatsConfig) -> Result<Self, SecretStoreError> {
-        let runtime = Runtime::new().map_err(|e| {
-            SecretStoreError::StoreFailed(format!("failed to create runtime: {}", e))
-        })?;
+        let runtime = Runtime::new()
+            .map_err(|e| SecretStoreError::StoreFailed(format!("failed to create runtime: {e}")))?;
 
         let kv = runtime.block_on(async {
             let client = crate::connect::nats_connect(config)
@@ -46,7 +45,7 @@ impl NatsSecretStore {
                 })
                 .await
                 .map_err(|e| {
-                    SecretStoreError::StoreFailed(format!("failed to create KV bucket: {}", e))
+                    SecretStoreError::StoreFailed(format!("failed to create KV bucket: {e}"))
                 })?;
 
             Ok::<_, SecretStoreError>(kv)

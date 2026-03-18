@@ -47,7 +47,7 @@ impl NatsQueue {
     /// Creates the VLINDER stream if it doesn't exist.
     pub fn connect(config: &crate::NatsConfig) -> Result<Self, QueueError> {
         let runtime = Runtime::new()
-            .map_err(|e| QueueError::SendFailed(format!("failed to create runtime: {}", e)))?;
+            .map_err(|e| QueueError::SendFailed(format!("failed to create runtime: {e}")))?;
 
         let (client, jetstream) = runtime.block_on(async {
             let client = crate::connect::nats_connect(config)
@@ -87,7 +87,7 @@ impl NatsQueue {
         jetstream
             .get_or_create_stream(config)
             .await
-            .map_err(|e| QueueError::SendFailed(format!("failed to create stream: {}", e)))?;
+            .map_err(|e| QueueError::SendFailed(format!("failed to create stream: {e}")))?;
 
         Ok(())
     }
@@ -208,7 +208,7 @@ impl NatsQueue {
                 handle.block_on(async {
                     msg.ack()
                         .await
-                        .map_err(|e| QueueError::ReceiveFailed(format!("ack failed: {}", e)))
+                        .map_err(|e| QueueError::ReceiveFailed(format!("ack failed: {e}")))
                 })
             } else {
                 Ok(())
@@ -904,10 +904,7 @@ fn routing_key_to_subject(key: &RoutingKey) -> String {
             runtime,
             agent,
         } => {
-            format!(
-                "vlinder.{}.{}.{}.invoke.{}.{}.{}",
-                session, branch, submission, harness, runtime, agent,
-            )
+            format!("vlinder.{session}.{branch}.{submission}.invoke.{harness}.{runtime}.{agent}",)
         }
         RoutingKey::Complete {
             session,
@@ -916,10 +913,7 @@ fn routing_key_to_subject(key: &RoutingKey) -> String {
             agent,
             harness,
         } => {
-            format!(
-                "vlinder.{}.{}.{}.complete.{}.{}",
-                session, branch, submission, agent, harness,
-            )
+            format!("vlinder.{session}.{branch}.{submission}.complete.{agent}.{harness}",)
         }
         RoutingKey::Request {
             session,
@@ -970,10 +964,7 @@ fn routing_key_to_subject(key: &RoutingKey) -> String {
             caller,
             target,
         } => {
-            format!(
-                "vlinder.{}.{}.{}.delegate.{}.{}",
-                session, branch, submission, caller, target,
-            )
+            format!("vlinder.{session}.{branch}.{submission}.delegate.{caller}.{target}",)
         }
         RoutingKey::DelegateReply {
             session,
@@ -984,8 +975,7 @@ fn routing_key_to_subject(key: &RoutingKey) -> String {
             nonce,
         } => {
             format!(
-                "vlinder.{}.{}.{}.delegate-reply.{}.{}.{}",
-                session, branch, submission, caller, target, nonce,
+                "vlinder.{session}.{branch}.{submission}.delegate-reply.{caller}.{target}.{nonce}",
             )
         }
         RoutingKey::Repair {
@@ -995,10 +985,7 @@ fn routing_key_to_subject(key: &RoutingKey) -> String {
             harness,
             agent,
         } => {
-            format!(
-                "vlinder.{}.{}.{}.repair.{}.{}",
-                session, branch, submission, harness, agent,
-            )
+            format!("vlinder.{session}.{branch}.{submission}.repair.{harness}.{agent}",)
         }
         RoutingKey::Fork {
             session,
@@ -1006,10 +993,7 @@ fn routing_key_to_subject(key: &RoutingKey) -> String {
             submission,
             agent_name,
         } => {
-            format!(
-                "vlinder.{}.{}.{}.fork.{}",
-                session, branch, submission, agent_name,
-            )
+            format!("vlinder.{session}.{branch}.{submission}.fork.{agent_name}",)
         }
         RoutingKey::Promote {
             session,
@@ -1017,10 +1001,7 @@ fn routing_key_to_subject(key: &RoutingKey) -> String {
             submission,
             agent_name,
         } => {
-            format!(
-                "vlinder.{}.{}.{}.promote.{}",
-                session, branch, submission, agent_name,
-            )
+            format!("vlinder.{session}.{branch}.{submission}.promote.{agent_name}",)
         }
     }
 }
@@ -1492,7 +1473,7 @@ fn get_header(headers: &async_nats::HeaderMap, key: &str) -> Result<String, Queu
     headers
         .get(key)
         .map(std::string::ToString::to_string)
-        .ok_or_else(|| QueueError::ReceiveFailed(format!("missing header: {}", key)))
+        .ok_or_else(|| QueueError::ReceiveFailed(format!("missing header: {key}")))
 }
 
 // ============================================================================

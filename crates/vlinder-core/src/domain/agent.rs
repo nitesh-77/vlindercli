@@ -51,7 +51,7 @@ impl Agent {
     ///
     /// Registry replaces this with `<registry_id>/agents/<name>` during registration.
     pub fn placeholder_id(name: &str) -> ResourceId {
-        ResourceId::new(format!("pending-registration://agents/{}", name))
+        ResourceId::new(format!("pending-registration://agents/{name}"))
     }
 
     /// Create an agent directly from TOML content.

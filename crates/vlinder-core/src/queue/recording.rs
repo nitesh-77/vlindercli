@@ -78,7 +78,7 @@ impl RecordingQueue {
         let node_id = node.id.clone();
 
         if let Err(e) = self.store.insert_node(&node) {
-            tracing::warn!(error = %node_id, "Failed to record DAG node (outbox): {}", e);
+            tracing::warn!(error = %node_id, "Failed to record DAG node (outbox): {e}");
         }
     }
 }

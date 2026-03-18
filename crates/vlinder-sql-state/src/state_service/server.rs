@@ -344,7 +344,7 @@ impl StateService for StateServiceServer {
         let broken_at: chrono::DateTime<chrono::Utc> = req
             .broken_at
             .parse()
-            .map_err(|e| Status::invalid_argument(format!("invalid broken_at: {}", e)))?;
+            .map_err(|e| Status::invalid_argument(format!("invalid broken_at: {e}")))?;
         match self
             .store
             .seal_branch(vlinder_core::domain::BranchId::from(req.id), broken_at)

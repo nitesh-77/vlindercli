@@ -109,8 +109,8 @@ impl From<toml::de::Error> for ParseError {
 impl std::fmt::Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ParseError::Io(e) => write!(f, "{}", e),
-            ParseError::Toml(e) | ParseError::ModelPathNotFound(e) => write!(f, "{}", e),
+            ParseError::Io(e) => write!(f, "{e}"),
+            ParseError::Toml(e) | ParseError::ModelPathNotFound(e) => write!(f, "{e}"),
         }
     }
 }

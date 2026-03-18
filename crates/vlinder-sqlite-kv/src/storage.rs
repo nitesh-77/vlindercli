@@ -16,14 +16,14 @@ impl SqliteObjectStorage {
     pub fn open_at(db_path: &std::path::Path) -> Result<Self, String> {
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent)
-                .map_err(|e| format!("failed to create storage directory: {}", e))?;
+                .map_err(|e| format!("failed to create storage directory: {e}"))?;
         }
 
         let conn =
-            Connection::open(db_path).map_err(|e| format!("failed to open database: {}", e))?;
+            Connection::open(db_path).map_err(|e| format!("failed to open database: {e}"))?;
 
         conn.execute_batch("PRAGMA journal_mode=WAL;")
-            .map_err(|e| format!("failed to set WAL mode: {}", e))?;
+            .map_err(|e| format!("failed to set WAL mode: {e}"))?;
 
         conn.execute(
             "CREATE TABLE IF NOT EXISTS files (
@@ -34,7 +34,7 @@ impl SqliteObjectStorage {
             )",
             [],
         )
-        .map_err(|e| format!("failed to create files table: {}", e))?;
+        .map_err(|e| format!("failed to create files table: {e}"))?;
 
         Ok(SqliteObjectStorage {
             conn: Arc::new(Mutex::new(conn)),
@@ -47,7 +47,7 @@ impl SqliteObjectStorage {
             "INSERT OR REPLACE INTO files (path, content, updated_at) VALUES (?, ?, unixepoch())",
             params![path, content],
         )
-        .map_err(|e| format!("failed to write file: {}", e))?;
+        .map_err(|e| format!("failed to write file: {e}"))?;
         Ok(())
     }
 
@@ -55,19 +55,19 @@ impl SqliteObjectStorage {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let mut stmt = conn
             .prepare("SELECT content FROM files WHERE path = ?")
-            .map_err(|e| format!("failed to prepare query: {}", e))?;
+            .map_err(|e| format!("failed to prepare query: {e}"))?;
 
         let mut rows = stmt
             .query(params![path])
-            .map_err(|e| format!("failed to query file: {}", e))?;
+            .map_err(|e| format!("failed to query file: {e}"))?;
 
         if let Some(row) = rows
             .next()
-            .map_err(|e| format!("failed to read row: {}", e))?
+            .map_err(|e| format!("failed to read row: {e}"))?
         {
             let content: Vec<u8> = row
                 .get(0)
-                .map_err(|e| format!("failed to get content: {}", e))?;
+                .map_err(|e| format!("failed to get content: {e}"))?;
             Ok(Some(content))
         } else {
             Ok(None)
@@ -78,7 +78,7 @@ impl SqliteObjectStorage {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let rows_affected = conn
             .execute("DELETE FROM files WHERE path = ?", params![path])
-            .map_err(|e| format!("failed to delete file: {}", e))?;
+            .map_err(|e| format!("failed to delete file: {e}"))?;
         Ok(rows_affected > 0)
     }
 
@@ -92,15 +92,15 @@ impl SqliteObjectStorage {
 
         let mut stmt = conn
             .prepare("SELECT path FROM files WHERE path LIKE ?")
-            .map_err(|e| format!("failed to prepare query: {}", e))?;
+            .map_err(|e| format!("failed to prepare query: {e}"))?;
 
         let rows = stmt
             .query_map(params![pattern], |row| row.get(0))
-            .map_err(|e| format!("failed to list files: {}", e))?;
+            .map_err(|e| format!("failed to list files: {e}"))?;
 
         let mut files = Vec::new();
         for path_result in rows {
-            files.push(path_result.map_err(|e| format!("failed to get path: {}", e))?);
+            files.push(path_result.map_err(|e| format!("failed to get path: {e}"))?);
         }
         Ok(files)
     }

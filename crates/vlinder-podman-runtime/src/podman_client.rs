@@ -21,7 +21,7 @@ pub(crate) enum PodmanError {
 impl fmt::Display for PodmanError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            PodmanError::Run(msg) => write!(f, "podman operation failed: {}", msg),
+            PodmanError::Run(msg) => write!(f, "podman operation failed: {msg}"),
         }
     }
 }
@@ -132,10 +132,10 @@ pub(crate) trait PodmanClient: Send {
 /// The file is chmod 600 — s3fs refuses to read passwd files with
 /// group/other permissions.
 pub(crate) fn write_s3_credentials(name: &str, credentials: &str) -> Result<String, String> {
-    let path = format!("/tmp/vlinder-s3-{}.passwd", name);
+    let path = format!("/tmp/vlinder-s3-{name}.passwd");
 
     // Try podman machine ssh (macOS with Podman Machine VM)
-    let write_cmd = format!("cat > {} && chmod 600 {}", path, path);
+    let write_cmd = format!("cat > {path} && chmod 600 {path}");
     let result = std::process::Command::new("podman")
         .args(["machine", "ssh", "--", "sh", "-c", &write_cmd])
         .stdin(std::process::Stdio::piped())
@@ -160,12 +160,12 @@ pub(crate) fn write_s3_credentials(name: &str, credentials: &str) -> Result<Stri
 
     // Fallback: direct write (Linux, no VM)
     std::fs::write(&path, credentials)
-        .map_err(|e| format!("failed to write s3 credentials to {}: {}", path, e))?;
+        .map_err(|e| format!("failed to write s3 credentials to {path}: {e}"))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
-            .map_err(|e| format!("failed to chmod {}: {}", path, e))?;
+            .map_err(|e| format!("failed to chmod {path}: {e}"))?;
     }
     tracing::debug!(path = %path, "Wrote s3fs credentials to local filesystem");
     Ok(path)
@@ -173,7 +173,7 @@ pub(crate) fn write_s3_credentials(name: &str, credentials: &str) -> Result<Stri
 
 /// Remove an s3fs credentials file (fire-and-forget).
 pub(crate) fn remove_s3_credentials(name: &str) {
-    let path = format!("/tmp/vlinder-s3-{}.passwd", name);
+    let path = format!("/tmp/vlinder-s3-{name}.passwd");
 
     // Try podman machine ssh (macOS)
     let _ = std::process::Command::new("podman")

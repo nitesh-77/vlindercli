@@ -132,7 +132,7 @@ impl OpenRouterWorker {
         response
             .body_mut()
             .read_json()
-            .map_err(|e| format!("failed to parse response: {}", e))
+            .map_err(|e| format!("failed to parse response: {e}"))
     }
 }
 

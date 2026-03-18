@@ -37,7 +37,7 @@ impl Fleet {
         let mut agents = HashSet::with_capacity(manifest.agents.len());
         for name in manifest.agents.keys() {
             let id = registry.agent_id(name).ok_or_else(|| {
-                LoadError::Validation(format!("agent '{}' is not registered", name))
+                LoadError::Validation(format!("agent '{name}' is not registered"))
             })?;
             agents.insert(id);
         }
@@ -52,7 +52,7 @@ impl Fleet {
 
     /// Placeholder ID before registry assigns a real one.
     pub fn placeholder_id(name: &str) -> ResourceId {
-        ResourceId::new(format!("pending-registration://fleets/{}", name))
+        ResourceId::new(format!("pending-registration://fleets/{name}"))
     }
 }
 
@@ -66,9 +66,9 @@ pub enum LoadError {
 impl std::fmt::Display for LoadError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            LoadError::Io(e) => write!(f, "IO error: {}", e),
-            LoadError::Parse(s) => write!(f, "parse error: {}", s),
-            LoadError::Validation(s) => write!(f, "validation error: {}", s),
+            LoadError::Io(e) => write!(f, "IO error: {e}"),
+            LoadError::Parse(s) => write!(f, "parse error: {s}"),
+            LoadError::Validation(s) => write!(f, "validation error: {s}"),
         }
     }
 }

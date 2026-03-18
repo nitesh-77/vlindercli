@@ -42,7 +42,7 @@ pub enum PayloadError {
 impl std::fmt::Display for PayloadError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            PayloadError::InvalidPayload(msg) => write!(f, "invalid payload: {}", msg),
+            PayloadError::InvalidPayload(msg) => write!(f, "invalid payload: {msg}"),
         }
     }
 }

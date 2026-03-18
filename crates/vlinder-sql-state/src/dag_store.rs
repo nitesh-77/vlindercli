@@ -25,11 +25,10 @@ impl SqliteDagStore {
     pub fn open(path: &Path) -> Result<Self, String> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
-                .map_err(|e| format!("failed to create dag store directory: {}", e))?;
+                .map_err(|e| format!("failed to create dag store directory: {e}"))?;
         }
 
-        let conn =
-            Connection::open(path).map_err(|e| format!("failed to open dag store: {}", e))?;
+        let conn = Connection::open(path).map_err(|e| format!("failed to open dag store: {e}"))?;
 
         conn.execute_batch(
             "PRAGMA journal_mode=WAL;
@@ -79,7 +78,7 @@ impl SqliteDagStore {
                  created_at TEXT NOT NULL
              );",
         )
-        .map_err(|e| format!("failed to initialize dag store: {}", e))?;
+        .map_err(|e| format!("failed to initialize dag store: {e}"))?;
 
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
@@ -153,7 +152,7 @@ fn row_to_dag_node(row: &rusqlite::Row) -> Result<DagNode, rusqlite::Error> {
         rusqlite::Error::FromSqlConversionFailure(
             3,
             rusqlite::types::Type::Text,
-            format!("invalid message_blob JSON: {}", e).into(),
+            format!("invalid message_blob JSON: {e}").into(),
         )
     })?;
     // Payload is #[serde(skip)] on several message types, so patch it back
@@ -183,9 +182,9 @@ impl DagStore for SqliteDagStore {
 
         // Serialize the full message as JSON blob (source of truth).
         let message_blob = serde_json::to_string(&node.message)
-            .map_err(|e| format!("serialize message_blob failed: {}", e))?;
+            .map_err(|e| format!("serialize message_blob failed: {e}"))?;
         let snapshot_json = serde_json::to_string(&node.state)
-            .map_err(|e| format!("serialize snapshot failed: {}", e))?;
+            .map_err(|e| format!("serialize snapshot failed: {e}"))?;
 
         // Extract indexed columns from the message for query performance.
         let (from, to) = node.message.from_to();
@@ -213,29 +212,29 @@ impl DagStore for SqliteDagStore {
                 node.branch_id().as_i64(),
                 snapshot_json,
             ],
-        ).map_err(|e| format!("insert_node failed: {}", e))?;
+        ).map_err(|e| format!("insert_node failed: {e}"))?;
 
         Ok(())
     }
 
     fn get_node(&self, hash: &DagNodeId) -> Result<Option<DagNode>, String> {
         let conn = self.conn.lock().unwrap();
-        let sql = format!("SELECT {} FROM dag_nodes WHERE hash = ?1", DAG_NODE_COLUMNS);
+        let sql = format!("SELECT {DAG_NODE_COLUMNS} FROM dag_nodes WHERE hash = ?1");
         let mut stmt = conn
             .prepare(&sql)
-            .map_err(|e| format!("get_node prepare failed: {}", e))?;
+            .map_err(|e| format!("get_node prepare failed: {e}"))?;
 
         let result = stmt
             .query_row(rusqlite::params![hash.as_str()], row_to_dag_node)
             .optional()
-            .map_err(|e| format!("get_node query failed: {}", e))?;
+            .map_err(|e| format!("get_node query failed: {e}"))?;
 
         Ok(result)
     }
 
     fn get_node_by_prefix(&self, prefix: &str) -> Result<Option<DagNode>, String> {
         let conn = self.conn.lock().unwrap();
-        let pattern = format!("{}%", prefix);
+        let pattern = format!("{prefix}%");
 
         // Count matches first to detect ambiguity
         let count: i64 = conn
@@ -244,67 +243,60 @@ impl DagStore for SqliteDagStore {
                 rusqlite::params![pattern],
                 |row| row.get(0),
             )
-            .map_err(|e| format!("get_node_by_prefix count failed: {}", e))?;
+            .map_err(|e| format!("get_node_by_prefix count failed: {e}"))?;
 
         match count {
             0 => Ok(None),
             1 => {
-                let sql = format!(
-                    "SELECT {} FROM dag_nodes WHERE hash LIKE ?1",
-                    DAG_NODE_COLUMNS
-                );
+                let sql = format!("SELECT {DAG_NODE_COLUMNS} FROM dag_nodes WHERE hash LIKE ?1");
                 let mut stmt = conn
                     .prepare(&sql)
-                    .map_err(|e| format!("get_node_by_prefix prepare failed: {}", e))?;
+                    .map_err(|e| format!("get_node_by_prefix prepare failed: {e}"))?;
 
                 let node = stmt
                     .query_row(rusqlite::params![pattern], row_to_dag_node)
-                    .map_err(|e| format!("get_node_by_prefix query failed: {}", e))?;
+                    .map_err(|e| format!("get_node_by_prefix query failed: {e}"))?;
 
                 Ok(Some(node))
             }
-            n => Err(format!("ambiguous hash prefix '{}': {} matches", prefix, n)),
+            n => Err(format!("ambiguous hash prefix '{prefix}': {n} matches")),
         }
     }
 
     fn get_session_nodes(&self, session_id: &SessionId) -> Result<Vec<DagNode>, String> {
         let conn = self.conn.lock().unwrap();
         let sql = format!(
-            "SELECT {} FROM dag_nodes WHERE session_id = ?1 ORDER BY created_at",
-            DAG_NODE_COLUMNS
+            "SELECT {DAG_NODE_COLUMNS} FROM dag_nodes WHERE session_id = ?1 ORDER BY created_at"
         );
         let mut stmt = conn
             .prepare(&sql)
-            .map_err(|e| format!("get_session_nodes prepare failed: {}", e))?;
+            .map_err(|e| format!("get_session_nodes prepare failed: {e}"))?;
 
         let rows = stmt
             .query_map(rusqlite::params![session_id.as_str()], row_to_dag_node)
-            .map_err(|e| format!("get_session_nodes query failed: {}", e))?;
+            .map_err(|e| format!("get_session_nodes query failed: {e}"))?;
 
         let mut nodes = Vec::new();
         for row in rows {
-            nodes.push(row.map_err(|e| format!("get_session_nodes row failed: {}", e))?);
+            nodes.push(row.map_err(|e| format!("get_session_nodes row failed: {e}"))?);
         }
         Ok(nodes)
     }
 
     fn get_children(&self, parent_hash: &DagNodeId) -> Result<Vec<DagNode>, String> {
         let conn = self.conn.lock().unwrap();
-        let sql = format!(
-            "SELECT {} FROM dag_nodes WHERE parent_hash = ?1",
-            DAG_NODE_COLUMNS
-        );
+        let sql = format!("SELECT {DAG_NODE_COLUMNS} FROM dag_nodes WHERE parent_hash = ?1");
         let mut stmt = conn
             .prepare(&sql)
-            .map_err(|e| format!("get_children prepare failed: {}", e))?;
+            .map_err(|e| format!("get_children prepare failed: {e}"))?;
 
         let rows = stmt
             .query_map(rusqlite::params![parent_hash.as_str()], row_to_dag_node)
-            .map_err(|e| format!("get_children query failed: {}", e))?;
+            .map_err(|e| format!("get_children query failed: {e}"))?;
 
         let mut nodes = Vec::new();
         for row in rows {
-            nodes.push(row.map_err(|e| format!("get_children row failed: {}", e))?);
+            nodes.push(row.map_err(|e| format!("get_children row failed: {e}"))?);
         }
         Ok(nodes)
     }
@@ -330,7 +322,7 @@ impl DagStore for SqliteDagStore {
                 Utc::now().to_rfc3339()
             ],
         )
-        .map_err(|e| format!("create_branch failed: {}", e))?;
+        .map_err(|e| format!("create_branch failed: {e}"))?;
         Ok(BranchId::from(conn.last_insert_rowid()))
     }
 
@@ -341,11 +333,11 @@ impl DagStore for SqliteDagStore {
                 "SELECT id, name, session_id, fork_point, head, created_at, broken_at
                  FROM branches WHERE name = ?1",
             )
-            .map_err(|e| format!("get_branch_by_name prepare failed: {}", e))?;
+            .map_err(|e| format!("get_branch_by_name prepare failed: {e}"))?;
 
         stmt.query_row(rusqlite::params![name], row_to_branch)
             .optional()
-            .map_err(|e| format!("get_branch_by_name query failed: {}", e))
+            .map_err(|e| format!("get_branch_by_name query failed: {e}"))
     }
 
     fn get_branch(&self, id: BranchId) -> Result<Option<Branch>, String> {
@@ -355,11 +347,11 @@ impl DagStore for SqliteDagStore {
                 "SELECT id, name, session_id, fork_point, head, created_at, broken_at
                  FROM branches WHERE id = ?1",
             )
-            .map_err(|e| format!("get_branch prepare failed: {}", e))?;
+            .map_err(|e| format!("get_branch prepare failed: {e}"))?;
 
         stmt.query_row(rusqlite::params![id.as_i64()], row_to_branch)
             .optional()
-            .map_err(|e| format!("get_branch query failed: {}", e))
+            .map_err(|e| format!("get_branch query failed: {e}"))
     }
 
     fn list_sessions(&self) -> Result<Vec<SessionSummary>, String> {
@@ -378,7 +370,7 @@ impl DagStore for SqliteDagStore {
             GROUP BY session_id
             ORDER BY started_at DESC",
             )
-            .map_err(|e| format!("list_sessions prepare failed: {}", e))?;
+            .map_err(|e| format!("list_sessions prepare failed: {e}"))?;
 
         let rows = stmt
             .query_map([], |row| {
@@ -407,11 +399,11 @@ impl DagStore for SqliteDagStore {
                     is_open,
                 })
             })
-            .map_err(|e| format!("list_sessions query failed: {}", e))?;
+            .map_err(|e| format!("list_sessions query failed: {e}"))?;
 
         let mut summaries = Vec::new();
         for row in rows {
-            summaries.push(row.map_err(|e| format!("list_sessions row failed: {}", e))?);
+            summaries.push(row.map_err(|e| format!("list_sessions row failed: {e}"))?);
         }
         Ok(summaries)
     }
@@ -419,20 +411,19 @@ impl DagStore for SqliteDagStore {
     fn get_nodes_by_submission(&self, submission_id: &str) -> Result<Vec<DagNode>, String> {
         let conn = self.conn.lock().unwrap();
         let sql = format!(
-            "SELECT {} FROM dag_nodes WHERE submission_id = ?1 ORDER BY created_at",
-            DAG_NODE_COLUMNS
+            "SELECT {DAG_NODE_COLUMNS} FROM dag_nodes WHERE submission_id = ?1 ORDER BY created_at"
         );
         let mut stmt = conn
             .prepare(&sql)
-            .map_err(|e| format!("get_nodes_by_submission prepare failed: {}", e))?;
+            .map_err(|e| format!("get_nodes_by_submission prepare failed: {e}"))?;
 
         let rows = stmt
             .query_map([submission_id], row_to_dag_node)
-            .map_err(|e| format!("get_nodes_by_submission query failed: {}", e))?;
+            .map_err(|e| format!("get_nodes_by_submission query failed: {e}"))?;
 
         let mut nodes = Vec::new();
         for row in rows {
-            nodes.push(row.map_err(|e| format!("get_nodes_by_submission row failed: {}", e))?);
+            nodes.push(row.map_err(|e| format!("get_nodes_by_submission row failed: {e}"))?);
         }
         Ok(nodes)
     }
@@ -446,15 +437,15 @@ impl DagStore for SqliteDagStore {
                  WHERE session_id = ?1
                  ORDER BY created_at",
             )
-            .map_err(|e| format!("get_branches_for_session prepare failed: {}", e))?;
+            .map_err(|e| format!("get_branches_for_session prepare failed: {e}"))?;
 
         let rows = stmt
             .query_map(rusqlite::params![session_id.as_str()], row_to_branch)
-            .map_err(|e| format!("get_branches_for_session query failed: {}", e))?;
+            .map_err(|e| format!("get_branches_for_session query failed: {e}"))?;
 
         let mut branches = Vec::new();
         for row in rows {
-            branches.push(row.map_err(|e| format!("get_branches_for_session row failed: {}", e))?);
+            branches.push(row.map_err(|e| format!("get_branches_for_session row failed: {e}"))?);
         }
         Ok(branches)
     }
@@ -470,28 +461,26 @@ impl DagStore for SqliteDagStore {
         if let Some(mt) = message_type {
             let mut stmt = conn
                 .prepare(&format!(
-                    "SELECT {} FROM dag_nodes WHERE timeline_id = ?1 AND message_type = ?2 ORDER BY created_at DESC LIMIT 1",
-                    DAG_NODE_COLUMNS
+                    "SELECT {DAG_NODE_COLUMNS} FROM dag_nodes WHERE timeline_id = ?1 AND message_type = ?2 ORDER BY created_at DESC LIMIT 1"
                 ))
-                .map_err(|e| format!("latest_node_on_branch prepare failed: {}", e))?;
+                .map_err(|e| format!("latest_node_on_branch prepare failed: {e}"))?;
 
             stmt.query_row(
                 rusqlite::params![branch_id_str, mt.as_str()],
                 row_to_dag_node,
             )
             .optional()
-            .map_err(|e| format!("latest_node_on_branch query failed: {}", e))
+            .map_err(|e| format!("latest_node_on_branch query failed: {e}"))
         } else {
             let mut stmt = conn
                 .prepare(&format!(
-                    "SELECT {} FROM dag_nodes WHERE timeline_id = ?1 ORDER BY created_at DESC LIMIT 1",
-                    DAG_NODE_COLUMNS
+                    "SELECT {DAG_NODE_COLUMNS} FROM dag_nodes WHERE timeline_id = ?1 ORDER BY created_at DESC LIMIT 1"
                 ))
-                .map_err(|e| format!("latest_node_on_branch prepare failed: {}", e))?;
+                .map_err(|e| format!("latest_node_on_branch prepare failed: {e}"))?;
 
             stmt.query_row(rusqlite::params![branch_id_str], row_to_dag_node)
                 .optional()
-                .map_err(|e| format!("latest_node_on_branch query failed: {}", e))
+                .map_err(|e| format!("latest_node_on_branch query failed: {e}"))
         }
     }
 
@@ -502,9 +491,9 @@ impl DagStore for SqliteDagStore {
                 "UPDATE branches SET name = ?1 WHERE id = ?2",
                 rusqlite::params![new_name, id.as_i64()],
             )
-            .map_err(|e| format!("rename_branch failed: {}", e))?;
+            .map_err(|e| format!("rename_branch failed: {e}"))?;
         if rows == 0 {
-            return Err(format!("branch {} not found", id));
+            return Err(format!("branch {id} not found"));
         }
         Ok(())
     }
@@ -520,9 +509,9 @@ impl DagStore for SqliteDagStore {
                 "UPDATE branches SET broken_at = ?1 WHERE id = ?2",
                 rusqlite::params![broken_at.to_rfc3339(), id.as_i64()],
             )
-            .map_err(|e| format!("seal_branch failed: {}", e))?;
+            .map_err(|e| format!("seal_branch failed: {e}"))?;
         if rows == 0 {
-            return Err(format!("branch {} not found", id));
+            return Err(format!("branch {id} not found"));
         }
         Ok(())
     }
@@ -542,9 +531,9 @@ impl DagStore for SqliteDagStore {
                 "UPDATE sessions SET default_branch = ?1 WHERE id = ?2",
                 rusqlite::params![branch_id.as_i64(), session_id.as_str()],
             )
-            .map_err(|e| format!("update_session_default_branch failed: {}", e))?;
+            .map_err(|e| format!("update_session_default_branch failed: {e}"))?;
         if rows == 0 {
-            return Err(format!("session {} not found", session_id));
+            return Err(format!("session {session_id} not found"));
         }
         Ok(())
     }
@@ -562,7 +551,7 @@ impl DagStore for SqliteDagStore {
                 session.created_at.to_rfc3339(),
             ],
         )
-        .map_err(|e| format!("create_session failed: {}", e))?;
+        .map_err(|e| format!("create_session failed: {e}"))?;
         Ok(())
     }
 
@@ -573,11 +562,11 @@ impl DagStore for SqliteDagStore {
                 "SELECT id, name, agent_name, default_branch, created_at
                  FROM sessions WHERE id = ?1",
             )
-            .map_err(|e| format!("get_session prepare failed: {}", e))?;
+            .map_err(|e| format!("get_session prepare failed: {e}"))?;
 
         stmt.query_row(rusqlite::params![session_id.as_str()], row_to_session)
             .optional()
-            .map_err(|e| format!("get_session query failed: {}", e))
+            .map_err(|e| format!("get_session query failed: {e}"))
     }
 
     fn get_session_by_name(&self, name: &str) -> Result<Option<Session>, String> {
@@ -587,11 +576,11 @@ impl DagStore for SqliteDagStore {
                 "SELECT id, name, agent_name, default_branch, created_at
                  FROM sessions WHERE name = ?1",
             )
-            .map_err(|e| format!("get_session_by_name prepare failed: {}", e))?;
+            .map_err(|e| format!("get_session_by_name prepare failed: {e}"))?;
 
         stmt.query_row(rusqlite::params![name], row_to_session)
             .optional()
-            .map_err(|e| format!("get_session_by_name query failed: {}", e))
+            .map_err(|e| format!("get_session_by_name query failed: {e}"))
     }
 }
 

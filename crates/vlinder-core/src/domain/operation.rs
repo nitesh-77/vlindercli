@@ -56,7 +56,7 @@ impl FromStr for Operation {
             "run" => Ok(Operation::Run),
             "chat" => Ok(Operation::Chat),
             "generate" => Ok(Operation::Generate),
-            _ => Err(format!("unknown operation: {}", s)),
+            _ => Err(format!("unknown operation: {s}")),
         }
     }
 }

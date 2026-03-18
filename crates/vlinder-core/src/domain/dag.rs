@@ -88,7 +88,7 @@ impl std::str::FromStr for MessageType {
             "repair" => Ok(MessageType::Repair),
             "fork" => Ok(MessageType::Fork),
             "promote" => Ok(MessageType::Promote),
-            _ => Err(format!("unknown message type: {}", s)),
+            _ => Err(format!("unknown message type: {s}")),
         }
     }
 }
@@ -320,7 +320,7 @@ impl DagStore for InMemoryDagStore {
         match matches.len() {
             0 => Ok(None),
             1 => Ok(Some(matches[0].clone())),
-            n => Err(format!("ambiguous ID prefix '{}': {} matches", prefix, n)),
+            n => Err(format!("ambiguous ID prefix '{prefix}': {n} matches")),
         }
     }
 
@@ -461,7 +461,7 @@ impl DagStore for InMemoryDagStore {
         let branch = branches
             .iter_mut()
             .find(|b| b.id == id)
-            .ok_or_else(|| format!("branch {} not found", id))?;
+            .ok_or_else(|| format!("branch {id} not found"))?;
         branch.name = new_name.to_string();
         Ok(())
     }
@@ -471,7 +471,7 @@ impl DagStore for InMemoryDagStore {
         let branch = branches
             .iter_mut()
             .find(|b| b.id == id)
-            .ok_or_else(|| format!("branch {} not found", id))?;
+            .ok_or_else(|| format!("branch {id} not found"))?;
         branch.broken_at = Some(broken_at);
         Ok(())
     }
@@ -485,7 +485,7 @@ impl DagStore for InMemoryDagStore {
         let session = sessions
             .iter_mut()
             .find(|s| s.id == *session_id)
-            .ok_or_else(|| format!("session {} not found", session_id))?;
+            .ok_or_else(|| format!("session {session_id} not found"))?;
         session.default_branch = branch_id;
         Ok(())
     }

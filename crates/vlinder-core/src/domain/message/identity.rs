@@ -151,7 +151,7 @@ impl SessionId {
         let name = petnames
             .generate(&mut rng, 2, "-")
             .unwrap_or_else(|| "unnamed-session".to_string());
-        format!("{}-{}", name, suffix)
+        format!("{name}-{suffix}")
     }
 
     pub fn as_str(&self) -> &str {
@@ -181,7 +181,7 @@ impl TryFrom<String> for SessionId {
     type Error = String;
 
     fn try_from(s: String) -> Result<Self, Self::Error> {
-        Uuid::parse_str(&s).map_err(|_| format!("invalid session ID (expected UUID): {}", s))?;
+        Uuid::parse_str(&s).map_err(|_| format!("invalid session ID (expected UUID): {s}"))?;
         Ok(Self(s))
     }
 }
@@ -400,7 +400,7 @@ impl std::str::FromStr for HarnessType {
             "api" => Ok(HarnessType::Api),
             "whatsapp" => Ok(HarnessType::Whatsapp),
             "grpc" => Ok(HarnessType::Grpc),
-            _ => Err(format!("unknown harness type: {}", s)),
+            _ => Err(format!("unknown harness type: {s}")),
         }
     }
 }
@@ -428,7 +428,7 @@ mod tests {
     #[test]
     fn submission_id_display() {
         let id = SubmissionId::from("a1b2c3d".to_string());
-        assert_eq!(format!("{}", id), "a1b2c3d");
+        assert_eq!(format!("{id}"), "a1b2c3d");
     }
 
     #[test]
@@ -460,11 +460,10 @@ mod tests {
         let id = SessionId::new();
         let s = id.as_str();
         // Should be a valid UUID (8-4-4-4-12 hex with dashes)
-        assert_eq!(s.len(), 36, "UUID should be 36 chars, got: {}", s);
+        assert_eq!(s.len(), 36, "UUID should be 36 chars, got: {s}");
         assert!(
             uuid::Uuid::parse_str(s).is_ok(),
-            "should be a valid UUID: {}",
-            s
+            "should be a valid UUID: {s}"
         );
     }
 
@@ -476,9 +475,7 @@ mod tests {
         let suffix = &id.as_str()[..4];
         assert!(
             name.ends_with(suffix),
-            "petname '{}' should end with UUID prefix '{}'",
-            name,
-            suffix
+            "petname '{name}' should end with UUID prefix '{suffix}'"
         );
     }
 
@@ -506,7 +503,7 @@ mod tests {
     #[test]
     fn session_id_display() {
         let id = SessionId::try_from("d4761d76-dee4-4ebf-9df4-43b52efa4f78".to_string()).unwrap();
-        assert_eq!(format!("{}", id), "d4761d76-dee4-4ebf-9df4-43b52efa4f78");
+        assert_eq!(format!("{id}"), "d4761d76-dee4-4ebf-9df4-43b52efa4f78");
     }
 
     // --- BranchId tests (ADR 093) ---
@@ -514,13 +511,13 @@ mod tests {
     #[test]
     fn branch_id_main_is_one() {
         let id = BranchId::from(1);
-        assert_eq!(format!("{}", id), "1");
+        assert_eq!(format!("{id}"), "1");
     }
 
     #[test]
     fn branch_id_display() {
         let id = BranchId::from(1);
-        assert_eq!(format!("{}", id), "1");
+        assert_eq!(format!("{id}"), "1");
     }
 
     #[test]
@@ -566,7 +563,7 @@ mod tests {
     #[test]
     fn sequence_display_format() {
         let seq = Sequence::from(42);
-        assert_eq!(format!("{}", seq), "42");
+        assert_eq!(format!("{seq}"), "42");
     }
 
     #[test]

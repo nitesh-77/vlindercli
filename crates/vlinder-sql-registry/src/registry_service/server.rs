@@ -92,7 +92,7 @@ impl RegistryService for RegistryServiceServer {
         let registry = Arc::clone(&self.registry);
         let result = tokio::task::spawn_blocking(move || registry.register_agent(domain_agent))
             .await
-            .map_err(|e| Status::internal(format!("task join error: {}", e)))?;
+            .map_err(|e| Status::internal(format!("task join error: {e}")))?;
 
         match result {
             Ok(()) => Ok(Response::new(RegisterAgentResponse {

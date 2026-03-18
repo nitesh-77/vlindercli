@@ -53,7 +53,7 @@ impl HarnessService for HarnessServiceServer {
         let (session_id, branch_id) =
             tokio::task::spawn_blocking(move || harness.start_session(&req.agent_name))
                 .await
-                .map_err(|e| Status::internal(format!("spawn_blocking failed: {}", e)))?;
+                .map_err(|e| Status::internal(format!("spawn_blocking failed: {e}")))?;
         Ok(Response::new(StartSessionResponse {
             session_id: session_id.as_str().to_string(),
             default_branch_id: branch_id.as_i64(),
@@ -70,7 +70,7 @@ impl HarnessService for HarnessServiceServer {
         let result = tokio::task::spawn_blocking(move || {
             let id = ResourceId::new(&req.agent_id);
             let session_id = SessionId::try_from(req.session_id)
-                .map_err(|e| format!("invalid session_id: {}", e))?;
+                .map_err(|e| format!("invalid session_id: {e}"))?;
             let timeline = BranchId::from(req.timeline_id.parse::<i64>().unwrap_or(0));
             let dag_parent = DagNodeId::from(req.dag_parent);
             harness.run_agent(
@@ -84,7 +84,7 @@ impl HarnessService for HarnessServiceServer {
             )
         })
         .await
-        .map_err(|e| Status::internal(format!("spawn_blocking failed: {}", e)))?;
+        .map_err(|e| Status::internal(format!("spawn_blocking failed: {e}")))?;
 
         match result {
             Ok(output) => Ok(Response::new(RunAgentResponse {
@@ -112,12 +112,12 @@ impl HarnessService for HarnessServiceServer {
                 fork_point: DagNodeId::from(req.fork_point),
             };
             let session_id = SessionId::try_from(req.session_id)
-                .map_err(|e| format!("invalid session_id: {}", e))?;
+                .map_err(|e| format!("invalid session_id: {e}"))?;
             let timeline = BranchId::from(req.timeline_id.parse::<i64>().unwrap_or(0));
             harness.fork_timeline(params, session_id, timeline)
         })
         .await
-        .map_err(|e| Status::internal(format!("spawn_blocking failed: {}", e)))?;
+        .map_err(|e| Status::internal(format!("spawn_blocking failed: {e}")))?;
 
         match result {
             Ok(()) => Ok(Response::new(ForkTimelineResponse { error: None })),
@@ -137,12 +137,12 @@ impl HarnessService for HarnessServiceServer {
                 agent_name: req.agent_name,
             };
             let session_id = SessionId::try_from(req.session_id)
-                .map_err(|e| format!("invalid session_id: {}", e))?;
+                .map_err(|e| format!("invalid session_id: {e}"))?;
             let timeline = BranchId::from(req.timeline_id.parse::<i64>().unwrap_or(0));
             harness.promote_timeline(params, session_id, timeline)
         })
         .await
-        .map_err(|e| Status::internal(format!("spawn_blocking failed: {}", e)))?;
+        .map_err(|e| Status::internal(format!("spawn_blocking failed: {e}")))?;
 
         match result {
             Ok(()) => Ok(Response::new(PromoteTimelineResponse { error: None })),

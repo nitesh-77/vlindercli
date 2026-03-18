@@ -45,9 +45,9 @@ pub enum SecretStoreError {
 impl fmt::Display for SecretStoreError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            SecretStoreError::NotFound(name) => write!(f, "secret not found: {}", name),
-            SecretStoreError::StoreFailed(msg) => write!(f, "store failed: {}", msg),
-            SecretStoreError::DeleteFailed(msg) => write!(f, "delete failed: {}", msg),
+            SecretStoreError::NotFound(name) => write!(f, "secret not found: {name}"),
+            SecretStoreError::StoreFailed(msg) => write!(f, "store failed: {msg}"),
+            SecretStoreError::DeleteFailed(msg) => write!(f, "delete failed: {msg}"),
         }
     }
 }
@@ -106,8 +106,7 @@ impl SecretStore for InMemorySecretStore {
             Ok(())
         } else {
             Err(SecretStoreError::DeleteFailed(format!(
-                "secret not found: {}",
-                name
+                "secret not found: {name}"
             )))
         }
     }

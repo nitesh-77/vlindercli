@@ -119,8 +119,8 @@ impl LambdaRuntime {
     /// Passes platform URLs as environment variables so the lambda adapter
     /// inside the container can connect back to NATS, registry, and state.
     fn deploy(&mut self, name: &str, agent: &Agent) -> Result<(), LambdaError> {
-        let role_name = format!("vlinder-agent-{}", name);
-        let function_name = format!("vlinder-{}", name);
+        let role_name = format!("vlinder-agent-{name}");
+        let function_name = format!("vlinder-{name}");
 
         let role_arn = self.client.create_role(&role_name)?;
 
@@ -177,7 +177,7 @@ impl LambdaRuntime {
             let agent_id = AgentId::new(name);
             if let Ok((invoke, ack)) = self.queue.receive_invoke(&agent_id) {
                 let _ = ack();
-                let function_name = format!("vlinder-{}", name);
+                let function_name = format!("vlinder-{name}");
 
                 let json_payload = serde_json::to_vec(&invoke).unwrap_or_else(|_| b"{}".to_vec());
 
@@ -201,7 +201,7 @@ impl LambdaRuntime {
                             "Lambda invocation failed"
                         );
                         let complete = invoke.create_reply(
-                            format!("[error] Lambda invoke failed: {}", e).into_bytes(),
+                            format!("[error] Lambda invoke failed: {e}").into_bytes(),
                         );
                         let _ = self.queue.send_complete(complete);
                     }
@@ -212,8 +212,8 @@ impl LambdaRuntime {
 
     /// Tear down a deployed function: delete Lambda first, then IAM role.
     fn undeploy(&mut self, name: &str) {
-        let function_name = format!("vlinder-{}", name);
-        let role_name = format!("vlinder-agent-{}", name);
+        let function_name = format!("vlinder-{name}");
+        let role_name = format!("vlinder-agent-{name}");
 
         self.client.delete_function(&function_name);
         self.client.delete_role(&role_name);
@@ -289,7 +289,7 @@ mod tests {
 
         fn create_role(&self, role_name: &str) -> Result<String, LambdaError> {
             self.roles.borrow_mut().insert(role_name.to_string());
-            Ok(format!("arn:aws:iam::123456789012:role/{}", role_name))
+            Ok(format!("arn:aws:iam::123456789012:role/{role_name}"))
         }
 
         fn delete_role(&self, role_name: &str) {
@@ -315,8 +315,7 @@ mod tests {
             if self.functions.borrow().contains(function_name) {
                 Ok(Some(crate::lambda_client::FunctionInfo {
                     function_arn: format!(
-                        "arn:aws:lambda:us-east-1:123456789012:function:{}",
-                        function_name
+                        "arn:aws:lambda:us-east-1:123456789012:function:{function_name}"
                     ),
                 }))
             } else {
@@ -347,7 +346,7 @@ mod tests {
         }
 
         fn create_role(&self, role_name: &str) -> Result<String, LambdaError> {
-            Ok(format!("arn:aws:iam::123456789012:role/{}", role_name))
+            Ok(format!("arn:aws:iam::123456789012:role/{role_name}"))
         }
 
         fn delete_role(&self, _role_name: &str) {}
@@ -365,8 +364,7 @@ mod tests {
         ) -> Result<Option<crate::lambda_client::FunctionInfo>, LambdaError> {
             Ok(Some(crate::lambda_client::FunctionInfo {
                 function_arn: format!(
-                    "arn:aws:lambda:us-east-1:123456789012:function:{}",
-                    function_name
+                    "arn:aws:lambda:us-east-1:123456789012:function:{function_name}"
                 ),
             }))
         }
@@ -621,8 +619,7 @@ mod tests {
         let payload_str = String::from_utf8_lossy(&complete.payload);
         assert!(
             payload_str.contains("[error]"),
-            "expected error payload, got: {}",
-            payload_str
+            "expected error payload, got: {payload_str}"
         );
     }
 
@@ -651,7 +648,7 @@ mod tests {
                 Ok(())
             }
             fn create_role(&self, role_name: &str) -> Result<String, LambdaError> {
-                Ok(format!("arn:aws:iam::123456789012:role/{}", role_name))
+                Ok(format!("arn:aws:iam::123456789012:role/{role_name}"))
             }
             fn delete_role(&self, _: &str) {}
             fn create_function(&self, req: &CreateFunctionRequest) -> Result<String, LambdaError> {
@@ -669,8 +666,7 @@ mod tests {
             ) -> Result<Option<crate::lambda_client::FunctionInfo>, LambdaError> {
                 Ok(Some(crate::lambda_client::FunctionInfo {
                     function_arn: format!(
-                        "arn:aws:lambda:us-east-1:123456789012:function:{}",
-                        function_name
+                        "arn:aws:lambda:us-east-1:123456789012:function:{function_name}"
                     ),
                 }))
             }

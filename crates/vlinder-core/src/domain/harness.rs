@@ -97,9 +97,9 @@ fn build_payload(
 ) -> String {
     match (last_invoke_payload, last_complete_payload) {
         (Some(invoke), Some(complete)) => {
-            format!("{}\nAgent: {}\nUser: {}", invoke, complete, current_input)
+            format!("{invoke}\nAgent: {complete}\nUser: {current_input}")
         }
-        _ => format!("User: {}", current_input),
+        _ => format!("User: {current_input}"),
     }
 }
 
@@ -162,11 +162,11 @@ impl CoreHarness {
         let agent = self
             .registry
             .get_agent(agent_id)
-            .ok_or_else(|| format!("agent not deployed: {}", agent_id))?;
+            .ok_or_else(|| format!("agent not deployed: {agent_id}"))?;
         let runtime = self
             .registry
             .select_runtime(&agent)
-            .ok_or_else(|| format!("no runtime available for agent: {}", agent_id))?;
+            .ok_or_else(|| format!("no runtime available for agent: {agent_id}"))?;
 
         let last_invoke_node = self
             .store
@@ -263,7 +263,7 @@ impl Harness for CoreHarness {
         let complete = self
             .queue
             .run_agent(invoke_msg)
-            .map_err(|e| format!("queue error: {}", e))?;
+            .map_err(|e| format!("queue error: {e}"))?;
 
         let result = String::from_utf8_lossy(&complete.payload).to_string();
         self.registry
@@ -290,7 +290,7 @@ impl Harness for CoreHarness {
 
         self.queue
             .send_fork(fork_msg)
-            .map_err(|e| format!("queue error: {}", e))
+            .map_err(|e| format!("queue error: {e}"))
     }
 
     fn promote_timeline(
@@ -305,7 +305,7 @@ impl Harness for CoreHarness {
 
         self.queue
             .send_promote(promote_msg)
-            .map_err(|e| format!("queue error: {}", e))
+            .map_err(|e| format!("queue error: {e}"))
     }
 }
 

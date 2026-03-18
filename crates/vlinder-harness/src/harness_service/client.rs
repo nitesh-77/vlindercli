@@ -91,7 +91,7 @@ impl Harness for GrpcHarnessClient {
         let response = self
             .runtime
             .block_on(async { client.run_agent(request).await })
-            .map_err(|e| format!("gRPC error: {}", e))?;
+            .map_err(|e| format!("gRPC error: {e}"))?;
 
         let resp = response.into_inner();
         if let Some(error) = resp.error {
@@ -119,7 +119,7 @@ impl Harness for GrpcHarnessClient {
         let response = self
             .runtime
             .block_on(async { client.fork_timeline(request).await })
-            .map_err(|e| format!("gRPC error: {}", e))?;
+            .map_err(|e| format!("gRPC error: {e}"))?;
 
         let resp = response.into_inner();
         if let Some(error) = resp.error {
@@ -145,7 +145,7 @@ impl Harness for GrpcHarnessClient {
         let response = self
             .runtime
             .block_on(async { client.promote_timeline(request).await })
-            .map_err(|e| format!("gRPC error: {}", e))?;
+            .map_err(|e| format!("gRPC error: {e}"))?;
 
         let resp = response.into_inner();
         if let Some(error) = resp.error {

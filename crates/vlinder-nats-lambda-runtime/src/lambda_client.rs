@@ -17,7 +17,7 @@ pub enum LambdaError {
 impl fmt::Display for LambdaError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            LambdaError::Aws(msg) => write!(f, "{}", msg),
+            LambdaError::Aws(msg) => write!(f, "{msg}"),
         }
     }
 }
@@ -103,7 +103,7 @@ impl AwsLambdaClient {
     /// Uses the default credential chain (~/.aws/credentials, env vars, etc).
     pub fn new(region: &str) -> Result<Self, LambdaError> {
         let rt = tokio::runtime::Runtime::new()
-            .map_err(|e| LambdaError::Aws(format!("failed to create tokio runtime: {}", e)))?;
+            .map_err(|e| LambdaError::Aws(format!("failed to create tokio runtime: {e}")))?;
 
         let (lambda, iam) = rt.block_on(async {
             let region = aws_config::Region::new(region.to_string());
@@ -317,7 +317,7 @@ impl LambdaClient for AwsLambdaClient {
                 .map_err(|e| LambdaError::Aws(format!("invoke: {}", format_sdk_error(&e))))?;
 
             if let Some(err) = result.function_error() {
-                return Err(LambdaError::Aws(format!("function error: {}", err)));
+                return Err(LambdaError::Aws(format!("function error: {err}")));
             }
 
             Ok(result
@@ -380,13 +380,13 @@ fn format_sdk_error<E: std::error::Error>(err: &E) -> String {
 }
 
 fn is_entity_already_exists<E: std::fmt::Debug>(err: &aws_sdk_iam::error::SdkError<E>) -> bool {
-    format!("{:?}", err).contains("EntityAlreadyExists")
+    format!("{err:?}").contains("EntityAlreadyExists")
 }
 
 fn is_resource_conflict<E: std::fmt::Debug>(err: &aws_sdk_lambda::error::SdkError<E>) -> bool {
-    format!("{:?}", err).contains("ResourceConflictException")
+    format!("{err:?}").contains("ResourceConflictException")
 }
 
 fn is_resource_not_found<E: std::fmt::Debug>(err: &aws_sdk_lambda::error::SdkError<E>) -> bool {
-    format!("{:?}", err).contains("ResourceNotFoundException")
+    format!("{err:?}").contains("ResourceNotFoundException")
 }

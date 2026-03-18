@@ -398,7 +398,7 @@ fn proto_to_session(s: proto::SessionProto) -> Result<vlinder_core::domain::Sess
     let created_at: chrono::DateTime<chrono::Utc> = s
         .created_at
         .parse()
-        .map_err(|e| format!("invalid created_at: {}", e))?;
+        .map_err(|e| format!("invalid created_at: {e}"))?;
     Ok(vlinder_core::domain::Session {
         id,
         name: s.name,

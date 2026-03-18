@@ -51,10 +51,10 @@ pub enum CatalogError {
 impl std::fmt::Display for CatalogError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            CatalogError::NotFound(name) => write!(f, "model not found: {}", name),
-            CatalogError::Network(msg) => write!(f, "network error: {}", msg),
-            CatalogError::Parse(msg) => write!(f, "parse error: {}", msg),
-            CatalogError::UnknownCatalog(name) => write!(f, "unknown catalog: {}", name),
+            CatalogError::NotFound(name) => write!(f, "model not found: {name}"),
+            CatalogError::Network(msg) => write!(f, "network error: {msg}"),
+            CatalogError::Parse(msg) => write!(f, "parse error: {msg}"),
+            CatalogError::UnknownCatalog(name) => write!(f, "unknown catalog: {name}"),
         }
     }
 }

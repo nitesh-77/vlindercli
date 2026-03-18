@@ -28,20 +28,20 @@ pub struct NatsConfig {
 pub(crate) async fn nats_connect(config: &NatsConfig) -> Result<async_nats::Client, String> {
     if let Some(ref content) = config.creds_content {
         let options = ConnectOptions::with_credentials(content)
-            .map_err(|e| format!("failed to parse inline credentials: {}", e))?;
+            .map_err(|e| format!("failed to parse inline credentials: {e}"))?;
         options
             .connect(&config.url)
             .await
-            .map_err(|e| format!("failed to connect to {}: {}", config.url, e))
+            .map_err(|e| format!("failed to connect to {}: {e}", config.url))
     } else if let Some(ref creds_path) = config.creds_file {
         let expanded = expand_tilde(creds_path);
         let options = ConnectOptions::with_credentials_file(&expanded)
             .await
-            .map_err(|e| format!("failed to load credentials from {}: {}", expanded, e))?;
+            .map_err(|e| format!("failed to load credentials from {expanded}: {e}"))?;
         options
             .connect(&config.url)
             .await
-            .map_err(|e| format!("failed to connect to {}: {}", config.url, e))
+            .map_err(|e| format!("failed to connect to {}: {e}", config.url))
     } else {
         async_nats::connect(&config.url)
             .await

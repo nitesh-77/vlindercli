@@ -58,7 +58,7 @@ impl KvWorker {
         agent_id: &str,
         session_id: &str,
     ) -> Result<Arc<SqliteObjectStorage>, String> {
-        let cache_key = format!("{}:{}", agent_id, session_id);
+        let cache_key = format!("{agent_id}:{session_id}");
         if let Some(storage) = self.stores.read().unwrap().get(&cache_key) {
             return Ok(storage.clone());
         }
@@ -66,10 +66,10 @@ impl KvWorker {
         let agent = self
             .registry
             .get_agent_by_name(agent_id)
-            .ok_or_else(|| format!("unknown agent: {}", agent_id))?;
+            .ok_or_else(|| format!("unknown agent: {agent_id}"))?;
         let uri = agent
             .object_storage
-            .ok_or_else(|| format!("agent has no object_storage declared: {}", agent_id))?;
+            .ok_or_else(|| format!("agent has no object_storage declared: {agent_id}"))?;
         let base_path = uri
             .path()
             .ok_or_else(|| format!("object_storage URI has no path: {}", uri.as_str()))?;
@@ -96,7 +96,7 @@ impl KvWorker {
         agent_id: &str,
         session_id: &str,
     ) -> Result<Arc<SqliteStateStore>, String> {
-        let cache_key = format!("{}:{}", agent_id, session_id);
+        let cache_key = format!("{agent_id}:{session_id}");
         if let Some(store) = self.state_stores.read().unwrap().get(&cache_key) {
             return Ok(store.clone());
         }
@@ -104,10 +104,10 @@ impl KvWorker {
         let agent = self
             .registry
             .get_agent_by_name(agent_id)
-            .ok_or_else(|| format!("unknown agent: {}", agent_id))?;
+            .ok_or_else(|| format!("unknown agent: {agent_id}"))?;
         let uri = agent
             .object_storage
-            .ok_or_else(|| format!("agent has no object_storage declared: {}", agent_id))?;
+            .ok_or_else(|| format!("agent has no object_storage declared: {agent_id}"))?;
 
         let path = match uri.scheme() {
             Some("sqlite") => {
@@ -268,7 +268,7 @@ impl KvWorker {
     fn handle_get(&self, request: &RequestMessage) -> Vec<u8> {
         let req: KvGetRequest = match serde_json::from_slice(request.payload.as_slice()) {
             Ok(r) => r,
-            Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
+            Err(e) => return format!("[error] invalid request: {e}").into_bytes(),
         };
 
         // Versioned get (ADR 055): resolve through state commit -> snapshot -> value
@@ -283,7 +283,7 @@ impl KvWorker {
                 ) {
                     Ok(Some(content)) => content,
                     Ok(None) => Vec::new(),
-                    Err(e) => format!("[error] {}", e).into_bytes(),
+                    Err(e) => format!("[error] {e}").into_bytes(),
                 };
             }
         }
@@ -291,13 +291,13 @@ impl KvWorker {
         // Unversioned fallback
         let store = match self.get_or_open(request.agent_id.as_str(), request.session.as_str()) {
             Ok(s) => s,
-            Err(e) => return format!("[error] {}", e).into_bytes(),
+            Err(e) => return format!("[error] {e}").into_bytes(),
         };
 
         match store.get_file(&req.path) {
             Ok(Some(content)) => content,
             Ok(None) => Vec::new(),
-            Err(e) => format!("[error] {}", e).into_bytes(),
+            Err(e) => format!("[error] {e}").into_bytes(),
         }
     }
 
@@ -305,12 +305,12 @@ impl KvWorker {
     fn handle_put(&self, request: &RequestMessage) -> (Vec<u8>, Option<String>) {
         let req: KvPutRequest = match serde_json::from_slice(request.payload.as_slice()) {
             Ok(r) => r,
-            Err(e) => return (format!("[error] invalid request: {}", e).into_bytes(), None),
+            Err(e) => return (format!("[error] invalid request: {e}").into_bytes(), None),
         };
 
         let store = match self.get_or_open(request.agent_id.as_str(), request.session.as_str()) {
             Ok(s) => s,
-            Err(e) => return (format!("[error] {}", e).into_bytes(), None),
+            Err(e) => return (format!("[error] {e}").into_bytes(), None),
         };
 
         // No base64 — store content bytes directly
@@ -318,7 +318,7 @@ impl KvWorker {
 
         // Always write to ObjectStorage (current-state access for unversioned reads)
         if let Err(e) = store.put_file(&req.path, content) {
-            return (format!("[error] {}", e).into_bytes(), None);
+            return (format!("[error] {e}").into_bytes(), None);
         }
 
         // Versioned put (ADR 055): state comes from the envelope
@@ -334,7 +334,7 @@ impl KvWorker {
                     let response = serde_json::json!({"state": new_state});
                     (serde_json::to_vec(&response).unwrap(), Some(new_state))
                 }
-                Err(e) => (format!("[error] {}", e).into_bytes(), None),
+                Err(e) => (format!("[error] {e}").into_bytes(), None),
             };
         }
 
@@ -345,7 +345,7 @@ impl KvWorker {
     fn handle_list(&self, request: &RequestMessage) -> Vec<u8> {
         let req: KvListRequest = match serde_json::from_slice(request.payload.as_slice()) {
             Ok(r) => r,
-            Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
+            Err(e) => return format!("[error] invalid request: {e}").into_bytes(),
         };
 
         // Versioned list: resolve paths from the state snapshot
@@ -358,10 +358,10 @@ impl KvWorker {
                     &req.path,
                 ) {
                     Ok(files) => serde_json::to_string(&files).map_or_else(
-                        |e| format!("[error] {}", e).into_bytes(),
+                        |e| format!("[error] {e}").into_bytes(),
                         std::string::String::into_bytes,
                     ),
-                    Err(e) => format!("[error] {}", e).into_bytes(),
+                    Err(e) => format!("[error] {e}").into_bytes(),
                 };
             }
         }
@@ -369,33 +369,33 @@ impl KvWorker {
         // Unversioned fallback
         let store = match self.get_or_open(request.agent_id.as_str(), request.session.as_str()) {
             Ok(s) => s,
-            Err(e) => return format!("[error] {}", e).into_bytes(),
+            Err(e) => return format!("[error] {e}").into_bytes(),
         };
 
         match store.list_files(&req.path) {
             Ok(files) => serde_json::to_string(&files).map_or_else(
-                |e| format!("[error] {}", e).into_bytes(),
+                |e| format!("[error] {e}").into_bytes(),
                 std::string::String::into_bytes,
             ),
-            Err(e) => format!("[error] {}", e).into_bytes(),
+            Err(e) => format!("[error] {e}").into_bytes(),
         }
     }
 
     fn handle_delete(&self, request: &RequestMessage) -> Vec<u8> {
         let req: KvDeleteRequest = match serde_json::from_slice(request.payload.as_slice()) {
             Ok(r) => r,
-            Err(e) => return format!("[error] invalid request: {}", e).into_bytes(),
+            Err(e) => return format!("[error] invalid request: {e}").into_bytes(),
         };
 
         let store = match self.get_or_open(request.agent_id.as_str(), request.session.as_str()) {
             Ok(s) => s,
-            Err(e) => return format!("[error] {}", e).into_bytes(),
+            Err(e) => return format!("[error] {e}").into_bytes(),
         };
 
         match store.delete_file(&req.path) {
             Ok(true) => b"ok".to_vec(),
             Ok(false) => b"not_found".to_vec(),
-            Err(e) => format!("[error] {}", e).into_bytes(),
+            Err(e) => format!("[error] {e}").into_bytes(),
         }
     }
 
@@ -422,7 +422,7 @@ impl KvWorker {
         } else {
             let commit = state_store
                 .get_state_commit(parent_state)?
-                .ok_or_else(|| format!("unknown parent state: {}", parent_state))?;
+                .ok_or_else(|| format!("unknown parent state: {parent_state}"))?;
             state_store
                 .get_snapshot(&commit.snapshot_hash)?
                 .unwrap_or_default()
@@ -456,7 +456,7 @@ impl KvWorker {
         // Load state commit
         let commit = state_store
             .get_state_commit(state_hash)?
-            .ok_or_else(|| format!("unknown state: {}", state_hash))?;
+            .ok_or_else(|| format!("unknown state: {state_hash}"))?;
 
         // Load snapshot
         let entries = state_store
@@ -484,7 +484,7 @@ impl KvWorker {
 
         let commit = state_store
             .get_state_commit(state_hash)?
-            .ok_or_else(|| format!("unknown state: {}", state_hash))?;
+            .ok_or_else(|| format!("unknown state: {state_hash}"))?;
 
         let entries = state_store
             .get_snapshot(&commit.snapshot_hash)?

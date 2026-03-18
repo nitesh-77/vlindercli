@@ -42,7 +42,7 @@ impl std::str::FromStr for RuntimeType {
         match s {
             "container" => Ok(RuntimeType::Container),
             "lambda" => Ok(RuntimeType::Lambda),
-            _ => Err(format!("unknown runtime type: {}", s)),
+            _ => Err(format!("unknown runtime type: {s}")),
         }
     }
 }

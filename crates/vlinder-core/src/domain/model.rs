@@ -36,7 +36,7 @@ impl Model {
     ///
     /// Registry replaces this with `<registry_id>/models/<name>` during registration.
     pub fn placeholder_id(name: &str) -> ResourceId {
-        ResourceId::new(format!("pending-registration://models/{}", name))
+        ResourceId::new(format!("pending-registration://models/{name}"))
     }
 
     /// Provider-friendly name — the model identifier providers expect in API calls (ADR 094).
@@ -131,8 +131,8 @@ impl From<ParseError> for LoadError {
 impl std::fmt::Display for LoadError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            LoadError::Io(e) => write!(f, "{}", e),
-            LoadError::Parse(e) => write!(f, "{}", e),
+            LoadError::Io(e) => write!(f, "{e}"),
+            LoadError::Parse(e) => write!(f, "{e}"),
         }
     }
 }

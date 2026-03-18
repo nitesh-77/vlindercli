@@ -44,7 +44,7 @@ impl FromStr for ServiceType {
             "vec" => Ok(ServiceType::Vec),
             "infer" => Ok(ServiceType::Infer),
             "embed" => Ok(ServiceType::Embed),
-            _ => Err(format!("unknown service type: {}", s)),
+            _ => Err(format!("unknown service type: {s}")),
         }
     }
 }
