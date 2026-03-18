@@ -17,6 +17,6 @@ pub use server::StateServiceServer;
 
 /// Generated protobuf types.
 pub mod proto {
-    #![allow(clippy::doc_markdown)]
+    #![allow(clippy::doc_markdown, clippy::default_trait_access)]
     tonic::include_proto!("vlinder.state");
 }

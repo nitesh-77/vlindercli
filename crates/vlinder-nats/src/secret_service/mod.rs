@@ -15,7 +15,7 @@ pub use client::{ping_secret_service, GrpcSecretClient};
 pub use server::SecretServiceServer;
 
 /// Generated protobuf types.
-#[allow(clippy::doc_markdown)]
+#[allow(clippy::doc_markdown, clippy::default_trait_access)]
 pub mod proto {
     tonic::include_proto!("vlinder.secret_store");
 }

@@ -16,7 +16,7 @@ pub use client::{ping_catalog_service, GrpcCatalogClient};
 pub use server::CatalogServiceServer;
 
 /// Generated protobuf types.
-#[allow(clippy::doc_markdown)]
+#[allow(clippy::doc_markdown, clippy::default_trait_access)]
 pub mod proto {
     tonic::include_proto!("vlinder.catalog");
 }
