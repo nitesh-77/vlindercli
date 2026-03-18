@@ -63,7 +63,7 @@ fn grpc_register_and_get_agent() {
     let addr = start_server_background(registry.clone());
 
     // Create gRPC client
-    let client = GrpcRegistryClient::connect(&format!("http://{}", addr)).unwrap();
+    let client = GrpcRegistryClient::connect(&format!("http://{addr}")).unwrap();
 
     // Register an agent via gRPC
     let agent = Agent {
@@ -96,17 +96,17 @@ fn grpc_list_agents() {
     let registry = Arc::new(InMemoryRegistry::new(test_secret_store()));
     registry.register_runtime(RuntimeType::Container);
     let addr = start_server_background(registry.clone());
-    let client = GrpcRegistryClient::connect(&format!("http://{}", addr)).unwrap();
+    let client = GrpcRegistryClient::connect(&format!("http://{addr}")).unwrap();
 
     // Register two agents
     for i in 0..2 {
-        let name = format!("agent-{}", i);
+        let name = format!("agent-{i}");
         let agent = Agent {
             name: name.clone(),
             description: "Test".to_string(),
             id: Agent::placeholder_id(&name),
             runtime: RuntimeType::Container,
-            executable: format!("localhost/agent-{}:latest", i),
+            executable: format!("localhost/agent-{i}:latest"),
             requirements: empty_requirements(),
             object_storage: None,
             vector_storage: None,
@@ -128,7 +128,7 @@ fn grpc_job_lifecycle() {
     let registry = Arc::new(InMemoryRegistry::new(test_secret_store()));
     registry.register_runtime(RuntimeType::Container);
     let addr = start_server_background(registry.clone());
-    let client = GrpcRegistryClient::connect(&format!("http://{}", addr)).unwrap();
+    let client = GrpcRegistryClient::connect(&format!("http://{addr}")).unwrap();
 
     // Register an agent first
     let agent = Agent {

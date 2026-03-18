@@ -287,8 +287,8 @@ mod tests {
             name: name.to_string(),
             model_type: ModelType::Inference,
             provider: Provider::Ollama,
-            model_path: ResourceId::new(format!("ollama://localhost:11434/{}", name)),
-            digest: format!("sha256:test-digest-{}", name),
+            model_path: ResourceId::new(format!("ollama://localhost:11434/{name}")),
+            digest: format!("sha256:test-digest-{name}"),
         }
     }
 
@@ -350,10 +350,10 @@ mod tests {
         Agent {
             id: Agent::placeholder_id(name),
             name: name.to_string(),
-            description: format!("{} agent", name),
+            description: format!("{name} agent"),
             source: None,
             runtime: RuntimeType::Container,
-            executable: format!("localhost/{}:latest", name),
+            executable: format!("localhost/{name}:latest"),
             image_digest: None,
             public_key: None,
             object_storage: None,
@@ -473,19 +473,32 @@ mod tests {
         assert_eq!(restored.name, "full");
         assert_eq!(restored.source.as_deref(), Some("https://example.com"));
         assert_eq!(
-            restored.image_digest.as_ref().map(|d| d.as_str()),
+            restored
+                .image_digest
+                .as_ref()
+                .map(vlinder_core::domain::ImageDigest::as_str),
             Some("sha256:abc123")
         );
         assert_eq!(
-            restored.object_storage.as_ref().map(|r| r.as_str()),
+            restored
+                .object_storage
+                .as_ref()
+                .map(vlinder_core::domain::ResourceId::as_str),
             Some("sqlite:///data/objects.db")
         );
         assert_eq!(
-            restored.vector_storage.as_ref().map(|r| r.as_str()),
+            restored
+                .vector_storage
+                .as_ref()
+                .map(vlinder_core::domain::ResourceId::as_str),
             Some("sqlite:///data/vectors.db")
         );
         assert_eq!(
-            restored.requirements.models.get("phi3").map(|s| s.as_str()),
+            restored
+                .requirements
+                .models
+                .get("phi3")
+                .map(std::string::String::as_str),
             Some("phi3:latest")
         );
         assert_eq!(restored.requirements.services.len(), 1);

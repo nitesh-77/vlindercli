@@ -188,14 +188,14 @@ fn agent_models_survive_proto_round_trip() {
         back.requirements
             .models
             .get("inference_model")
-            .map(|s| s.as_str()),
+            .map(std::string::String::as_str),
         Some("phi3:latest"),
     );
     assert_eq!(
         back.requirements
             .models
             .get("embedding_model")
-            .map(|s| s.as_str()),
+            .map(std::string::String::as_str),
         Some("nomic-embed"),
     );
 }

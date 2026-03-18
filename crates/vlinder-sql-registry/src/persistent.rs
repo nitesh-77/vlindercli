@@ -321,7 +321,7 @@ mod tests {
             name: name.to_string(),
             model_type: ModelType::Inference,
             provider: Provider::Ollama,
-            model_path: ResourceId::new(format!("ollama://localhost:11434/{}", name)),
+            model_path: ResourceId::new(format!("ollama://localhost:11434/{name}")),
             digest: String::new(),
         }
     }
@@ -414,7 +414,7 @@ mod tests {
             Err(e) => e.to_string(),
             Ok(_) => panic!("expected error for corrupt db"),
         };
-        assert!(err.contains("persistence error"), "got: {}", err);
+        assert!(err.contains("persistence error"), "got: {err}");
     }
 
     #[test]
@@ -445,10 +445,10 @@ mod tests {
         Agent {
             id: Agent::placeholder_id(name),
             name: name.to_string(),
-            description: format!("{} agent", name),
+            description: format!("{name} agent"),
             source: None,
             runtime: RuntimeType::Container,
-            executable: format!("localhost/{}:latest", name),
+            executable: format!("localhost/{name}:latest"),
             image_digest: None,
             public_key: None,
             object_storage: None,
