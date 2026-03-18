@@ -53,7 +53,7 @@ impl AdapterConfig {
 }
 
 fn required_env(key: &str) -> Result<String, String> {
-    std::env::var(key).map_err(|_| format!("required env var {} not set", key))
+    std::env::var(key).map_err(|_| format!("required env var {key} not set"))
 }
 
 #[cfg(test)]

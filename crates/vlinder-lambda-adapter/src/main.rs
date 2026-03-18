@@ -1,7 +1,7 @@
 //! vlinder-lambda-adapter — Lambda extension that gives agents provider services.
 //!
 //! Replaces `aws-lambda-web-adapter` inside Lambda container images. Speaks the
-//! Lambda Runtime API on one side and runs a full ProviderServer on the other,
+//! Lambda Runtime API on one side and runs a full `ProviderServer` on the other,
 //! giving Lambda agents access to inference, KV, vector storage, and delegation.
 //!
 //! Lifecycle:
@@ -10,8 +10,8 @@
 //! 3. Wait for agent to be ready on localhost
 //! 4. Enter Lambda Runtime API loop:
 //!    a. GET /runtime/invocation/next (blocks until Lambda dispatches)
-//!    b. Deserialize InvokeMessage from body
-//!    c. Start ProviderServer, POST payload to agent
+//!    b. Deserialize `InvokeMessage` from body
+//!    c. Start `ProviderServer`, POST payload to agent
 //!    d. Build complete message with diagnostics and state
 //!    e. Send complete to NATS
 //!    f. POST response back to Lambda Runtime API
@@ -105,7 +105,7 @@ fn register_extension(runtime_api: &str) {
     std::thread::spawn(move || {
         let http = ureq::Agent::new();
 
-        let register_url = format!("http://{}/2020-01-01/extension/register", runtime_api);
+        let register_url = format!("http://{runtime_api}/2020-01-01/extension/register");
         let resp = http
             .post(&register_url)
             .set("Lambda-Extension-Name", "vlinder-lambda-adapter")
@@ -132,7 +132,7 @@ fn register_extension(runtime_api: &str) {
 
         // Block forever waiting for events (we requested none, so this
         // just keeps the extension process alive).
-        let next_url = format!("http://{}/2020-01-01/extension/event/next", runtime_api);
+        let next_url = format!("http://{runtime_api}/2020-01-01/extension/event/next");
         let _ = http
             .get(&next_url)
             .set("Lambda-Extension-Identifier", &extension_id)
@@ -142,7 +142,7 @@ fn register_extension(runtime_api: &str) {
 
 /// Block until the agent's health endpoint responds (up to 60s).
 fn wait_for_agent(http: &ureq::Agent, port: u16) -> Result<(), String> {
-    let url = format!("http://127.0.0.1:{}/health", port);
+    let url = format!("http://127.0.0.1:{port}/health");
     let deadline = Instant::now() + Duration::from_secs(60);
 
     tracing::info!(
@@ -154,8 +154,7 @@ fn wait_for_agent(http: &ureq::Agent, port: u16) -> Result<(), String> {
     loop {
         if Instant::now() > deadline {
             return Err(format!(
-                "agent did not become ready within 60s (port {})",
-                port
+                "agent did not become ready within 60s (port {port})"
             ));
         }
         if http.get(&url).call().is_ok() {
@@ -183,7 +182,7 @@ fn runtime_api_loop(
         let response = http
             .get(&next_url)
             .call()
-            .map_err(|e| format!("GET invocation/next failed: {}", e))?;
+            .map_err(|e| format!("GET invocation/next failed: {e}"))?;
 
         let request_id = response
             .header("Lambda-Runtime-Aws-Request-Id")
@@ -194,7 +193,7 @@ fn runtime_api_loop(
         response
             .into_reader()
             .read_to_end(&mut body)
-            .map_err(|e| format!("failed to read invocation body: {}", e))?;
+            .map_err(|e| format!("failed to read invocation body: {e}"))?;
 
         tracing::info!(
             event = "adapter.invocation",
@@ -211,7 +210,7 @@ fn runtime_api_loop(
                 );
                 http.post(&response_url)
                     .send_bytes(&output)
-                    .map_err(|e| format!("POST invocation response failed: {}", e))?;
+                    .map_err(|e| format!("POST invocation response failed: {e}"))?;
             }
             Err(e) => {
                 tracing::error!(
@@ -234,8 +233,8 @@ fn runtime_api_loop(
 
 /// Handle a single Lambda invocation.
 ///
-/// The invocation body is a JSON-serialized InvokeMessage (sent by the daemon).
-/// We deserialize it, start a ProviderServer, POST the payload to the agent,
+/// The invocation body is a JSON-serialized `InvokeMessage` (sent by the daemon).
+/// We deserialize it, start a `ProviderServer`, POST the payload to the agent,
 /// build diagnostics, send complete to NATS, and return the agent's output.
 fn handle_invocation(
     config: &AdapterConfig,
@@ -274,16 +273,16 @@ fn handle_invocation(
     let agent_response = http
         .post(&agent_url)
         .send_bytes(&invoke.payload)
-        .map_err(|e| format!("POST to agent failed: {}", e))?;
+        .map_err(|e| format!("POST to agent failed: {e}"))?;
 
     let mut output = Vec::new();
     agent_response
         .into_reader()
         .read_to_end(&mut output)
-        .map_err(|e| format!("failed to read agent response: {}", e))?;
+        .map_err(|e| format!("failed to read agent response: {e}"))?;
 
     let final_state = provider_server.final_state();
-    let duration_ms = started_at.elapsed().as_millis() as u64;
+    let duration_ms = u64::try_from(started_at.elapsed().as_millis()).unwrap_or(u64::MAX);
 
     // Determine region from env (set by Lambda service).
     let region = std::env::var("AWS_REGION")
@@ -295,7 +294,7 @@ fn handle_invocation(
 
     queue
         .send_complete(complete)
-        .map_err(|e| format!("failed to send complete to NATS: {}", e))?;
+        .map_err(|e| format!("failed to send complete to NATS: {e}"))?;
 
     tracing::info!(
         event = "adapter.invocation_complete",

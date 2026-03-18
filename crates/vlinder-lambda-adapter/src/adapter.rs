@@ -6,12 +6,12 @@
 
 use vlinder_core::domain::{CompleteMessage, InvokeMessage, RuntimeDiagnostics, RuntimeInfo};
 
-/// Deserialize a Lambda invocation body into an InvokeMessage.
+/// Deserialize a Lambda invocation body into an `InvokeMessage`.
 ///
-/// The daemon serializes the full InvokeMessage as the Lambda payload.
+/// The daemon serializes the full `InvokeMessage` as the Lambda payload.
 /// This is the adapter's entry point for each invocation.
 pub fn deserialize_invoke(body: &[u8]) -> Result<InvokeMessage, String> {
-    serde_json::from_slice(body).map_err(|e| format!("failed to deserialize InvokeMessage: {}", e))
+    serde_json::from_slice(body).map_err(|e| format!("failed to deserialize InvokeMessage: {e}"))
 }
 
 /// Build Lambda-specific runtime diagnostics.
@@ -34,7 +34,7 @@ pub fn build_lambda_diagnostics(
 /// Build the complete message from an invocation result.
 ///
 /// Combines the invoke context, agent output, final state, and diagnostics
-/// into a CompleteMessage ready to send to NATS.
+/// into a `CompleteMessage` ready to send to NATS.
 pub fn build_complete(
     invoke: &InvokeMessage,
     output: Vec<u8>,
@@ -61,7 +61,7 @@ mod tests {
         SubmissionId,
     };
 
-    /// Build a test InvokeMessage and serialize it to JSON, simulating what
+    /// Build a test `InvokeMessage` and serialize it to JSON, simulating what
     /// the daemon sends as the Lambda payload.
     fn make_invoke_json(payload: &[u8]) -> Vec<u8> {
         let invoke = InvokeMessage::new(
@@ -135,7 +135,7 @@ mod tests {
                 assert_eq!(function_name, "my-function");
                 assert_eq!(region, "eu-west-1");
             }
-            other => panic!("expected Lambda, got {:?}", other),
+            other @ RuntimeInfo::Container { .. } => panic!("expected Lambda, got {other:?}"),
         }
     }
 
