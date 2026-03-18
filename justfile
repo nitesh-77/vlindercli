@@ -1,19 +1,40 @@
 # =============================================================================
-# Platform Builds (OCI container images via Podman)
+# Build Recipes
+#
+# The typical dev loop is:
+#
+#   just clean && just build-everything
+#
+# This is designed to be FAST. Here's how:
+#
+#   - `clean` cleans runtime state (DBs, conversations, NATS streams,
+#     agent containers) but NOT build artifacts. Cargo's incremental
+#     compilation is correct — it tracks every input via fingerprints
+#     and recompiles exactly what changed. Nuking target/ just to feel
+#     safe costs minutes for zero correctness gain.
+#
+#   - `build-sidecar` hashes the source files that feed the sidecar's
+#     Dockerfile. If nothing changed, it skips the Podman build entirely
+#     (sub-second no-op). The sidecar image is also preserved across
+#     `clean` — it's platform infrastructure, not test state.
+#
+#   - `build` runs `cargo build` which compiles all workspace crates
+#     (default-members = members in Cargo.toml). Incremental builds
+#     after small changes take seconds.
+#
+# If you suspect toolchain corruption or dep weirdness, use `just
+# reset` which IS the nuclear option: cargo clean + nuke all
+# localhost/* images including the sidecar.
 # =============================================================================
 
-# Build vlinder-podman-sidecar (OCI image via Podman, multi-stage Rust build)
-build-sidecar:
-    podman build -t localhost/vlinder-podman-sidecar:latest -f crates/vlinder-podman-sidecar/Dockerfile .
-
-# =============================================================================
-# Main Commands
-# =============================================================================
-
-# Build what's needed for local testing
+# Build what's needed for local testing (incremental — fast when little changed)
 build-everything: build build-sidecar
 
-# Run tests
+# Build all workspace crates (incremental — only recompiles what changed)
+build:
+    cargo build
+
+# Run all workspace tests
 test:
     cargo test --workspace
 
@@ -21,28 +42,125 @@ test:
 test-podman-runtime:
     cargo test -p vlinder-podman-runtime
 
-# Build CLI
-build:
-    cargo build
+# =============================================================================
+# Sidecar Image Build
+#
+# The sidecar is an OCI container image built via Podman. Unlike host
+# binaries, Podman doesn't have Cargo's fingerprinting — it will happily
+# re-run a multi-stage Rust build even if nothing changed.
+#
+# To avoid this, we compute a SHA-256 hash of every file that feeds into
+# the Dockerfile (source code, Cargo.toml files, proto files, stubs, and
+# the Dockerfile itself). The hash is stored in target/.sidecar-hash.
+# If the hash matches AND the image exists, we skip the build.
+#
+# The 10 crates in the sidecar's dependency chain:
+#   vlinder-podman-sidecar, vlinder-provider-server, vlinder-core,
+#   vlinder-nats, vlinder-sql-registry, vlinder-sql-state,
+#   vlinder-ollama, vlinder-infer-openrouter, vlinder-sqlite-kv,
+#   vlinder-sqlite-vec
+#
+# If you add a crate to the sidecar's dep chain, you MUST add its
+# source paths to the find command below, or the hash won't detect
+# changes in the new crate.
+# =============================================================================
 
-# Clean all build artifacts
-clean:
-    cargo clean
-
-# Clean data plane (DBs, WAL files, state pointers, conversations)
-clean-data:
-    rm -f ~/.vlinder/*.db ~/.vlinder/*.db-shm ~/.vlinder/*.db-wal
-    rm -rf ~/.vlinder/conversations
-    rm -rf ~/.vlinder/state
-
-# Full reset: clean slate for testing. Preserves config, credentials, and nats.conf.
-reset:
+# Build vlinder-podman-sidecar OCI image, skipping if source unchanged.
+build-sidecar:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    echo "=== Vlinder Reset ==="
+    # Every file that can change the sidecar image. If you add a crate
+    # to the sidecar's dep chain, add its paths here.
+    hash=$(find \
+        Cargo.toml \
+        crates/vlinder-podman-sidecar/Dockerfile \
+        crates/vlinder-podman-sidecar/Cargo.toml \
+        crates/vlinder-podman-sidecar/src \
+        crates/vlinder-podman-sidecar/stubs \
+        crates/vlinder-provider-server/Cargo.toml \
+        crates/vlinder-provider-server/src \
+        crates/vlinder-core/Cargo.toml \
+        crates/vlinder-core/src \
+        crates/vlinder-nats/Cargo.toml \
+        crates/vlinder-nats/src \
+        crates/vlinder-nats/build.rs \
+        crates/vlinder-nats/proto \
+        crates/vlinder-sql-registry/Cargo.toml \
+        crates/vlinder-sql-registry/src \
+        crates/vlinder-sql-registry/build.rs \
+        crates/vlinder-sql-registry/proto \
+        crates/vlinder-sql-state/Cargo.toml \
+        crates/vlinder-sql-state/src \
+        crates/vlinder-sql-state/build.rs \
+        crates/vlinder-sql-state/proto \
+        crates/vlinder-ollama/Cargo.toml \
+        crates/vlinder-ollama/src \
+        crates/vlinder-infer-openrouter/Cargo.toml \
+        crates/vlinder-infer-openrouter/src \
+        crates/vlinder-sqlite-kv/Cargo.toml \
+        crates/vlinder-sqlite-kv/src \
+        crates/vlinder-sqlite-vec/Cargo.toml \
+        crates/vlinder-sqlite-vec/src \
+        -type f | sort | xargs shasum -a 256 | shasum -a 256 | cut -d' ' -f1)
+
+    if podman image exists localhost/vlinder-podman-sidecar:latest 2>/dev/null \
+        && [ -f target/.sidecar-hash ] \
+        && [ "$(cat target/.sidecar-hash)" = "$hash" ]; then
+        echo "build-sidecar: image up to date (hash match), skipping"
+        exit 0
+    fi
+
+    echo "build-sidecar: source changed, rebuilding image..."
+    podman build -t localhost/vlinder-podman-sidecar:latest \
+        -f crates/vlinder-podman-sidecar/Dockerfile .
+
+    mkdir -p target
+    echo "$hash" > target/.sidecar-hash
+    echo "build-sidecar: done"
+
+# =============================================================================
+# Clean / Reset Recipes
+#
+# There are two levels:
+#
+#   just clean    — Clean runtime state for testing. This is what you
+#                   want 99% of the time. It kills processes, purges
+#                   NATS streams, wipes DBs and conversations, and
+#                   removes agent containers. It does NOT touch build
+#                   artifacts or the sidecar image, because:
+#
+#                     1. Cargo's incremental build is correct. It
+#                        fingerprints every input and recompiles what
+#                        changed. You cannot get stale binaries.
+#
+#                     2. The sidecar image is platform infrastructure.
+#                        Nuking it forces a full Rust recompile inside
+#                        the Podman build (~5 min), and it has nothing
+#                        to do with test state.
+#
+#                   Agent container images (localhost/echo-container,
+#                   etc.) ARE removed because they are test artifacts
+#                   that you may want rebuilt from scratch.
+#
+#   just reset    — Nuclear option. Everything in `clean` PLUS cargo
+#                   clean and removal of ALL localhost/* images
+#                   including the sidecar. Use this only when you
+#                   suspect toolchain corruption, dependency cache
+#                   issues, or want to verify a true clean build.
+#                   Expect a full rebuild afterwards (~5-10 min).
+# =============================================================================
+
+# Clean runtime state for testing. Does not touch build artifacts or sidecar image.
+clean:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    echo "=== Vlinder Clean ==="
 
     # 1. Stop daemon/worker processes
+    #    Running processes hold old binaries in memory — killing them is
+    #    the one thing you actually need to pick up new code.
     if pgrep -f "vlinder.*daemon" >/dev/null 2>&1 || pgrep -f "VLINDER_WORKER_ROLE" >/dev/null 2>&1; then
         echo "  Stopping vlinder processes..."
         pkill -f "VLINDER_WORKER_ROLE" 2>/dev/null || true
@@ -53,17 +171,19 @@ reset:
         echo "  - No vlinder processes running"
     fi
 
-    # 2. Podman: remove containers and locally-built images (localhost/*)
-    #    Preserves pulled base images (rust, debian, python, etc.)
+    # 2. Podman: remove agent containers and their images.
+    #    Preserves the sidecar image (platform infrastructure) and
+    #    pulled base images (rust, debian, python, etc.).
     echo "  Cleaning Podman..."
     podman pod rm -a -f 2>/dev/null || true
     podman rm -a -f 2>/dev/null || true
-    podman images --format '{{"{{"}}.Repository{{"}}"}}:{{"{{"}}.Tag{{"}}"}}' \
+    podman images --format '{{"{{"}} .Repository {{"}}"}}:{{"{{"}} .Tag {{"}}"}}' \
         | grep '^localhost/' \
+        | grep -v '^localhost/vlinder-podman-sidecar:' \
         | while read -r img; do podman rmi -f "$img" 2>/dev/null || true; done \
         || true
     podman volume prune -f 2>/dev/null || true
-    echo "  ✓ Podman clean (base images preserved)"
+    echo "  ✓ Podman clean (sidecar + base images preserved)"
 
     # 3. NATS JetStream streams
     if command -v nats >/dev/null 2>&1 && nc -z localhost 4222 2>/dev/null; then
@@ -85,18 +205,39 @@ reset:
     rm -rf ~/.vlinder/nats-data
     echo "  ✓ Data plane clean"
 
-    # 5. Rust build artifacts
-    echo "  Cleaning build artifacts..."
-    cargo clean 2>/dev/null || true
-    echo "  ✓ Build artifacts clean"
-
     echo ""
-    echo "=== Reset complete ==="
+    echo "=== Clean complete ==="
     echo "Preserved: ~/.vlinder/config.toml, ~/.vlinder/client.toml, ~/.vlinder/nats.conf, ~/.vlinder/*.creds"
     echo ""
     echo "Next steps:"
-    echo "  1. Rebuild:  just build"
+    echo "  1. Rebuild:  just build-everything"
     echo "  2. Daemon:   cargo run -p vlinderd -- daemon"
+
+# Nuclear reset: runtime state + build artifacts + all images. Full rebuild needed after.
+reset: clean
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    echo "=== Nuclear cleanup (build artifacts + sidecar) ==="
+
+    # Remove sidecar image and its hash marker
+    podman rmi -f localhost/vlinder-podman-sidecar:latest 2>/dev/null || true
+    rm -f target/.sidecar-hash
+    echo "  ✓ Sidecar image removed"
+
+    # Nuke Cargo's target directory
+    cargo clean 2>/dev/null || true
+    echo "  ✓ Build artifacts cleaned"
+
+    echo ""
+    echo "=== Full reset complete. Next: just build-everything ==="
+    echo ""
+
+# Clean data plane (DBs, WAL files, state pointers, conversations)
+clean-data:
+    rm -f ~/.vlinder/*.db ~/.vlinder/*.db-shm ~/.vlinder/*.db-wal
+    rm -rf ~/.vlinder/conversations
+    rm -rf ~/.vlinder/state
 
 # Check license compliance (fails on GPL/copyleft)
 license-check:
