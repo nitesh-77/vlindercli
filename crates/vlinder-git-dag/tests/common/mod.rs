@@ -1,7 +1,7 @@
 //! Shared helpers for integration tests (ADR 082).
 //!
 //! Each integration test binary includes this via `mod common;`.
-//! Provides isolated VLINDER_DIR, conversation repo setup, and git helpers.
+//! Provides isolated `VLINDER_DIR`, conversation repo setup, and git helpers.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -14,10 +14,10 @@ use vlinder_core::domain::{
 };
 use vlinder_git_dag::GitDagWorker;
 
-/// Create an isolated VLINDER_DIR for this test.
+/// Create an isolated `VLINDER_DIR` for this test.
 ///
-/// Reads VLINDER_INTEGRATION_RUN, creates `<run_dir>/<test_name>/.vlinder/`,
-/// sets VLINDER_DIR, and prints the path to stderr.
+/// Reads `VLINDER_INTEGRATION_RUN`, creates `<run_dir>/<test_name>/.vlinder/`,
+/// sets `VLINDER_DIR`, and prints the path to stderr.
 pub fn test_vlinder_dir(test_name: &str) -> PathBuf {
     let run_dir = std::env::var("VLINDER_INTEGRATION_RUN")
         .expect("VLINDER_INTEGRATION_RUN not set — use `just run-integration-tests`");
@@ -28,16 +28,16 @@ pub fn test_vlinder_dir(test_name: &str) -> PathBuf {
     test_dir
 }
 
-/// Create a test conversations repo using GitDagWorker.
+/// Create a test conversations repo using `GitDagWorker`.
 ///
-/// Opens a GitDagWorker at `<vlinder_dir>/conversations/` and returns it.
+/// Opens a `GitDagWorker` at `<vlinder_dir>/conversations/` and returns it.
 /// Caller uses `on_observable_message()` to populate the repo.
 pub fn test_conversations_worker(vlinder_dir: &Path) -> GitDagWorker {
     let conv_dir = vlinder_dir.join("conversations");
     GitDagWorker::open(&conv_dir, "test.local:9000", None).unwrap()
 }
 
-/// Conversations directory path for a given VLINDER_DIR.
+/// Conversations directory path for a given `VLINDER_DIR`.
 pub fn conversations_path(vlinder_dir: &Path) -> PathBuf {
     vlinder_dir.join("conversations")
 }
@@ -65,8 +65,8 @@ pub fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
 
 /// Read a trailer value from a git commit.
 pub fn read_trailer(dir: &Path, commit: &str, key: &str) -> Option<String> {
-    let format = format!("%(trailers:key={},valueonly)", key);
-    let value = git(dir, &["log", "-1", &format!("--format={}", format), commit]).ok()?;
+    let format = format!("%(trailers:key={key},valueonly)");
+    let value = git(dir, &["log", "-1", &format!("--format={format}"), commit]).ok()?;
     if value.is_empty() {
         None
     } else {

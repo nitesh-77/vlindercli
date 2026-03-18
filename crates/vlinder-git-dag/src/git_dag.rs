@@ -815,7 +815,7 @@ mod tests {
                 sequence: 1,
                 endpoint: "/infer".to_string(),
                 request_bytes: 1024,
-                received_at_ms: 1700000000000,
+                received_at_ms: 1_700_000_000_000,
             },
         );
         let created_at = DateTime::from_timestamp(epoch_secs, 0).unwrap();
@@ -952,7 +952,7 @@ mod tests {
 
     /// Show a file from the session subtree on main.
     fn show_session_file(repo_path: &Path, msg_dir: &str, field: &str) -> Result<String, String> {
-        let path = format!("main:{}/{}/{}/{}", AGENT, SESSION, msg_dir, field);
+        let path = format!("main:{AGENT}/{SESSION}/{msg_dir}/{field}");
         git(repo_path, &["show", &path])
     }
 
@@ -1004,11 +1004,10 @@ mod tests {
 
         let body = git(tmp.path(), &["log", "-1", "--format=%b", "main"]).unwrap();
         assert!(
-            body.contains(&format!("Session: {}", SESSION)),
-            "body: {}",
-            body
+            body.contains(&format!("Session: {SESSION}")),
+            "body: {body}"
         );
-        assert!(body.contains("Submission: sub-1"), "body: {}", body);
+        assert!(body.contains("Submission: sub-1"), "body: {body}");
     }
 
     #[test]
@@ -1081,7 +1080,7 @@ mod tests {
     #[test]
     fn author_date_matches_node() {
         let (mut worker, tmp) = test_worker();
-        let (msg, ts) = test_invoke(b"data", 1700000000);
+        let (msg, ts) = test_invoke(b"data", 1_700_000_000);
 
         worker.on_observable_message(&msg, ts);
 
@@ -1111,7 +1110,7 @@ mod tests {
         assert_eq!(show("created_at").unwrap(), "1970-01-01T00:16:40.000Z");
         assert!(!show("protocol_version").unwrap().is_empty());
         let diag = show("diagnostics.toml").unwrap();
-        assert!(diag.contains("harness_version"), "diag: {}", diag);
+        assert!(diag.contains("harness_version"), "diag: {diag}");
     }
 
     #[test]
@@ -1153,7 +1152,7 @@ mod tests {
         assert!(show("correlation_id").is_ok(), "should have correlation_id");
         assert_eq!(show("service").unwrap(), "infer");
         let diag = show("diagnostics.toml").unwrap();
-        assert!(diag.contains("duration_ms"), "diag: {}", diag);
+        assert!(diag.contains("duration_ms"), "diag: {diag}");
     }
 
     #[test]
@@ -1191,11 +1190,10 @@ mod tests {
         assert_eq!(show("harness").unwrap(), "cli");
         assert_eq!(show("stderr").unwrap(), "WARN: something");
         let diag = show("diagnostics.toml").unwrap();
-        assert!(diag.contains("duration_ms"), "diag: {}", diag);
+        assert!(diag.contains("duration_ms"), "diag: {diag}");
         assert!(
             !diag.contains("stderr"),
-            "stderr should be stripped from diagnostics: {}",
-            diag
+            "stderr should be stripped from diagnostics: {diag}"
         );
     }
 
@@ -1208,8 +1206,8 @@ mod tests {
 
         // Delegate agent is "summarizer" (target), so folder is summarizer/<session>/
         let dir = "001-coordinator-delegate";
-        let path = format!("main:summarizer/{}/{}", SESSION, dir);
-        let show = |field: &str| git(tmp.path(), &["show", &format!("{}/{}", path, field)]);
+        let path = format!("main:summarizer/{SESSION}/{dir}");
+        let show = |field: &str| git(tmp.path(), &["show", &format!("{path}/{field}")]);
 
         assert_eq!(show("type").unwrap(), "delegate");
         assert_eq!(show("caller_agent").unwrap(), "coordinator");
@@ -1282,17 +1280,13 @@ mod tests {
 
         let ls = git(
             tmp.path(),
-            &[
-                "ls-tree",
-                "--name-only",
-                &format!("main:{}/{}", AGENT, SESSION),
-            ],
+            &["ls-tree", "--name-only", &format!("main:{AGENT}/{SESSION}")],
         )
         .unwrap();
-        assert!(ls.contains("001-cli-invoke"), "ls: {}", ls);
-        assert!(ls.contains("002-support-agent-request"), "ls: {}", ls);
-        assert!(ls.contains("003-infer.ollama-response"), "ls: {}", ls);
-        assert!(ls.contains("timelines"), "ls: {}", ls);
+        assert!(ls.contains("001-cli-invoke"), "ls: {ls}");
+        assert!(ls.contains("002-support-agent-request"), "ls: {ls}");
+        assert!(ls.contains("003-infer.ollama-response"), "ls: {ls}");
+        assert!(ls.contains("timelines"), "ls: {ls}");
     }
 
     #[test]
@@ -1357,7 +1351,7 @@ mod tests {
         worker.on_observable_message(&msg, ts);
 
         let content = git(tmp.path(), &["show", "main:agent.toml"]).unwrap();
-        assert!(content.contains("support-agent"), "agent.toml: {}", content);
+        assert!(content.contains("support-agent"), "agent.toml: {content}");
     }
 
     #[test]
@@ -1368,11 +1362,10 @@ mod tests {
         worker.on_observable_message(&msg, ts);
 
         let content = git(tmp.path(), &["show", "main:platform.toml"]).unwrap();
-        assert!(content.contains("version"), "platform.toml: {}", content);
+        assert!(content.contains("version"), "platform.toml: {content}");
         assert!(
             content.contains("registry_host"),
-            "platform.toml: {}",
-            content
+            "platform.toml: {content}"
         );
     }
 
@@ -1447,34 +1440,30 @@ mod tests {
         // Each session has its own folder under the agent
         let ls = git(
             tmp.path(),
-            &["ls-tree", "--name-only", &format!("main:{}", AGENT)],
+            &["ls-tree", "--name-only", &format!("main:{AGENT}")],
         )
         .unwrap();
-        assert!(ls.contains(SESSION), "ls: {}", ls);
-        assert!(ls.contains(SESSION2), "ls: {}", ls);
+        assert!(ls.contains(SESSION), "ls: {ls}");
+        assert!(ls.contains(SESSION2), "ls: {ls}");
 
         // Each session folder has its own message
         let ls1 = git(
             tmp.path(),
-            &[
-                "ls-tree",
-                "--name-only",
-                &format!("main:{}/{}", AGENT, SESSION),
-            ],
+            &["ls-tree", "--name-only", &format!("main:{AGENT}/{SESSION}")],
         )
         .unwrap();
-        assert!(ls1.contains("001-cli-invoke"), "ls1: {}", ls1);
+        assert!(ls1.contains("001-cli-invoke"), "ls1: {ls1}");
 
         let ls2 = git(
             tmp.path(),
             &[
                 "ls-tree",
                 "--name-only",
-                &format!("main:{}/{}", AGENT, SESSION2),
+                &format!("main:{AGENT}/{SESSION2}"),
             ],
         )
         .unwrap();
-        assert!(ls2.contains("001-cli-invoke"), "ls2: {}", ls2);
+        assert!(ls2.contains("001-cli-invoke"), "ls2: {ls2}");
     }
 
     #[test]
@@ -1500,15 +1489,11 @@ mod tests {
         // Session folder has both messages
         let ls = git(
             tmp.path(),
-            &[
-                "ls-tree",
-                "--name-only",
-                &format!("main:{}/{}", AGENT, SESSION),
-            ],
+            &["ls-tree", "--name-only", &format!("main:{AGENT}/{SESSION}")],
         )
         .unwrap();
-        assert!(ls.contains("001-cli-invoke"), "ls: {}", ls);
-        assert!(ls.contains("002-support-agent-request"), "ls: {}", ls);
+        assert!(ls.contains("001-cli-invoke"), "ls: {ls}");
+        assert!(ls.contains("002-support-agent-request"), "ls: {ls}");
     }
 
     // --- Timeline index tests (ADR 114) ---
@@ -1525,21 +1510,13 @@ mod tests {
 
         let timeline = git(
             tmp.path(),
-            &[
-                "show",
-                &format!("main:{}/{}/timelines/main", AGENT, SESSION),
-            ],
+            &["show", &format!("main:{AGENT}/{SESSION}/timelines/main")],
         )
         .unwrap();
-        assert!(
-            timeline.contains("001-cli-invoke"),
-            "timeline: {}",
-            timeline
-        );
+        assert!(timeline.contains("001-cli-invoke"), "timeline: {timeline}");
         assert!(
             timeline.contains("002-support-agent-request"),
-            "timeline: {}",
-            timeline
+            "timeline: {timeline}"
         );
     }
 
@@ -1552,10 +1529,7 @@ mod tests {
 
         let active = git(
             tmp.path(),
-            &[
-                "show",
-                &format!("main:{}/{}/timelines/ACTIVE", AGENT, SESSION),
-            ],
+            &["show", &format!("main:{AGENT}/{SESSION}/timelines/ACTIVE")],
         )
         .unwrap();
         assert_eq!(active, "main");
@@ -1688,8 +1662,7 @@ mod tests {
         let body = git(tmp.path(), &["log", "-1", "--format=%b", "main"]).unwrap();
         assert!(
             body.contains("Checkpoint: handle_result"),
-            "commit body should contain Checkpoint trailer, got: {}",
-            body
+            "commit body should contain Checkpoint trailer, got: {body}"
         );
     }
 
@@ -1732,8 +1705,7 @@ mod tests {
         let branches = git(tmp.path(), &["branch", "--list"]).unwrap();
         assert!(
             branches.contains("repair-branch"),
-            "expected 'repair-branch' in branches, got: {}",
-            branches
+            "expected 'repair-branch' in branches, got: {branches}"
         );
     }
 
@@ -1767,7 +1739,7 @@ mod tests {
         // The timelines/ dir should have both 'main' and 'repair-branch' index files
         let session_path = tmp
             .path()
-            .join(format!("support-agent/{}/timelines", SESSION));
+            .join(format!("support-agent/{SESSION}/timelines"));
         assert!(
             session_path.join("main").exists(),
             "main timeline index should exist"

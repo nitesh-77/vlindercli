@@ -1,11 +1,11 @@
 //! Integration tests for the time-travel workflow (ADR 081, 082).
 //!
-//! These tests use GitDagWorker directly to create realistic conversation
+//! These tests use `GitDagWorker` directly to create realistic conversation
 //! repos with proper trailers, then exercise timeline operations on them.
-//! Each test gets its own isolated VLINDER_DIR under the date-stamped run
+//! Each test gets its own isolated `VLINDER_DIR` under the date-stamped run
 //! directory.
 //!
-//! Requires: `just run-integration-tests` (sets VLINDER_INTEGRATION_RUN)
+//! Requires: `just run-integration-tests` (sets `VLINDER_INTEGRATION_RUN`)
 
 mod common;
 
@@ -19,7 +19,7 @@ use vlinder_git_dag::GitDagWorker;
 // ============================================================================
 
 #[test]
-#[ignore] // Run via: just run-integration-tests
+#[ignore = "requires vlinder daemon and NATS"]
 fn checkout_shows_trailers_and_state() {
     let vlinder_dir = test_vlinder_dir("checkout_shows_trailers_and_state");
     let conv_dir = conversations_path(&vlinder_dir);
@@ -85,7 +85,7 @@ fn checkout_shows_trailers_and_state() {
 // ============================================================================
 
 #[test]
-#[ignore] // Run via: just run-integration-tests
+#[ignore = "requires vlinder daemon and NATS"]
 fn promote_moves_main_and_labels_old() {
     let vlinder_dir = test_vlinder_dir("promote_moves_main_and_labels_old");
     let conv_dir = conversations_path(&vlinder_dir);
@@ -151,7 +151,7 @@ fn promote_moves_main_and_labels_old() {
 // ============================================================================
 
 #[test]
-#[ignore] // Run via: just run-integration-tests
+#[ignore = "requires vlinder daemon and NATS"]
 fn fork_creates_independent_branch() {
     let vlinder_dir = test_vlinder_dir("fork_creates_independent_branch");
     let conv_dir = conversations_path(&vlinder_dir);
@@ -229,7 +229,7 @@ fn fork_creates_independent_branch() {
 // ============================================================================
 
 #[test]
-#[ignore] // Run via: just run-integration-tests
+#[ignore = "requires vlinder daemon and NATS"]
 fn checkout_then_promote_full_workflow() {
     let vlinder_dir = test_vlinder_dir("checkout_then_promote_full_workflow");
     let conv_dir = conversations_path(&vlinder_dir);
