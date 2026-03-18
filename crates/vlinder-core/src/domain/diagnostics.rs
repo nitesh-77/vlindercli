@@ -312,7 +312,7 @@ mod tests {
             sequence: 1,
             endpoint: "/infer".to_string(),
             request_bytes: 1024,
-            received_at_ms: 1700000000000,
+            received_at_ms: 1_700_000_000_000,
         };
         let json = serde_json::to_string(&diag).unwrap();
         let back: RequestDiagnostics = serde_json::from_str(&json).unwrap();
@@ -325,7 +325,7 @@ mod tests {
             sequence: 1,
             endpoint: "/infer".to_string(),
             request_bytes: 1024,
-            received_at_ms: 1700000000000,
+            received_at_ms: 1_700_000_000_000,
         };
         let toml_str = toml::to_string_pretty(&diag).unwrap();
         let back: RequestDiagnostics = toml::from_str(&toml_str).unwrap();
@@ -461,7 +461,7 @@ mod tests {
             RuntimeInfo::Container { engine_version, .. } => {
                 assert_eq!(engine_version, "unknown");
             }
-            other => panic!("expected Container, got {other:?}"),
+            other @ RuntimeInfo::Lambda { .. } => panic!("expected Container, got {other:?}"),
         }
     }
 
@@ -574,7 +574,7 @@ mod tests {
     #[test]
     fn health_snapshot_json_round_trip() {
         let snap = HealthSnapshot {
-            timestamp_ms: 1700000000000,
+            timestamp_ms: 1_700_000_000_000,
             latency_ms: 12,
             status_code: 200,
         };

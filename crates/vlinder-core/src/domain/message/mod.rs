@@ -343,7 +343,8 @@ mod tests {
         assert_eq!(
             key,
             RoutingKey::Invoke {
-                timeline: msg.timeline,
+                session: msg.session.clone(),
+                branch: msg.branch,
                 submission: msg.submission.clone(),
                 harness: msg.harness,
                 runtime: msg.runtime,
@@ -371,7 +372,8 @@ mod tests {
         assert_eq!(
             key,
             RoutingKey::Request {
-                timeline: msg.timeline,
+                session: msg.session.clone(),
+                branch: msg.branch,
                 submission: msg.submission.clone(),
                 agent: msg.agent_id.clone(),
                 service: msg.service,
@@ -401,7 +403,8 @@ mod tests {
         assert_eq!(
             key,
             RoutingKey::Response {
-                timeline: response.timeline,
+                session: response.session.clone(),
+                branch: response.branch,
                 submission: response.submission.clone(),
                 service: response.service,
                 agent: response.agent_id.clone(),
@@ -428,7 +431,8 @@ mod tests {
         assert_eq!(
             key,
             RoutingKey::Complete {
-                timeline: msg.timeline,
+                session: msg.session.clone(),
+                branch: msg.branch,
                 submission: msg.submission.clone(),
                 agent: msg.agent_id.clone(),
                 harness: msg.harness,
@@ -456,7 +460,8 @@ mod tests {
         assert_eq!(
             key,
             RoutingKey::Delegate {
-                timeline: msg.timeline,
+                session: msg.session.clone(),
+                branch: msg.branch,
                 submission: msg.submission.clone(),
                 caller: msg.caller.clone(),
                 target: msg.target.clone(),
@@ -484,7 +489,8 @@ mod tests {
         assert_eq!(
             reply_key,
             RoutingKey::DelegateReply {
-                timeline: msg.timeline,
+                session: msg.session.clone(),
+                branch: msg.branch,
                 submission: msg.submission.clone(),
                 caller: msg.caller.clone(),
                 target: msg.target.clone(),
@@ -593,7 +599,7 @@ mod tests {
         let headers = ObservableMessageHeaders::Invoke {
             id: MessageId::from("msg-1".to_string()),
             protocol_version: "0.1.0".to_string(),
-            timeline: BranchId::from(1),
+            branch: BranchId::from(1),
             submission: test_submission(),
             session: SessionId::new(),
             harness: HarnessType::Cli,

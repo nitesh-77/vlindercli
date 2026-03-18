@@ -114,6 +114,7 @@ impl Registry for InMemoryRegistry {
 
     // --- Agent operations ---
 
+    #[allow(clippy::too_many_lines)]
     fn register_agent(&self, mut agent: Agent) -> Result<(), RegistrationError> {
         let mut state = self.state.write().unwrap();
 
@@ -721,10 +722,10 @@ mod tests {
         Agent {
             id: Agent::placeholder_id(name),
             name: name.to_string(),
-            description: format!("{} agent", name),
+            description: format!("{name} agent"),
             source: None,
             runtime: RuntimeType::Container,
-            executable: format!("localhost/{}:latest", name),
+            executable: format!("localhost/{name}:latest"),
             image_digest: None,
             public_key: None,
             object_storage: None,
@@ -775,10 +776,10 @@ mod tests {
 
         AgentManifest {
             name: name.to_string(),
-            description: format!("{} agent", name),
+            description: format!("{name} agent"),
             source: None,
             runtime: "container".to_string(),
-            executable: format!("localhost/{}:latest", name),
+            executable: format!("localhost/{name}:latest"),
             requirements: RequirementsConfig {
                 models: HashMap::new(),
                 services: HashMap::new(),
@@ -942,7 +943,7 @@ mod tests {
                 assert_eq!(fleet_name, "bad-fleet");
                 assert!(agent_ref.contains("fake"));
             }
-            other => panic!("expected FleetAgentNotRegistered, got: {}", other),
+            other => panic!("expected FleetAgentNotRegistered, got: {other}"),
         }
     }
 
@@ -969,7 +970,7 @@ mod tests {
                 assert_eq!(fleet_name, "bad-entry");
                 assert!(agent_ref.contains("entry-only"));
             }
-            other => panic!("expected FleetAgentNotRegistered, got: {}", other),
+            other => panic!("expected FleetAgentNotRegistered, got: {other}"),
         }
     }
 

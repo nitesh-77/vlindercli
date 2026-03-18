@@ -119,7 +119,7 @@ mod tests {
     #[test]
     fn display_delegates_to_inner() {
         let r = ImageRef::parse("localhost/echo:latest").unwrap();
-        assert_eq!(format!("{}", r), "localhost/echo:latest");
+        assert_eq!(format!("{r}"), "localhost/echo:latest");
     }
 
     // ── Serde round-trip ──

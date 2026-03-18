@@ -282,11 +282,11 @@ mod tests {
         let node3 = build_dag_node(&msg3, &last_id, &node2.state);
         store.insert_node(&node3).unwrap();
 
-        let nodes = store.get_session_nodes(&session()).unwrap();
-        assert_eq!(nodes.len(), 3);
-        assert_eq!(nodes[0].parent_id, DagNodeId::root());
-        assert_eq!(nodes[1].parent_id, nodes[0].id);
-        assert_eq!(nodes[2].parent_id, nodes[1].id);
+        let all = store.get_session_nodes(&session()).unwrap();
+        assert_eq!(all.len(), 3);
+        assert_eq!(all[0].parent_id, DagNodeId::root());
+        assert_eq!(all[1].parent_id, all[0].id);
+        assert_eq!(all[2].parent_id, all[1].id);
     }
 
     #[test]

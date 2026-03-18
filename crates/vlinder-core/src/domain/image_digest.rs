@@ -124,7 +124,7 @@ mod tests {
     #[test]
     fn display_delegates_to_inner() {
         let d = ImageDigest::parse("sha256:abc123").unwrap();
-        assert_eq!(format!("{}", d), "sha256:abc123");
+        assert_eq!(format!("{d}"), "sha256:abc123");
     }
 
     // ── Serde round-trip ──

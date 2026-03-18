@@ -573,7 +573,8 @@ mod tests {
 
         // Build a reply routing key (as if from a DelegateMessage)
         let reply_key = RoutingKey::DelegateReply {
-            timeline: BranchId::from(1),
+            session: SessionId::new(),
+            branch: BranchId::from(1),
             submission: test_submission(),
             caller: AgentId::new("coordinator"),
             target: AgentId::new("summarizer"),
@@ -603,14 +604,16 @@ mod tests {
         let queue = InMemoryQueue::new();
 
         let reply_key_a = RoutingKey::DelegateReply {
-            timeline: BranchId::from(1),
+            session: SessionId::new(),
+            branch: BranchId::from(1),
             submission: test_submission(),
             caller: AgentId::new("coordinator"),
             target: AgentId::new("summarizer"),
             nonce: Nonce::new("nonce-a"),
         };
         let reply_key_b = RoutingKey::DelegateReply {
-            timeline: BranchId::from(1),
+            session: SessionId::new(),
+            branch: BranchId::from(1),
             submission: test_submission(),
             caller: AgentId::new("coordinator"),
             target: AgentId::new("summarizer"),

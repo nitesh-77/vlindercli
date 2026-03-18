@@ -266,11 +266,17 @@ mod tests {
         assert_eq!(manifest.runtime, "container");
         assert_eq!(manifest.executable, "localhost/test-agent:latest");
         assert_eq!(
-            manifest.object_storage.as_ref().map(|r| r.as_str()),
+            manifest
+                .object_storage
+                .as_ref()
+                .map(super::super::resource_id::ResourceId::as_str),
             Some("sqlite:///data/objects.db")
         );
         assert_eq!(
-            manifest.vector_storage.as_ref().map(|r| r.as_str()),
+            manifest
+                .vector_storage
+                .as_ref()
+                .map(super::super::resource_id::ResourceId::as_str),
             Some("sqlite:///data/vectors.db")
         );
     }
@@ -310,7 +316,10 @@ mod tests {
         let manifest: AgentManifest = toml::from_str(toml).unwrap();
 
         assert_eq!(
-            manifest.object_storage.as_ref().map(|r| r.as_str()),
+            manifest
+                .object_storage
+                .as_ref()
+                .map(super::super::resource_id::ResourceId::as_str),
             Some("s3://my-bucket/agents/test")
         );
         assert!(manifest.vector_storage.is_none());

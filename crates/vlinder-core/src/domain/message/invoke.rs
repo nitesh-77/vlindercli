@@ -209,8 +209,7 @@ mod tests {
         let payload_val = &raw["payload"];
         assert!(
             payload_val.is_string(),
-            "payload should be a string, got {:?}",
-            payload_val
+            "payload should be a string, got {payload_val:?}"
         );
         assert_eq!(payload_val.as_str().unwrap(), "aGVsbG8gd29ybGQ=");
     }

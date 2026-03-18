@@ -341,22 +341,35 @@ mod tests {
         assert_eq!(restored.runtime, RuntimeType::Container);
         assert_eq!(restored.executable, "localhost/thinker:latest");
         assert_eq!(
-            restored.image_digest.as_ref().map(|d| d.as_str()),
+            restored
+                .image_digest
+                .as_ref()
+                .map(super::super::image_digest::ImageDigest::as_str),
             Some("sha256:abc123def456")
         );
         assert_eq!(
-            restored.object_storage.as_ref().map(|r| r.as_str()),
+            restored
+                .object_storage
+                .as_ref()
+                .map(super::super::resource_id::ResourceId::as_str),
             Some("sqlite:///data/objects.db")
         );
         assert_eq!(
-            restored.vector_storage.as_ref().map(|r| r.as_str()),
+            restored
+                .vector_storage
+                .as_ref()
+                .map(super::super::resource_id::ResourceId::as_str),
             Some("sqlite:///data/vectors.db")
         );
 
         // Models (ADR 094: values are registry names, not URIs)
         assert_eq!(restored.requirements.models.len(), 2);
         assert_eq!(
-            restored.requirements.models.get("phi3").map(|s| s.as_str()),
+            restored
+                .requirements
+                .models
+                .get("phi3")
+                .map(std::string::String::as_str),
             Some("phi3:latest")
         );
 

@@ -332,7 +332,11 @@ mod tests {
     use super::*;
 
     fn session() -> SessionId {
-        SessionId::try_from("ses-1".to_string()).unwrap()
+        SessionId::try_from("00000000-0000-4000-8000-000000000001".to_string()).unwrap()
+    }
+
+    fn session_alt() -> SessionId {
+        SessionId::try_from("00000000-0000-4000-8000-000000000002".to_string()).unwrap()
     }
 
     fn branch() -> BranchId {
@@ -377,6 +381,18 @@ mod tests {
     #[test]
     fn invoke_equal_when_all_dimensions_match() {
         assert_eq!(base_invoke(), base_invoke());
+    }
+
+    #[test]
+    fn invoke_differs_by_session() {
+        let mut key = base_invoke();
+        if let RoutingKey::Invoke {
+            ref mut session, ..
+        } = key
+        {
+            *session = session_alt();
+        }
+        assert_ne!(base_invoke(), key);
     }
 
     #[test]
@@ -441,6 +457,18 @@ mod tests {
     }
 
     #[test]
+    fn complete_differs_by_session() {
+        let mut key = base_complete();
+        if let RoutingKey::Complete {
+            ref mut session, ..
+        } = key
+        {
+            *session = session_alt();
+        }
+        assert_ne!(base_complete(), key);
+    }
+
+    #[test]
     fn complete_differs_by_agent() {
         let mut key = base_complete();
         if let RoutingKey::Complete { ref mut agent, .. } = key {
@@ -480,6 +508,18 @@ mod tests {
     #[test]
     fn request_equal_when_all_dimensions_match() {
         assert_eq!(base_request(), base_request());
+    }
+
+    #[test]
+    fn request_differs_by_session() {
+        let mut key = base_request();
+        if let RoutingKey::Request {
+            ref mut session, ..
+        } = key
+        {
+            *session = session_alt();
+        }
+        assert_ne!(base_request(), key);
     }
 
     #[test]
@@ -561,6 +601,18 @@ mod tests {
     }
 
     #[test]
+    fn response_differs_by_session() {
+        let mut key = base_response();
+        if let RoutingKey::Response {
+            ref mut session, ..
+        } = key
+        {
+            *session = session_alt();
+        }
+        assert_ne!(base_response(), key);
+    }
+
+    #[test]
     fn response_differs_by_agent() {
         let mut key = base_response();
         if let RoutingKey::Response { ref mut agent, .. } = key {
@@ -601,6 +653,18 @@ mod tests {
     }
 
     #[test]
+    fn delegate_differs_by_session() {
+        let mut key = base_delegate();
+        if let RoutingKey::Delegate {
+            ref mut session, ..
+        } = key
+        {
+            *session = session_alt();
+        }
+        assert_ne!(base_delegate(), key);
+    }
+
+    #[test]
     fn delegate_differs_by_caller() {
         let mut key = base_delegate();
         if let RoutingKey::Delegate { ref mut caller, .. } = key {
@@ -636,6 +700,18 @@ mod tests {
     #[test]
     fn delegate_reply_equal_when_all_dimensions_match() {
         assert_eq!(base_delegate_reply(), base_delegate_reply());
+    }
+
+    #[test]
+    fn delegate_reply_differs_by_session() {
+        let mut key = base_delegate_reply();
+        if let RoutingKey::DelegateReply {
+            ref mut session, ..
+        } = key
+        {
+            *session = session_alt();
+        }
+        assert_ne!(base_delegate_reply(), key);
     }
 
     #[test]
@@ -691,7 +767,7 @@ mod tests {
         let reply = base_invoke().reply_key(None).unwrap();
         match reply {
             RoutingKey::Complete { .. } => {}
-            other => panic!("expected Complete, got {:?}", other),
+            other => panic!("expected Complete, got {other:?}"),
         }
     }
 
@@ -722,7 +798,7 @@ mod tests {
                 assert_eq!(operation, Operation::Get);
                 assert_eq!(sequence, Sequence::first());
             }
-            other => panic!("expected Response, got {:?}", other),
+            other => panic!("expected Response, got {other:?}"),
         }
     }
 

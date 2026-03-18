@@ -147,7 +147,7 @@ mod tests {
     #[test]
     fn resource_id_display() {
         let id = ResourceId::new("s3://bucket/key");
-        assert_eq!(format!("{}", id), "s3://bucket/key");
+        assert_eq!(format!("{id}"), "s3://bucket/key");
     }
 
     #[test]

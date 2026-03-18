@@ -618,6 +618,23 @@ mod tests {
             ) -> Result<Option<crate::domain::Session>, String> {
                 Ok(None)
             }
+            fn rename_branch(&self, _: crate::domain::BranchId, _: &str) -> Result<(), String> {
+                Ok(())
+            }
+            fn seal_branch(
+                &self,
+                _: crate::domain::BranchId,
+                _: chrono::DateTime<chrono::Utc>,
+            ) -> Result<(), String> {
+                Ok(())
+            }
+            fn update_session_default_branch(
+                &self,
+                _: &crate::domain::SessionId,
+                _: crate::domain::BranchId,
+            ) -> Result<(), String> {
+                Ok(())
+            }
             fn get_session_by_name(
                 &self,
                 _: &str,

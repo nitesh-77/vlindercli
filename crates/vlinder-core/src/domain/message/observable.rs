@@ -153,6 +153,7 @@ pub enum ObservableMessageHeaders {
 
 impl ObservableMessageHeaders {
     /// Assemble a full `ObservableMessage` by attaching a payload.
+    #[allow(clippy::too_many_lines)]
     pub fn assemble(self, payload: Vec<u8>) -> ObservableMessage {
         match self {
             Self::Invoke {

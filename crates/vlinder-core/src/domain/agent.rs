@@ -294,11 +294,17 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            agent.object_storage.as_ref().map(|r| r.as_str()),
+            agent
+                .object_storage
+                .as_ref()
+                .map(super::super::resource_id::ResourceId::as_str),
             Some("sqlite:///data/objects.db"),
         );
         assert_eq!(
-            agent.vector_storage.as_ref().map(|r| r.as_str()),
+            agent
+                .vector_storage
+                .as_ref()
+                .map(super::super::resource_id::ResourceId::as_str),
             Some("sqlite:///data/vectors.db"),
         );
     }

@@ -49,7 +49,7 @@ mod tests {
     #[test]
     fn display_delegates_to_inner() {
         let id = PodId::new("abc123");
-        assert_eq!(format!("{}", id), "abc123");
+        assert_eq!(format!("{id}"), "abc123");
     }
 
     #[test]
