@@ -368,7 +368,7 @@ mod tests {
     use vlinder_core::domain::{
         AgentId, BranchId, CompleteMessage, DagNodeId, HarnessType, InMemoryDagStore,
         InvokeDiagnostics, InvokeMessage, ObservableMessage, RuntimeDiagnostics, RuntimeType,
-        SubmissionId,
+        Snapshot, SubmissionId,
     };
 
     fn sess_id() -> SessionId {
@@ -412,19 +412,19 @@ mod tests {
         let sid = sess_id();
 
         let invoke_msg = make_invoke_msg(b"summarize this article", "pensieve", sid.clone());
-        let mut invoke = build_dag_node(&invoke_msg, &DagNodeId::root());
+        let mut invoke = build_dag_node(&invoke_msg, &DagNodeId::root(), &Snapshot::empty());
         invoke.created_at = Utc.with_ymd_and_hms(2026, 2, 8, 14, 30, 5).unwrap();
 
         let complete_msg =
             make_complete_msg(b"This article discusses several topics.", "pensieve", sid);
-        let mut complete = build_dag_node(&complete_msg, &invoke.id);
+        let mut complete = build_dag_node(&complete_msg, &invoke.id, &Snapshot::empty());
         complete.created_at = Utc.with_ymd_and_hms(2026, 2, 8, 14, 30, 10).unwrap();
 
         store.insert_node(&invoke).unwrap();
         store.insert_node(&complete).unwrap();
 
         // Create a session so the viewer can look it up
-        let session = Session::new(sess_id(), "pensieve");
+        let session = Session::new(sess_id(), "pensieve", BranchId::from(1));
         store.create_session(&session).unwrap();
 
         store
@@ -535,11 +535,11 @@ mod tests {
         let store = InMemoryDagStore::new();
         let sid = SessionId::try_from("e2660cff-33d6-4428-acca-2d297dcc1cad".to_string()).unwrap();
         let msg = make_invoke_msg(b"what next?", "todoapp", sid.clone());
-        let mut invoke = build_dag_node(&msg, &DagNodeId::root());
+        let mut invoke = build_dag_node(&msg, &DagNodeId::root(), &Snapshot::empty());
         invoke.created_at = Utc.with_ymd_and_hms(2026, 2, 8, 14, 30, 5).unwrap();
         store.insert_node(&invoke).unwrap();
 
-        let session = Session::new(sid, "todoapp");
+        let session = Session::new(sid, "todoapp", BranchId::from(1));
         store.create_session(&session).unwrap();
 
         let html = render_session(&store, &session).unwrap();

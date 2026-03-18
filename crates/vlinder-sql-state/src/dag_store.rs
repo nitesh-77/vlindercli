@@ -606,8 +606,8 @@ mod tests {
     use vlinder_core::domain::{
         AgentId, BranchId, CompleteMessage, DelegateDiagnostics, DelegateMessage, HarnessType,
         InferenceBackendType, InvokeDiagnostics, InvokeMessage, Nonce, Operation,
-        RequestDiagnostics, RequestMessage, ResponseMessage, RuntimeDiagnostics, RuntimeType,
-        Sequence, ServiceBackend, SubmissionId,
+        RequestDiagnostics, RequestMessage, RuntimeDiagnostics, RuntimeType, Sequence,
+        ServiceBackend, Snapshot, SubmissionId,
     };
 
     fn test_store() -> SqliteDagStore {
@@ -662,27 +662,6 @@ mod tests {
         .into()
     }
 
-    fn make_response(payload: &[u8]) -> ObservableMessage {
-        let request = RequestMessage::new(
-            BranchId::from(1),
-            sub(),
-            sess(),
-            AgentId::new("agent-a"),
-            ServiceBackend::Infer(InferenceBackendType::Ollama),
-            Operation::Run,
-            Sequence::first(),
-            b"prompt".to_vec(),
-            None,
-            RequestDiagnostics {
-                sequence: 1,
-                endpoint: "/infer".to_string(),
-                request_bytes: 0,
-                received_at_ms: 0,
-            },
-        );
-        ResponseMessage::from_request(&request, payload.to_vec()).into()
-    }
-
     fn make_complete(payload: &[u8], state: Option<String>) -> ObservableMessage {
         CompleteMessage::new(
             BranchId::from(1),
@@ -716,7 +695,7 @@ mod tests {
 
     fn test_node(payload: &[u8], parent: &DagNodeId) -> DagNode {
         let msg = make_invoke(payload, None);
-        build_dag_node(&msg, parent)
+        build_dag_node(&msg, parent, &Snapshot::empty())
     }
 
     #[test]
@@ -736,7 +715,7 @@ mod tests {
     fn round_trip_preserves_all_fields() {
         let store = test_store();
         let msg = make_delegate(b"delegate this");
-        let node = build_dag_node(&msg, &DagNodeId::root());
+        let node = build_dag_node(&msg, &DagNodeId::root(), &Snapshot::empty());
 
         store.insert_node(&node).unwrap();
         let retrieved = store.get_node(&node.id).unwrap().unwrap();
@@ -777,17 +756,17 @@ mod tests {
         let mut node1 = test_node(b"first", &DagNodeId::root());
         node1.created_at = chrono::TimeZone::with_ymd_and_hms(&Utc, 2025, 1, 1, 0, 0, 0).unwrap();
 
-        let mut node2 = build_dag_node(&make_request(b"second"), &node1.id);
+        let mut node2 = build_dag_node(&make_request(b"second"), &node1.id, &Snapshot::empty());
         node2.created_at = chrono::TimeZone::with_ymd_and_hms(&Utc, 2025, 1, 1, 0, 1, 0).unwrap();
 
         // Insert out of order
         store.insert_node(&node2).unwrap();
         store.insert_node(&node1).unwrap();
 
-        let nodes = store.get_session_nodes(&sess()).unwrap();
-        assert_eq!(nodes.len(), 2);
-        assert_eq!(nodes[0].id, node1.id);
-        assert_eq!(nodes[1].id, node2.id);
+        let all = store.get_session_nodes(&sess()).unwrap();
+        assert_eq!(all.len(), 2);
+        assert_eq!(all[0].id, node1.id);
+        assert_eq!(all[1].id, node2.id);
     }
 
     #[test]
@@ -796,7 +775,11 @@ mod tests {
 
         let parent = test_node(b"parent", &DagNodeId::root());
 
-        let mut child = build_dag_node(&make_complete(b"child", None), &parent.id);
+        let mut child = build_dag_node(
+            &make_complete(b"child", None),
+            &parent.id,
+            &Snapshot::empty(),
+        );
         child.created_at = chrono::TimeZone::with_ymd_and_hms(&Utc, 2025, 1, 1, 0, 1, 0).unwrap();
 
         store.insert_node(&parent).unwrap();
@@ -836,7 +819,7 @@ mod tests {
             DagNodeId::root(),
         )
         .into();
-        let node_a = build_dag_node(&msg_a, &DagNodeId::root());
+        let node_a = build_dag_node(&msg_a, &DagNodeId::root(), &Snapshot::empty());
 
         let msg_b: ObservableMessage = InvokeMessage::new(
             BranchId::from(1),
@@ -853,7 +836,7 @@ mod tests {
             DagNodeId::root(),
         )
         .into();
-        let node_b = build_dag_node(&msg_b, &DagNodeId::root());
+        let node_b = build_dag_node(&msg_b, &DagNodeId::root(), &Snapshot::empty());
 
         store.insert_node(&node_a).unwrap();
         store.insert_node(&node_b).unwrap();
@@ -878,14 +861,13 @@ mod tests {
         let session_id = sess();
         let fork = DagNodeId::from("abc123".to_string());
         let id = store
-            .create_timeline("repair-1", &session_id, None, Some(&fork))
+            .create_branch("repair-1", &session_id, Some(&fork))
             .unwrap();
-        assert!(id >= 1);
+        assert!(id.as_i64() >= 1);
 
-        let tl = store.get_timeline(id).unwrap().unwrap();
-        assert_eq!(tl.branch_name, "repair-1");
+        let tl = store.get_branch(id).unwrap().unwrap();
+        assert_eq!(tl.name, "repair-1");
         assert_eq!(tl.session_id, session_id);
-        assert!(tl.parent_timeline_id.is_none());
         assert_eq!(tl.fork_point, Some(DagNodeId::from("abc123".to_string())));
         assert!(tl.broken_at.is_none());
     }
@@ -895,85 +877,83 @@ mod tests {
         let store = test_store();
 
         let session_id = sess();
-        let parent_id = store
-            .create_timeline("main", &session_id, None, None)
-            .unwrap();
+        let _parent_id = store.create_branch("main", &session_id, None).unwrap();
         let fork = DagNodeId::from("abc123".to_string());
         let fork_id = store
-            .create_timeline("repair-1", &session_id, Some(parent_id), Some(&fork))
+            .create_branch("repair-1", &session_id, Some(&fork))
             .unwrap();
 
-        let tl = store.get_timeline(fork_id).unwrap().unwrap();
-        assert_eq!(tl.parent_timeline_id, Some(parent_id));
+        let tl = store.get_branch(fork_id).unwrap().unwrap();
+        assert_eq!(tl.fork_point, Some(fork));
     }
 
     #[test]
     fn get_timeline_by_branch() {
         let store = test_store();
         let session_id = sess();
-        store
-            .create_timeline("main", &session_id, None, None)
-            .unwrap();
+        store.create_branch("main", &session_id, None).unwrap();
 
-        let tl = store.get_timeline_by_branch("main").unwrap().unwrap();
+        let tl = store.get_branch_by_name("main").unwrap().unwrap();
         assert_eq!(tl.session_id, session_id);
 
-        assert!(store
-            .get_timeline_by_branch("nonexistent")
-            .unwrap()
-            .is_none());
+        assert!(store.get_branch_by_name("nonexistent").unwrap().is_none());
     }
 
     // ========================================================================
-    // latest_node_on_timeline tests
+    // latest_node_on_branch tests
     // ========================================================================
 
     #[test]
-    fn latest_node_on_timeline_returns_none_for_empty() {
+    fn latest_node_on_branch_returns_none_for_empty() {
         let store = test_store();
-        let result = store.latest_node_on_timeline(1, None).unwrap();
+        let result = store
+            .latest_node_on_branch(BranchId::from(1), None)
+            .unwrap();
         assert!(result.is_none());
     }
 
     #[test]
-    fn latest_node_on_timeline_returns_most_recent() {
+    fn latest_node_on_branch_returns_most_recent() {
         let store = test_store();
 
         let invoke = make_invoke(b"first", None);
-        let node1 = build_dag_node(&invoke, &DagNodeId::root());
+        let node1 = build_dag_node(&invoke, &DagNodeId::root(), &Snapshot::empty());
         store.insert_node(&node1).unwrap();
 
         let complete = make_complete(b"response", None);
-        let node2 = build_dag_node(&complete, &node1.id);
+        let node2 = build_dag_node(&complete, &node1.id, &Snapshot::empty());
         store.insert_node(&node2).unwrap();
 
         // No filter — returns the most recent (complete)
-        let latest = store.latest_node_on_timeline(1, None).unwrap().unwrap();
+        let latest = store
+            .latest_node_on_branch(BranchId::from(1), None)
+            .unwrap()
+            .unwrap();
         assert_eq!(latest.id, node2.id);
     }
 
     #[test]
-    fn latest_node_on_timeline_filters_by_message_type() {
+    fn latest_node_on_branch_filters_by_message_type() {
         let store = test_store();
 
         let invoke = make_invoke(b"question", None);
-        let node1 = build_dag_node(&invoke, &DagNodeId::root());
+        let node1 = build_dag_node(&invoke, &DagNodeId::root(), &Snapshot::empty());
         store.insert_node(&node1).unwrap();
 
         let complete = make_complete(b"answer", None);
-        let node2 = build_dag_node(&complete, &node1.id);
+        let node2 = build_dag_node(&complete, &node1.id, &Snapshot::empty());
         store.insert_node(&node2).unwrap();
 
         // Filter for Invoke — should return node1, not node2
         let latest_invoke = store
-            .latest_node_on_timeline(1, Some(MessageType::Invoke))
+            .latest_node_on_branch(BranchId::from(1), Some(MessageType::Invoke))
             .unwrap()
             .unwrap();
         assert_eq!(latest_invoke.id, node1.id);
 
         // Filter for Complete — should return node2
         let latest_complete = store
-            .latest_node_on_timeline(1, Some(MessageType::Complete))
+            .latest_node_on_branch(BranchId::from(1), Some(MessageType::Complete))
             .unwrap()
             .unwrap();
         assert_eq!(latest_complete.id, node2.id);
@@ -989,6 +969,7 @@ mod tests {
         let session = Session::new(
             SessionId::try_from("a1b2c3d4-e5f6-7890-abcd-ef1234567890".to_string()).unwrap(),
             "pensieve",
+            BranchId::from(1),
         );
 
         store.create_session(&session).unwrap();
@@ -996,7 +977,7 @@ mod tests {
         let sid = SessionId::try_from("a1b2c3d4-e5f6-7890-abcd-ef1234567890".to_string()).unwrap();
         let retrieved = store.get_session(&sid).unwrap().unwrap();
         assert_eq!(
-            retrieved.session.as_str(),
+            retrieved.id.as_str(),
             "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
         );
         assert_eq!(retrieved.agent, "pensieve");
@@ -1009,6 +990,7 @@ mod tests {
         let session = Session::new(
             SessionId::try_from("a1b2c3d4-e5f6-7890-abcd-ef1234567890".to_string()).unwrap(),
             "pensieve",
+            BranchId::from(1),
         );
         let name = session.name.clone();
 
@@ -1016,7 +998,7 @@ mod tests {
 
         let retrieved = store.get_session_by_name(&name).unwrap().unwrap();
         assert_eq!(
-            retrieved.session.as_str(),
+            retrieved.id.as_str(),
             "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
         );
         assert_eq!(retrieved.agent, "pensieve");
@@ -1041,6 +1023,7 @@ mod tests {
         let session = Session::new(
             SessionId::try_from("a1b2c3d4-e5f6-7890-abcd-ef1234567890".to_string()).unwrap(),
             "pensieve",
+            BranchId::from(1),
         );
 
         store.create_session(&session).unwrap();
@@ -1070,8 +1053,7 @@ mod tests {
         let err = result.unwrap_err();
         assert!(
             err.contains("invalid message_blob JSON"),
-            "error should mention invalid JSON, got: {}",
-            err
+            "error should mention invalid JSON, got: {err}"
         );
     }
 }
