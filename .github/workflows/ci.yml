@@ -71,7 +71,9 @@ jobs:
               unzip protoc-28.3-linux-aarch_64.zip -d /usr/local &&
               cargo build --release -p vlinder -p vlinderd --features vlinderd/vendored-openssl -p vlinder-lambda-adapter
             '
+      # Disabled — not needed yet. Re-enable when artifact distribution is set up.
       - name: Upload binaries to S3
+        if: false
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.CI_AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.CI_AWS_SECRET_ACCESS_KEY }}
