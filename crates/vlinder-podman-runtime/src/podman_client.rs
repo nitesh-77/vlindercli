@@ -122,7 +122,7 @@ pub(crate) trait PodmanClient: Send {
 
 /// Write an s3fs credentials file to the Podman execution environment.
 ///
-/// On macOS: writes via `podman machine ssh` into the CoreOS VM's `/tmp`.
+/// On macOS: writes via `podman machine ssh` into the `CoreOS` VM's `/tmp`.
 /// On Linux: writes directly to the host's `/tmp`.
 ///
 /// Returns the path where the file was written (in the execution

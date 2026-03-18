@@ -1,8 +1,8 @@
 //! gRPC State Service (ADR 079).
 //!
-//! Exposes the DagStore trait over gRPC for distributed mode.
-//! - `StateServiceServer`: Wraps a DagStore impl, serves gRPC requests
-//! - `GrpcStateClient`: Implements DagStore trait via gRPC calls
+//! Exposes the `DagStore` trait over gRPC for distributed mode.
+//! - `StateServiceServer`: Wraps a `DagStore` impl, serves gRPC requests
+//! - `GrpcStateClient`: Implements `DagStore` trait via gRPC calls
 
 #[cfg(feature = "client")]
 mod client;
@@ -17,5 +17,6 @@ pub use server::StateServiceServer;
 
 /// Generated protobuf types.
 pub mod proto {
+    #![allow(clippy::doc_markdown)]
     tonic::include_proto!("vlinder.state");
 }

@@ -46,7 +46,7 @@ impl ModelManifest {
 ///
 /// - If already a URI (contains "://"), return as-is
 /// - If absolute path, convert to file:// URI
-/// - If relative path, resolve against model_dir and convert to file:// URI
+/// - If relative path, resolve against `model_dir` and convert to file:// URI
 fn resolve_model_path_uri(model_path: &str, model_dir: &Path) -> Result<String, ParseError> {
     // Already a URI
     if model_path.contains("://") {

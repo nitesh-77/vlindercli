@@ -13,7 +13,7 @@ use super::{
 
 /// Agent identity within the routing bounded context.
 ///
-/// Distinct from ResourceId (registration context). For routing, this is
+/// Distinct from `ResourceId` (registration context). For routing, this is
 /// the unique identifier that distinguishes one agent from another.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(transparent)]
@@ -267,7 +267,7 @@ impl RoutingKey {
     /// (ADR 096 §3). Delegate requires a nonce to distinguish multiple
     /// delegations to the same target within one submission.
     ///
-    /// Reply variants (Complete, Response, DelegateReply) return None —
+    /// Reply variants (Complete, Response, `DelegateReply`) return None —
     /// hops are one level deep (reply asymmetry).
     pub fn reply_key(&self, nonce: Option<Nonce>) -> Option<RoutingKey> {
         match self {

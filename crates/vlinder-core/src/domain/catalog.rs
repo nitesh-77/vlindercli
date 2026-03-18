@@ -8,14 +8,14 @@ use super::Model;
 /// A catalog that resolves model names to Model configurations.
 ///
 /// Different implementations query different sources:
-/// - OllamaCatalog: queries Ollama API
-/// - HuggingFaceCatalog: downloads from HuggingFace Hub
-/// - LocalCatalog: scans local directory
+/// - `OllamaCatalog`: queries Ollama API
+/// - `HuggingFaceCatalog`: downloads from `HuggingFace` Hub
+/// - `LocalCatalog`: scans local directory
 pub trait ModelCatalog: Send + Sync {
     /// Resolve a model name to a fully configured Model.
     ///
     /// The returned Model includes the engine type, which determines
-    /// how the model will be executed (Ollama HTTP, OpenRouter API, etc.).
+    /// how the model will be executed (Ollama HTTP, `OpenRouter` API, etc.).
     fn resolve(&self, name: &str) -> Result<Model, CatalogError>;
 
     /// List available models in this catalog.
@@ -67,7 +67,7 @@ impl std::error::Error for CatalogError {}
 
 /// A service that dispatches catalog operations to named sources.
 ///
-/// Where `ModelCatalog` represents a single source (Ollama, OpenRouter),
+/// Where `ModelCatalog` represents a single source (Ollama, `OpenRouter`),
 /// `CatalogService` aggregates multiple sources and routes by catalog name.
 pub trait CatalogService: Send + Sync {
     /// List available catalog names (e.g. `["ollama", "openrouter"]`).
@@ -85,7 +85,7 @@ pub trait CatalogService: Send + Sync {
 
 /// In-process composite that dispatches to registered `ModelCatalog` backends.
 ///
-/// Named "Composite" (not "InMemory") because the backends themselves make
+/// Named "Composite" (not "`InMemory`") because the backends themselves make
 /// real HTTP calls — this is just the dispatch layer.
 #[derive(Default)]
 pub struct CompositeCatalog {

@@ -1,4 +1,4 @@
-//! gRPC server wrapping a CatalogService implementation.
+//! gRPC server wrapping a `CatalogService` implementation.
 
 use std::sync::Arc;
 use tonic::{Request, Response, Status};

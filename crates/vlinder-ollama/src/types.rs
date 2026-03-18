@@ -1,7 +1,7 @@
 //! Ollama native API types for `/api/chat`, `/api/generate`, and `/api/embed`.
 //!
 //! Minimal types covering required fields + optional metrics fields.
-//! Used for route validation (DeserializeOwned) and response parsing.
+//! Used for route validation (`DeserializeOwned`) and response parsing.
 
 use serde::{Deserialize, Serialize};
 

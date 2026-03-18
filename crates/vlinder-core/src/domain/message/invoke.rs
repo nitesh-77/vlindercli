@@ -1,4 +1,4 @@
-//! InvokeMessage: Harness → Runtime (start a submission).
+//! `InvokeMessage`: Harness → Runtime (start a submission).
 
 use serde::{Deserialize, Serialize};
 
@@ -27,7 +27,7 @@ mod base64_serde {
 /// Invoke message: Harness → Runtime
 ///
 /// Starts a submission by invoking an agent.
-/// Expects a CompleteMessage in response (enforced by ExpectsReply trait).
+/// Expects a `CompleteMessage` in response (enforced by `ExpectsReply` trait).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct InvokeMessage {
     pub id: MessageId,
@@ -46,7 +46,7 @@ pub struct InvokeMessage {
     pub state: Option<String>,
     /// Diagnostics from the harness (ADR 071).
     pub diagnostics: InvokeDiagnostics,
-    /// DagNode to parent this invoke on in the DAG.
+    /// `DagNode` to parent this invoke on in the DAG.
     /// The harness populates this from the conversations repo HEAD.
     pub dag_parent: DagNodeId,
 }

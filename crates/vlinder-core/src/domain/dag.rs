@@ -4,7 +4,7 @@
 //! No pairing, no buffering — each message is independently meaningful.
 //!
 //! Each `DagNode` captures one message:
-//! - `hash`: SHA-256(payload || parent_hash || message_type || diagnostics) — Merkle chain
+//! - `hash`: SHA-256(payload || `parent_hash` || `message_type` || diagnostics) — Merkle chain
 //! - `parent_hash`: previous node in the same session (empty string for root)
 //! - `message_type`: Invoke, Request, Response, Complete, or Delegate
 //! - `from` / `to`: sender and receiver (parsed from NATS subject)
@@ -24,8 +24,8 @@ use super::session::Session;
 /// Snapshot of all store states at a point in the DAG (ADR 116).
 ///
 /// Maps service instance names to their per-store state hashes.
-/// BTreeMap guarantees deterministic ordering for content addressing.
-/// Always present on every DagNode — inherited from parent if unchanged.
+/// `BTreeMap` guarantees deterministic ordering for content addressing.
+/// Always present on every `DagNode` — inherited from parent if unchanged.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(transparent)]
 pub struct Snapshot(pub BTreeMap<Instance, StateHash>);
@@ -132,7 +132,7 @@ impl DagNode {
 ///
 /// `sha256(payload || parent_hash || message_type || diagnostics || session_id)`
 /// — the parent hash makes this a Merkle chain: changing any ancestor
-/// invalidates all descendants. The session_id ensures that identical
+/// invalidates all descendants. The `session_id` ensures that identical
 /// messages in different sessions produce different hashes (prevents
 /// INSERT OR IGNORE from silently dropping cross-session duplicates).
 pub fn hash_dag_node(
@@ -178,7 +178,7 @@ pub struct Branch {
 
 /// A worker that persists observable messages to a DAG structure.
 ///
-/// Git is one implementation (GitDagWorker). Any backend that can
+/// Git is one implementation (`GitDagWorker`). Any backend that can
 /// preserve the chronological message stream would implement this.
 pub trait DagWorker: Send {
     /// Persist a single observable message.
@@ -235,7 +235,7 @@ pub trait DagStore: Send + Sync {
         session_id: &super::SessionId,
     ) -> Result<Vec<Branch>, String>;
 
-    /// Get the most recent DagNode on a branch, optionally filtered by message type.
+    /// Get the most recent `DagNode` on a branch, optionally filtered by message type.
     fn latest_node_on_branch(
         &self,
         branch_id: super::BranchId,
@@ -273,7 +273,7 @@ pub trait DagStore: Send + Sync {
 // In-Memory Implementation (for testing)
 // ============================================================================
 
-/// In-memory DagStore for unit tests that don't need SQLite.
+/// In-memory `DagStore` for unit tests that don't need `SQLite`.
 pub struct InMemoryDagStore {
     nodes: std::sync::Mutex<Vec<DagNode>>,
     branches: std::sync::Mutex<Vec<Branch>>,

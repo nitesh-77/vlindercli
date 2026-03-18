@@ -17,5 +17,6 @@ pub use server::RegistryServiceServer;
 
 /// Generated protobuf types.
 pub mod proto {
+    #![allow(clippy::doc_markdown)]
     tonic::include_proto!("vlinder.registry");
 }

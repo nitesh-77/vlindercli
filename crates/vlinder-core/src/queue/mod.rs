@@ -7,7 +7,7 @@
 //!
 //! NATS-backed `NatsQueue` lives in the `vlinder-nats` crate.
 //!
-//! Factory functions (from_config, recording_from_config) live in
+//! Factory functions (`from_config`, `recording_from_config`) live in
 //! `crate::queue_factory` to keep this module free of config/infra deps.
 
 mod in_memory;

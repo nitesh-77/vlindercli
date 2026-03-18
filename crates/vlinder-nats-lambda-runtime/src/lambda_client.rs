@@ -71,7 +71,7 @@ pub(crate) trait LambdaClient: Send {
     /// Delete a Lambda function. Fire-and-forget: errors are logged, not returned.
     fn delete_function(&self, function_name: &str);
 
-    /// Invoke a Lambda function synchronously (RequestResponse).
+    /// Invoke a Lambda function synchronously (`RequestResponse`).
     /// Returns the function's output payload.
     fn invoke_function(&self, function_name: &str, payload: &[u8]) -> Result<Vec<u8>, LambdaError>;
 }
@@ -94,7 +94,7 @@ const LAMBDA_TRUST_POLICY: &str = include_str!("lambda-trust-policy.json");
 /// Permission policy: allows Lambda to decrypt env vars with any KMS key.
 /// Lambda encrypts environment variables at rest using the account's default
 /// KMS key (or a custom one). Without this, the function fails at invoke time
-/// with KmsAccessDeniedException.
+/// with `KmsAccessDeniedException`.
 const LAMBDA_PERMISSIONS_POLICY: &str = include_str!("lambda-permissions-policy.json");
 
 impl AwsLambdaClient {
@@ -329,7 +329,7 @@ impl LambdaClient for AwsLambdaClient {
 }
 
 impl AwsLambdaClient {
-    /// Shared async helper for get_function (used by both get_function and create_function).
+    /// Shared async helper for `get_function` (used by both `get_function` and `create_function`).
     async fn get_function_inner(
         &self,
         function_name: &str,

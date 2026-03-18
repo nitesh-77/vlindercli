@@ -1,4 +1,4 @@
-//! NATS-backed message queue with JetStream durability (ADR 044).
+//! NATS-backed message queue with `JetStream` durability (ADR 044).
 //!
 //! Provides a sync facade over the async NATS client. The runtime is owned
 //! internally, so callers use simple blocking APIs while getting async I/O.
@@ -26,7 +26,7 @@ use vlinder_core::domain::{
     ServiceType, SessionId, SubmissionId,
 };
 
-/// NATS queue with JetStream durability.
+/// NATS queue with `JetStream` durability.
 ///
 /// Sync facade over async internals. Clone is cheap (Arc).
 #[derive(Clone)]
@@ -97,7 +97,7 @@ impl NatsQueue {
         &self.inner.client
     }
 
-    /// Escape hatch: access JetStream context directly.
+    /// Escape hatch: access `JetStream` context directly.
     pub fn jetstream(&self) -> &jetstream::Context {
         &self.inner.jetstream
     }
@@ -891,9 +891,9 @@ impl MessageQueue for NatsQueue {
 
 /// Serialize a routing key to a NATS subject string (ADR 096 §8).
 ///
-/// This is the single point of truth for RoutingKey → NATS subject
+/// This is the single point of truth for `RoutingKey` → NATS subject
 /// serialization. Injectivity: distinct routing keys produce distinct
-/// subjects (verified by tests in routing_key.rs).
+/// subjects (verified by tests in `routing_key.rs`).
 fn routing_key_to_subject(key: &RoutingKey) -> String {
     match key {
         RoutingKey::Invoke {

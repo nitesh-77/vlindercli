@@ -1,5 +1,5 @@
-//! OpenRouter provider — declares the hostname and routes
-//! for the OpenRouter inference backend, and the worker that
+//! `OpenRouter` provider — declares the hostname and routes
+//! for the `OpenRouter` inference backend, and the worker that
 //! processes inference requests.
 
 #[cfg(feature = "worker")]
@@ -17,10 +17,10 @@ use vlinder_core::domain::{
     HttpMethod, InferenceBackendType, Operation, ProviderHost, ProviderRoute, ServiceBackend,
 };
 
-/// The virtual hostname the sidecar will serve for OpenRouter.
+/// The virtual hostname the sidecar will serve for `OpenRouter`.
 pub const HOSTNAME: &str = "openrouter.vlinder.local";
 
-/// Build the provider host declaration for OpenRouter.
+/// Build the provider host declaration for `OpenRouter`.
 pub fn provider_host() -> ProviderHost {
     ProviderHost::new(
         HOSTNAME,

@@ -108,7 +108,7 @@ impl Agent {
 
     /// Return a borrowed view of the user-declared configuration.
     ///
-    /// Excludes registry-assigned fields (id, image_digest, public_key)
+    /// Excludes registry-assigned fields (id, `image_digest`, `public_key`)
     /// so two agents with the same declared config compare equal regardless
     /// of registration state.
     pub fn config(&self) -> AgentConfig<'_> {
@@ -179,7 +179,7 @@ impl From<ParseError> for LoadError {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Requirements {
     /// Model alias → registry name (ADR 094).
-    /// e.g., "inference_model" → "claude-sonnet"
+    /// e.g., `inference_model` → "claude-sonnet"
     pub models: HashMap<String, String>,
     pub services: HashMap<ServiceType, ServiceConfig>,
     /// S3 mount declarations (ADR 107).

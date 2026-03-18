@@ -1,7 +1,7 @@
 //! Service type — identifies which platform service handles a request.
 //!
-//! The routing triple (ServiceType, Backend, Operation) determines which
-//! worker processes a request. ServiceType is the first dimension.
+//! The routing triple (`ServiceType`, Backend, Operation) determines which
+//! worker processes a request. `ServiceType` is the first dimension.
 
 use std::fmt;
 use std::str::FromStr;

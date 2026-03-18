@@ -1,11 +1,11 @@
-//! gRPC client implementing the CatalogService trait.
+//! gRPC client implementing the `CatalogService` trait.
 
 use tonic::transport::Channel;
 
 use super::proto::{self, catalog_service_client::CatalogServiceClient};
 use vlinder_core::domain::{CatalogError, CatalogService, Model, ModelInfo};
 
-/// CatalogService implementation that makes gRPC calls to a remote Catalog Service.
+/// `CatalogService` implementation that makes gRPC calls to a remote Catalog Service.
 ///
 /// A single client talks to the entire service — catalog names are passed
 /// per-call, not baked into the constructor.

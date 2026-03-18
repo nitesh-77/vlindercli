@@ -1,9 +1,9 @@
-//! DAG worker helpers — convert ObservableMessage to DagNode for storage
+//! DAG worker helpers — convert `ObservableMessage` to `DagNode` for storage
 //! (ADR 065, 067, 078, 080).
 //!
-//! SQLite recording is handled synchronously by the transactional outbox
-//! (RecordingQueue, ADR 080). The `dag-git` NATS consumer reconstructs
-//! messages via `vlinder-nats` and passes them here for DagNode conversion.
+//! `SQLite` recording is handled synchronously by the transactional outbox
+//! (`RecordingQueue`, ADR 080). The `dag-git` NATS consumer reconstructs
+//! messages via `vlinder-nats` and passes them here for `DagNode` conversion.
 
 use chrono::Utc;
 

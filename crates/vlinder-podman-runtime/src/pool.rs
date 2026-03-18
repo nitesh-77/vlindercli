@@ -1,11 +1,11 @@
-//! ContainerRuntime — manages the lifecycle of Podman pods for container agents.
+//! `ContainerRuntime` — manages the lifecycle of Podman pods for container agents.
 //!
 //! Each agent runs as a pod containing two containers:
 //! 1. The agent container (user-provided OCI image)
 //! 2. The sidecar container (vlinder-podman-sidecar, mediates queue ↔ agent)
 //!
 //! The runtime creates pods, starts them, and tears them down on shutdown.
-//! Dead pod detection is deferred — ensure_containers restarts missing pods
+//! Dead pod detection is deferred — `ensure_containers` restarts missing pods
 //! on the next tick.
 
 use std::collections::HashMap;
@@ -296,9 +296,9 @@ impl ContainerRuntime {
     /// Three network contexts matter:
     ///
     /// 1. **Mac host**: where the daemon (vlinderd) and `podman` CLI run.
-    ///    LocalStack binds to `localhost:4566` here.
-    /// 2. **Podman VM** (CoreOS on Apple HV): where s3fs and the container
-    ///    engine actually run. `localhost:4566` reaches LocalStack via
+    ///    `LocalStack` binds to `localhost:4566` here.
+    /// 2. **Podman VM** (`CoreOS` on Apple HV): where s3fs and the container
+    ///    engine actually run. `localhost:4566` reaches `LocalStack` via
     ///    Podman's port forwarding. `host.containers.internal` resolves to
     ///    `192.168.127.254` but port forwarding only binds to the Mac side,
     ///    so `host.containers.internal:4566` does NOT work from the VM.
@@ -315,16 +315,16 @@ impl ContainerRuntime {
     ///
     /// - `ro`: read-only mount (agents should not write to S3 mounts)
     /// - `connect_timeout=10`: **prevents Podman deadlock**. Without this,
-    ///   if the S3 endpoint is unreachable (e.g. LocalStack not running),
-    ///   s3fs blocks the mount() syscall indefinitely. Since Podman holds
+    ///   if the S3 endpoint is unreachable (e.g. `LocalStack` not running),
+    ///   s3fs blocks the `mount()` syscall indefinitely. Since Podman holds
     ///   internal locks during container start, this deadlocks the entire
     ///   Podman daemon — `podman ps`, `podman machine ssh`, everything hangs.
     ///   The only recovery is `podman machine stop` (which also often hangs,
     ///   requiring force-killing `vfkit`/`gvproxy` processes).
     /// - `compat_dir`: **required for sub-path mounts**. S3 has no real
     ///   directories — only key prefixes. When mounting `bucket:/v0.1.0/`,
-    ///   s3fs's CheckBucket does a HEAD on the prefix path. Without
-    ///   `compat_dir`, CheckBucket enters an infinite retry loop on 404,
+    ///   s3fs's `CheckBucket` does a HEAD on the prefix path. Without
+    ///   `compat_dir`, `CheckBucket` enters an infinite retry loop on 404,
     ///   consuming CPU and blocking all FUSE requests (same deadlock as above).
     ///   With `compat_dir`, it uses LIST instead of HEAD to verify the path.
     ///   NOTE: even with `compat_dir`, a zero-byte directory marker object
@@ -336,7 +336,7 @@ impl ContainerRuntime {
     ///   volume driver runs as root in the VM, so the mount is owned by root;
     ///   `allow_other` lets the container's processes read it.
     /// - `use_path_request_style`: required for non-AWS S3 backends
-    ///   (LocalStack, MinIO). AWS uses virtual-hosted-style URLs
+    ///   (`LocalStack`, `MinIO`). AWS uses virtual-hosted-style URLs
     ///   (`bucket.s3.amazonaws.com`), but local backends need path-style
     ///   (`localhost:4566/bucket`).
     /// - `passwd_file`: s3fs reads credentials from a colon-separated file
@@ -521,7 +521,7 @@ fn extract_port(url: &str, default: u16) -> u16 {
 mod tests {
     use super::*;
 
-    /// Build a PodmanRuntimeConfig for tests (matches vlinderd's Config::for_test defaults).
+    /// Build a `PodmanRuntimeConfig` for tests (matches `vlinderd`'s `Config::for_test` defaults).
     fn test_config() -> PodmanRuntimeConfig {
         PodmanRuntimeConfig {
             image_policy: "mutable".to_string(),
@@ -534,7 +534,7 @@ mod tests {
         }
     }
 
-    /// Build an InMemoryRegistry for tests.
+    /// Build an `InMemoryRegistry` for tests.
     fn test_registry() -> Arc<dyn Registry> {
         use vlinder_core::domain::{InMemoryRegistry, InMemorySecretStore};
         let secret_store = Arc::new(InMemorySecretStore::new());

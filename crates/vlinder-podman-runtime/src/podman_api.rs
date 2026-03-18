@@ -1,4 +1,4 @@
-//! PodmanApiClient — Podman trait implementation using the libpod REST API.
+//! `PodmanApiClient` — Podman trait implementation using the libpod REST API.
 //!
 //! Primary implementation. Talks to Podman's REST API over a Unix socket.
 //! Uses ureq with a Unix transport adapter for HTTP-over-socket.

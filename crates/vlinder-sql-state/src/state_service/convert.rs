@@ -1,4 +1,4 @@
-//! Conversions between domain DagNode and protobuf DagNode.
+//! Conversions between domain `DagNode` and protobuf `DagNode`.
 
 use chrono::{DateTime, Utc};
 

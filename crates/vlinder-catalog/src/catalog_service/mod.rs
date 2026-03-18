@@ -1,8 +1,8 @@
 //! gRPC Catalog Service.
 //!
-//! Exposes the CatalogService trait over gRPC for distributed mode.
-//! - `CatalogServiceServer`: Wraps a CatalogService impl, serves gRPC requests
-//! - `GrpcCatalogClient`: Implements CatalogService trait via gRPC calls
+//! Exposes the `CatalogService` trait over gRPC for distributed mode.
+//! - `CatalogServiceServer`: Wraps a `CatalogService` impl, serves gRPC requests
+//! - `GrpcCatalogClient`: Implements `CatalogService` trait via gRPC calls
 
 #[cfg(feature = "client")]
 mod client;
@@ -16,6 +16,7 @@ pub use client::{ping_catalog_service, GrpcCatalogClient};
 pub use server::CatalogServiceServer;
 
 /// Generated protobuf types.
+#[allow(clippy::doc_markdown)]
 pub mod proto {
     tonic::include_proto!("vlinder.catalog");
 }

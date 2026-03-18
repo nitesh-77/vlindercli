@@ -1,7 +1,7 @@
 //! Harness - API surface for agent interaction.
 //!
 //! The harness is the entry point for external requests. Different harness
-//! types handle different interfaces (CLI, Web API, WhatsApp, etc.) but share
+//! types handle different interfaces (CLI, Web API, `WhatsApp`, etc.) but share
 //! a common contract via the `Harness` trait.
 //!
 //! `CoreHarness` is the canonical implementation: it orchestrates sessions,
@@ -26,7 +26,7 @@ pub trait Harness {
     /// Start a new conversation session for an agent.
     ///
     /// Creates a session and its default "main" branch. Returns the
-    /// SessionId and the default branch's BranchId.
+    /// `SessionId` and the default branch's `BranchId`.
     fn start_session(&self, agent_name: &str) -> (SessionId, BranchId);
 
     /// Run an agent to completion synchronously.
@@ -45,10 +45,10 @@ pub trait Harness {
         dag_parent: DagNodeId,
     ) -> Result<String, String>;
 
-    /// Create a timeline fork by sending a ForkMessage through the queue.
+    /// Create a timeline fork by sending a `ForkMessage` through the queue.
     ///
-    /// Fire-and-forget: both SQL (via RecordingQueue) and git (via
-    /// GitDagWorker) react to the message. No response is expected.
+    /// Fire-and-forget: both SQL (via `RecordingQueue`) and git (via
+    /// `GitDagWorker`) react to the message. No response is expected.
     fn fork_timeline(
         &self,
         params: ForkParams,
@@ -56,10 +56,10 @@ pub trait Harness {
         timeline: BranchId,
     ) -> Result<(), String>;
 
-    /// Promote a branch to main by sending a PromoteMessage through the queue.
+    /// Promote a branch to main by sending a `PromoteMessage` through the queue.
     ///
-    /// Fire-and-forget: both SQL (via RecordingQueue) and git (via
-    /// GitDagWorker) react to the message. No response is expected.
+    /// Fire-and-forget: both SQL (via `RecordingQueue`) and git (via
+    /// `GitDagWorker`) react to the message. No response is expected.
     fn promote_timeline(
         &self,
         params: PromoteParams,
@@ -70,8 +70,8 @@ pub trait Harness {
 
 /// Parameters for `Harness::fork_timeline()`.
 ///
-/// The CLI reads these from the DagStore (node lookup + session context).
-/// The harness wraps them in a ForkMessage and sends through the queue.
+/// The CLI reads these from the `DagStore` (node lookup + session context).
+/// The harness wraps them in a `ForkMessage` and sends through the queue.
 pub struct ForkParams {
     pub agent_name: String,
     pub branch_name: String,
@@ -80,8 +80,8 @@ pub struct ForkParams {
 
 /// Parameters for `Harness::promote_timeline()`.
 ///
-/// The CLI reads these from the DagStore (branch lookup + session context).
-/// The harness wraps them in a PromoteMessage and sends through the queue.
+/// The CLI reads these from the `DagStore` (branch lookup + session context).
+/// The harness wraps them in a `PromoteMessage` and sends through the queue.
 pub struct PromoteParams {
     pub agent_name: String,
 }
@@ -137,7 +137,7 @@ impl CoreHarness {
         }
     }
 
-    /// Build an InvokeMessage from session state and register a job.
+    /// Build an `InvokeMessage` from session state and register a job.
     ///
     /// Returns the message and the job ID.
     #[allow(clippy::too_many_arguments)]

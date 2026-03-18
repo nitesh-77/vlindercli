@@ -20,7 +20,7 @@ use std::sync::{Arc, Mutex};
 /// ACK/NACK operations are no-ops since messages are removed from the queue
 /// immediately on receive (no durability or redelivery support).
 pub struct InMemoryQueue {
-    /// Messages keyed by RoutingKey (ADR 096 §5).
+    /// Messages keyed by `RoutingKey` (ADR 096 §5).
     pub(crate) typed_queues: Arc<Mutex<HashMap<RoutingKey, VecDeque<ObservableMessage>>>>,
 }
 

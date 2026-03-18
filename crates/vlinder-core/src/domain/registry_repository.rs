@@ -11,7 +11,7 @@ use super::{
 
 /// Repository for persisting Registry state.
 ///
-/// Implementations handle storage (SQLite, Postgres, etc.).
+/// Implementations handle storage (`SQLite`, `Postgres`, etc.).
 /// Registry uses this for save/load operations.
 pub trait RegistryRepository: Send + Sync {
     /// Save a model to the repository.

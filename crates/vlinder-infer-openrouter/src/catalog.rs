@@ -1,4 +1,4 @@
-//! OpenRouter model catalog - queries OpenRouter API for available models.
+//! `OpenRouter` model catalog - queries `OpenRouter` API for available models.
 
 use serde::Deserialize;
 
@@ -6,17 +6,17 @@ use vlinder_core::domain::{
     CatalogError, Model, ModelCatalog, ModelInfo, ModelType, Provider, ResourceId,
 };
 
-/// Catalog that queries OpenRouter's API for available models.
+/// Catalog that queries `OpenRouter`'s API for available models.
 pub struct OpenRouterCatalog {
     endpoint: String,
     api_key: String,
 }
 
 impl OpenRouterCatalog {
-    /// Create a new OpenRouter catalog.
+    /// Create a new `OpenRouter` catalog.
     ///
-    /// - `endpoint`: OpenRouter API URL (e.g., "https://openrouter.ai/api/v1")
-    /// - `api_key`: OpenRouter API key for authentication
+    /// - `endpoint`: `OpenRouter` API URL (e.g., `<https://openrouter.ai/api/v1>`)
+    /// - `api_key`: `OpenRouter` API key for authentication
     pub fn new(endpoint: impl Into<String>, api_key: impl Into<String>) -> Self {
         Self {
             endpoint: endpoint.into(),

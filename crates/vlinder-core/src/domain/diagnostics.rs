@@ -24,7 +24,7 @@ use super::service_type::ServiceType;
 // InvokeDiagnostics — Harness
 // ============================================================================
 
-/// Diagnostics emitted by the harness when creating an InvokeMessage.
+/// Diagnostics emitted by the harness when creating an `InvokeMessage`.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct InvokeDiagnostics {
     /// Harness version (e.g., `env!("CARGO_PKG_VERSION")`).

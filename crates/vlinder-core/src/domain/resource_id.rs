@@ -1,15 +1,15 @@
 //! Resource identifier for registry lookups.
 //!
-//! ResourceId is a URI that identifies any resource in the registry:
+//! `ResourceId` is a URI that identifies any resource in the registry:
 //! storage, models, runtimes, queues, etc.
 
 use serde::{Deserialize, Serialize};
 
 /// A URI that identifies a resource in the registry.
 ///
-/// ResourceId is the key for looking up provisioned resources.
+/// `ResourceId` is the key for looking up provisioned resources.
 /// The URI scheme indicates the resource type:
-/// - `sqlite:///path/to/db.sqlite` → SQLite storage
+/// - `sqlite:///path/to/db.sqlite` → `SQLite` storage
 /// - `s3://bucket/prefix` → S3 storage
 /// - `memory://name` → in-memory (testing)
 /// - `ollama://phi3` → Ollama model
@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 pub struct ResourceId(String);
 
 impl ResourceId {
-    /// Create a new ResourceId from a URI string.
+    /// Create a new `ResourceId` from a URI string.
     pub fn new(uri: impl Into<String>) -> Self {
         ResourceId(uri.into())
     }

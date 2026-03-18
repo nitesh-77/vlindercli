@@ -1,7 +1,7 @@
-//! SqliteDagStore — SQLite-backed persistence for the Merkle DAG (ADR 067).
+//! `SqliteDagStore` — `SQLite`-backed persistence for the Merkle DAG (ADR 067).
 //!
 //! Domain types (`DagNode`, `DagStore`, `MessageType`, `hash_dag_node`) live
-//! in `vlinder_core::domain`. This module provides the SQLite implementation.
+//! in `vlinder_core::domain`. This module provides the `SQLite` implementation.
 
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -15,7 +15,7 @@ use vlinder_core::domain::{
     SessionSummary,
 };
 
-/// SQLite-backed DagStore.
+/// SQLite-backed `DagStore`.
 pub struct SqliteDagStore {
     conn: Arc<Mutex<Connection>>,
 }
@@ -86,10 +86,10 @@ impl SqliteDagStore {
     }
 }
 
-/// Construct a Branch from a SQLite row.
+/// Construct a `Branch` from a `SQLite` row.
 ///
-/// Expects columns in order: id, name, session_id, fork_point, head,
-/// created_at, broken_at.
+/// Expects columns in order: `id`, `name`, `session_id`, `fork_point`, `head`,
+/// `created_at`, `broken_at`.
 fn row_to_branch(row: &rusqlite::Row) -> Result<Branch, rusqlite::Error> {
     let created_at_str: String = row.get(5)?;
     let created_at = DateTime::parse_from_rfc3339(&created_at_str)
@@ -114,9 +114,9 @@ fn row_to_branch(row: &rusqlite::Row) -> Result<Branch, rusqlite::Error> {
     })
 }
 
-/// Construct a Session from a SQLite row.
+/// Construct a `Session` from a `SQLite` row.
 ///
-/// Expects columns in order: id, name, agent_name, default_branch, created_at.
+/// Expects columns in order: `id`, `name`, `agent_name`, `default_branch`, `created_at`.
 fn row_to_session(row: &rusqlite::Row) -> Result<Session, rusqlite::Error> {
     let id: String = row.get(0)?;
     let name: String = row.get(1)?;
@@ -137,10 +137,10 @@ fn row_to_session(row: &rusqlite::Row) -> Result<Session, rusqlite::Error> {
     })
 }
 
-/// Construct a DagNode from a SQLite row.
+/// Construct a `DagNode` from a `SQLite` row.
 ///
-/// Expects columns in order: hash, parent_hash, created_at, message_blob.
-/// The message_blob column contains the JSON-serialized ObservableMessage.
+/// Expects columns in order: `hash`, `parent_hash`, `created_at`, `message_blob`.
+/// The `message_blob` column contains the JSON-serialized `ObservableMessage`.
 fn row_to_dag_node(row: &rusqlite::Row) -> Result<DagNode, rusqlite::Error> {
     let created_at_str: String = row.get(2)?;
     let created_at = DateTime::parse_from_rfc3339(&created_at_str)
@@ -173,7 +173,7 @@ fn row_to_dag_node(row: &rusqlite::Row) -> Result<DagNode, rusqlite::Error> {
     })
 }
 
-/// Column list for queries that return full DagNodes.
+/// Column list for queries that return full `DagNode`s.
 const DAG_NODE_COLUMNS: &str = "hash, parent_hash, created_at, message_blob, payload, snapshot";
 
 impl DagStore for SqliteDagStore {

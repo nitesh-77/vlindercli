@@ -1,6 +1,6 @@
-//! InMemoryRegistry — in-process Registry implementation with RwLock.
+//! `InMemoryRegistry` — in-process Registry implementation with `RwLock`.
 //!
-//! Used directly for tests and as the read cache inside PersistentRegistry.
+//! Used directly for tests and as the read cache inside `PersistentRegistry`.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
@@ -11,7 +11,7 @@ use super::{
     ServiceType, SubmissionId, VectorStorageType,
 };
 
-/// Internal state for InMemoryRegistry.
+/// Internal state for `InMemoryRegistry`.
 struct RegistryState {
     jobs: HashMap<JobId, Job>,
     agents: HashMap<ResourceId, Agent>,
@@ -26,7 +26,7 @@ struct RegistryState {
     available_embedding_engines: HashSet<Provider>,
 }
 
-/// In-memory registry with internal RwLock for thread-safe access.
+/// In-memory registry with internal `RwLock` for thread-safe access.
 pub struct InMemoryRegistry {
     /// URI where this registry exposes its API.
     registry_id: ResourceId,
@@ -95,7 +95,7 @@ impl InMemoryRegistry {
 
     /// Remove an agent by name. Returns true if the agent existed.
     ///
-    /// Used by PersistentRegistry for cache eviction after disk delete.
+    /// Used by `PersistentRegistry` for cache eviction after disk delete.
     pub fn remove_agent(&self, name: &str) -> bool {
         let agent_id = self.agent_id_internal(name);
         let mut state = self.state.write().unwrap();

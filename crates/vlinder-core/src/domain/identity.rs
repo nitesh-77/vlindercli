@@ -1,7 +1,7 @@
 //! Agent identity: Ed25519 key pair generation and persistence (ADR 084).
 //!
 //! Every agent gets an Ed25519 key pair:
-//! - Private key stored in the SecretStore at `agents/{name}/private-key`
+//! - Private key stored in the `SecretStore` at `agents/{name}/private-key`
 //! - Public key carried on the Agent struct and stored in the registry
 //!
 //! The `ensure_agent_identity` function is idempotent: if a key already exists
@@ -46,7 +46,7 @@ impl From<SecretStoreError> for IdentityError {
 
 /// Returns the secret store key name for an agent's private key.
 ///
-/// Convention: `agents/{name}/private-key` (see ADR 084, secret_store.rs).
+/// Convention: `agents/{name}/private-key` (see ADR 084, `secret_store.rs`).
 pub fn private_key_name(agent_name: &str) -> String {
     format!("agents/{agent_name}/private-key")
 }

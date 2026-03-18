@@ -1,11 +1,11 @@
 //! Secret store trait definition (ADR 083).
 //!
-//! Named byte-blob storage for secrets (private keys, NKeys, API keys).
+//! Named byte-blob storage for secrets (private keys, `NKeys`, API keys).
 //! The store does not interpret contents — it stores and retrieves.
 //!
 //! Naming convention:
 //! - `agents/{name}/private-key` — Ed25519 private keys (ADR 084)
-//! - `nats/{role}/nkey` — NATS NKeys (ADR 085)
+//! - `nats/{role}/nkey` — NATS `NKeys` (ADR 085)
 //! - `providers/{name}/api-key` — Provider API keys
 
 use std::fmt;

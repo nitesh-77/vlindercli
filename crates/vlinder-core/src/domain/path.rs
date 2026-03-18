@@ -87,7 +87,7 @@ impl AbsolutePath {
         }
     }
 
-    /// Get the path as a PathBuf reference.
+    /// Get the path as a `PathBuf` reference.
     pub fn as_path(&self) -> &Path {
         &self.0
     }

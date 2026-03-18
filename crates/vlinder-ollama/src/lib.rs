@@ -5,12 +5,12 @@
 //! Routes are scoped to the capabilities an agent declares:
 //!
 //! Inference:
-//! - `/v1/chat/completions` — OpenAI-compatible inference (Operation::Run)
-//! - `/api/chat` — Ollama native chat (Operation::Chat)
-//! - `/api/generate` — Ollama native generate (Operation::Generate)
+//! - `/v1/chat/completions` — OpenAI-compatible inference (`Operation::Run`)
+//! - `/api/chat` — Ollama native chat (`Operation::Chat`)
+//! - `/api/generate` — Ollama native generate (`Operation::Generate`)
 //!
 //! Embedding:
-//! - `/api/embed` — Ollama native embed (Operation::Run)
+//! - `/api/embed` — Ollama native embed (`Operation::Run`)
 
 #[cfg(feature = "worker")]
 mod catalog;

@@ -1,4 +1,4 @@
-//! GitDagWorker — writes typed messages as git commits (ADR 064, 069, 070, 078, 114).
+//! `GitDagWorker` — writes typed messages as git commits (ADR 064, 069, 070, 078, 114).
 //!
 //! Each message becomes a commit on `main`. The commit tree accumulates under
 //! `<agent>/<session>/` — each commit contains all previous message directories
@@ -693,7 +693,7 @@ impl DagWorker for GitDagWorker {
     }
 }
 
-/// Extract (from, to, type_str) from an ObservableMessage for commit metadata.
+/// Extract (from, to, `type_str`) from an `ObservableMessage` for commit metadata.
 fn message_routing(msg: &ObservableMessage) -> (String, String, &'static str) {
     match msg {
         ObservableMessage::Invoke(m) => (

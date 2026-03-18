@@ -1,4 +1,4 @@
-//! gRPC server wrapping the DagStore trait.
+//! gRPC server wrapping the `DagStore` trait.
 
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
@@ -17,7 +17,7 @@ use super::proto::{
 };
 use vlinder_core::domain::{DagNodeId, DagStore, MessageType, SessionId};
 
-/// gRPC server that wraps a DagStore implementation.
+/// gRPC server that wraps a `DagStore` implementation.
 pub struct StateServiceServer {
     store: Arc<dyn DagStore>,
 }

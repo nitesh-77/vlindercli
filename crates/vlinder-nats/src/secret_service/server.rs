@@ -1,4 +1,4 @@
-//! gRPC server wrapping the SecretStore trait.
+//! gRPC server wrapping the `SecretStore` trait.
 
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
@@ -9,7 +9,7 @@ use super::proto::{
 };
 use vlinder_core::domain::SecretStore;
 
-/// gRPC server that wraps a SecretStore implementation.
+/// gRPC server that wraps a `SecretStore` implementation.
 pub struct SecretServiceServer {
     store: Arc<dyn SecretStore>,
 }

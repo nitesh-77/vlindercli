@@ -1,7 +1,7 @@
 //! SQLite-vec worker — receives vector storage requests from the queue,
-//! opens SqliteVectorStorage per agent, and sends responses back.
+//! opens `SqliteVectorStorage` per agent, and sends responses back.
 //!
-//! Follows the same pattern as OllamaWorker / OpenRouterWorker:
+//! Follows the same pattern as `OllamaWorker` / `OpenRouterWorker`:
 //! the worker lives in the provider crate, next to the route declarations.
 
 use std::collections::HashMap;

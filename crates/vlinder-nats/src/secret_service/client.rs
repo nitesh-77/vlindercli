@@ -1,11 +1,11 @@
-//! gRPC client implementing the SecretStore trait.
+//! gRPC client implementing the `SecretStore` trait.
 
 use tonic::transport::Channel;
 
 use super::proto::{self, secret_store_service_client::SecretStoreServiceClient};
 use vlinder_core::domain::{SecretStore, SecretStoreError};
 
-/// SecretStore implementation that makes gRPC calls to a remote Secret Service.
+/// `SecretStore` implementation that makes gRPC calls to a remote Secret Service.
 pub struct GrpcSecretClient {
     client: SecretStoreServiceClient<Channel>,
     runtime: tokio::runtime::Runtime,

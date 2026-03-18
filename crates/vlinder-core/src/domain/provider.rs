@@ -1,7 +1,7 @@
 //! Provider — the service that hosts and serves a model.
 //!
 //! Determines queue routing for inference and embedding requests.
-//! Used by Model (who serves it), ServiceConfig (what the agent declares),
+//! Used by Model (who serves it), `ServiceConfig` (what the agent declares),
 //! and the provider server (where to route requests).
 
 use serde::{Deserialize, Serialize};
@@ -15,7 +15,7 @@ use super::routing_key::ServiceBackend;
 pub enum Provider {
     /// Ollama HTTP API (local models).
     Ollama,
-    /// OpenRouter API (cloud LLMs via OpenAI-compatible endpoint).
+    /// `OpenRouter` API (cloud LLMs via OpenAI-compatible endpoint).
     OpenRouter,
 }
 

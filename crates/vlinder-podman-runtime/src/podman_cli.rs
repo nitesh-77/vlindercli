@@ -1,4 +1,4 @@
-//! PodmanCliClient — Podman trait implementation via the `podman` CLI.
+//! `PodmanCliClient` — Podman trait implementation via the `podman` CLI.
 //!
 //! Fallback implementation that shells out to the `podman` binary.
 //! Used when no Podman socket is available (ADR 077).

@@ -2,18 +2,18 @@
 //!
 //! Three concepts mirror git's object model:
 //! - Values: Content blobs keyed by SHA-256 hash
-//! - Snapshots: Path -> value_hash mappings (like git trees)
+//! - Snapshots: Path -> `value_hash` mappings (like git trees)
 //! - State commits: Snapshot + parent pointer (like git commits)
 //!
 //! Hash computation:
 //! - Value: SHA256(content)
 //! - Snapshot: SHA256(sorted JSON of entries)
-//! - State commit: SHA256(snapshot_hash + ":" + parent_hash)
+//! - State commit: SHA256(`snapshot_hash` + ":" + `parent_hash`)
 //!
 //! Root state: empty string "" — the parent of the first commit.
 //!
 //! Merged from vlinder-core/src/domain/state.rs (types + hashing) and
-//! vlinderd/src/storage/state_store.rs (SQLite persistence).
+//! `vlinderd/src/storage/state_store.rs` (`SQLite` persistence).
 
 use std::collections::HashMap;
 use std::hash::BuildHasher;
@@ -52,7 +52,7 @@ pub fn hash_snapshot<S: BuildHasher>(entries: &HashMap<String, String, S>) -> St
     hash_value(json.as_bytes())
 }
 
-/// Compute SHA-256 hash of a state commit (snapshot_hash + ":" + parent_hash).
+/// Compute SHA-256 hash of a state commit (`snapshot_hash` + ":" + `parent_hash`).
 pub fn hash_state_commit(snapshot_hash: &str, parent_hash: &str) -> String {
     let input = format!("{snapshot_hash}:{parent_hash}");
     hash_value(input.as_bytes())
@@ -73,7 +73,7 @@ pub fn sorted_entries_json<S: BuildHasher>(entries: &HashMap<String, String, S>)
 // SQLite state store — concrete type, no trait
 // ============================================================================
 
-/// Content-addressed append-only SQLite store for versioned agent state.
+/// Content-addressed append-only `SQLite` store for versioned agent state.
 pub struct SqliteStateStore {
     conn: Arc<Mutex<Connection>>,
 }

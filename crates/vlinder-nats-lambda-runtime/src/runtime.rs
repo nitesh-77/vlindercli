@@ -1,4 +1,4 @@
-//! LambdaRuntime — manages AWS Lambda functions for Lambda-typed agents.
+//! `LambdaRuntime` — manages AWS Lambda functions for Lambda-typed agents.
 //!
 //! Reconciliation loop mirrors `ContainerRuntime` (pool.rs):
 //! query registry → remove orphan functions → deploy missing agents.
@@ -168,8 +168,8 @@ impl LambdaRuntime {
 
     /// Poll queue for invocations and dispatch to Lambda functions.
     ///
-    /// Serializes the full InvokeMessage as the Lambda payload. The adapter
-    /// inside the container deserializes it, runs the ProviderServer, and
+    /// Serializes the full `InvokeMessage` as the Lambda payload. The adapter
+    /// inside the container deserializes it, runs the `ProviderServer`, and
     /// sends complete to NATS — the daemon only needs to handle invoke-level
     /// failures (Lambda itself couldn't run).
     fn dispatch_invocations(&self) {
@@ -337,7 +337,7 @@ mod tests {
         }
     }
 
-    /// Mock client where invoke_function always fails (deploy succeeds).
+    /// Mock client where `invoke_function` always fails (deploy succeeds).
     struct FailingLambdaClient;
 
     impl LambdaClient for FailingLambdaClient {

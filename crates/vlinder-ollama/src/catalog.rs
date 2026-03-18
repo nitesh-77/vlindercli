@@ -14,7 +14,7 @@ pub struct OllamaCatalog {
 impl OllamaCatalog {
     /// Create a new Ollama catalog.
     ///
-    /// - `endpoint`: Ollama server URL (e.g., "http://localhost:11434")
+    /// - `endpoint`: Ollama server URL (e.g., `<http://localhost:11434>`)
     pub fn new(endpoint: impl Into<String>) -> Self {
         Self {
             endpoint: endpoint.into(),

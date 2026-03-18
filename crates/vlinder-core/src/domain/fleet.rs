@@ -7,7 +7,7 @@ use super::resource_id::ResourceId;
 /// A fleet is a composition boundary for agents.
 ///
 /// Stored in the registry after deployment. References agents by their
-/// registry-issued ResourceIds — names are resolved via the registry
+/// registry-issued `ResourceId`s — names are resolved via the registry
 /// during construction.
 ///
 /// See ADR 022 for the manifest format.

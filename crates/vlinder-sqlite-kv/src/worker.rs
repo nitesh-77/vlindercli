@@ -1,11 +1,11 @@
 //! KV worker — receives object storage requests from the queue,
-//! opens SqliteObjectStorage + SqliteStateStore per agent, and sends
+//! opens `SqliteObjectStorage` + `SqliteStateStore` per agent, and sends
 //! responses back.
 //!
-//! Follows the same pattern as SqliteVecWorker: 3-arg constructor,
-//! lazy get_or_open(), tick() polling.
+//! Follows the same pattern as `SqliteVecWorker`: 3-arg constructor,
+//! lazy `get_or_open()`, `tick()` polling.
 //!
-//! Key differences from the old ObjectServiceWorker:
+//! Key differences from the old `ObjectServiceWorker`:
 //! - State comes from the message envelope (request.state), not JSON payload
 //! - No base64 — content is stored as plain bytes
 //! - Concrete types only (no ObjectStorage/StateStore traits)
@@ -87,7 +87,7 @@ impl KvWorker {
         Ok(storage)
     }
 
-    /// Get or open a SqliteStateStore for an agent+session.
+    /// Get or open a `SqliteStateStore` for an agent+session.
     ///
     /// State store is co-located with the session-scoped object storage:
     /// `<agent_storage_dir>/sessions/<session_id>/state.db`.
@@ -301,7 +301,7 @@ impl KvWorker {
         }
     }
 
-    /// Returns (response_payload, new_state_option).
+    /// Returns `(response_payload, new_state_option)`.
     fn handle_put(&self, request: &RequestMessage) -> (Vec<u8>, Option<String>) {
         let req: KvPutRequest = match serde_json::from_slice(request.payload.as_slice()) {
             Ok(r) => r,

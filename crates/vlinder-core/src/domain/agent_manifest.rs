@@ -29,10 +29,10 @@ pub struct AgentManifest {
     pub requirements: RequirementsConfig,
     #[serde(default)]
     pub prompts: Option<PromptsConfig>,
-    /// Object storage resource ID (e.g., "sqlite:///path/to/objects.db")
+    /// Object storage resource ID (e.g., `<sqlite:///path/to/objects.db>`)
     #[serde(default)]
     pub object_storage: Option<ResourceId>,
-    /// Vector storage resource ID (e.g., "sqlite:///path/to/vectors.db")
+    /// Vector storage resource ID (e.g., `<sqlite:///path/to/vectors.db>`)
     #[serde(default)]
     pub vector_storage: Option<ResourceId>,
 }
@@ -81,7 +81,7 @@ impl AgentManifest {
 ///
 /// Only used for non-container runtimes where the executable is a local file.
 /// - If already a file:// URI, resolve relative paths
-/// - If a bare path, resolve against agent_dir and convert to file:// URI
+/// - If a bare path, resolve against `agent_dir` and convert to file:// URI
 fn resolve_executable_path(executable: &str, agent_dir: &Path) -> Result<String, ParseError> {
     // Already a file:// URI with relative path
     if let Some(path) = executable.strip_prefix("file://") {

@@ -1,7 +1,7 @@
 //! Shared NATS connection logic.
 //!
 //! Centralises URL connection and optional credential file authentication
-//! so that NatsQueue, NatsSecretStore, and any future NATS users don't
+//! so that `NatsQueue`, `NatsSecretStore`, and any future NATS users don't
 //! duplicate the handshake.
 
 use async_nats::ConnectOptions;
@@ -10,8 +10,8 @@ use crate::expand_tilde;
 
 /// NATS connection parameters.
 ///
-/// Constructed by the daemon config layer, consumed by NatsQueue and
-/// NatsSecretStore. Keeps NATS-specific details inside vlinder-nats.
+/// Constructed by the daemon config layer, consumed by `NatsQueue` and
+/// `NatsSecretStore`. Keeps NATS-specific details inside `vlinder-nats`.
 #[derive(Debug, Clone)]
 pub struct NatsConfig {
     pub url: String,

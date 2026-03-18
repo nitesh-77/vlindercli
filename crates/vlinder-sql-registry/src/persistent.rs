@@ -1,10 +1,10 @@
-//! PersistentRegistry — write-through registry with SQLite persistence.
+//! `PersistentRegistry` — write-through registry with `SQLite` persistence.
 //!
-//! Composes InMemoryRegistry (fast reads) with SqliteRegistryRepository
-//! (durable writes). SQLite is the source of truth; in-memory is a cache.
+//! Composes `InMemoryRegistry` (fast reads) with `SqliteRegistryRepository`
+//! (durable writes). `SQLite` is the source of truth; in-memory is a cache.
 //!
 //! On construction, loads all models and agents from disk (fail-fast).
-//! On register_model()/register_agent(), writes to disk first, then updates cache.
+//! On `register_model()`/`register_agent()`, writes to disk first, then updates cache.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -18,9 +18,9 @@ use vlinder_core::domain::{
     VectorStorageType,
 };
 
-/// Registry with write-through persistence to SQLite.
+/// Registry with write-through persistence to `SQLite`.
 ///
-/// SQLite is the source of truth. InMemoryRegistry is the read cache.
+/// `SQLite` is the source of truth. `InMemoryRegistry` is the read cache.
 /// All writes go to disk first (fail-fast), then update the cache.
 pub struct PersistentRegistry {
     inner: InMemoryRegistry,
@@ -28,7 +28,7 @@ pub struct PersistentRegistry {
 }
 
 impl PersistentRegistry {
-    /// Open a persistent registry backed by SQLite at the given path.
+    /// Open a persistent registry backed by `SQLite` at the given path.
     ///
     /// Registers engine capabilities from config first, then loads all
     /// existing models from disk (validating each against available engines).
@@ -462,7 +462,7 @@ mod tests {
         }
     }
 
-    /// Open a PersistentRegistry with container runtime pre-registered.
+    /// Open a `PersistentRegistry` with container runtime pre-registered.
     fn open_with_runtime(db_path: &std::path::Path) -> PersistentRegistry {
         let registry =
             PersistentRegistry::open(db_path, &test_config(), test_secret_store()).unwrap();

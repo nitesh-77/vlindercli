@@ -1,4 +1,4 @@
-//! CompleteMessage: Runtime → Harness (submission finished).
+//! `CompleteMessage`: Runtime → Harness (submission finished).
 
 use serde::{Deserialize, Serialize};
 

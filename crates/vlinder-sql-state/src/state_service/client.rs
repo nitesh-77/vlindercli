@@ -1,11 +1,11 @@
-//! gRPC client implementing the DagStore trait.
+//! gRPC client implementing the `DagStore` trait.
 
 use tonic::transport::Channel;
 
 use super::proto::{self, state_service_client::StateServiceClient};
 use vlinder_core::domain::{Branch, BranchId, DagNode, DagNodeId, DagStore};
 
-/// DagStore implementation that makes gRPC calls to a remote State Service.
+/// `DagStore` implementation that makes gRPC calls to a remote State Service.
 pub struct GrpcStateClient {
     client: StateServiceClient<Channel>,
     runtime: tokio::runtime::Runtime,

@@ -1,5 +1,5 @@
-//! OpenRouter inference worker — receives OpenAI-typed requests from the queue,
-//! POSTs to the OpenRouter API, and sends the full response back.
+//! `OpenRouter` inference worker — receives OpenAI-typed requests from the queue,
+//! POSTs to the `OpenRouter` API, and sends the full response back.
 
 use std::sync::Arc;
 use std::time::Instant;

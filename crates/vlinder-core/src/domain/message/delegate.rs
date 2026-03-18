@@ -1,4 +1,4 @@
-//! DelegateMessage: Agent → Agent (via runtime).
+//! `DelegateMessage`: Agent → Agent (via runtime).
 
 use serde::{Deserialize, Serialize};
 

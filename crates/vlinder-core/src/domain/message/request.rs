@@ -1,4 +1,4 @@
-//! RequestMessage: Runtime → Service (agent calls a service).
+//! `RequestMessage`: Runtime → Service (agent calls a service).
 
 use serde::{Deserialize, Serialize};
 
@@ -12,7 +12,7 @@ use super::{ExpectsReply, PROTOCOL_VERSION};
 /// Request message: Runtime → Service
 ///
 /// Agent requests a service operation (kv, vec, infer, embed).
-/// Expects a ResponseMessage in response (enforced by ExpectsReply trait).
+/// Expects a `ResponseMessage` in response (enforced by `ExpectsReply` trait).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RequestMessage {
     pub id: MessageId,

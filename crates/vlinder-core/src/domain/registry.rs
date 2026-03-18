@@ -25,13 +25,13 @@ use crate::domain::{
 pub struct JobId(String);
 
 impl JobId {
-    /// Create a new JobId under the given registry.
+    /// Create a new `JobId` under the given registry.
     pub fn new(registry_id: &ResourceId) -> Self {
         let uuid = uuid::Uuid::new_v4();
         Self(format!("{}/jobs/{uuid}", registry_id.as_str()))
     }
 
-    /// Create a JobId from an existing string (e.g., from gRPC).
+    /// Create a `JobId` from an existing string (e.g., from gRPC).
     pub fn from_string(id: String) -> Self {
         Self(id)
     }
@@ -301,7 +301,7 @@ pub trait Registry: Send + Sync {
     /// Get all registered models.
     fn get_models(&self) -> Vec<Model>;
 
-    /// Get a model by its model_path (the URI that identifies the actual model resource).
+    /// Get a model by its `model_path` (the URI that identifies the actual model resource).
     fn get_model_by_path(&self, path: &ResourceId) -> Option<Model>;
 
     /// Get the registry-issued ID for a model name.

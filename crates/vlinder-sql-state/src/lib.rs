@@ -1,7 +1,7 @@
 //! vlinder-sql-state — SQLite-backed state vertical.
 //!
-//! Contains the SqliteDagStore (Merkle DAG persistence) and the
-//! SessionServer (read-only HTTP viewer for conversation sessions).
+//! Contains the `SqliteDagStore` (Merkle DAG persistence) and the
+//! `SessionServer` (read-only HTTP viewer for conversation sessions).
 
 #[cfg(feature = "server")]
 pub mod dag_store;

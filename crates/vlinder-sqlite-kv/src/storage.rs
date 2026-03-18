@@ -1,6 +1,6 @@
 //! SQLite-backed object storage (virtual filesystem).
 //!
-//! Concrete type with inherent methods — no ObjectStorage trait.
+//! Concrete type with inherent methods — no `ObjectStorage` trait.
 //! Moved from vlinderd/src/storage/object.rs.
 
 use rusqlite::{params, Connection};

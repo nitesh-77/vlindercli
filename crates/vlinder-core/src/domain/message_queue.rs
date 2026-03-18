@@ -6,8 +6,8 @@
 //! - `send_response()` / `receive_response()`: Service → Runtime
 //! - `send_complete()` / `receive_complete()`: Runtime → Harness
 //!
-//! Each receive method returns a tuple of (TypedMessage, AckFn) where
-//! AckFn acknowledges successful processing.
+//! Each receive method returns a tuple of (`TypedMessage`, `AckFn`) where
+//! `AckFn` acknowledges successful processing.
 
 use super::{
     AgentId, CompleteMessage, DelegateMessage, ForkMessage, HarnessType, InvokeMessage, Operation,
@@ -27,22 +27,22 @@ pub trait MessageQueue {
     // Typed message methods (ADR 044)
     // -------------------------------------------------------------------------
 
-    /// Send an InvokeMessage (Harness → Runtime).
+    /// Send an `InvokeMessage` (Harness → Runtime).
     ///
     /// Implementation determines routing from message dimensions.
     fn send_invoke(&self, msg: InvokeMessage) -> Result<(), QueueError>;
 
-    /// Send a RequestMessage (Runtime → Service).
+    /// Send a `RequestMessage` (Runtime → Service).
     ///
     /// Implementation determines routing from message dimensions.
     fn send_request(&self, msg: RequestMessage) -> Result<(), QueueError>;
 
-    /// Send a ResponseMessage (Service → Runtime).
+    /// Send a `ResponseMessage` (Service → Runtime).
     ///
     /// Implementation determines routing from message dimensions.
     fn send_response(&self, msg: ResponseMessage) -> Result<(), QueueError>;
 
-    /// Send a CompleteMessage (Runtime → Harness).
+    /// Send a `CompleteMessage` (Runtime → Harness).
     ///
     /// Implementation determines routing from message dimensions.
     fn send_complete(&self, msg: CompleteMessage) -> Result<(), QueueError>;
@@ -51,7 +51,7 @@ pub trait MessageQueue {
     // Typed receive methods (ADR 044)
     // -------------------------------------------------------------------------
 
-    /// Receive an InvokeMessage for a specific agent.
+    /// Receive an `InvokeMessage` for a specific agent.
     ///
     /// Returns the typed message with all dimensions intact.
     fn receive_invoke(
@@ -59,7 +59,7 @@ pub trait MessageQueue {
         agent: &AgentId,
     ) -> Result<(InvokeMessage, Acknowledgement), QueueError>;
 
-    /// Receive a RequestMessage for a service-backend/operation pair.
+    /// Receive a `RequestMessage` for a service-backend/operation pair.
     ///
     /// Used by workers to receive typed service requests.
     /// Returns the typed message with all dimensions intact.
@@ -69,7 +69,7 @@ pub trait MessageQueue {
         operation: Operation,
     ) -> Result<(RequestMessage, Acknowledgement), QueueError>;
 
-    /// Receive a ResponseMessage for the given request.
+    /// Receive a `ResponseMessage` for the given request.
     ///
     /// The queue builds the filter pattern from the request's dimensions.
     /// Returns the typed message with all dimensions intact.
@@ -78,7 +78,7 @@ pub trait MessageQueue {
         request: &RequestMessage,
     ) -> Result<(ResponseMessage, Acknowledgement), QueueError>;
 
-    /// Receive a CompleteMessage for a specific submission.
+    /// Receive a `CompleteMessage` for a specific submission.
     ///
     /// Each invocation polls its own submission-scoped consumer (ADR 052).
     fn receive_complete(
@@ -91,16 +91,16 @@ pub trait MessageQueue {
     // Delegation methods (ADR 056, ADR 096 §7)
     // -------------------------------------------------------------------------
 
-    /// Send a DelegateMessage (Agent → Agent via runtime).
+    /// Send a `DelegateMessage` (Agent → Agent via runtime).
     fn send_delegate(&self, msg: DelegateMessage) -> Result<(), QueueError>;
 
-    /// Receive a DelegateMessage for a target agent.
+    /// Receive a `DelegateMessage` for a target agent.
     fn receive_delegate(
         &self,
         target: &AgentId,
     ) -> Result<(DelegateMessage, Acknowledgement), QueueError>;
 
-    /// Send a CompleteMessage as a delegation reply (ADR 096 §7).
+    /// Send a `CompleteMessage` as a delegation reply (ADR 096 §7).
     ///
     /// Routes via `RoutingKey::DelegateReply` — the nonce ensures uniqueness
     /// when the same caller delegates to the same target multiple times.
@@ -112,7 +112,7 @@ pub trait MessageQueue {
 
     /// Receive a delegation reply (ADR 096 §7).
     ///
-    /// Polls for a CompleteMessage at the given `DelegateReply` routing key.
+    /// Polls for a `CompleteMessage` at the given `DelegateReply` routing key.
     fn receive_delegate_reply(
         &self,
         reply_key: &RoutingKey,
@@ -122,12 +122,12 @@ pub trait MessageQueue {
     // Repair methods (ADR 113)
     // -------------------------------------------------------------------------
 
-    /// Send a RepairMessage (Platform → Sidecar).
+    /// Send a `RepairMessage` (Platform → Sidecar).
     ///
     /// Instructs the sidecar to replay a failed service call.
     fn send_repair(&self, msg: RepairMessage) -> Result<(), QueueError>;
 
-    /// Receive a RepairMessage for a specific agent.
+    /// Receive a `RepairMessage` for a specific agent.
     ///
     /// The sidecar subscribes to repair messages alongside invoke.
     fn receive_repair(
@@ -139,23 +139,23 @@ pub trait MessageQueue {
     // Fork methods
     // -------------------------------------------------------------------------
 
-    /// Send a ForkMessage (CLI → Platform).
+    /// Send a `ForkMessage` (CLI → Platform).
     ///
     /// Creates a new timeline branch in the DAG. Both SQL and git projections
     /// react to this message.
     fn send_fork(&self, msg: ForkMessage) -> Result<(), QueueError>;
 
-    /// Send a PromoteMessage (CLI → Platform).
+    /// Send a `PromoteMessage` (CLI → Platform).
     ///
     /// Promotes a branch to main. Both SQL and git projections react to
     /// this message.
     fn send_promote(&self, msg: PromoteMessage) -> Result<(), QueueError>;
 
-    /// Send a SessionStartMessage (CLI → Platform).
+    /// Send a `SessionStartMessage` (CLI → Platform).
     ///
     /// Creates a new conversation session and its default "main" branch.
-    /// Returns the BranchId of the default branch so callers can use it
-    /// as the BranchId for subsequent messages.
+    /// Returns the `BranchId` of the default branch so callers can use it
+    /// as the `BranchId` for subsequent messages.
     fn send_session_start(
         &self,
         msg: super::SessionStartMessage,
@@ -179,7 +179,7 @@ pub trait MessageQueue {
     /// Send a repair and block until the agent completes.
     ///
     /// Used by the harness to replay a failed service call (ADR 113).
-    /// Reply type is CompleteMessage, same as invoke.
+    /// Reply type is `CompleteMessage`, same as invoke.
     fn repair_agent(&self, msg: RepairMessage) -> Result<CompleteMessage, QueueError> {
         let submission = msg.submission.clone();
         let harness = msg.harness;
@@ -252,7 +252,7 @@ impl std::error::Error for QueueError {}
 
 // --- Routing ---
 
-/// Extract the agent name from a registry-assigned ResourceId.
+/// Extract the agent name from a registry-assigned `ResourceId`.
 ///
 /// Registry IDs have the format `<registry>/agents/<name>`.
 /// The last path component is the agent name, used as the NATS subject token.

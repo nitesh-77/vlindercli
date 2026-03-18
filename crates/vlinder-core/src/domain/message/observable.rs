@@ -1,4 +1,4 @@
-//! ObservableMessage — unified enum wrapping all typed messages.
+//! `ObservableMessage` — unified enum wrapping all typed messages.
 //!
 //! `ObservableMessageHeaders` carries all message metadata without the payload.
 //! Transports deserialize their wire format into headers; the domain assembles

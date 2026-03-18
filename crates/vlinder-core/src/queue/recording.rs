@@ -1,4 +1,4 @@
-//! RecordingQueue — transactional outbox for synchronous DAG recording.
+//! `RecordingQueue` — transactional outbox for synchronous DAG recording.
 //!
 //! Wraps any `MessageQueue` and records a `DagNode` into a `DagStore`
 //! before forwarding each send. This eliminates the race condition where
@@ -22,10 +22,10 @@ use crate::domain::{
 /// `DagNode` with Merkle chaining → insert into `DagStore` → forward
 /// original message to inner queue.
 ///
-/// DagStore write failures are logged but don't block message sending.
+/// `DagStore` write failures are logged but don't block message sending.
 ///
 /// Merkle chain parent resolution uses the timeline `head` pointer stored
-/// in the database, ensuring that multiple RecordingQueue instances (sidecar
+/// in the database, ensuring that multiple `RecordingQueue` instances (sidecar
 /// + daemon) share a single source of truth for chaining (issue #37).
 pub struct RecordingQueue {
     inner: Arc<dyn MessageQueue + Send + Sync>,

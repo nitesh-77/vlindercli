@@ -1,4 +1,4 @@
-//! ResponseMessage: Service → Runtime (service replies).
+//! `ResponseMessage`: Service → Runtime (service replies).
 
 use serde::{Deserialize, Serialize};
 

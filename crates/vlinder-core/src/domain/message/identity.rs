@@ -46,9 +46,9 @@ impl From<String> for MessageId {
 
 /// Content-addressed hash identifying a single DAG node.
 ///
-/// Value is SHA-256(payload || parent_hash || message_type || diagnostics).
+/// Value is SHA-256(payload || `parent_hash` || `message_type` || diagnostics).
 /// Used as the primary key of the Merkle chain — every node's `parent_hash`
-/// references another DagNodeId (or is empty for the root).
+/// references another `DagNodeId` (or is empty for the root).
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct DagNodeId(String);
@@ -96,7 +96,7 @@ impl SubmissionId {
         &self.0
     }
 
-    /// Create a unique SubmissionId for a new user action.
+    /// Create a unique `SubmissionId` for a new user action.
     pub fn new() -> Self {
         Self(Uuid::new_v4().to_string())
     }
@@ -371,7 +371,7 @@ pub enum HarnessType {
     Web,
     /// REST API harness
     Api,
-    /// WhatsApp integration harness
+    /// `WhatsApp` integration harness
     Whatsapp,
     /// gRPC remote harness
     Grpc,

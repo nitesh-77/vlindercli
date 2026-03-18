@@ -1,4 +1,4 @@
-//! SQLite implementation of RegistryRepository.
+//! `SQLite` implementation of `RegistryRepository`.
 
 use std::path::Path;
 use std::sync::Mutex;
