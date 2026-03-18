@@ -3,7 +3,7 @@
 use vlinder_nats::{NatsConfig, NatsQueue};
 
 #[test]
-#[ignore] // Run via: just run-integration-tests
+#[ignore = "requires a running NATS server — run via: just run-integration-tests"]
 fn connect_to_localhost() {
     let config = NatsConfig {
         url: "nats://localhost:4222".to_string(),
