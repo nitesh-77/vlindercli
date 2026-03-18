@@ -17,11 +17,10 @@ fn openrouter_key_or_skip() -> Option<String> {
 }
 
 #[test]
-#[ignore] // Run via: just run-integration-tests
+#[ignore = "requires OpenRouter API key"]
 fn lists_models_from_openrouter() {
-    let key = match openrouter_key_or_skip() {
-        Some(k) => k,
-        None => return,
+    let Some(key) = openrouter_key_or_skip() else {
+        return;
     };
     let catalog = OpenRouterCatalog::new("https://openrouter.ai/api/v1", &key);
     let models = catalog.list();
@@ -30,11 +29,10 @@ fn lists_models_from_openrouter() {
 }
 
 #[test]
-#[ignore] // Run via: just run-integration-tests
+#[ignore = "requires OpenRouter API key"]
 fn resolves_model_from_openrouter() {
-    let key = match openrouter_key_or_skip() {
-        Some(k) => k,
-        None => return,
+    let Some(key) = openrouter_key_or_skip() else {
+        return;
     };
     let catalog = OpenRouterCatalog::new("https://openrouter.ai/api/v1", &key);
     let model = catalog.resolve("anthropic/claude-sonnet-4");

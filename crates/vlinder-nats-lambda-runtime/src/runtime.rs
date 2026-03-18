@@ -625,10 +625,6 @@ mod tests {
 
     #[test]
     fn deploy_passes_vpc_config_to_client() {
-        let registry = test_registry();
-        let agent = make_lambda_agent("echo");
-        registry.register_agent(agent).unwrap();
-
         use std::sync::{Arc as StdArc, Mutex};
 
         #[derive(Default)]
@@ -636,8 +632,6 @@ mod tests {
             subnet_ids: Vec<String>,
             security_group_ids: Vec<String>,
         }
-
-        let captured = StdArc::new(Mutex::new(CapturedVpc::default()));
 
         struct CapturingClient {
             captured: StdArc<Mutex<CapturedVpc>>,
@@ -675,6 +669,12 @@ mod tests {
                 Ok(p.to_vec())
             }
         }
+
+        let registry = test_registry();
+        let agent = make_lambda_agent("echo");
+        registry.register_agent(agent).unwrap();
+
+        let captured = StdArc::new(Mutex::new(CapturedVpc::default()));
 
         let mut config = test_config();
         config.vpc_subnet_ids = vec!["subnet-aaa".to_string(), "subnet-bbb".to_string()];
