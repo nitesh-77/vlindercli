@@ -24,270 +24,184 @@ pub struct Supervisor {
     workers: Vec<Child>,
 }
 
+/// Whether a service health check failure should abort startup.
+enum HealthCheckPolicy {
+    Fatal,
+    Warn,
+}
+
+/// Ensure an address has the `http://` scheme prefix.
+fn ensure_http(addr: &str) -> String {
+    if addr.starts_with("http://") {
+        addr.to_string()
+    } else {
+        format!("http://{addr}")
+    }
+}
+
+/// Wait for a gRPC service to become ready, polling with the given ping function.
+/// Returns the version if ready, or None if the deadline is exceeded.
+fn wait_for_service(
+    addr: &str,
+    service_name: &str,
+    ping: impl Fn(&str) -> Option<(u32, u32, u32)>,
+    policy: HealthCheckPolicy,
+    workers: &mut [Child],
+) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut version = None;
+
+    while Instant::now() < deadline {
+        if let Some(v) = ping(addr) {
+            version = Some(v);
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    match (version, policy) {
+        (Some((major, minor, patch)), _) => {
+            tracing::info!(
+                addr = %addr,
+                version = %format!("{major}.{minor}.{patch}"),
+                "{service_name} is ready"
+            );
+        }
+        (None, HealthCheckPolicy::Fatal) => {
+            tracing::error!(addr = %addr, "{service_name} did not become ready within 10s");
+            for child in workers.iter_mut() {
+                let _ = child.kill();
+            }
+            panic!("{service_name} failed to start — aborting distributed mode");
+        }
+        (None, HealthCheckPolicy::Warn) => {
+            tracing::warn!(
+                addr = %addr,
+                "{service_name} did not become ready within 10s"
+            );
+        }
+    }
+}
+
+/// Spawn `count` workers of the given role.
+fn spawn_n(workers: &mut Vec<Child>, role: WorkerRole, count: u32) {
+    for _ in 0..count {
+        if let Some(child) = spawn_worker(role) {
+            workers.push(child);
+        }
+    }
+}
+
 impl Supervisor {
     /// Spawn worker processes based on config.
     pub fn new(config: &Config) -> Self {
         let counts = &config.distributed.workers;
         let mut workers = Vec::new();
 
-        // Secret service must start first — registry needs secrets for
-        // agent identity (keys). Singleton worker.
-        if let Some(child) = spawn_worker(WorkerRole::Secret) {
-            workers.push(child);
-        }
-
-        {
-            let secret_addr = if config.distributed.secret_addr.starts_with("http://") {
-                config.distributed.secret_addr.clone()
-            } else {
-                format!("http://{}", config.distributed.secret_addr)
-            };
-
-            let deadline = Instant::now() + Duration::from_secs(10);
-            let mut version = None;
-
-            while Instant::now() < deadline {
-                if let Some(v) = ping_secret_service(&secret_addr) {
-                    version = Some(v);
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(50));
-            }
-
-            match version {
-                Some((major, minor, patch)) => {
-                    tracing::info!(
-                        addr = %secret_addr,
-                        version = %format!("{}.{}.{}", major, minor, patch),
-                        "Secret service is ready"
-                    );
-                }
-                None => {
-                    tracing::warn!(addr = %secret_addr, "Secret service did not become ready within 10s — registry may fail to connect");
-                }
-            }
-        }
+        // Secret service must start first — registry needs secrets for agent identity.
+        spawn_n(&mut workers, WorkerRole::Secret, 1);
+        wait_for_service(
+            &ensure_http(&config.distributed.secret_addr),
+            "Secret service",
+            ping_secret_service,
+            HealthCheckPolicy::Warn,
+            &mut workers,
+        );
 
         // Registry must start next — other workers connect to it.
-        for _ in 0..counts.registry {
-            if let Some(child) = spawn_worker(WorkerRole::Registry) {
-                workers.push(child);
-            }
-        }
-
-        // Wait for registry to become ready before spawning client workers.
+        spawn_n(&mut workers, WorkerRole::Registry, counts.registry);
         if counts.registry > 0 {
-            let addr = if config.distributed.registry_addr.starts_with("http://") {
-                config.distributed.registry_addr.clone()
-            } else {
-                format!("http://{}", config.distributed.registry_addr)
-            };
-
-            let deadline = Instant::now() + Duration::from_secs(10);
-            let mut version = None;
-
-            while Instant::now() < deadline {
-                if let Some(v) = ping_registry(&addr) {
-                    version = Some(v);
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(50));
-            }
-
-            if let Some((major, minor, patch)) = version {
-                tracing::info!(
-                    addr = %addr,
-                    version = %format!("{}.{}.{}", major, minor, patch),
-                    "Registry is ready"
-                );
-            } else {
-                tracing::error!(addr = %addr, "Registry did not become ready within 10s");
-                for child in &mut workers {
-                    let _ = child.kill();
-                }
-                panic!("Registry failed to start — aborting distributed mode");
-            }
+            wait_for_service(
+                &ensure_http(&config.distributed.registry_addr),
+                "Registry",
+                ping_registry,
+                HealthCheckPolicy::Fatal,
+                &mut workers,
+            );
         }
 
         // State service — singleton gRPC server for DagStore queries (ADR 079).
-        // Non-fatal health check: callers handle connection failures gracefully.
-        if let Some(child) = spawn_worker(WorkerRole::State) {
-            workers.push(child);
-        }
+        spawn_n(&mut workers, WorkerRole::State, 1);
+        wait_for_service(
+            &ensure_http(&config.distributed.state_addr),
+            "State service",
+            ping_state_service,
+            HealthCheckPolicy::Warn,
+            &mut workers,
+        );
 
-        {
-            let state_addr = if config.distributed.state_addr.starts_with("http://") {
-                config.distributed.state_addr.clone()
-            } else {
-                format!("http://{}", config.distributed.state_addr)
-            };
-
-            let deadline = Instant::now() + Duration::from_secs(10);
-            let mut version = None;
-
-            while Instant::now() < deadline {
-                if let Some(v) = ping_state_service(&state_addr) {
-                    version = Some(v);
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(50));
-            }
-
-            match version {
-                Some((major, minor, patch)) => {
-                    tracing::info!(
-                        addr = %state_addr,
-                        version = %format!("{}.{}.{}", major, minor, patch),
-                        "State service is ready"
-                    );
-                }
-                None => {
-                    tracing::warn!(addr = %state_addr, "State service did not become ready within 10s — state queries will fail until it starts");
-                }
-            }
-        }
-
-        // Catalog service — singleton gRPC server for model catalog queries.
-        // Independent of other services (talks only to external APIs).
-        // Non-fatal health check: CLI falls back to direct catalog access.
-        // Only spawn if at least one catalog provider is compiled in.
-        #[cfg(any(feature = "ollama", feature = "openrouter"))]
-        if let Some(child) = spawn_worker(WorkerRole::Catalog) {
-            workers.push(child);
-        }
-
+        // Catalog service — model catalog queries.
         #[cfg(any(feature = "ollama", feature = "openrouter"))]
         {
-            let catalog_addr = if config.distributed.catalog_addr.starts_with("http://") {
-                config.distributed.catalog_addr.clone()
-            } else {
-                format!("http://{}", config.distributed.catalog_addr)
-            };
-
-            let deadline = Instant::now() + Duration::from_secs(10);
-            let mut version = None;
-
-            while Instant::now() < deadline {
-                if let Some(v) = ping_catalog_service(&catalog_addr) {
-                    version = Some(v);
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(50));
-            }
-
-            match version {
-                Some((major, minor, patch)) => {
-                    tracing::info!(
-                        addr = %catalog_addr,
-                        version = %format!("{}.{}.{}", major, minor, patch),
-                        "Catalog service is ready"
-                    );
-                }
-                None => {
-                    tracing::warn!(addr = %catalog_addr, "Catalog service did not become ready within 10s — catalog queries will fail until it starts");
-                }
-            }
+            spawn_n(&mut workers, WorkerRole::Catalog, 1);
+            wait_for_service(
+                &ensure_http(&config.distributed.catalog_addr),
+                "Catalog service",
+                ping_catalog_service,
+                HealthCheckPolicy::Warn,
+                &mut workers,
+            );
         }
 
-        // Harness service — gRPC bridge for CLI→daemon agent invocation.
-        // Must start before agent/inference workers (they depend on harness
-        // being available for agent execution).
-        for _ in 0..counts.harness {
-            if let Some(child) = spawn_worker(WorkerRole::Harness) {
-                workers.push(child);
-            }
-        }
-
+        // Harness — gRPC bridge for CLI→daemon agent invocation.
+        spawn_n(&mut workers, WorkerRole::Harness, counts.harness);
         if counts.harness > 0 {
-            let harness_addr = if config.distributed.harness_addr.starts_with("http://") {
-                config.distributed.harness_addr.clone()
-            } else {
-                format!("http://{}", config.distributed.harness_addr)
-            };
-
-            let deadline = Instant::now() + Duration::from_secs(10);
-            let mut version = None;
-
-            while Instant::now() < deadline {
-                if let Some(v) = ping_harness(&harness_addr) {
-                    version = Some(v);
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(50));
-            }
-
-            if let Some((major, minor, patch)) = version {
-                tracing::info!(
-                    addr = %harness_addr,
-                    version = %format!("{}.{}.{}", major, minor, patch),
-                    "Harness service is ready"
-                );
-            } else {
-                tracing::error!(addr = %harness_addr, "Harness service did not become ready within 10s");
-                for child in &mut workers {
-                    let _ = child.kill();
-                }
-                panic!("Harness failed to start — aborting distributed mode");
-            }
+            wait_for_service(
+                &ensure_http(&config.distributed.harness_addr),
+                "Harness",
+                ping_harness,
+                HealthCheckPolicy::Fatal,
+                &mut workers,
+            );
         }
 
         // Agent runtimes
         #[cfg(feature = "container")]
-        for _ in 0..counts.agent.container {
-            if let Some(child) = spawn_worker(WorkerRole::AgentContainer) {
-                workers.push(child);
-            }
-        }
+        spawn_n(
+            &mut workers,
+            WorkerRole::AgentContainer,
+            counts.agent.container,
+        );
         #[cfg(feature = "lambda")]
-        for _ in 0..counts.agent.lambda {
-            if let Some(child) = spawn_worker(WorkerRole::AgentLambda) {
-                workers.push(child);
-            }
-        }
+        spawn_n(&mut workers, WorkerRole::AgentLambda, counts.agent.lambda);
 
         // Inference workers
         #[cfg(feature = "ollama")]
-        for _ in 0..counts.inference.ollama {
-            if let Some(child) = spawn_worker(WorkerRole::InferenceOllama) {
-                workers.push(child);
-            }
-        }
+        spawn_n(
+            &mut workers,
+            WorkerRole::InferenceOllama,
+            counts.inference.ollama,
+        );
         #[cfg(feature = "openrouter")]
-        for _ in 0..counts.inference.openrouter {
-            if let Some(child) = spawn_worker(WorkerRole::InferenceOpenRouter) {
-                workers.push(child);
-            }
-        }
+        spawn_n(
+            &mut workers,
+            WorkerRole::InferenceOpenRouter,
+            counts.inference.openrouter,
+        );
 
-        // Object storage workers
+        // Storage workers
         #[cfg(feature = "sqlite-kv")]
-        for _ in 0..counts.storage.object.sqlite {
-            if let Some(child) = spawn_worker(WorkerRole::StorageObjectSqlite) {
-                workers.push(child);
-            }
-        }
-        // Vector storage workers
+        spawn_n(
+            &mut workers,
+            WorkerRole::StorageObjectSqlite,
+            counts.storage.object.sqlite,
+        );
         #[cfg(feature = "sqlite-vec")]
-        for _ in 0..counts.storage.vector.sqlite {
-            if let Some(child) = spawn_worker(WorkerRole::StorageVectorSqlite) {
-                workers.push(child);
-            }
-        }
-        // DAG git worker — singleton recommended (single branch + HEAD lock,
-        // see ADR 078). Configurable via [distributed.workers] dag_git.
-        for _ in 0..counts.dag_git {
-            if let Some(child) = spawn_worker(WorkerRole::DagGit) {
-                workers.push(child);
-            }
-        }
+        spawn_n(
+            &mut workers,
+            WorkerRole::StorageVectorSqlite,
+            counts.storage.vector.sqlite,
+        );
 
-        // Session viewer — local HTTP server for browsing conversation sessions.
-        // No health check needed: local-only, no other services depend on it.
-        for _ in 0..counts.session_viewer {
-            if let Some(child) = spawn_worker(WorkerRole::SessionViewer) {
-                workers.push(child);
-            }
-        }
+        // DAG git worker
+        spawn_n(&mut workers, WorkerRole::DagGit, counts.dag_git);
+
+        // Session viewer
+        spawn_n(
+            &mut workers,
+            WorkerRole::SessionViewer,
+            counts.session_viewer,
+        );
 
         tracing::info!(
             worker_count = workers.len(),
