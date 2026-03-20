@@ -1,6 +1,6 @@
 # ADR 118: Wire-Format Payloads
 
-**Status:** Draft
+**Status:** Accepted
 
 ## Context
 
@@ -12,7 +12,7 @@ This creates several problems:
 
 2. **Redundant protocol fields.** `ResponseMessage.status_code` duplicates what the HTTP response already carries. `ResponseMessage.correlation_id` duplicates what the routing key provides. These fields exist because the payload is opaque — the platform can't read them from the bytes.
 
-3. **Worker coupling.** Writing a new worker requires importing vlinder-core, constructing `RequestMessage`/`ResponseMessage` structs, setting status codes, echoing state, serializing diagnostics into NATS headers. A worker must understand vlinder's internal message protocol.
+3. **Worker ceremony.** Workers must extract the body, discard HTTP metadata, set status codes and state as separate fields, and build diagnostics manually — when the upstream HTTP response already contains everything.
 
 4. **No metering.** Inference calls are expensive real-world interactions. The platform sits between the agent and every service but cannot meter, audit, or bill because the response metadata is thrown away.
 
@@ -30,18 +30,7 @@ Every current service interaction is HTTP: Ollama, OpenRouter, KV (via provider 
 
 `RequestMessage.payload` and `ResponseMessage.payload` carry the serialized HTTP request/response — status line, headers, and body. The payload is self-describing: any HTTP parser can read it without knowing vlinder's internal types.
 
-For HTTP, this means a serde-friendly envelope:
-
-```rust
-#[derive(Serialize, Deserialize)]
-struct HttpResponse {
-    status: u16,
-    headers: Vec<(String, String)>,
-    body: Vec<u8>,
-}
-```
-
-This replaces the current `Vec<u8>` body-only payload.
+The implementation uses `http::Response<Vec<u8>>` from the standard `http` crate, serialized via `http-serde-ext`. A `WireResponse` wrapper in `vlinder-core::domain::wire` provides the serde integration. This replaces the current `Vec<u8>` body-only payload.
 
 ### 2. Remove redundant message fields
 
@@ -50,28 +39,21 @@ Fields that duplicate information in the wire-format payload are removed from th
 - `ResponseMessage.status_code` — in the HTTP response status line
 - `ResponseMessage.correlation_id` — in the routing key (ADR 096)
 
-### 3. HTTP workers are transparent proxies
+### 3. Worker crates capture the full HTTP exchange
 
-For HTTP services, the sidecar acts as a recording proxy: it forwards the agent's request to the worker, captures the full HTTP response, and wraps it as the message payload. The worker does not import vlinder-core or know it's inside vlinder.
+Worker crates call the upstream HTTP service and capture the complete response — status, headers, and body. The crate serializes it as a `WireResponse` for the message payload and extracts domain-specific metrics (token counts, model info, dimensions) for diagnostics. The crate owns both responsibilities because it has the domain expertise to parse the upstream response format.
 
-Existing workers (Ollama, OpenRouter, KV, vector) already speak HTTP. New HTTP workers require zero vlinder-specific code — deploy an HTTP service and point the sidecar at it.
+The provider server unwraps the `WireResponse` envelope before returning to the agent — agents see a normal HTTP response.
 
-Non-HTTP providers (e.g., database via Postgres wire protocol) use a different model — see ADR 119. The sidecar plugin contract (ADR 120) allows both models to coexist.
-
-### 4. Payload hash for content-addressed storage
-
-Each payload is hashed by the producer. The hash travels alongside the payload as `payload_hash`. The producer stores the payload in its own content-addressed store, keyed by hash. The DAG node's snapshot references the hash, enabling time-travel lookups.
-
-### 5. Metering reads from captured headers
+### 4. Metering reads from captured headers
 
 The platform can extract metering data (token counts, model info, rate limits, latency) from the captured HTTP response headers. This enables auditing and billing without modifying workers.
 
 ## Consequences
 
 - Service call payloads become self-describing HTTP captures
-- `ResponseMessage.status_code` and `correlation_id` are removed
-- Workers are plain HTTP servers — no vlinder-core dependency
-- New workers require zero platform-specific code
+- `ResponseMessage.status_code` and `correlation_id` to be removed (tracked in WIP branch)
+- Worker crates capture full HTTP responses and extract domain-specific metrics
 - The DAG captures full HTTP exchanges, enabling exact replay
 - Database workers (Dolt/Doltgres) require a separate protocol-aware provider host — see ADR 119
 - Metering and auditing become possible by reading captured headers
