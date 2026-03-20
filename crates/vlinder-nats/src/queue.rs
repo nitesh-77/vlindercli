@@ -1153,50 +1153,28 @@ pub fn from_nats_headers<S: BuildHasher>(
     key: &RoutingKey,
     headers: &HashMap<String, String, S>,
 ) -> Option<vlinder_core::domain::ObservableMessageHeaders> {
-    use vlinder_core::domain::ObservableMessageHeaders;
+    use vlinder_core::domain::{MessageDetails, ObservableMessageHeaders};
 
-    // Common fields shared by all variants.
     let id = MessageId::from(headers.get("msg-id")?.clone());
     let protocol_version = headers.get("protocol-version").cloned().unwrap_or_default();
-    let session = SessionId::try_from(headers.get("session-id")?.clone()).ok()?;
     let state = headers.get("state").cloned();
 
-    match &key.kind {
-        RoutingKind::Invoke {
-            harness,
-            runtime,
-            agent,
-        } => {
+    let details = match &key.kind {
+        RoutingKind::Invoke { .. } => {
             let diagnostics = headers
                 .get("diagnostics")
                 .and_then(|s| serde_json::from_str(s).ok())
                 .unwrap_or_else(|| InvokeDiagnostics {
                     harness_version: String::new(),
                 });
-
             let dag_parent =
                 DagNodeId::from(headers.get("dag-parent").cloned().unwrap_or_default());
-
-            Some(ObservableMessageHeaders::Invoke {
-                id,
-                protocol_version,
-                branch: key.branch,
-                submission: key.submission.clone(),
-                session,
-                harness: *harness,
-                runtime: *runtime,
-                agent_id: agent.clone(),
-                state,
+            Some(MessageDetails::Invoke {
                 diagnostics,
                 dag_parent,
             })
         }
-        RoutingKind::Request {
-            agent,
-            service,
-            operation,
-            sequence,
-        } => {
+        RoutingKind::Request { .. } => {
             let diagnostics = headers
                 .get("diagnostics")
                 .and_then(|s| serde_json::from_str(s).ok())
@@ -1206,28 +1184,12 @@ pub fn from_nats_headers<S: BuildHasher>(
                     request_bytes: 0,
                     received_at_ms: 0,
                 });
-
-            Some(ObservableMessageHeaders::Request {
-                id,
-                protocol_version,
-                branch: key.branch,
-                submission: key.submission.clone(),
-                session,
-                agent_id: agent.clone(),
-                service: *service,
-                operation: *operation,
-                sequence: *sequence,
-                state,
+            Some(MessageDetails::Request {
                 diagnostics,
                 checkpoint: headers.get("checkpoint").cloned(),
             })
         }
-        RoutingKind::Response {
-            service,
-            agent,
-            operation,
-            sequence,
-        } => {
+        RoutingKind::Response { .. } => {
             let diagnostics = headers
                 .get("diagnostics")
                 .and_then(|s| serde_json::from_str(s).ok())
@@ -1237,43 +1199,21 @@ pub fn from_nats_headers<S: BuildHasher>(
                 .get("status-code")
                 .and_then(|s| s.parse::<u16>().ok())
                 .unwrap_or(200);
-
-            Some(ObservableMessageHeaders::Response {
-                id,
-                protocol_version,
-                branch: key.branch,
-                submission: key.submission.clone(),
-                session,
-                agent_id: agent.clone(),
-                service: *service,
-                operation: *operation,
-                sequence: *sequence,
-                correlation_id,
-                state,
+            Some(MessageDetails::Response {
                 diagnostics,
+                correlation_id,
                 status_code,
                 checkpoint: headers.get("checkpoint").cloned(),
             })
         }
-        RoutingKind::Complete { agent, harness } => {
+        RoutingKind::Complete { .. } => {
             let diagnostics = headers
                 .get("diagnostics")
                 .and_then(|s| serde_json::from_str(s).ok())
                 .unwrap_or_else(|| RuntimeDiagnostics::placeholder(0));
-
-            Some(ObservableMessageHeaders::Complete {
-                id,
-                protocol_version,
-                branch: key.branch,
-                submission: key.submission.clone(),
-                session,
-                agent_id: agent.clone(),
-                harness: *harness,
-                state,
-                diagnostics,
-            })
+            Some(MessageDetails::Complete { diagnostics })
         }
-        RoutingKind::Delegate { caller, target } => {
+        RoutingKind::Delegate { .. } => {
             let diagnostics = headers
                 .get("diagnostics")
                 .and_then(|s| serde_json::from_str(s).ok())
@@ -1281,26 +1221,10 @@ pub fn from_nats_headers<S: BuildHasher>(
                     runtime: RuntimeDiagnostics::placeholder(0),
                 });
             let nonce = Nonce::new(headers.get("nonce")?.clone());
-
-            Some(ObservableMessageHeaders::Delegate {
-                id,
-                protocol_version,
-                branch: key.branch,
-                submission: key.submission.clone(),
-                session,
-                caller: caller.clone(),
-                target: target.clone(),
-                nonce,
-                state,
-                diagnostics,
-            })
+            Some(MessageDetails::Delegate { diagnostics, nonce })
         }
-        RoutingKind::DelegateReply { .. } => {
-            // DelegateReply carries a CompleteMessage — same as Complete.
-            // Handled via receive_delegate_reply which already parses directly.
-            None
-        }
-        RoutingKind::Repair { harness, agent } => {
+        RoutingKind::DelegateReply { .. } => None,
+        RoutingKind::Repair { .. } => {
             let dag_parent = DagNodeId::from(headers.get("dag-parent").cloned()?);
             let checkpoint = headers.get("checkpoint").cloned()?;
             let service = ServiceBackend::from_parts(
@@ -1309,47 +1233,32 @@ pub fn from_nats_headers<S: BuildHasher>(
             )?;
             let operation = Operation::from_str(headers.get("operation")?).ok()?;
             let sequence = Sequence::from(headers.get("sequence")?.parse::<u32>().ok()?);
-
-            Some(ObservableMessageHeaders::Repair {
-                id,
-                protocol_version,
-                branch: key.branch,
-                submission: key.submission.clone(),
-                session,
-                agent_id: agent.clone(),
-                harness: *harness,
+            Some(MessageDetails::Repair {
                 dag_parent,
                 checkpoint,
                 service,
                 operation,
                 sequence,
-                state,
             })
         }
-        RoutingKind::Fork { agent_name } => {
+        RoutingKind::Fork { .. } => {
             let branch_name = headers.get("branch-name").cloned()?;
             let fork_point = DagNodeId::from(headers.get("fork-point").cloned()?);
-
-            Some(ObservableMessageHeaders::Fork {
-                id,
-                protocol_version,
-                branch: key.branch,
-                submission: key.submission.clone(),
-                session,
-                agent_name: agent_name.clone(),
+            Some(MessageDetails::Fork {
                 branch_name,
                 fork_point,
             })
         }
-        RoutingKind::Promote { agent_name } => Some(ObservableMessageHeaders::Promote {
-            id,
-            protocol_version,
-            branch: key.branch,
-            submission: key.submission.clone(),
-            session,
-            agent_name: agent_name.clone(),
-        }),
-    }
+        RoutingKind::Promote { .. } => Some(MessageDetails::Promote),
+    };
+
+    details.map(|details| ObservableMessageHeaders {
+        id,
+        protocol_version,
+        state,
+        routing_key: key.clone(),
+        details,
+    })
 }
 
 /// Derive a stable consumer name from a filter pattern.
@@ -2191,11 +2100,11 @@ mod tests {
     }
 
     #[test]
-    fn from_nats_headers_invoke_missing_session_returns_none() {
+    fn from_nats_headers_invoke_missing_msg_id_returns_none() {
         let original = test_invoke_message(None);
         let key = original.routing_key();
         let mut headers = invoke_to_nats_headers(&original);
-        headers.remove("session-id");
+        headers.remove("msg-id");
 
         assert!(from_nats_headers(&key, &headers).is_none());
     }

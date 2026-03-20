@@ -10,14 +10,11 @@ use super::super::diagnostics::{
     ServiceDiagnostics,
 };
 use super::super::operation::Operation;
-use super::super::routing_key::{AgentId, Nonce, ServiceBackend};
-use super::super::RuntimeType;
+use super::super::routing_key::{Nonce, RoutingKey, RoutingKind, ServiceBackend};
 use super::complete::CompleteMessage;
 use super::delegate::DelegateMessage;
 use super::fork::ForkMessage;
-use super::identity::{
-    BranchId, DagNodeId, HarnessType, MessageId, Sequence, SessionId, SubmissionId,
-};
+use super::identity::{BranchId, DagNodeId, MessageId, Sequence, SessionId, SubmissionId};
 use super::invoke::InvokeMessage;
 use super::promote::PromoteMessage;
 use super::repair::RepairMessage;
@@ -46,117 +43,79 @@ pub enum ObservableMessage {
 /// SQS attributes, etc.) into typed domain fields. The domain then assembles
 /// the final `ObservableMessage` by attaching the payload.
 ///
-/// Each variant carries exactly the fields for that message type — no Options,
-/// no guessing. The variant itself is the type discriminant.
+/// Common fields (`id`, `protocol_version`, `state`) live on the struct.
+/// Routing dimensions (session, branch, submission + variant-specific)
+/// live on the `RoutingKey`. Variant-specific extras (diagnostics,
+/// checkpoint, etc.) live on `MessageDetails`.
 #[derive(Debug)]
-pub enum ObservableMessageHeaders {
+pub struct ObservableMessageHeaders {
+    pub id: MessageId,
+    pub protocol_version: String,
+    pub state: Option<String>,
+    pub routing_key: RoutingKey,
+    pub details: MessageDetails,
+}
+
+/// Variant-specific message metadata not carried by the routing key.
+#[derive(Debug)]
+pub enum MessageDetails {
     Invoke {
-        id: MessageId,
-        protocol_version: String,
-        branch: BranchId,
-        submission: SubmissionId,
-        session: SessionId,
-        harness: HarnessType,
-        runtime: RuntimeType,
-        agent_id: AgentId,
-        state: Option<String>,
         diagnostics: InvokeDiagnostics,
         dag_parent: DagNodeId,
     },
     Request {
-        id: MessageId,
-        protocol_version: String,
-        branch: BranchId,
-        submission: SubmissionId,
-        session: SessionId,
-        agent_id: AgentId,
-        service: ServiceBackend,
-        operation: Operation,
-        sequence: Sequence,
-        state: Option<String>,
         diagnostics: RequestDiagnostics,
         checkpoint: Option<String>,
     },
     Response {
-        id: MessageId,
-        protocol_version: String,
-        branch: BranchId,
-        submission: SubmissionId,
-        session: SessionId,
-        agent_id: AgentId,
-        service: ServiceBackend,
-        operation: Operation,
-        sequence: Sequence,
-        correlation_id: MessageId,
-        state: Option<String>,
         diagnostics: ServiceDiagnostics,
+        correlation_id: MessageId,
         status_code: u16,
         checkpoint: Option<String>,
     },
     Complete {
-        id: MessageId,
-        protocol_version: String,
-        branch: BranchId,
-        submission: SubmissionId,
-        session: SessionId,
-        agent_id: AgentId,
-        harness: HarnessType,
-        state: Option<String>,
         diagnostics: RuntimeDiagnostics,
     },
     Delegate {
-        id: MessageId,
-        protocol_version: String,
-        branch: BranchId,
-        submission: SubmissionId,
-        session: SessionId,
-        caller: AgentId,
-        target: AgentId,
-        nonce: Nonce,
-        state: Option<String>,
         diagnostics: DelegateDiagnostics,
+        nonce: Nonce,
     },
     Repair {
-        id: MessageId,
-        protocol_version: String,
-        branch: BranchId,
-        submission: SubmissionId,
-        session: SessionId,
-        agent_id: AgentId,
-        harness: HarnessType,
         dag_parent: DagNodeId,
         checkpoint: String,
         service: ServiceBackend,
         operation: Operation,
         sequence: Sequence,
-        state: Option<String>,
     },
     Fork {
-        id: MessageId,
-        protocol_version: String,
-        branch: BranchId,
-        submission: SubmissionId,
-        session: SessionId,
-        agent_name: String,
         branch_name: String,
         fork_point: DagNodeId,
     },
-    Promote {
-        id: MessageId,
-        protocol_version: String,
-        branch: BranchId,
-        submission: SubmissionId,
-        session: SessionId,
-        agent_name: String,
-    },
+    Promote,
 }
 
 impl ObservableMessageHeaders {
     /// Assemble a full `ObservableMessage` by attaching a payload.
-    #[allow(clippy::too_many_lines)]
     pub fn assemble(self, payload: Vec<u8>) -> ObservableMessage {
-        match self {
-            Self::Invoke {
+        let id = self.id;
+        let protocol_version = self.protocol_version;
+        let state = self.state;
+        let session = self.routing_key.session;
+        let branch = self.routing_key.branch;
+        let submission = self.routing_key.submission;
+
+        match (self.routing_key.kind, self.details) {
+            (
+                RoutingKind::Invoke {
+                    harness,
+                    runtime,
+                    agent,
+                },
+                MessageDetails::Invoke {
+                    diagnostics,
+                    dag_parent,
+                },
+            ) => ObservableMessage::Invoke(InvokeMessage {
                 id,
                 protocol_version,
                 branch,
@@ -164,44 +123,30 @@ impl ObservableMessageHeaders {
                 session,
                 harness,
                 runtime,
-                agent_id,
-                state,
-                diagnostics,
-                dag_parent,
-            } => ObservableMessage::Invoke(InvokeMessage {
-                id,
-                protocol_version,
-                branch,
-                submission,
-                session,
-                harness,
-                runtime,
-                agent_id,
+                agent_id: agent,
                 payload,
                 state,
                 diagnostics,
                 dag_parent,
             }),
-            Self::Request {
+            (
+                RoutingKind::Request {
+                    agent,
+                    service,
+                    operation,
+                    sequence,
+                },
+                MessageDetails::Request {
+                    diagnostics,
+                    checkpoint,
+                },
+            ) => ObservableMessage::Request(RequestMessage {
                 id,
                 protocol_version,
                 branch,
                 submission,
                 session,
-                agent_id,
-                service,
-                operation,
-                sequence,
-                state,
-                diagnostics,
-                checkpoint,
-            } => ObservableMessage::Request(RequestMessage {
-                id,
-                protocol_version,
-                branch,
-                submission,
-                session,
-                agent_id,
+                agent_id: agent,
                 service,
                 operation,
                 sequence,
@@ -210,28 +155,26 @@ impl ObservableMessageHeaders {
                 diagnostics,
                 checkpoint,
             }),
-            Self::Response {
+            (
+                RoutingKind::Response {
+                    service,
+                    agent,
+                    operation,
+                    sequence,
+                },
+                MessageDetails::Response {
+                    diagnostics,
+                    correlation_id,
+                    status_code,
+                    checkpoint,
+                },
+            ) => ObservableMessage::Response(ResponseMessage {
                 id,
                 protocol_version,
                 branch,
                 submission,
                 session,
-                agent_id,
-                service,
-                operation,
-                sequence,
-                correlation_id,
-                state,
-                diagnostics,
-                status_code,
-                checkpoint,
-            } => ObservableMessage::Response(ResponseMessage {
-                id,
-                protocol_version,
-                branch,
-                submission,
-                session,
-                agent_id,
+                agent_id: agent,
                 service,
                 operation,
                 sequence,
@@ -242,40 +185,25 @@ impl ObservableMessageHeaders {
                 status_code,
                 checkpoint,
             }),
-            Self::Complete {
+            (
+                RoutingKind::Complete { agent, harness },
+                MessageDetails::Complete { diagnostics },
+            ) => ObservableMessage::Complete(CompleteMessage {
                 id,
                 protocol_version,
                 branch,
                 submission,
                 session,
-                agent_id,
-                harness,
-                state,
-                diagnostics,
-            } => ObservableMessage::Complete(CompleteMessage {
-                id,
-                protocol_version,
-                branch,
-                submission,
-                session,
-                agent_id,
+                agent_id: agent,
                 harness,
                 payload,
                 state,
                 diagnostics,
             }),
-            Self::Delegate {
-                id,
-                protocol_version,
-                branch,
-                submission,
-                session,
-                caller,
-                target,
-                nonce,
-                state,
-                diagnostics,
-            } => ObservableMessage::Delegate(DelegateMessage {
+            (
+                RoutingKind::Delegate { caller, target },
+                MessageDetails::Delegate { diagnostics, nonce },
+            ) => ObservableMessage::Delegate(DelegateMessage {
                 id,
                 protocol_version,
                 branch,
@@ -288,27 +216,22 @@ impl ObservableMessageHeaders {
                 state,
                 diagnostics,
             }),
-            Self::Repair {
+            (
+                RoutingKind::Repair { harness, agent },
+                MessageDetails::Repair {
+                    dag_parent,
+                    checkpoint,
+                    service,
+                    operation,
+                    sequence,
+                },
+            ) => ObservableMessage::Repair(RepairMessage {
                 id,
                 protocol_version,
                 branch,
                 submission,
                 session,
-                agent_id,
-                harness,
-                dag_parent,
-                checkpoint,
-                service,
-                operation,
-                sequence,
-                state,
-            } => ObservableMessage::Repair(RepairMessage {
-                id,
-                protocol_version,
-                branch,
-                submission,
-                session,
-                agent_id,
+                agent_id: agent,
                 harness,
                 dag_parent,
                 checkpoint,
@@ -318,16 +241,13 @@ impl ObservableMessageHeaders {
                 payload,
                 state,
             }),
-            Self::Fork {
-                id,
-                protocol_version,
-                branch,
-                submission,
-                session,
-                agent_name,
-                branch_name,
-                fork_point,
-            } => ObservableMessage::Fork(ForkMessage {
+            (
+                RoutingKind::Fork { agent_name },
+                MessageDetails::Fork {
+                    branch_name,
+                    fork_point,
+                },
+            ) => ObservableMessage::Fork(ForkMessage {
                 id,
                 protocol_version,
                 branch,
@@ -337,21 +257,17 @@ impl ObservableMessageHeaders {
                 branch_name,
                 fork_point,
             }),
-            Self::Promote {
-                id,
-                protocol_version,
-                branch,
-                submission,
-                session,
-                agent_name,
-            } => ObservableMessage::Promote(PromoteMessage {
-                id,
-                protocol_version,
-                branch,
-                submission,
-                session,
-                agent_name,
-            }),
+            (RoutingKind::Promote { agent_name }, MessageDetails::Promote) => {
+                ObservableMessage::Promote(PromoteMessage {
+                    id,
+                    protocol_version,
+                    branch,
+                    submission,
+                    session,
+                    agent_name,
+                })
+            }
+            _ => unreachable!("routing key kind and message details must match"),
         }
     }
 }

@@ -31,7 +31,7 @@ pub use identity::{
     StateHash, SubmissionId,
 };
 pub use invoke::InvokeMessage;
-pub use observable::{ObservableMessage, ObservableMessageHeaders};
+pub use observable::{MessageDetails, ObservableMessage, ObservableMessageHeaders};
 pub use promote::PromoteMessage;
 pub use repair::RepairMessage;
 pub use request::RequestMessage;
@@ -608,18 +608,24 @@ mod tests {
 
     #[test]
     fn invoke_headers_assemble_produces_invoke_message() {
-        let headers = ObservableMessageHeaders::Invoke {
+        let headers = ObservableMessageHeaders {
             id: MessageId::from("msg-1".to_string()),
             protocol_version: "0.1.0".to_string(),
-            branch: BranchId::from(1),
-            submission: test_submission(),
-            session: SessionId::new(),
-            harness: HarnessType::Cli,
-            runtime: RuntimeType::Container,
-            agent_id: test_agent_id(),
             state: Some("state-abc".to_string()),
-            diagnostics: test_invoke_diag(),
-            dag_parent: DagNodeId::root(),
+            routing_key: RoutingKey {
+                session: SessionId::new(),
+                branch: BranchId::from(1),
+                submission: test_submission(),
+                kind: RoutingKind::Invoke {
+                    harness: HarnessType::Cli,
+                    runtime: RuntimeType::Container,
+                    agent: test_agent_id(),
+                },
+            },
+            details: MessageDetails::Invoke {
+                diagnostics: test_invoke_diag(),
+                dag_parent: DagNodeId::root(),
+            },
         };
 
         let msg = headers.assemble(b"hello".to_vec());
