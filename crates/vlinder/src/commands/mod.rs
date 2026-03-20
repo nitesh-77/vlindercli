@@ -492,7 +492,7 @@ mod tests {
     #[test]
     fn cli_session_fork() {
         let cli = Cli::try_parse_from([
-            "vlinder", "session", "fork", "sess-1", "--from", "abc123", "--name", "repair-1",
+            "vlinder", "session", "fork", "sess-1", "--from", "abc123", "--branch", "repair-1",
         ])
         .unwrap();
         assert_eq!(
@@ -501,7 +501,7 @@ mod tests {
                 cmd: session::SessionCommand::Fork {
                     session_id: "sess-1".to_string(),
                     from: "abc123".to_string(),
-                    name: "repair-1".to_string(),
+                    branch: "repair-1".to_string(),
                 }
             }
         );

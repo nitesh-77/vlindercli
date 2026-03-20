@@ -27,7 +27,7 @@ pub enum SessionCommand {
         from: String,
         /// Branch name for the new timeline
         #[arg(long)]
-        name: String,
+        branch: String,
     },
     /// Promote a branch to main
     Promote {
@@ -46,8 +46,8 @@ pub fn execute(cmd: SessionCommand) {
         SessionCommand::Fork {
             session_id,
             from,
-            name,
-        } => fork(&session_id, &from, &name),
+            branch,
+        } => fork(&session_id, &from, &branch),
         SessionCommand::Promote { session_id, branch } => promote(&session_id, &branch),
     }
 }
