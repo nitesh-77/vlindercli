@@ -106,6 +106,7 @@ Claude should:
 - Never mention Claude in commit messages
 - No "Co-Authored-By" lines
 - Commit messages should read as if written by the user
+- **Never use `--no-verify`** — pre-commit hooks exist for a reason. If the hook fails, fix the issue.
 
 ### Commit Message Format
 

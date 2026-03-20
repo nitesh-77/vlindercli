@@ -96,6 +96,7 @@ pub enum MessageDetails {
 
 impl ObservableMessageHeaders {
     /// Assemble a full `ObservableMessage` by attaching a payload.
+    #[allow(clippy::too_many_lines)]
     pub fn assemble(self, payload: Vec<u8>) -> ObservableMessage {
         let id = self.id;
         let protocol_version = self.protocol_version;
