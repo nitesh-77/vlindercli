@@ -17,18 +17,26 @@ llama_level = "error"
 backend = "nats"
 nats_url = "nats://localhost:4222"
 
+[state]
+backend = "grpc"
+
 [ollama]
 endpoint = "http://localhost:11434"
 
 [distributed]
 enabled = true
-registry_addr = "127.0.0.1:9090"
+registry_addr = "http://0.0.0.0:9090"
+state_addr = "http://0.0.0.0:9092"
+harness_addr = "http://0.0.0.0:9091"
+secret_addr = "http://0.0.0.0:9093"
+catalog_addr = "http://0.0.0.0:9094"
 
 [distributed.workers]
 registry = 1
+harness = 1
 
 [distributed.workers.agent]
-wasm = 1
+container = 1
 
 [distributed.workers.inference]
 ollama = 1
@@ -38,8 +46,6 @@ ollama = 1
 
 [distributed.workers.storage.object]
 sqlite = 1
-memory = 0
 
 [distributed.workers.storage.vector]
 sqlite = 1
-memory = 0

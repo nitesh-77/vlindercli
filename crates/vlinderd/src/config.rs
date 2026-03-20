@@ -340,11 +340,11 @@ impl Default for DistributedConfig {
     fn default() -> Self {
         Self {
             registry_backend: default_registry_backend(),
-            registry_addr: "http://127.0.0.1:9090".to_string(),
-            state_addr: "http://127.0.0.1:9092".to_string(),
-            harness_addr: "http://127.0.0.1:9091".to_string(),
-            secret_addr: "http://127.0.0.1:9093".to_string(),
-            catalog_addr: "http://127.0.0.1:9094".to_string(),
+            registry_addr: "http://0.0.0.0:9090".to_string(),
+            state_addr: "http://0.0.0.0:9092".to_string(),
+            harness_addr: "http://0.0.0.0:9091".to_string(),
+            secret_addr: "http://0.0.0.0:9093".to_string(),
+            catalog_addr: "http://0.0.0.0:9094".to_string(),
             workers: WorkerCounts::default(),
         }
     }
@@ -428,14 +428,15 @@ impl Config {
     ///
     /// Panics if the config file exists but is invalid — missing `[queue]` or
     /// `[state]` sections is a fatal misconfiguration.
-    /// Panics if no config file exists — run `vlinder init` first.
+    /// Panics if no config file exists — create it manually.
     fn load_from_file() -> Self {
         let config_path = config_path();
         assert!(
             config_path.exists(),
             "Config file not found: {}\n\
-             Run `vlinder init` or create it manually.\n\
-             Required sections: [queue] (backend), [state] (backend)",
+             Create ~/.vlinder/config.toml manually.\n\
+             Required sections: [queue] (backend), [state] (backend)\n\
+             See: https://docs.vlindercli.dev/how-to/installation/#bootstrap",
             config_path.display()
         );
         let contents = std::fs::read_to_string(&config_path)
@@ -747,9 +748,9 @@ mod tests {
     #[test]
     fn for_test_distributed_defaults() {
         let config = Config::for_test();
-        assert_eq!(config.distributed.registry_addr, "http://127.0.0.1:9090");
-        assert_eq!(config.distributed.harness_addr, "http://127.0.0.1:9091");
-        assert_eq!(config.distributed.secret_addr, "http://127.0.0.1:9093");
+        assert_eq!(config.distributed.registry_addr, "http://0.0.0.0:9090");
+        assert_eq!(config.distributed.harness_addr, "http://0.0.0.0:9091");
+        assert_eq!(config.distributed.secret_addr, "http://0.0.0.0:9093");
         assert_eq!(config.distributed.workers.registry, 1);
         assert_eq!(config.distributed.workers.harness, 1);
         assert_eq!(config.distributed.workers.agent.container, 1);
