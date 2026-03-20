@@ -10,19 +10,8 @@ use vlinder_core::domain::{
     ServiceDiagnostics, ServiceMetrics, ServiceType,
 };
 
-/// Successful inference result from the upstream API.
-struct InferenceSuccess {
-    body: Vec<u8>,
-    tokens_input: u32,
-    tokens_output: u32,
-    model: String,
-}
-
-/// Error from the upstream API or request validation.
-struct WorkerError {
-    status_code: u16,
-    body: Vec<u8>,
-}
+/// Handler result: the raw HTTP response + extracted metrics.
+type HandlerResult = (http::Response<Vec<u8>>, ServiceMetrics);
 
 pub struct OpenRouterWorker {
     queue: Arc<dyn MessageQueue + Send + Sync>,
@@ -52,11 +41,13 @@ impl OpenRouterWorker {
             Ok((request, ack)) => {
                 let start = Instant::now();
 
-                let (response_payload, status_code, tokens_input, tokens_output, model) =
-                    match self.handle(request.payload.as_slice()) {
-                        Ok(s) => (s.body, 200, s.tokens_input, s.tokens_output, s.model),
-                        Err(e) => (e.body, e.status_code, 0, 0, String::new()),
-                    };
+                let (http_response, metrics) = self.handle(request.payload.as_slice());
+
+                let status_code = http_response.status().as_u16();
+                let wire = vlinder_core::domain::wire::WireResponse {
+                    inner: http_response,
+                };
+                let response_payload = serde_json::to_vec(&wire).unwrap_or_default();
 
                 let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
 
@@ -64,11 +55,7 @@ impl OpenRouterWorker {
                     service: ServiceType::Infer,
                     backend: "openrouter".to_string(),
                     duration_ms,
-                    metrics: ServiceMetrics::Inference {
-                        tokens_input,
-                        tokens_output,
-                        model,
-                    },
+                    metrics,
                 };
 
                 let mut response = ResponseMessage::from_request_with_diagnostics(
@@ -86,42 +73,42 @@ impl OpenRouterWorker {
         }
     }
 
-    fn handle(&self, payload: &[u8]) -> Result<InferenceSuccess, WorkerError> {
-        let req: CreateChatCompletionRequest =
-            serde_json::from_slice(payload).map_err(|e| WorkerError {
-                status_code: 400,
-                body: openai_error_json(&e.to_string(), "invalid_request_error"),
-            })?;
+    fn handle(&self, payload: &[u8]) -> HandlerResult {
+        let req: CreateChatCompletionRequest = match serde_json::from_slice(payload) {
+            Ok(r) => r,
+            Err(e) => return error_result(400, &e.to_string(), "invalid_request_error"),
+        };
 
         let model_name = req.model.clone();
 
-        let response = self.call_openrouter(&req).map_err(|e| WorkerError {
-            status_code: 500,
-            body: openai_error_json(&e, "server_error"),
-        })?;
+        let http_response = match self.call_upstream_raw(&req) {
+            Ok(r) => r,
+            Err(e) => return error_result(500, &e, "server_error"),
+        };
 
-        let (tokens_input, tokens_output) = response
-            .usage
-            .as_ref()
-            .map_or((0, 0), |u| (u.prompt_tokens, u.completion_tokens));
+        let (ti, to) = serde_json::from_slice::<CreateChatCompletionResponse>(http_response.body())
+            .ok()
+            .and_then(|r| {
+                r.usage
+                    .as_ref()
+                    .map(|u| (u.prompt_tokens, u.completion_tokens))
+            })
+            .unwrap_or((0, 0));
 
-        let body = serde_json::to_vec(&response).map_err(|e| WorkerError {
-            status_code: 500,
-            body: openai_error_json(&e.to_string(), "server_error"),
-        })?;
-
-        Ok(InferenceSuccess {
-            body,
-            tokens_input,
-            tokens_output,
-            model: model_name,
-        })
+        (
+            http_response,
+            ServiceMetrics::Inference {
+                tokens_input: ti,
+                tokens_output: to,
+                model: model_name,
+            },
+        )
     }
 
-    fn call_openrouter(
+    fn call_upstream_raw(
         &self,
         req: &CreateChatCompletionRequest,
-    ) -> Result<CreateChatCompletionResponse, String> {
+    ) -> Result<http::Response<Vec<u8>>, String> {
         let url = format!("{}/chat/completions", self.endpoint);
 
         let mut response = ureq::post(&url)
@@ -129,11 +116,40 @@ impl OpenRouterWorker {
             .send_json(req)
             .map_err(|e| e.to_string())?;
 
-        response
+        let status = response.status();
+        let mut builder = http::Response::builder().status(status);
+        for name in response.headers().keys() {
+            for value in response.headers().get_all(name) {
+                if let Ok(s) = value.to_str() {
+                    builder = builder.header(name.as_str(), s);
+                }
+            }
+        }
+
+        let body = response
             .body_mut()
-            .read_json()
-            .map_err(|e| format!("failed to parse response: {e}"))
+            .read_to_vec()
+            .map_err(|e| format!("failed to read response body: {e}"))?;
+
+        builder
+            .body(body)
+            .map_err(|e| format!("failed to build http::Response: {e}"))
     }
+}
+
+/// Build an error result with an OpenAI-shaped error body and zeroed metrics.
+fn error_result(status: u16, message: &str, error_type: &str) -> HandlerResult {
+    (
+        http::Response::builder()
+            .status(status)
+            .body(openai_error_json(message, error_type))
+            .unwrap(),
+        ServiceMetrics::Inference {
+            tokens_input: 0,
+            tokens_output: 0,
+            model: String::new(),
+        },
+    )
 }
 
 /// Build an OpenAI-shaped error JSON payload.
@@ -188,6 +204,18 @@ mod tests {
         request
     }
 
+    /// Unwrap the `WireResponse` envelope from a response payload, returning
+    /// the HTTP status and body for assertions.
+    fn unwrap_wire(response: &ResponseMessage) -> (u16, Vec<u8>) {
+        if let Ok(wire) =
+            serde_json::from_slice::<vlinder_core::domain::wire::WireResponse>(&response.payload)
+        {
+            (wire.inner.status().as_u16(), wire.inner.into_body())
+        } else {
+            (response.status_code, response.payload.clone())
+        }
+    }
+
     #[test]
     fn rejects_invalid_payload() {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
@@ -201,8 +229,9 @@ mod tests {
         assert!(worker.tick());
 
         let (response, ack) = queue.receive_response(&request).unwrap();
-        assert_eq!(response.status_code, 400);
-        let body: serde_json::Value = serde_json::from_slice(response.payload.as_slice()).unwrap();
+        let (status, body) = unwrap_wire(&response);
+        assert_eq!(status, 400);
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(body["error"]["type"], "invalid_request_error");
         assert!(!body["error"]["message"].as_str().unwrap().is_empty());
         ack().unwrap();
@@ -254,8 +283,9 @@ mod tests {
         assert!(worker.tick());
 
         let (response, ack) = queue.receive_response(&request).unwrap();
-        assert_eq!(response.status_code, 500);
-        let body: serde_json::Value = serde_json::from_slice(response.payload.as_slice()).unwrap();
+        let (status, body) = unwrap_wire(&response);
+        assert_eq!(status, 500);
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(body["error"]["type"], "server_error");
         assert!(!body["error"]["message"].as_str().unwrap().is_empty());
         ack().unwrap();
