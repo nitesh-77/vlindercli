@@ -37,6 +37,7 @@ mod secret_store;
 mod service_type;
 pub mod session;
 mod storage;
+pub mod wire;
 pub mod workers;
 
 // ============================================================================

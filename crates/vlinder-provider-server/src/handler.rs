@@ -85,7 +85,15 @@ impl InvokeHandler {
                 if let Some(ref new_state) = response.state {
                     *self.state.write().unwrap() = Some(new_state.clone());
                 }
-                (response.status_code, response.payload.clone())
+                // Unwrap WireResponse envelope (ADR 118) — agent sees the HTTP body,
+                // not the wire-format wrapper. Fall back to raw payload if not wrapped.
+                if let Ok(wire) = serde_json::from_slice::<vlinder_core::domain::wire::WireResponse>(
+                    &response.payload,
+                ) {
+                    (wire.inner.status().as_u16(), wire.inner.into_body())
+                } else {
+                    (response.status_code, response.payload.clone())
+                }
             }
             Err(e) => (502, format!("queue error: {e}").into_bytes()),
         }

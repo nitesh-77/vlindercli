@@ -1749,6 +1749,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "http-serde-ext"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "665c24b8e7e21688dc74edb228f07c1815bbc7ff3b48a3ee72fa20937fbde095"
+dependencies = [
+ "http 1.4.0",
+ "serde",
+]
+
+[[package]]
 name = "httparse"
 version = "1.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3983,6 +3993,8 @@ dependencies = [
  "base64",
  "chrono",
  "ed25519-dalek",
+ "http 1.4.0",
+ "http-serde-ext",
  "petname",
  "rand",
  "semver",
@@ -4079,6 +4091,7 @@ name = "vlinder-ollama"
 version = "0.1.0"
 dependencies = [
  "async-openai",
+ "http 1.4.0",
  "serde",
  "serde_json",
  "tracing",
