@@ -60,7 +60,7 @@ mod tests {
     };
     use super::super::operation::Operation;
     use super::super::routing_key::{
-        AgentId, InferenceBackendType, Nonce, RoutingKey, ServiceBackend,
+        AgentId, InferenceBackendType, Nonce, RoutingKey, RoutingKind, ServiceBackend,
     };
     use super::super::storage::ObjectStorageType;
     use super::super::RuntimeType;
@@ -342,13 +342,15 @@ mod tests {
         let key = msg.routing_key();
         assert_eq!(
             key,
-            RoutingKey::Invoke {
+            RoutingKey {
                 session: msg.session.clone(),
                 branch: msg.branch,
                 submission: msg.submission.clone(),
-                harness: msg.harness,
-                runtime: msg.runtime,
-                agent: msg.agent_id.clone(),
+                kind: RoutingKind::Invoke {
+                    harness: msg.harness,
+                    runtime: msg.runtime,
+                    agent: msg.agent_id.clone(),
+                },
             }
         );
     }
@@ -371,14 +373,16 @@ mod tests {
         let key = msg.routing_key();
         assert_eq!(
             key,
-            RoutingKey::Request {
+            RoutingKey {
                 session: msg.session.clone(),
                 branch: msg.branch,
                 submission: msg.submission.clone(),
-                agent: msg.agent_id.clone(),
-                service: msg.service,
-                operation: msg.operation,
-                sequence: msg.sequence,
+                kind: RoutingKind::Request {
+                    agent: msg.agent_id.clone(),
+                    service: msg.service,
+                    operation: msg.operation,
+                    sequence: msg.sequence,
+                },
             }
         );
     }
@@ -402,14 +406,16 @@ mod tests {
         let key = response.routing_key();
         assert_eq!(
             key,
-            RoutingKey::Response {
+            RoutingKey {
                 session: response.session.clone(),
                 branch: response.branch,
                 submission: response.submission.clone(),
-                service: response.service,
-                agent: response.agent_id.clone(),
-                operation: response.operation,
-                sequence: response.sequence,
+                kind: RoutingKind::Response {
+                    service: response.service,
+                    agent: response.agent_id.clone(),
+                    operation: response.operation,
+                    sequence: response.sequence,
+                },
             }
         );
     }
@@ -430,12 +436,14 @@ mod tests {
         let key = msg.routing_key();
         assert_eq!(
             key,
-            RoutingKey::Complete {
+            RoutingKey {
                 session: msg.session.clone(),
                 branch: msg.branch,
                 submission: msg.submission.clone(),
-                agent: msg.agent_id.clone(),
-                harness: msg.harness,
+                kind: RoutingKind::Complete {
+                    agent: msg.agent_id.clone(),
+                    harness: msg.harness,
+                },
             }
         );
     }
@@ -459,12 +467,14 @@ mod tests {
         let key = msg.routing_key();
         assert_eq!(
             key,
-            RoutingKey::Delegate {
+            RoutingKey {
                 session: msg.session.clone(),
                 branch: msg.branch,
                 submission: msg.submission.clone(),
-                caller: msg.caller.clone(),
-                target: msg.target.clone(),
+                kind: RoutingKind::Delegate {
+                    caller: msg.caller.clone(),
+                    target: msg.target.clone(),
+                },
             }
         );
     }
@@ -488,13 +498,15 @@ mod tests {
         let reply_key = msg.reply_routing_key();
         assert_eq!(
             reply_key,
-            RoutingKey::DelegateReply {
+            RoutingKey {
                 session: msg.session.clone(),
                 branch: msg.branch,
                 submission: msg.submission.clone(),
-                caller: msg.caller.clone(),
-                target: msg.target.clone(),
-                nonce: Nonce::new("abc123"),
+                kind: RoutingKind::DelegateReply {
+                    caller: msg.caller.clone(),
+                    target: msg.target.clone(),
+                    nonce: Nonce::new("abc123"),
+                },
             }
         );
     }

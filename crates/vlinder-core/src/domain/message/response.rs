@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use super::super::diagnostics::ServiceDiagnostics;
 use super::super::operation::Operation;
-use super::super::routing_key::{AgentId, RoutingKey, ServiceBackend};
+use super::super::routing_key::{AgentId, RoutingKey, RoutingKind, ServiceBackend};
 use super::identity::{BranchId, MessageId, Sequence, SessionId, SubmissionId};
 use super::request::RequestMessage;
 use super::PROTOCOL_VERSION;
@@ -82,14 +82,16 @@ impl ResponseMessage {
 
     /// Produce the routing key for this message (ADR 096 §4).
     pub fn routing_key(&self) -> RoutingKey {
-        RoutingKey::Response {
+        RoutingKey {
             session: self.session.clone(),
             branch: self.branch,
             submission: self.submission.clone(),
-            service: self.service,
-            agent: self.agent_id.clone(),
-            operation: self.operation,
-            sequence: self.sequence,
+            kind: RoutingKind::Response {
+                service: self.service,
+                agent: self.agent_id.clone(),
+                operation: self.operation,
+                sequence: self.sequence,
+            },
         }
     }
 }

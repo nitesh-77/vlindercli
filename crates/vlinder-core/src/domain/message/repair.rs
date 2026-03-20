@@ -1,7 +1,7 @@
 //! `RepairMessage`: Platform → Sidecar (replay a failed service call, ADR 113).
 
 use super::super::operation::Operation;
-use super::super::routing_key::{AgentId, RoutingKey, ServiceBackend};
+use super::super::routing_key::{AgentId, RoutingKey, RoutingKind, ServiceBackend};
 use super::identity::{
     BranchId, DagNodeId, HarnessType, MessageId, Sequence, SessionId, SubmissionId,
 };
@@ -75,12 +75,14 @@ impl RepairMessage {
 
     /// Produce the routing key for this message.
     pub fn routing_key(&self) -> RoutingKey {
-        RoutingKey::Repair {
+        RoutingKey {
             session: self.session.clone(),
             branch: self.branch,
             submission: self.submission.clone(),
-            harness: self.harness,
-            agent: self.agent_id.clone(),
+            kind: RoutingKind::Repair {
+                harness: self.harness,
+                agent: self.agent_id.clone(),
+            },
         }
     }
 }

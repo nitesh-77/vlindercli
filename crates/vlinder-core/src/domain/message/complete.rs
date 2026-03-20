@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::super::diagnostics::RuntimeDiagnostics;
-use super::super::routing_key::{AgentId, RoutingKey};
+use super::super::routing_key::{AgentId, RoutingKey, RoutingKind};
 use super::identity::{BranchId, HarnessType, MessageId, SessionId, SubmissionId};
 use super::PROTOCOL_VERSION;
 
@@ -57,12 +57,14 @@ impl CompleteMessage {
 
     /// Produce the routing key for this message (ADR 096 §4).
     pub fn routing_key(&self) -> RoutingKey {
-        RoutingKey::Complete {
+        RoutingKey {
             session: self.session.clone(),
             branch: self.branch,
             submission: self.submission.clone(),
-            agent: self.agent_id.clone(),
-            harness: self.harness,
+            kind: RoutingKind::Complete {
+                agent: self.agent_id.clone(),
+                harness: self.harness,
+            },
         }
     }
 }

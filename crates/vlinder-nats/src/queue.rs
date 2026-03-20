@@ -22,8 +22,8 @@ use vlinder_core::domain::{
     Acknowledgement, AgentId, BranchId, CompleteMessage, DagNodeId, DelegateDiagnostics,
     DelegateMessage, HarnessType, InvokeDiagnostics, InvokeMessage, MessageId, MessageQueue, Nonce,
     Operation, QueueError, RepairMessage, RequestDiagnostics, RequestMessage, ResponseMessage,
-    RoutingKey, RuntimeDiagnostics, RuntimeType, Sequence, ServiceBackend, ServiceDiagnostics,
-    ServiceType, SessionId, SubmissionId,
+    RoutingKey, RoutingKind, RuntimeDiagnostics, RuntimeType, Sequence, ServiceBackend,
+    ServiceDiagnostics, ServiceType, SessionId, SubmissionId,
 };
 
 /// NATS queue with `JetStream` durability.
@@ -826,11 +826,13 @@ impl MessageQueue for NatsQueue {
     }
 
     fn send_fork(&self, msg: vlinder_core::domain::ForkMessage) -> Result<(), QueueError> {
-        let subject = routing_key_to_subject(&RoutingKey::Fork {
+        let subject = routing_key_to_subject(&RoutingKey {
             session: msg.session.clone(),
             branch: msg.branch,
             submission: msg.submission.clone(),
-            agent_name: msg.agent_name.clone(),
+            kind: RoutingKind::Fork {
+                agent_name: msg.agent_name.clone(),
+            },
         });
 
         self.inner.runtime.block_on(async {
@@ -854,11 +856,13 @@ impl MessageQueue for NatsQueue {
     }
 
     fn send_promote(&self, msg: vlinder_core::domain::PromoteMessage) -> Result<(), QueueError> {
-        let subject = routing_key_to_subject(&RoutingKey::Promote {
+        let subject = routing_key_to_subject(&RoutingKey {
             session: msg.session.clone(),
             branch: msg.branch,
             submission: msg.submission.clone(),
-            agent_name: msg.agent_name.clone(),
+            kind: RoutingKind::Promote {
+                agent_name: msg.agent_name.clone(),
+            },
         });
 
         self.inner.runtime.block_on(async {
@@ -895,40 +899,26 @@ impl MessageQueue for NatsQueue {
 /// serialization. Injectivity: distinct routing keys produce distinct
 /// subjects (verified by tests in `routing_key.rs`).
 fn routing_key_to_subject(key: &RoutingKey) -> String {
-    match key {
-        RoutingKey::Invoke {
-            session,
-            branch,
-            submission,
+    let prefix = format!("vlinder.{}.{}.{}", key.session, key.branch, key.submission);
+    let suffix = match &key.kind {
+        RoutingKind::Invoke {
             harness,
             runtime,
             agent,
         } => {
-            format!("vlinder.{session}.{branch}.{submission}.invoke.{harness}.{runtime}.{agent}",)
+            format!("invoke.{harness}.{runtime}.{agent}")
         }
-        RoutingKey::Complete {
-            session,
-            branch,
-            submission,
-            agent,
-            harness,
-        } => {
-            format!("vlinder.{session}.{branch}.{submission}.complete.{agent}.{harness}",)
+        RoutingKind::Complete { agent, harness } => {
+            format!("complete.{agent}.{harness}")
         }
-        RoutingKey::Request {
-            session,
-            branch,
-            submission,
+        RoutingKind::Request {
             agent,
             service,
             operation,
             sequence,
         } => {
             format!(
-                "vlinder.{}.{}.{}.req.{}.{}.{}.{}.{}",
-                session,
-                branch,
-                submission,
+                "req.{}.{}.{}.{}.{}",
                 agent,
                 service.service_type(),
                 service.backend_str(),
@@ -936,20 +926,14 @@ fn routing_key_to_subject(key: &RoutingKey) -> String {
                 sequence,
             )
         }
-        RoutingKey::Response {
-            session,
-            branch,
-            submission,
+        RoutingKind::Response {
             service,
             agent,
             operation,
             sequence,
         } => {
             format!(
-                "vlinder.{}.{}.{}.res.{}.{}.{}.{}.{}",
-                session,
-                branch,
-                submission,
+                "res.{}.{}.{}.{}.{}",
                 service.service_type(),
                 service.backend_str(),
                 agent,
@@ -957,53 +941,27 @@ fn routing_key_to_subject(key: &RoutingKey) -> String {
                 sequence,
             )
         }
-        RoutingKey::Delegate {
-            session,
-            branch,
-            submission,
-            caller,
-            target,
-        } => {
-            format!("vlinder.{session}.{branch}.{submission}.delegate.{caller}.{target}",)
+        RoutingKind::Delegate { caller, target } => {
+            format!("delegate.{caller}.{target}")
         }
-        RoutingKey::DelegateReply {
-            session,
-            branch,
-            submission,
+        RoutingKind::DelegateReply {
             caller,
             target,
             nonce,
         } => {
-            format!(
-                "vlinder.{session}.{branch}.{submission}.delegate-reply.{caller}.{target}.{nonce}",
-            )
+            format!("delegate-reply.{caller}.{target}.{nonce}")
         }
-        RoutingKey::Repair {
-            session,
-            branch,
-            submission,
-            harness,
-            agent,
-        } => {
-            format!("vlinder.{session}.{branch}.{submission}.repair.{harness}.{agent}",)
+        RoutingKind::Repair { harness, agent } => {
+            format!("repair.{harness}.{agent}")
         }
-        RoutingKey::Fork {
-            session,
-            branch,
-            submission,
-            agent_name,
-        } => {
-            format!("vlinder.{session}.{branch}.{submission}.fork.{agent_name}",)
+        RoutingKind::Fork { agent_name } => {
+            format!("fork.{agent_name}")
         }
-        RoutingKey::Promote {
-            session,
-            branch,
-            submission,
-            agent_name,
-        } => {
-            format!("vlinder.{session}.{branch}.{submission}.promote.{agent_name}",)
+        RoutingKind::Promote { agent_name } => {
+            format!("promote.{agent_name}")
         }
-    }
+    };
+    format!("{prefix}.{suffix}")
 }
 
 /// Parse a NATS subject back into a `RoutingKey`.
@@ -1020,85 +978,56 @@ pub fn subject_to_routing_key(subject: &str) -> Option<RoutingKey> {
     let branch = BranchId::from(s[2].parse::<i64>().unwrap_or(0));
     let submission = SubmissionId::from(s[3].to_string());
 
-    match s[4] {
-        // vlinder.{session}.{branch}.{submission}.invoke.{harness}.{runtime}.{agent}
-        "invoke" if s.len() == 8 => Some(RoutingKey::Invoke {
-            session,
-            branch,
-            submission,
+    let kind = match s[4] {
+        "invoke" if s.len() == 8 => Some(RoutingKind::Invoke {
             harness: HarnessType::from_str(s[5]).ok()?,
             runtime: RuntimeType::from_str(s[6]).ok()?,
             agent: AgentId::new(s[7]),
         }),
-        // vlinder.{session}.{branch}.{submission}.req.{agent}.{svc}.{backend}.{op}.{seq}
-        "req" if s.len() == 10 => Some(RoutingKey::Request {
-            session,
-            branch,
-            submission,
+        "req" if s.len() == 10 => Some(RoutingKind::Request {
             agent: AgentId::new(s[5]),
             service: ServiceBackend::from_parts(ServiceType::from_str(s[6]).ok()?, s[7])?,
             operation: Operation::from_str(s[8]).ok()?,
             sequence: Sequence::from(s[9].parse::<u32>().ok()?),
         }),
-        // vlinder.{session}.{branch}.{submission}.res.{svc}.{backend}.{agent}.{op}.{seq}
-        "res" if s.len() == 10 => Some(RoutingKey::Response {
-            session,
-            branch,
-            submission,
+        "res" if s.len() == 10 => Some(RoutingKind::Response {
             service: ServiceBackend::from_parts(ServiceType::from_str(s[5]).ok()?, s[6])?,
             agent: AgentId::new(s[7]),
             operation: Operation::from_str(s[8]).ok()?,
             sequence: Sequence::from(s[9].parse::<u32>().ok()?),
         }),
-        // vlinder.{session}.{branch}.{submission}.complete.{agent}.{harness}
-        "complete" if s.len() == 7 => Some(RoutingKey::Complete {
-            session,
-            branch,
-            submission,
+        "complete" if s.len() == 7 => Some(RoutingKind::Complete {
             agent: AgentId::new(s[5]),
             harness: HarnessType::from_str(s[6]).ok()?,
         }),
-        // vlinder.{session}.{branch}.{submission}.delegate.{caller}.{target}
-        "delegate" if s.len() == 7 => Some(RoutingKey::Delegate {
-            session,
-            branch,
-            submission,
+        "delegate" if s.len() == 7 => Some(RoutingKind::Delegate {
             caller: AgentId::new(s[5]),
             target: AgentId::new(s[6]),
         }),
-        // vlinder.{session}.{branch}.{submission}.delegate-reply.{caller}.{target}.{nonce}
-        "delegate-reply" if s.len() == 8 => Some(RoutingKey::DelegateReply {
-            session,
-            branch,
-            submission,
+        "delegate-reply" if s.len() == 8 => Some(RoutingKind::DelegateReply {
             caller: AgentId::new(s[5]),
             target: AgentId::new(s[6]),
             nonce: Nonce::new(s[7]),
         }),
-        // vlinder.{session}.{branch}.{submission}.repair.{harness}.{agent}
-        "repair" if s.len() == 7 => Some(RoutingKey::Repair {
-            session,
-            branch,
-            submission,
+        "repair" if s.len() == 7 => Some(RoutingKind::Repair {
             harness: HarnessType::from_str(s[5]).ok()?,
             agent: AgentId::new(s[6]),
         }),
-        // vlinder.{session}.{branch}.{submission}.fork.{agent_name}
-        "fork" if s.len() == 6 => Some(RoutingKey::Fork {
-            session,
-            branch,
-            submission,
+        "fork" if s.len() == 6 => Some(RoutingKind::Fork {
             agent_name: s[5].to_string(),
         }),
-        // vlinder.{session}.{branch}.{submission}.promote.{agent_name}
-        "promote" if s.len() == 6 => Some(RoutingKey::Promote {
-            session,
-            branch,
-            submission,
+        "promote" if s.len() == 6 => Some(RoutingKind::Promote {
             agent_name: s[5].to_string(),
         }),
         _ => None,
-    }
+    };
+
+    kind.map(|kind| RoutingKey {
+        session,
+        branch,
+        submission,
+        kind,
+    })
 }
 
 /// Serialize an `InvokeMessage` into NATS headers (sans payload).
@@ -1232,14 +1161,11 @@ pub fn from_nats_headers<S: BuildHasher>(
     let session = SessionId::try_from(headers.get("session-id")?.clone()).ok()?;
     let state = headers.get("state").cloned();
 
-    match key {
-        RoutingKey::Invoke {
-            branch,
-            submission,
+    match &key.kind {
+        RoutingKind::Invoke {
             harness,
             runtime,
             agent,
-            ..
         } => {
             let diagnostics = headers
                 .get("diagnostics")
@@ -1254,8 +1180,8 @@ pub fn from_nats_headers<S: BuildHasher>(
             Some(ObservableMessageHeaders::Invoke {
                 id,
                 protocol_version,
-                branch: *branch,
-                submission: submission.clone(),
+                branch: key.branch,
+                submission: key.submission.clone(),
                 session,
                 harness: *harness,
                 runtime: *runtime,
@@ -1265,14 +1191,11 @@ pub fn from_nats_headers<S: BuildHasher>(
                 dag_parent,
             })
         }
-        RoutingKey::Request {
-            branch,
-            submission,
+        RoutingKind::Request {
             agent,
             service,
             operation,
             sequence,
-            ..
         } => {
             let diagnostics = headers
                 .get("diagnostics")
@@ -1287,8 +1210,8 @@ pub fn from_nats_headers<S: BuildHasher>(
             Some(ObservableMessageHeaders::Request {
                 id,
                 protocol_version,
-                branch: *branch,
-                submission: submission.clone(),
+                branch: key.branch,
+                submission: key.submission.clone(),
                 session,
                 agent_id: agent.clone(),
                 service: *service,
@@ -1299,14 +1222,11 @@ pub fn from_nats_headers<S: BuildHasher>(
                 checkpoint: headers.get("checkpoint").cloned(),
             })
         }
-        RoutingKey::Response {
-            branch,
-            submission,
+        RoutingKind::Response {
             service,
             agent,
             operation,
             sequence,
-            ..
         } => {
             let diagnostics = headers
                 .get("diagnostics")
@@ -1321,8 +1241,8 @@ pub fn from_nats_headers<S: BuildHasher>(
             Some(ObservableMessageHeaders::Response {
                 id,
                 protocol_version,
-                branch: *branch,
-                submission: submission.clone(),
+                branch: key.branch,
+                submission: key.submission.clone(),
                 session,
                 agent_id: agent.clone(),
                 service: *service,
@@ -1335,13 +1255,7 @@ pub fn from_nats_headers<S: BuildHasher>(
                 checkpoint: headers.get("checkpoint").cloned(),
             })
         }
-        RoutingKey::Complete {
-            branch,
-            submission,
-            agent,
-            harness,
-            ..
-        } => {
+        RoutingKind::Complete { agent, harness } => {
             let diagnostics = headers
                 .get("diagnostics")
                 .and_then(|s| serde_json::from_str(s).ok())
@@ -1350,8 +1264,8 @@ pub fn from_nats_headers<S: BuildHasher>(
             Some(ObservableMessageHeaders::Complete {
                 id,
                 protocol_version,
-                branch: *branch,
-                submission: submission.clone(),
+                branch: key.branch,
+                submission: key.submission.clone(),
                 session,
                 agent_id: agent.clone(),
                 harness: *harness,
@@ -1359,13 +1273,7 @@ pub fn from_nats_headers<S: BuildHasher>(
                 diagnostics,
             })
         }
-        RoutingKey::Delegate {
-            branch,
-            submission,
-            caller,
-            target,
-            ..
-        } => {
+        RoutingKind::Delegate { caller, target } => {
             let diagnostics = headers
                 .get("diagnostics")
                 .and_then(|s| serde_json::from_str(s).ok())
@@ -1377,8 +1285,8 @@ pub fn from_nats_headers<S: BuildHasher>(
             Some(ObservableMessageHeaders::Delegate {
                 id,
                 protocol_version,
-                branch: *branch,
-                submission: submission.clone(),
+                branch: key.branch,
+                submission: key.submission.clone(),
                 session,
                 caller: caller.clone(),
                 target: target.clone(),
@@ -1387,18 +1295,12 @@ pub fn from_nats_headers<S: BuildHasher>(
                 diagnostics,
             })
         }
-        RoutingKey::DelegateReply { .. } => {
+        RoutingKind::DelegateReply { .. } => {
             // DelegateReply carries a CompleteMessage — same as Complete.
             // Handled via receive_delegate_reply which already parses directly.
             None
         }
-        RoutingKey::Repair {
-            branch,
-            submission,
-            harness,
-            agent,
-            ..
-        } => {
+        RoutingKind::Repair { harness, agent } => {
             let dag_parent = DagNodeId::from(headers.get("dag-parent").cloned()?);
             let checkpoint = headers.get("checkpoint").cloned()?;
             let service = ServiceBackend::from_parts(
@@ -1411,8 +1313,8 @@ pub fn from_nats_headers<S: BuildHasher>(
             Some(ObservableMessageHeaders::Repair {
                 id,
                 protocol_version,
-                branch: *branch,
-                submission: submission.clone(),
+                branch: key.branch,
+                submission: key.submission.clone(),
                 session,
                 agent_id: agent.clone(),
                 harness: *harness,
@@ -1424,36 +1326,26 @@ pub fn from_nats_headers<S: BuildHasher>(
                 state,
             })
         }
-        RoutingKey::Fork {
-            branch,
-            submission,
-            agent_name,
-            ..
-        } => {
+        RoutingKind::Fork { agent_name } => {
             let branch_name = headers.get("branch-name").cloned()?;
             let fork_point = DagNodeId::from(headers.get("fork-point").cloned()?);
 
             Some(ObservableMessageHeaders::Fork {
                 id,
                 protocol_version,
-                branch: *branch,
-                submission: submission.clone(),
+                branch: key.branch,
+                submission: key.submission.clone(),
                 session,
                 agent_name: agent_name.clone(),
                 branch_name,
                 fork_point,
             })
         }
-        RoutingKey::Promote {
-            branch,
-            submission,
-            agent_name,
-            ..
-        } => Some(ObservableMessageHeaders::Promote {
+        RoutingKind::Promote { agent_name } => Some(ObservableMessageHeaders::Promote {
             id,
             protocol_version,
-            branch: *branch,
-            submission: submission.clone(),
+            branch: key.branch,
+            submission: key.submission.clone(),
             session,
             agent_name: agent_name.clone(),
         }),
@@ -1513,13 +1405,15 @@ mod tests {
 
     #[test]
     fn invoke_subject_format() {
-        let key = RoutingKey::Invoke {
+        let key = RoutingKey {
             session: session(),
             branch: timeline(),
             submission: submission(),
-            harness: HarnessType::Cli,
-            runtime: RuntimeType::Container,
-            agent: agent(),
+            kind: RoutingKind::Invoke {
+                harness: HarnessType::Cli,
+                runtime: RuntimeType::Container,
+                agent: agent(),
+            },
         };
         assert_eq!(
             routing_key_to_subject(&key),
@@ -1534,14 +1428,16 @@ mod tests {
 
     #[test]
     fn request_subject_format() {
-        let key = RoutingKey::Request {
+        let key = RoutingKey {
             session: session(),
             branch: timeline(),
             submission: submission(),
-            agent: agent(),
-            service: ServiceBackend::Kv(ObjectStorageType::Sqlite),
-            operation: Operation::Get,
-            sequence: Sequence::first(),
+            kind: RoutingKind::Request {
+                agent: agent(),
+                service: ServiceBackend::Kv(ObjectStorageType::Sqlite),
+                operation: Operation::Get,
+                sequence: Sequence::first(),
+            },
         };
         assert_eq!(
             routing_key_to_subject(&key),
@@ -1556,14 +1452,16 @@ mod tests {
 
     #[test]
     fn response_subject_format() {
-        let key = RoutingKey::Response {
+        let key = RoutingKey {
             session: session(),
             branch: timeline(),
             submission: submission(),
-            service: ServiceBackend::Infer(InferenceBackendType::Ollama),
-            agent: agent(),
-            operation: Operation::Run,
-            sequence: Sequence::from(3),
+            kind: RoutingKind::Response {
+                service: ServiceBackend::Infer(InferenceBackendType::Ollama),
+                agent: agent(),
+                operation: Operation::Run,
+                sequence: Sequence::from(3),
+            },
         };
         assert_eq!(
             routing_key_to_subject(&key),
@@ -1578,12 +1476,14 @@ mod tests {
 
     #[test]
     fn complete_subject_format() {
-        let key = RoutingKey::Complete {
+        let key = RoutingKey {
             session: session(),
             branch: timeline(),
             submission: submission(),
-            agent: agent(),
-            harness: HarnessType::Web,
+            kind: RoutingKind::Complete {
+                agent: agent(),
+                harness: HarnessType::Web,
+            },
         };
         assert_eq!(
             routing_key_to_subject(&key),
@@ -1598,12 +1498,14 @@ mod tests {
 
     #[test]
     fn delegate_subject_format() {
-        let key = RoutingKey::Delegate {
+        let key = RoutingKey {
             session: session(),
             branch: timeline(),
             submission: submission(),
-            caller: agent(),
-            target: agent_alt(),
+            kind: RoutingKind::Delegate {
+                caller: agent(),
+                target: agent_alt(),
+            },
         };
         assert_eq!(
             routing_key_to_subject(&key),
@@ -1618,13 +1520,15 @@ mod tests {
 
     #[test]
     fn delegate_reply_subject_format() {
-        let key = RoutingKey::DelegateReply {
+        let key = RoutingKey {
             session: session(),
             branch: timeline(),
             submission: submission(),
-            caller: agent(),
-            target: agent_alt(),
-            nonce: Nonce::new("abc123"),
+            kind: RoutingKind::DelegateReply {
+                caller: agent(),
+                target: agent_alt(),
+                nonce: Nonce::new("abc123"),
+            },
         };
         assert_eq!(
             routing_key_to_subject(&key),
@@ -1653,319 +1557,379 @@ mod tests {
 
     #[test]
     fn invoke_injective_by_timeline() {
-        let a = RoutingKey::Invoke {
+        let a = RoutingKey {
             session: session(),
             branch: timeline(),
             submission: submission(),
-            harness: HarnessType::Cli,
-            runtime: RuntimeType::Container,
-            agent: agent(),
+            kind: RoutingKind::Invoke {
+                harness: HarnessType::Cli,
+                runtime: RuntimeType::Container,
+                agent: agent(),
+            },
         };
-        let b = RoutingKey::Invoke {
+        let b = RoutingKey {
             session: session(),
             branch: timeline_alt(),
             submission: submission(),
-            harness: HarnessType::Cli,
-            runtime: RuntimeType::Container,
-            agent: agent(),
+            kind: RoutingKind::Invoke {
+                harness: HarnessType::Cli,
+                runtime: RuntimeType::Container,
+                agent: agent(),
+            },
         };
         assert_injective(&a, &b);
     }
 
     #[test]
     fn invoke_injective_by_submission() {
-        let a = RoutingKey::Invoke {
+        let a = RoutingKey {
             session: session(),
             branch: timeline(),
             submission: submission(),
-            harness: HarnessType::Cli,
-            runtime: RuntimeType::Container,
-            agent: agent(),
+            kind: RoutingKind::Invoke {
+                harness: HarnessType::Cli,
+                runtime: RuntimeType::Container,
+                agent: agent(),
+            },
         };
-        let b = RoutingKey::Invoke {
+        let b = RoutingKey {
             session: session(),
             branch: timeline(),
             submission: submission_alt(),
-            harness: HarnessType::Cli,
-            runtime: RuntimeType::Container,
-            agent: agent(),
+            kind: RoutingKind::Invoke {
+                harness: HarnessType::Cli,
+                runtime: RuntimeType::Container,
+                agent: agent(),
+            },
         };
         assert_injective(&a, &b);
     }
 
     #[test]
     fn invoke_injective_by_harness() {
-        let a = RoutingKey::Invoke {
+        let a = RoutingKey {
             session: session(),
             branch: timeline(),
             submission: submission(),
-            harness: HarnessType::Cli,
-            runtime: RuntimeType::Container,
-            agent: agent(),
+            kind: RoutingKind::Invoke {
+                harness: HarnessType::Cli,
+                runtime: RuntimeType::Container,
+                agent: agent(),
+            },
         };
-        let b = RoutingKey::Invoke {
+        let b = RoutingKey {
             session: session(),
             branch: timeline(),
             submission: submission(),
-            harness: HarnessType::Web,
-            runtime: RuntimeType::Container,
-            agent: agent(),
+            kind: RoutingKind::Invoke {
+                harness: HarnessType::Web,
+                runtime: RuntimeType::Container,
+                agent: agent(),
+            },
         };
         assert_injective(&a, &b);
     }
 
     #[test]
     fn invoke_injective_by_agent() {
-        let a = RoutingKey::Invoke {
+        let a = RoutingKey {
             session: session(),
             branch: timeline(),
             submission: submission(),
-            harness: HarnessType::Cli,
-            runtime: RuntimeType::Container,
-            agent: agent(),
+            kind: RoutingKind::Invoke {
+                harness: HarnessType::Cli,
+                runtime: RuntimeType::Container,
+                agent: agent(),
+            },
         };
-        let b = RoutingKey::Invoke {
+        let b = RoutingKey {
             session: session(),
             branch: timeline(),
             submission: submission(),
-            harness: HarnessType::Cli,
-            runtime: RuntimeType::Container,
-            agent: agent_alt(),
+            kind: RoutingKind::Invoke {
+                harness: HarnessType::Cli,
+                runtime: RuntimeType::Container,
+                agent: agent_alt(),
+            },
         };
         assert_injective(&a, &b);
     }
 
     #[test]
     fn request_injective_by_service() {
-        let a = RoutingKey::Request {
+        let a = RoutingKey {
             session: session(),
             branch: timeline(),
             submission: submission(),
-            agent: agent(),
-            service: ServiceBackend::Kv(ObjectStorageType::Sqlite),
-            operation: Operation::Get,
-            sequence: Sequence::first(),
+            kind: RoutingKind::Request {
+                agent: agent(),
+                service: ServiceBackend::Kv(ObjectStorageType::Sqlite),
+                operation: Operation::Get,
+                sequence: Sequence::first(),
+            },
         };
-        let b = RoutingKey::Request {
+        let b = RoutingKey {
             session: session(),
             branch: timeline(),
             submission: submission(),
-            agent: agent(),
-            service: ServiceBackend::Vec(VectorStorageType::SqliteVec),
-            operation: Operation::Get,
-            sequence: Sequence::first(),
+            kind: RoutingKind::Request {
+                agent: agent(),
+                service: ServiceBackend::Vec(VectorStorageType::SqliteVec),
+                operation: Operation::Get,
+                sequence: Sequence::first(),
+            },
         };
         assert_injective(&a, &b);
     }
 
     #[test]
     fn request_injective_by_backend() {
-        let a = RoutingKey::Request {
+        let a = RoutingKey {
             session: session(),
             branch: timeline(),
             submission: submission(),
-            agent: agent(),
-            service: ServiceBackend::Kv(ObjectStorageType::Sqlite),
-            operation: Operation::Get,
-            sequence: Sequence::first(),
+            kind: RoutingKind::Request {
+                agent: agent(),
+                service: ServiceBackend::Kv(ObjectStorageType::Sqlite),
+                operation: Operation::Get,
+                sequence: Sequence::first(),
+            },
         };
-        let b = RoutingKey::Request {
+        let b = RoutingKey {
             session: session(),
             branch: timeline(),
             submission: submission(),
-            agent: agent(),
-            service: ServiceBackend::Kv(ObjectStorageType::InMemory),
-            operation: Operation::Get,
-            sequence: Sequence::first(),
+            kind: RoutingKind::Request {
+                agent: agent(),
+                service: ServiceBackend::Kv(ObjectStorageType::InMemory),
+                operation: Operation::Get,
+                sequence: Sequence::first(),
+            },
         };
         assert_injective(&a, &b);
     }
 
     #[test]
     fn request_injective_by_operation() {
-        let a = RoutingKey::Request {
+        let a = RoutingKey {
             session: session(),
             branch: timeline(),
             submission: submission(),
-            agent: agent(),
-            service: ServiceBackend::Kv(ObjectStorageType::Sqlite),
-            operation: Operation::Get,
-            sequence: Sequence::first(),
+            kind: RoutingKind::Request {
+                agent: agent(),
+                service: ServiceBackend::Kv(ObjectStorageType::Sqlite),
+                operation: Operation::Get,
+                sequence: Sequence::first(),
+            },
         };
-        let b = RoutingKey::Request {
+        let b = RoutingKey {
             session: session(),
             branch: timeline(),
             submission: submission(),
-            agent: agent(),
-            service: ServiceBackend::Kv(ObjectStorageType::Sqlite),
-            operation: Operation::Put,
-            sequence: Sequence::first(),
+            kind: RoutingKind::Request {
+                agent: agent(),
+                service: ServiceBackend::Kv(ObjectStorageType::Sqlite),
+                operation: Operation::Put,
+                sequence: Sequence::first(),
+            },
         };
         assert_injective(&a, &b);
     }
 
     #[test]
     fn request_injective_by_sequence() {
-        let a = RoutingKey::Request {
+        let a = RoutingKey {
             session: session(),
             branch: timeline(),
             submission: submission(),
-            agent: agent(),
-            service: ServiceBackend::Kv(ObjectStorageType::Sqlite),
-            operation: Operation::Get,
-            sequence: Sequence::first(),
+            kind: RoutingKind::Request {
+                agent: agent(),
+                service: ServiceBackend::Kv(ObjectStorageType::Sqlite),
+                operation: Operation::Get,
+                sequence: Sequence::first(),
+            },
         };
-        let b = RoutingKey::Request {
+        let b = RoutingKey {
             session: session(),
             branch: timeline(),
             submission: submission(),
-            agent: agent(),
-            service: ServiceBackend::Kv(ObjectStorageType::Sqlite),
-            operation: Operation::Get,
-            sequence: Sequence::from(2),
+            kind: RoutingKind::Request {
+                agent: agent(),
+                service: ServiceBackend::Kv(ObjectStorageType::Sqlite),
+                operation: Operation::Get,
+                sequence: Sequence::from(2),
+            },
         };
         assert_injective(&a, &b);
     }
 
     #[test]
     fn response_injective_by_agent() {
-        let a = RoutingKey::Response {
+        let a = RoutingKey {
             session: session(),
             branch: timeline(),
             submission: submission(),
-            service: ServiceBackend::Infer(InferenceBackendType::Ollama),
-            agent: agent(),
-            operation: Operation::Run,
-            sequence: Sequence::first(),
+            kind: RoutingKind::Response {
+                service: ServiceBackend::Infer(InferenceBackendType::Ollama),
+                agent: agent(),
+                operation: Operation::Run,
+                sequence: Sequence::first(),
+            },
         };
-        let b = RoutingKey::Response {
+        let b = RoutingKey {
             session: session(),
             branch: timeline(),
             submission: submission(),
-            service: ServiceBackend::Infer(InferenceBackendType::Ollama),
-            agent: agent_alt(),
-            operation: Operation::Run,
-            sequence: Sequence::first(),
+            kind: RoutingKind::Response {
+                service: ServiceBackend::Infer(InferenceBackendType::Ollama),
+                agent: agent_alt(),
+                operation: Operation::Run,
+                sequence: Sequence::first(),
+            },
         };
         assert_injective(&a, &b);
     }
 
     #[test]
     fn response_injective_by_backend() {
-        let a = RoutingKey::Response {
+        let a = RoutingKey {
             session: session(),
             branch: timeline(),
             submission: submission(),
-            service: ServiceBackend::Infer(InferenceBackendType::Ollama),
-            agent: agent(),
-            operation: Operation::Run,
-            sequence: Sequence::first(),
+            kind: RoutingKind::Response {
+                service: ServiceBackend::Infer(InferenceBackendType::Ollama),
+                agent: agent(),
+                operation: Operation::Run,
+                sequence: Sequence::first(),
+            },
         };
-        let b = RoutingKey::Response {
+        let b = RoutingKey {
             session: session(),
             branch: timeline(),
             submission: submission(),
-            service: ServiceBackend::Infer(InferenceBackendType::OpenRouter),
-            agent: agent(),
-            operation: Operation::Run,
-            sequence: Sequence::first(),
+            kind: RoutingKind::Response {
+                service: ServiceBackend::Infer(InferenceBackendType::OpenRouter),
+                agent: agent(),
+                operation: Operation::Run,
+                sequence: Sequence::first(),
+            },
         };
         assert_injective(&a, &b);
     }
 
     #[test]
     fn complete_injective_by_harness() {
-        let a = RoutingKey::Complete {
+        let a = RoutingKey {
             session: session(),
             branch: timeline(),
             submission: submission(),
-            agent: agent(),
-            harness: HarnessType::Cli,
+            kind: RoutingKind::Complete {
+                agent: agent(),
+                harness: HarnessType::Cli,
+            },
         };
-        let b = RoutingKey::Complete {
+        let b = RoutingKey {
             session: session(),
             branch: timeline(),
             submission: submission(),
-            agent: agent(),
-            harness: HarnessType::Web,
+            kind: RoutingKind::Complete {
+                agent: agent(),
+                harness: HarnessType::Web,
+            },
         };
         assert_injective(&a, &b);
     }
 
     #[test]
     fn complete_injective_by_agent() {
-        let a = RoutingKey::Complete {
+        let a = RoutingKey {
             session: session(),
             branch: timeline(),
             submission: submission(),
-            agent: agent(),
-            harness: HarnessType::Cli,
+            kind: RoutingKind::Complete {
+                agent: agent(),
+                harness: HarnessType::Cli,
+            },
         };
-        let b = RoutingKey::Complete {
+        let b = RoutingKey {
             session: session(),
             branch: timeline(),
             submission: submission(),
-            agent: agent_alt(),
-            harness: HarnessType::Cli,
+            kind: RoutingKind::Complete {
+                agent: agent_alt(),
+                harness: HarnessType::Cli,
+            },
         };
         assert_injective(&a, &b);
     }
 
     #[test]
     fn delegate_injective_by_caller() {
-        let a = RoutingKey::Delegate {
+        let a = RoutingKey {
             session: session(),
             branch: timeline(),
             submission: submission(),
-            caller: agent(),
-            target: agent_alt(),
+            kind: RoutingKind::Delegate {
+                caller: agent(),
+                target: agent_alt(),
+            },
         };
-        let b = RoutingKey::Delegate {
+        let b = RoutingKey {
             session: session(),
             branch: timeline(),
             submission: submission(),
-            caller: agent_alt(),
-            target: agent_alt(),
+            kind: RoutingKind::Delegate {
+                caller: agent_alt(),
+                target: agent_alt(),
+            },
         };
         assert_injective(&a, &b);
     }
 
     #[test]
     fn delegate_injective_by_target() {
-        let a = RoutingKey::Delegate {
+        let a = RoutingKey {
             session: session(),
             branch: timeline(),
             submission: submission(),
-            caller: agent(),
-            target: agent_alt(),
+            kind: RoutingKind::Delegate {
+                caller: agent(),
+                target: agent_alt(),
+            },
         };
-        let b = RoutingKey::Delegate {
+        let b = RoutingKey {
             session: session(),
             branch: timeline(),
             submission: submission(),
-            caller: agent(),
-            target: AgentId::new("fact-checker"),
+            kind: RoutingKind::Delegate {
+                caller: agent(),
+                target: AgentId::new("fact-checker"),
+            },
         };
         assert_injective(&a, &b);
     }
 
     #[test]
     fn delegate_reply_injective_by_nonce() {
-        let a = RoutingKey::DelegateReply {
+        let a = RoutingKey {
             session: session(),
             branch: timeline(),
             submission: submission(),
-            caller: agent(),
-            target: agent_alt(),
-            nonce: Nonce::new("nonce-1"),
+            kind: RoutingKind::DelegateReply {
+                caller: agent(),
+                target: agent_alt(),
+                nonce: Nonce::new("nonce-1"),
+            },
         };
-        let b = RoutingKey::DelegateReply {
+        let b = RoutingKey {
             session: session(),
             branch: timeline(),
             submission: submission(),
-            caller: agent(),
-            target: agent_alt(),
-            nonce: Nonce::new("nonce-2"),
+            kind: RoutingKind::DelegateReply {
+                caller: agent(),
+                target: agent_alt(),
+                nonce: Nonce::new("nonce-2"),
+            },
         };
         assert_injective(&a, &b);
     }
@@ -1976,63 +1940,75 @@ mod tests {
 
     #[test]
     fn invoke_and_complete_subjects_differ() {
-        let invoke = RoutingKey::Invoke {
+        let invoke = RoutingKey {
             session: session(),
             branch: timeline(),
             submission: submission(),
-            harness: HarnessType::Cli,
-            runtime: RuntimeType::Container,
-            agent: agent(),
+            kind: RoutingKind::Invoke {
+                harness: HarnessType::Cli,
+                runtime: RuntimeType::Container,
+                agent: agent(),
+            },
         };
-        let complete = RoutingKey::Complete {
+        let complete = RoutingKey {
             session: session(),
             branch: timeline(),
             submission: submission(),
-            agent: agent(),
-            harness: HarnessType::Cli,
+            kind: RoutingKind::Complete {
+                agent: agent(),
+                harness: HarnessType::Cli,
+            },
         };
         assert_injective(&invoke, &complete);
     }
 
     #[test]
     fn request_and_response_subjects_differ() {
-        let request = RoutingKey::Request {
+        let request = RoutingKey {
             session: session(),
             branch: timeline(),
             submission: submission(),
-            agent: agent(),
-            service: ServiceBackend::Kv(ObjectStorageType::Sqlite),
-            operation: Operation::Get,
-            sequence: Sequence::first(),
+            kind: RoutingKind::Request {
+                agent: agent(),
+                service: ServiceBackend::Kv(ObjectStorageType::Sqlite),
+                operation: Operation::Get,
+                sequence: Sequence::first(),
+            },
         };
-        let response = RoutingKey::Response {
+        let response = RoutingKey {
             session: session(),
             branch: timeline(),
             submission: submission(),
-            service: ServiceBackend::Kv(ObjectStorageType::Sqlite),
-            agent: agent(),
-            operation: Operation::Get,
-            sequence: Sequence::first(),
+            kind: RoutingKind::Response {
+                service: ServiceBackend::Kv(ObjectStorageType::Sqlite),
+                agent: agent(),
+                operation: Operation::Get,
+                sequence: Sequence::first(),
+            },
         };
         assert_injective(&request, &response);
     }
 
     #[test]
     fn delegate_and_delegate_reply_subjects_differ() {
-        let delegate = RoutingKey::Delegate {
+        let delegate = RoutingKey {
             session: session(),
             branch: timeline(),
             submission: submission(),
-            caller: agent(),
-            target: agent_alt(),
+            kind: RoutingKind::Delegate {
+                caller: agent(),
+                target: agent_alt(),
+            },
         };
-        let reply = RoutingKey::DelegateReply {
+        let reply = RoutingKey {
             session: session(),
             branch: timeline(),
             submission: submission(),
-            caller: agent(),
-            target: agent_alt(),
-            nonce: Nonce::new("n"),
+            kind: RoutingKind::DelegateReply {
+                caller: agent(),
+                target: agent_alt(),
+                nonce: Nonce::new("n"),
+            },
         };
         assert_injective(&delegate, &reply);
     }
@@ -2050,73 +2026,85 @@ mod tests {
 
     #[test]
     fn invoke_round_trips() {
-        assert_round_trips(&RoutingKey::Invoke {
+        assert_round_trips(&RoutingKey {
             session: session(),
             branch: timeline(),
             submission: submission(),
-            harness: HarnessType::Cli,
-            runtime: RuntimeType::Container,
-            agent: agent(),
+            kind: RoutingKind::Invoke {
+                harness: HarnessType::Cli,
+                runtime: RuntimeType::Container,
+                agent: agent(),
+            },
         });
     }
 
     #[test]
     fn request_round_trips() {
-        assert_round_trips(&RoutingKey::Request {
+        assert_round_trips(&RoutingKey {
             session: session(),
             branch: timeline(),
             submission: submission(),
-            agent: agent(),
-            service: ServiceBackend::Kv(ObjectStorageType::Sqlite),
-            operation: Operation::Get,
-            sequence: Sequence::first(),
+            kind: RoutingKind::Request {
+                agent: agent(),
+                service: ServiceBackend::Kv(ObjectStorageType::Sqlite),
+                operation: Operation::Get,
+                sequence: Sequence::first(),
+            },
         });
     }
 
     #[test]
     fn response_round_trips() {
-        assert_round_trips(&RoutingKey::Response {
+        assert_round_trips(&RoutingKey {
             session: session(),
             branch: timeline(),
             submission: submission(),
-            service: ServiceBackend::Infer(InferenceBackendType::Ollama),
-            agent: agent(),
-            operation: Operation::Run,
-            sequence: Sequence::from(3),
+            kind: RoutingKind::Response {
+                service: ServiceBackend::Infer(InferenceBackendType::Ollama),
+                agent: agent(),
+                operation: Operation::Run,
+                sequence: Sequence::from(3),
+            },
         });
     }
 
     #[test]
     fn complete_round_trips() {
-        assert_round_trips(&RoutingKey::Complete {
+        assert_round_trips(&RoutingKey {
             session: session(),
             branch: timeline(),
             submission: submission(),
-            agent: agent(),
-            harness: HarnessType::Grpc,
+            kind: RoutingKind::Complete {
+                agent: agent(),
+                harness: HarnessType::Grpc,
+            },
         });
     }
 
     #[test]
     fn delegate_round_trips() {
-        assert_round_trips(&RoutingKey::Delegate {
+        assert_round_trips(&RoutingKey {
             session: session(),
             branch: timeline(),
             submission: submission(),
-            caller: agent(),
-            target: agent_alt(),
+            kind: RoutingKind::Delegate {
+                caller: agent(),
+                target: agent_alt(),
+            },
         });
     }
 
     #[test]
     fn delegate_reply_round_trips() {
-        assert_round_trips(&RoutingKey::DelegateReply {
+        assert_round_trips(&RoutingKey {
             session: session(),
             branch: timeline(),
             submission: submission(),
-            caller: agent(),
-            target: agent_alt(),
-            nonce: Nonce::new("abc123"),
+            kind: RoutingKind::DelegateReply {
+                caller: agent(),
+                target: agent_alt(),
+                nonce: Nonce::new("abc123"),
+            },
         });
     }
 
@@ -2214,13 +2202,15 @@ mod tests {
 
     #[test]
     fn from_nats_headers_delegate_reply_returns_none() {
-        let key = RoutingKey::DelegateReply {
+        let key = RoutingKey {
             session: session(),
             branch: timeline(),
             submission: submission(),
-            caller: agent(),
-            target: agent_alt(),
-            nonce: Nonce::new("n"),
+            kind: RoutingKind::DelegateReply {
+                caller: agent(),
+                target: agent_alt(),
+                nonce: Nonce::new("n"),
+            },
         };
         assert!(from_nats_headers(&key, &HashMap::new()).is_none());
     }

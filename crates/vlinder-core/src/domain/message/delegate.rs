@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::super::diagnostics::DelegateDiagnostics;
-use super::super::routing_key::{AgentId, Nonce, RoutingKey};
+use super::super::routing_key::{AgentId, Nonce, RoutingKey, RoutingKind};
 use super::identity::{BranchId, MessageId, SessionId, SubmissionId};
 use super::PROTOCOL_VERSION;
 
@@ -62,12 +62,14 @@ impl DelegateMessage {
 
     /// Produce the routing key for this message (ADR 096 §4).
     pub fn routing_key(&self) -> RoutingKey {
-        RoutingKey::Delegate {
+        RoutingKey {
             session: self.session.clone(),
             branch: self.branch,
             submission: self.submission.clone(),
-            caller: self.caller.clone(),
-            target: self.target.clone(),
+            kind: RoutingKind::Delegate {
+                caller: self.caller.clone(),
+                target: self.target.clone(),
+            },
         }
     }
 

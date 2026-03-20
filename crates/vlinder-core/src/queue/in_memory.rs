@@ -3,7 +3,7 @@
 use crate::domain::{
     Acknowledgement, AgentId, CompleteMessage, DelegateMessage, ForkMessage, HarnessType,
     InvokeMessage, MessageQueue, ObservableMessage, Operation, QueueError, RepairMessage,
-    RequestMessage, ResponseMessage, RoutingKey, ServiceBackend, SubmissionId,
+    RequestMessage, ResponseMessage, RoutingKey, RoutingKind, ServiceBackend, SubmissionId,
 };
 #[cfg(test)]
 use crate::domain::{
@@ -87,7 +87,10 @@ impl MessageQueue for InMemoryQueue {
 
         for (key, queue) in typed.iter_mut() {
             let matches = match key {
-                RoutingKey::Invoke { agent: a, .. } => a == agent,
+                RoutingKey {
+                    kind: RoutingKind::Invoke { agent: ref a, .. },
+                    ..
+                } => a == agent,
                 _ => false,
             };
             if matches {
@@ -111,9 +114,13 @@ impl MessageQueue for InMemoryQueue {
 
         for (key, queue) in typed.iter_mut() {
             let matches = match key {
-                RoutingKey::Request {
-                    service: svc,
-                    operation: op,
+                RoutingKey {
+                    kind:
+                        RoutingKind::Request {
+                            service: svc,
+                            operation: op,
+                            ..
+                        },
                     ..
                 } => *svc == service && *op == operation,
                 _ => false,
@@ -158,9 +165,9 @@ impl MessageQueue for InMemoryQueue {
 
         for (key, queue) in typed.iter_mut() {
             let matches = match key {
-                RoutingKey::Complete {
-                    submission: sub,
-                    harness: h,
+                RoutingKey {
+                    submission: ref sub,
+                    kind: RoutingKind::Complete { harness: h, .. },
                     ..
                 } => sub == submission && *h == harness,
                 _ => false,
@@ -195,7 +202,10 @@ impl MessageQueue for InMemoryQueue {
 
         for (key, queue) in typed.iter_mut() {
             let matches = match key {
-                RoutingKey::Delegate { target: t, .. } => t == target,
+                RoutingKey {
+                    kind: RoutingKind::Delegate { target: ref t, .. },
+                    ..
+                } => t == target,
                 _ => false,
             };
             if matches {
@@ -258,7 +268,10 @@ impl MessageQueue for InMemoryQueue {
 
         for (key, queue) in typed.iter_mut() {
             let matches = match key {
-                RoutingKey::Repair { agent: a, .. } => a == agent,
+                RoutingKey {
+                    kind: RoutingKind::Repair { agent: ref a, .. },
+                    ..
+                } => a == agent,
                 _ => false,
             };
             if matches {
@@ -304,7 +317,8 @@ mod tests {
     use super::*;
     use crate::domain::{BranchId, DagNodeId, Sequence, SessionId, SubmissionId};
     use crate::domain::{
-        InferenceBackendType, Nonce, ObjectStorageType, Operation, RuntimeType, VectorStorageType,
+        InferenceBackendType, Nonce, ObjectStorageType, Operation, RoutingKind, RuntimeType,
+        VectorStorageType,
     };
 
     fn test_agent_id() -> AgentId {
@@ -572,13 +586,15 @@ mod tests {
         let queue = InMemoryQueue::new();
 
         // Build a reply routing key (as if from a DelegateMessage)
-        let reply_key = RoutingKey::DelegateReply {
+        let reply_key = RoutingKey {
             session: SessionId::new(),
             branch: BranchId::from(1),
             submission: test_submission(),
-            caller: AgentId::new("coordinator"),
-            target: AgentId::new("summarizer"),
-            nonce: Nonce::new("abc123"),
+            kind: RoutingKind::DelegateReply {
+                caller: AgentId::new("coordinator"),
+                target: AgentId::new("summarizer"),
+                nonce: Nonce::new("abc123"),
+            },
         };
 
         let complete = CompleteMessage::new(
@@ -603,21 +619,25 @@ mod tests {
     fn receive_delegate_reply_times_out_for_wrong_nonce() {
         let queue = InMemoryQueue::new();
 
-        let reply_key_a = RoutingKey::DelegateReply {
+        let reply_key_a = RoutingKey {
             session: SessionId::new(),
             branch: BranchId::from(1),
             submission: test_submission(),
-            caller: AgentId::new("coordinator"),
-            target: AgentId::new("summarizer"),
-            nonce: Nonce::new("nonce-a"),
+            kind: RoutingKind::DelegateReply {
+                caller: AgentId::new("coordinator"),
+                target: AgentId::new("summarizer"),
+                nonce: Nonce::new("nonce-a"),
+            },
         };
-        let reply_key_b = RoutingKey::DelegateReply {
+        let reply_key_b = RoutingKey {
             session: SessionId::new(),
             branch: BranchId::from(1),
             submission: test_submission(),
-            caller: AgentId::new("coordinator"),
-            target: AgentId::new("summarizer"),
-            nonce: Nonce::new("nonce-b"),
+            kind: RoutingKind::DelegateReply {
+                caller: AgentId::new("coordinator"),
+                target: AgentId::new("summarizer"),
+                nonce: Nonce::new("nonce-b"),
+            },
         };
 
         let complete = CompleteMessage::new(

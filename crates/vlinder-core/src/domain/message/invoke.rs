@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::super::diagnostics::{InvokeDiagnostics, RuntimeDiagnostics};
-use super::super::routing_key::{AgentId, RoutingKey};
+use super::super::routing_key::{AgentId, RoutingKey, RoutingKind};
 use super::super::RuntimeType;
 use super::complete::CompleteMessage;
 use super::identity::{BranchId, DagNodeId, HarnessType, MessageId, SessionId, SubmissionId};
@@ -83,13 +83,15 @@ impl InvokeMessage {
 
     /// Produce the routing key for this message (ADR 096 §4).
     pub fn routing_key(&self) -> RoutingKey {
-        RoutingKey::Invoke {
+        RoutingKey {
             session: self.session.clone(),
             branch: self.branch,
             submission: self.submission.clone(),
-            harness: self.harness,
-            runtime: self.runtime,
-            agent: self.agent_id.clone(),
+            kind: RoutingKind::Invoke {
+                harness: self.harness,
+                runtime: self.runtime,
+                agent: self.agent_id.clone(),
+            },
         }
     }
 

@@ -182,80 +182,67 @@ impl std::fmt::Display for Nonce {
 
 /// Routing key for message delivery.
 ///
-/// Each variant corresponds to one message direction in the protocol.
+/// Composite routing key: common prefix + variant-specific suffix.
+///
+/// Each routing key uniquely identifies a message direction in the protocol.
+/// The common prefix (session, branch, submission) maps to the NATS subject
+/// prefix `vlinder.{session}.{branch}.{submission}`. The kind maps to the
+/// variant-specific suffix.
+///
 /// Equality and hashing derive from all fields — two routing keys are
-/// equal if and only if they are the same variant and every dimension
-/// matches.
+/// equal if and only if they have the same prefix and the same kind.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum RoutingKey {
+pub struct RoutingKey {
+    pub session: SessionId,
+    pub branch: BranchId,
+    pub submission: SubmissionId,
+    pub kind: RoutingKind,
+}
+
+/// Variant-specific routing dimensions.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum RoutingKind {
     Invoke {
-        session: SessionId,
-        branch: BranchId,
-        submission: SubmissionId,
         harness: HarnessType,
         runtime: RuntimeType,
         agent: AgentId,
     },
     Complete {
-        session: SessionId,
-        branch: BranchId,
-        submission: SubmissionId,
         agent: AgentId,
         harness: HarnessType,
     },
     Request {
-        session: SessionId,
-        branch: BranchId,
-        submission: SubmissionId,
         agent: AgentId,
         service: ServiceBackend,
         operation: Operation,
         sequence: Sequence,
     },
     Response {
-        session: SessionId,
-        branch: BranchId,
-        submission: SubmissionId,
         service: ServiceBackend,
         agent: AgentId,
         operation: Operation,
         sequence: Sequence,
     },
     Delegate {
-        session: SessionId,
-        branch: BranchId,
-        submission: SubmissionId,
         caller: AgentId,
         target: AgentId,
     },
     DelegateReply {
-        session: SessionId,
-        branch: BranchId,
-        submission: SubmissionId,
         caller: AgentId,
         target: AgentId,
         nonce: Nonce,
     },
     /// Repair: Platform → Sidecar (replay a failed service call, ADR 113).
     Repair {
-        session: SessionId,
-        branch: BranchId,
-        submission: SubmissionId,
         harness: HarnessType,
         agent: AgentId,
     },
     /// Fork: CLI → Platform (create a branch).
     Fork {
-        session: SessionId,
-        branch: BranchId,
-        submission: SubmissionId,
         agent_name: String,
     },
     /// Promote: CLI → Platform (promote a branch to main).
     Promote {
-        session: SessionId,
-        branch: BranchId,
-        submission: SubmissionId,
         agent_name: String,
     },
 }
@@ -270,60 +257,40 @@ impl RoutingKey {
     /// Reply variants (Complete, Response, `DelegateReply`) return None —
     /// hops are one level deep (reply asymmetry).
     pub fn reply_key(&self, nonce: Option<Nonce>) -> Option<RoutingKey> {
-        match self {
-            RoutingKey::Invoke {
-                session,
-                branch,
-                submission,
-                harness,
-                agent,
-                ..
-            } => Some(RoutingKey::Complete {
-                session: session.clone(),
-                branch: *branch,
-                submission: submission.clone(),
+        let reply_kind = match &self.kind {
+            RoutingKind::Invoke { harness, agent, .. } => Some(RoutingKind::Complete {
                 agent: agent.clone(),
                 harness: *harness,
             }),
-            RoutingKey::Request {
-                session,
-                branch,
-                submission,
+            RoutingKind::Request {
                 agent,
                 service,
                 operation,
                 sequence,
-            } => Some(RoutingKey::Response {
-                session: session.clone(),
-                branch: *branch,
-                submission: submission.clone(),
+            } => Some(RoutingKind::Response {
                 service: *service,
                 agent: agent.clone(),
                 operation: *operation,
                 sequence: *sequence,
             }),
-            RoutingKey::Delegate {
-                session,
-                branch,
-                submission,
-                caller,
-                target,
-            } => nonce.map(|n| RoutingKey::DelegateReply {
-                session: session.clone(),
-                branch: *branch,
-                submission: submission.clone(),
+            RoutingKind::Delegate { caller, target } => nonce.map(|n| RoutingKind::DelegateReply {
                 caller: caller.clone(),
                 target: target.clone(),
                 nonce: n,
             }),
-            // Reply variants and repair don't produce further replies.
-            RoutingKey::Complete { .. }
-            | RoutingKey::Response { .. }
-            | RoutingKey::DelegateReply { .. }
-            | RoutingKey::Repair { .. }
-            | RoutingKey::Fork { .. }
-            | RoutingKey::Promote { .. } => None,
-        }
+            RoutingKind::Complete { .. }
+            | RoutingKind::Response { .. }
+            | RoutingKind::DelegateReply { .. }
+            | RoutingKind::Repair { .. }
+            | RoutingKind::Fork { .. }
+            | RoutingKind::Promote { .. } => None,
+        };
+        reply_kind.map(|kind| RoutingKey {
+            session: self.session.clone(),
+            branch: self.branch,
+            submission: self.submission.clone(),
+            kind,
+        })
     }
 }
 
@@ -368,13 +335,15 @@ mod tests {
     // ========================================================================
 
     fn base_invoke() -> RoutingKey {
-        RoutingKey::Invoke {
+        RoutingKey {
             session: session(),
             branch: branch(),
             submission: submission(),
-            harness: HarnessType::Cli,
-            runtime: RuntimeType::Container,
-            agent: agent(),
+            kind: RoutingKind::Invoke {
+                harness: HarnessType::Cli,
+                runtime: RuntimeType::Container,
+                agent: agent(),
+            },
         }
     }
 
@@ -386,42 +355,30 @@ mod tests {
     #[test]
     fn invoke_differs_by_session() {
         let mut key = base_invoke();
-        if let RoutingKey::Invoke {
-            ref mut session, ..
-        } = key
-        {
-            *session = session_alt();
-        }
+        key.session = session_alt();
         assert_ne!(base_invoke(), key);
     }
 
     #[test]
     fn invoke_differs_by_branch() {
         let mut key = base_invoke();
-        if let RoutingKey::Invoke { ref mut branch, .. } = key {
-            *branch = branch_alt();
-        }
+        key.branch = branch_alt();
         assert_ne!(base_invoke(), key);
     }
 
     #[test]
     fn invoke_differs_by_submission() {
         let mut key = base_invoke();
-        if let RoutingKey::Invoke {
-            ref mut submission, ..
-        } = key
-        {
-            *submission = submission_alt();
-        }
+        key.submission = submission_alt();
         assert_ne!(base_invoke(), key);
     }
 
     #[test]
     fn invoke_differs_by_harness() {
         let mut key = base_invoke();
-        if let RoutingKey::Invoke {
+        if let RoutingKind::Invoke {
             ref mut harness, ..
-        } = key
+        } = key.kind
         {
             *harness = HarnessType::Web;
         }
@@ -431,7 +388,7 @@ mod tests {
     #[test]
     fn invoke_differs_by_agent() {
         let mut key = base_invoke();
-        if let RoutingKey::Invoke { ref mut agent, .. } = key {
+        if let RoutingKind::Invoke { ref mut agent, .. } = key.kind {
             *agent = agent_alt();
         }
         assert_ne!(base_invoke(), key);
@@ -442,12 +399,14 @@ mod tests {
     // ========================================================================
 
     fn base_complete() -> RoutingKey {
-        RoutingKey::Complete {
+        RoutingKey {
             session: session(),
             branch: branch(),
             submission: submission(),
-            agent: agent(),
-            harness: HarnessType::Cli,
+            kind: RoutingKind::Complete {
+                agent: agent(),
+                harness: HarnessType::Cli,
+            },
         }
     }
 
@@ -459,19 +418,14 @@ mod tests {
     #[test]
     fn complete_differs_by_session() {
         let mut key = base_complete();
-        if let RoutingKey::Complete {
-            ref mut session, ..
-        } = key
-        {
-            *session = session_alt();
-        }
+        key.session = session_alt();
         assert_ne!(base_complete(), key);
     }
 
     #[test]
     fn complete_differs_by_agent() {
         let mut key = base_complete();
-        if let RoutingKey::Complete { ref mut agent, .. } = key {
+        if let RoutingKind::Complete { ref mut agent, .. } = key.kind {
             *agent = agent_alt();
         }
         assert_ne!(base_complete(), key);
@@ -480,9 +434,9 @@ mod tests {
     #[test]
     fn complete_differs_by_harness() {
         let mut key = base_complete();
-        if let RoutingKey::Complete {
+        if let RoutingKind::Complete {
             ref mut harness, ..
-        } = key
+        } = key.kind
         {
             *harness = HarnessType::Web;
         }
@@ -494,14 +448,16 @@ mod tests {
     // ========================================================================
 
     fn base_request() -> RoutingKey {
-        RoutingKey::Request {
+        RoutingKey {
             session: session(),
             branch: branch(),
             submission: submission(),
-            agent: agent(),
-            service: ServiceBackend::Kv(ObjectStorageType::Sqlite),
-            operation: Operation::Get,
-            sequence: Sequence::first(),
+            kind: RoutingKind::Request {
+                agent: agent(),
+                service: ServiceBackend::Kv(ObjectStorageType::Sqlite),
+                operation: Operation::Get,
+                sequence: Sequence::first(),
+            },
         }
     }
 
@@ -513,21 +469,16 @@ mod tests {
     #[test]
     fn request_differs_by_session() {
         let mut key = base_request();
-        if let RoutingKey::Request {
-            ref mut session, ..
-        } = key
-        {
-            *session = session_alt();
-        }
+        key.session = session_alt();
         assert_ne!(base_request(), key);
     }
 
     #[test]
     fn request_differs_by_service_type() {
         let mut key = base_request();
-        if let RoutingKey::Request {
+        if let RoutingKind::Request {
             ref mut service, ..
-        } = key
+        } = key.kind
         {
             *service = ServiceBackend::Vec(VectorStorageType::SqliteVec);
         }
@@ -537,9 +488,9 @@ mod tests {
     #[test]
     fn request_differs_by_backend_within_service() {
         let mut key = base_request();
-        if let RoutingKey::Request {
+        if let RoutingKind::Request {
             ref mut service, ..
-        } = key
+        } = key.kind
         {
             *service = ServiceBackend::Kv(ObjectStorageType::InMemory);
         }
@@ -549,9 +500,9 @@ mod tests {
     #[test]
     fn request_differs_by_operation() {
         let mut key = base_request();
-        if let RoutingKey::Request {
+        if let RoutingKind::Request {
             ref mut operation, ..
-        } = key
+        } = key.kind
         {
             *operation = Operation::Put;
         }
@@ -561,9 +512,9 @@ mod tests {
     #[test]
     fn request_differs_by_sequence() {
         let mut key = base_request();
-        if let RoutingKey::Request {
+        if let RoutingKind::Request {
             ref mut sequence, ..
-        } = key
+        } = key.kind
         {
             *sequence = Sequence::from(2);
         }
@@ -573,7 +524,7 @@ mod tests {
     #[test]
     fn request_differs_by_agent() {
         let mut key = base_request();
-        if let RoutingKey::Request { ref mut agent, .. } = key {
+        if let RoutingKind::Request { ref mut agent, .. } = key.kind {
             *agent = agent_alt();
         }
         assert_ne!(base_request(), key);
@@ -584,14 +535,16 @@ mod tests {
     // ========================================================================
 
     fn base_response() -> RoutingKey {
-        RoutingKey::Response {
+        RoutingKey {
             session: session(),
             branch: branch(),
             submission: submission(),
-            service: ServiceBackend::Kv(ObjectStorageType::Sqlite),
-            agent: agent(),
-            operation: Operation::Get,
-            sequence: Sequence::first(),
+            kind: RoutingKind::Response {
+                service: ServiceBackend::Kv(ObjectStorageType::Sqlite),
+                agent: agent(),
+                operation: Operation::Get,
+                sequence: Sequence::first(),
+            },
         }
     }
 
@@ -603,19 +556,14 @@ mod tests {
     #[test]
     fn response_differs_by_session() {
         let mut key = base_response();
-        if let RoutingKey::Response {
-            ref mut session, ..
-        } = key
-        {
-            *session = session_alt();
-        }
+        key.session = session_alt();
         assert_ne!(base_response(), key);
     }
 
     #[test]
     fn response_differs_by_agent() {
         let mut key = base_response();
-        if let RoutingKey::Response { ref mut agent, .. } = key {
+        if let RoutingKind::Response { ref mut agent, .. } = key.kind {
             *agent = agent_alt();
         }
         assert_ne!(base_response(), key);
@@ -624,9 +572,9 @@ mod tests {
     #[test]
     fn response_differs_by_service() {
         let mut key = base_response();
-        if let RoutingKey::Response {
+        if let RoutingKind::Response {
             ref mut service, ..
-        } = key
+        } = key.kind
         {
             *service = ServiceBackend::Infer(InferenceBackendType::Ollama);
         }
@@ -638,12 +586,14 @@ mod tests {
     // ========================================================================
 
     fn base_delegate() -> RoutingKey {
-        RoutingKey::Delegate {
+        RoutingKey {
             session: session(),
             branch: branch(),
             submission: submission(),
-            caller: agent(),
-            target: agent_alt(),
+            kind: RoutingKind::Delegate {
+                caller: agent(),
+                target: agent_alt(),
+            },
         }
     }
 
@@ -655,19 +605,14 @@ mod tests {
     #[test]
     fn delegate_differs_by_session() {
         let mut key = base_delegate();
-        if let RoutingKey::Delegate {
-            ref mut session, ..
-        } = key
-        {
-            *session = session_alt();
-        }
+        key.session = session_alt();
         assert_ne!(base_delegate(), key);
     }
 
     #[test]
     fn delegate_differs_by_caller() {
         let mut key = base_delegate();
-        if let RoutingKey::Delegate { ref mut caller, .. } = key {
+        if let RoutingKind::Delegate { ref mut caller, .. } = key.kind {
             *caller = AgentId::new("planner");
         }
         assert_ne!(base_delegate(), key);
@@ -676,7 +621,7 @@ mod tests {
     #[test]
     fn delegate_differs_by_target() {
         let mut key = base_delegate();
-        if let RoutingKey::Delegate { ref mut target, .. } = key {
+        if let RoutingKind::Delegate { ref mut target, .. } = key.kind {
             *target = AgentId::new("fact-checker");
         }
         assert_ne!(base_delegate(), key);
@@ -687,13 +632,15 @@ mod tests {
     // ========================================================================
 
     fn base_delegate_reply() -> RoutingKey {
-        RoutingKey::DelegateReply {
+        RoutingKey {
             session: session(),
             branch: branch(),
             submission: submission(),
-            caller: agent(),
-            target: agent_alt(),
-            nonce: Nonce::new("abc123"),
+            kind: RoutingKind::DelegateReply {
+                caller: agent(),
+                target: agent_alt(),
+                nonce: Nonce::new("abc123"),
+            },
         }
     }
 
@@ -705,19 +652,14 @@ mod tests {
     #[test]
     fn delegate_reply_differs_by_session() {
         let mut key = base_delegate_reply();
-        if let RoutingKey::DelegateReply {
-            ref mut session, ..
-        } = key
-        {
-            *session = session_alt();
-        }
+        key.session = session_alt();
         assert_ne!(base_delegate_reply(), key);
     }
 
     #[test]
     fn delegate_reply_differs_by_nonce() {
         let mut key = base_delegate_reply();
-        if let RoutingKey::DelegateReply { ref mut nonce, .. } = key {
+        if let RoutingKind::DelegateReply { ref mut nonce, .. } = key.kind {
             *nonce = Nonce::new("def456");
         }
         assert_ne!(base_delegate_reply(), key);
@@ -765,8 +707,8 @@ mod tests {
     fn invoke_reply_drops_runtime() {
         // Complete doesn't carry RuntimeType — it goes back to harness, not runtime
         let reply = base_invoke().reply_key(None).unwrap();
-        match reply {
-            RoutingKey::Complete { .. } => {}
+        match reply.kind {
+            RoutingKind::Complete { .. } => {}
             other => panic!("expected Complete, got {other:?}"),
         }
     }
@@ -780,19 +722,16 @@ mod tests {
     #[test]
     fn request_reply_preserves_all_dimensions() {
         let reply = base_request().reply_key(None).unwrap();
-        match reply {
-            RoutingKey::Response {
-                session: s,
-                branch: b,
-                submission,
+        assert_eq!(reply.session, self::session());
+        assert_eq!(reply.branch, self::branch());
+        assert_eq!(reply.submission, self::submission());
+        match reply.kind {
+            RoutingKind::Response {
                 service,
                 agent,
                 operation,
                 sequence,
             } => {
-                assert_eq!(s, self::session());
-                assert_eq!(b, self::branch());
-                assert_eq!(submission, self::submission());
                 assert_eq!(service, ServiceBackend::Kv(ObjectStorageType::Sqlite));
                 assert_eq!(agent, self::agent());
                 assert_eq!(operation, Operation::Get);
