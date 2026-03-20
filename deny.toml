@@ -1,6 +1,15 @@
 # cargo-deny configuration
 # Run: cargo deny check licenses
+# Run: cargo deny check advisories
 # Docs: https://embarkstudios.github.io/cargo-deny/
+
+[advisories]
+# Fail on any known vulnerability
+vulnerability = "deny"
+# Warn on unmaintained crates
+unmaintained = "warn"
+# Warn on crates that have been yanked
+yanked = "warn"
 
 [licenses]
 # Allow only permissive licenses
