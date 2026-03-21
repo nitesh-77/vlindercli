@@ -8,7 +8,7 @@ The platform has three distinct operational concerns that are currently conflate
 
 1. **Data plane** — agent execution. Invoke, request, response, complete, delegate. Every message is DAG-recorded. Session-scoped. Latency-sensitive. The agent is waiting.
 
-2. **Session plane** — history manipulation. Fork, repair, promote. User-initiated actions that mutate the DAG structure (branches). Session-scoped. Deliberate, not real-time.
+2. **Session plane** — compensating transactions. Fork, repair, promote. Corrective actions applied on top of the immutable execution record. Session-scoped. Deliberate, not real-time.
 
 3. **Infra plane** — provisioning. Deploy, delete. Changes what agents exist and how they're provisioned. Not session-scoped. Currently bypasses the queue entirely (direct gRPC to registry). Status is a read — it queries the registry, not the queue.
 
@@ -25,9 +25,19 @@ Issue #15 (async deploy + agent status) requires infra write operations to have 
 
 ## Decision
 
-### 1. Three routing key types
+### 1. The plane is the top-level discriminant
 
-Each plane gets its own routing key type with its own addressing:
+Each plane gets its own message address type. The plane determines the address shape — data and session are session-scoped, infra is not. The type hierarchy mirrors the NATS subject hierarchy:
+
+```rust
+pub enum RoutingKey {
+    Data(DataRoutingKey),
+    Session(SessionRoutingKey),
+    Infra(InfraRoutingKey),
+}
+```
+
+### 2. Each plane owns its routing key
 
 **Data plane** — session-scoped, DAG-recorded:
 ```rust
@@ -76,9 +86,11 @@ pub enum InfraMessageKind {
 }
 ```
 
-### 2. NATS subject prefixes by plane
+Data and Session share the same address shape today (session, branch, submission) but are separate types. If Session ever needs different fields (e.g. `reason` for audit), it can diverge without touching Data.
 
-Each plane gets its own subject prefix for clean subscription filtering:
+### 3. NATS subject prefixes by plane
+
+The subject hierarchy matches the type hierarchy:
 
 | Plane | Subject prefix | Example |
 |---|---|---|
@@ -86,20 +98,26 @@ Each plane gets its own subject prefix for clean subscription filtering:
 | Session | `vlinder.session.{session}.{branch}.{sub}...` | `vlinder.session.abc123.1.sub456.fork.echo` |
 | Infra | `vlinder.infra...` | `vlinder.infra.deploy.todoapp` |
 
-Consumers subscribe to `vlinder.data.>` for data only, `vlinder.infra.>` for infra only, or `vlinder.>` for everything.
+Consumers subscribe to `vlinder.data.>` for data only, `vlinder.session.>` for session only, `vlinder.infra.>` for infra only, or `vlinder.>` for everything.
 
-### 3. Separate JetStream streams per plane
+### 4. Separate JetStream streams per plane
 
 Each plane can have its own retention policy:
 - **Data**: limits-based retention (bounded by session count)
-- **Session**: limits-based (fewer messages, longer retention)
+- **Session**: limits-based (fewer messages, longer retention for decision history)
 - **Infra**: interest-based or work-queue (exactly-once delivery for deploy)
 
-### 4. Existing RoutingKey splits into Data + Session
+### 5. Different planes serve different audiences
 
-The current `RoutingKey` struct becomes `DataRoutingKey`. `RoutingKind` splits into `DataMessageKind` (Invoke, Complete, Request, Response, Delegate, DelegateReply) and `SessionMessageKind` (Repair, Fork, Promote). The common fields (session, branch, submission) stay on both structs — they share the same address shape.
+Data plane messages are agents doing real work for external users. Session plane messages are developers/operators applying compensating transactions — corrective actions (fork, repair, promote) on top of the immutable execution record. This distinction has implications:
 
-### 5. Registry trait stays unified for now
+- **Access control**: data plane is open to anyone who can invoke an agent. Session plane (fork, promote) should be restricted to operators — promoting a branch rewrites what "main" means.
+- **Audit**: data plane audit is the DAG. Session plane audit is "who forked what, when, why" — a different kind of record about human decisions, not agent behavior.
+- **Replay**: data plane messages are replayable (same input, same output). Session plane messages are control actions that change structure, not content. You don't replay a fork.
+- **Rate**: data plane is bounded by agent activity. Session plane is bounded by human activity (much lower).
+- **Retention**: data plane retention is bounded by session lifecycle. Session plane decisions (fork, promote) may need to be retained indefinitely as decision history.
+
+### 6. Registry trait stays unified for now
 
 The `Registry` trait continues to mix infra and query operations. Splitting the trait is a separate concern from splitting the message planes. The registry is a query interface regardless of which plane initiated the query.
 
@@ -107,18 +125,27 @@ The `Registry` trait continues to mix infra and query operations. Splitting the 
 
 ### Repair: session plane or data plane?
 
-Repair carries `harness` and `agent` (an `AgentId` routing identity) — it routes to the agent's sidecar and triggers a service call replay. Fork and Promote carry `agent_name` (a `String` from user input) and are processed by the `RecordingQueue`. Repair behaves more like a specialised Invoke than a session operation. Should it move to the data plane?
+Repair carries `harness` and `agent` — it routes to the agent's sidecar and triggers a service call replay. Fork and Promote are processed by the `RecordingQueue`. Repair behaves more like a specialised Invoke than a session operation. Should it move to the data plane?
 
-### Inconsistent agent identity across session operations
+## Implementation Strategy
 
-Repair uses `AgentId`, Fork and Promote use `String` for the agent. All three are session operations on an agent — they should use the same identifier type. This predates the plane split and should be resolved when implementing.
+Incremental migration — no big-bang refactoring:
+
+1. **Define new types alongside existing.** Create `DataRoutingKey`, `SessionRoutingKey`, `DataMessageKind`, `SessionMessageKind`. Don't touch `RoutingKey`.
+2. **Add `From` conversions.** `From<DataRoutingKey> for RoutingKey` and `From<SessionRoutingKey> for RoutingKey`. New code constructs plane-specific types; the rest of the codebase doesn't change.
+3. **Add accessors.** `RoutingKey::as_data()` and `RoutingKey::as_session()` return `Option<&DataRoutingKey>` / `Option<&SessionRoutingKey>`. Call sites that only handle one plane start using these.
+4. **Migrate call sites one at a time.** Each function that constructs or matches a `RoutingKey` switches to the plane-specific type. `From` impls keep everything compiling.
+5. **Change `RoutingKey` from struct to enum.** When all call sites are migrated, the `From` impls become enum variants.
+
+Each step compiles independently. Each step is committable.
 
 ## Consequences
 
+- The plane is the top-level type discriminant — code that handles one plane doesn't see the others
 - Infra operations (deploy, delete) can go on the queue with their own routing and lifecycle
 - Each plane is independently subscribable at the NATS level
 - Retention and delivery guarantees can differ per plane
-- The `RoutingKey` type splits but the address format for data/session is unchanged (just prefixed)
-- InfraRoutingKey has a simpler address — no session, branch, or submission
+- Data and Session share an address shape but are separate types — can diverge independently
+- Infra has a simpler address — no session, branch, or submission
 - Agent status tracking (issue #15) fits naturally on the infra plane
 - Breaking change to NATS subject format — all consumers need updating
