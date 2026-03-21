@@ -60,7 +60,7 @@ impl SqliteVecWorker {
         let storage = Arc::new(SqliteVectorStorage::open_at(std::path::Path::new(path))?);
         self.stores
             .write()
-            .unwrap()
+            .expect("stores lock poisoned")
             .insert(agent_id.to_string(), storage.clone());
         Ok(storage)
     }

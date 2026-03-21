@@ -270,11 +270,10 @@ pub trait Registry: Send + Sync {
         let registered = self.get_model(model_name).ok_or_else(|| {
             format!("model '{model}' (registry name: '{model_name}') not found in registry",)
         })?;
-        Ok(serde_json::to_value(registered.provider)
-            .unwrap()
-            .as_str()
-            .unwrap()
-            .to_string())
+        Ok(match registered.provider {
+            Provider::Ollama => "ollama".to_string(),
+            Provider::OpenRouter => "openrouter".to_string(),
+        })
     }
 
     /// Get all agents whose model requirements reference the given model name.

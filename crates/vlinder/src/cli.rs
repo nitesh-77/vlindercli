@@ -70,7 +70,7 @@ pub fn spinner(message: &str) -> ProgressBar {
         ProgressStyle::default_spinner()
             .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
             .template("{spinner:.cyan} {msg}")
-            .unwrap(),
+            .expect("hardcoded spinner template is valid"),
     );
     spinner.set_message(message.to_string());
     spinner.enable_steady_tick(Duration::from_millis(80));

@@ -19,7 +19,7 @@ where
     skin.print_text("Welcome to **Vlinder**! Type your message or `exit` to quit.\n");
 
     loop {
-        stdout().flush().unwrap();
+        let _ = stdout().flush();
 
         match editor.read_line(&prompt) {
             Ok(Signal::Success(input)) => {

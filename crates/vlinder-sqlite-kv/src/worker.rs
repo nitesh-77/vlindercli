@@ -82,7 +82,7 @@ impl KvWorker {
         let storage = Arc::new(SqliteObjectStorage::open_at(&session_path)?);
         self.stores
             .write()
-            .unwrap()
+            .expect("stores lock poisoned")
             .insert(cache_key, storage.clone());
         Ok(storage)
     }
@@ -134,7 +134,7 @@ impl KvWorker {
         let store = Arc::new(SqliteStateStore::open(&path)?);
         self.state_stores
             .write()
-            .unwrap()
+            .expect("state_stores lock poisoned")
             .insert(cache_key, store.clone());
         Ok(store)
     }

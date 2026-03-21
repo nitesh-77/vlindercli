@@ -465,10 +465,13 @@ fn send_reply(
     complete: CompleteMessage,
     reply_key: Option<&RoutingKey>,
 ) {
-    if let Some(key) = reply_key {
-        queue.send_delegate_reply(complete, key).unwrap();
+    let result = if let Some(key) = reply_key {
+        queue.send_delegate_reply(complete, key)
     } else {
-        queue.send_complete(complete).unwrap();
+        queue.send_complete(complete)
+    };
+    if let Err(e) = result {
+        tracing::error!(error = %e, "Failed to send reply");
     }
 }
 

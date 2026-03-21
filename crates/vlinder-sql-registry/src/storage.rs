@@ -86,26 +86,24 @@ impl RegistryRepository for SqliteRegistryRepository {
         let stored = StoredModel::from_model(model);
         let conn = self.conn.lock().unwrap();
 
-        let model_type: String = serde_json::to_value(&stored.model_type)
-            .map_err(|e| RepositoryError::Serialization(e.to_string()))?
-            .as_str()
-            .unwrap()
-            .to_string();
-        let provider: String = serde_json::to_value(stored.provider)
-            .map_err(|e| RepositoryError::Serialization(e.to_string()))?
-            .as_str()
-            .unwrap()
-            .to_string();
+        let model_type = match stored.model_type {
+            vlinder_core::domain::ModelType::Inference => "inference",
+            vlinder_core::domain::ModelType::Embedding => "embedding",
+        };
+        let provider = match stored.provider {
+            vlinder_core::domain::Provider::Ollama => "ollama",
+            vlinder_core::domain::Provider::OpenRouter => "openrouter",
+        };
 
         conn.execute(
             "INSERT OR REPLACE INTO models (name, model_type, provider, model_path, digest)
              VALUES (?1, ?2, ?3, ?4, ?5)",
-            [
-                &stored.name,
-                &model_type,
-                &provider,
-                &stored.model_path,
-                &stored.digest,
+            rusqlite::params![
+                stored.name,
+                model_type,
+                provider,
+                stored.model_path,
+                stored.digest,
             ],
         )
         .map_err(|e| RepositoryError::Database(e.to_string()))?;

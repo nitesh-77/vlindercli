@@ -142,7 +142,10 @@ impl MessageQueue for InMemoryQueue {
         request: &RequestMessage,
     ) -> Result<(ResponseMessage, Acknowledgement), QueueError> {
         // Exact lookup via reply_key (ADR 096 §6).
-        let reply_key = request.routing_key().reply_key(None).unwrap();
+        let reply_key = request
+            .routing_key()
+            .reply_key(None)
+            .expect("Request routing key always produces a Response reply key");
         let mut typed = self.typed_queues.lock().unwrap();
 
         if let Some(queue) = typed.get_mut(&reply_key) {

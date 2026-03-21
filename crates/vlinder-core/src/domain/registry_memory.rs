@@ -255,7 +255,11 @@ impl Registry for InMemoryRegistry {
             if let Some(stored_manifest) = state.manifests.get(&manifest.name) {
                 if *stored_manifest == manifest {
                     // Same manifest → idempotent, return existing agent
-                    return Ok(state.agents.get(&agent_id).unwrap().clone());
+                    return Ok(state
+                        .agents
+                        .get(&agent_id)
+                        .expect("agent must exist when manifest matches")
+                        .clone());
                 }
                 return Err(RegistrationError::ConfigMismatch(manifest.name.clone()));
             }
@@ -269,7 +273,11 @@ impl Registry for InMemoryRegistry {
         // Store manifest alongside the agent
         let mut state = self.state.write().unwrap();
         state.manifests.insert(manifest.name.clone(), manifest);
-        Ok(state.agents.get(&agent_id).unwrap().clone())
+        Ok(state
+            .agents
+            .get(&agent_id)
+            .expect("agent must exist after register_agent")
+            .clone())
     }
 
     fn get_agent(&self, id: &ResourceId) -> Option<Agent> {

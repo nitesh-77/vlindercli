@@ -297,7 +297,7 @@ fn error_result(status: u16, message: &str) -> HandlerResult {
         http::Response::builder()
             .status(status)
             .body(error_json(message))
-            .unwrap(),
+            .expect("building error response with known-valid status"),
         ServiceMetrics::Inference {
             tokens_input: 0,
             tokens_output: 0,

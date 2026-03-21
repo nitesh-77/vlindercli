@@ -77,6 +77,6 @@ impl DelegateMessage {
     pub fn reply_routing_key(&self) -> RoutingKey {
         self.routing_key()
             .reply_key(Some(self.nonce.clone()))
-            .unwrap()
+            .expect("Delegate routing key always produces a DelegateReply")
     }
 }

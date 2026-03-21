@@ -193,7 +193,10 @@ impl Registry for PersistentRegistry {
         };
 
         // Check for fleet dependencies before deleting
-        let agent_id = self.inner.agent_id(name).unwrap();
+        let agent_id = self
+            .inner
+            .agent_id(name)
+            .expect("agent_id must exist when get_agent_by_name succeeds");
         let dependent: Vec<String> = self
             .inner
             .get_fleets()
