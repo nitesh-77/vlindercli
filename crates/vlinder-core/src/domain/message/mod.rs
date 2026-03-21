@@ -60,7 +60,7 @@ mod tests {
     };
     use super::super::operation::Operation;
     use super::super::routing_key::{
-        AgentId, InferenceBackendType, Nonce, RoutingKey, RoutingKind, ServiceBackend,
+        AgentName, InferenceBackendType, Nonce, RoutingKey, RoutingKind, ServiceBackend,
     };
     use super::super::storage::ObjectStorageType;
     use super::super::RuntimeType;
@@ -70,8 +70,8 @@ mod tests {
         SubmissionId::from("a1b2c3d".to_string())
     }
 
-    fn test_agent_id() -> AgentId {
-        AgentId::new("echo-agent")
+    fn test_agent_id() -> AgentName {
+        AgentName::new("echo-agent")
     }
 
     fn test_invoke_diag() -> InvokeDiagnostics {
@@ -454,8 +454,8 @@ mod tests {
             BranchId::from(1),
             test_submission(),
             SessionId::new(),
-            AgentId::new("coordinator"),
-            AgentId::new("summarizer"),
+            AgentName::new("coordinator"),
+            AgentName::new("summarizer"),
             b"task".to_vec(),
             Nonce::new("test-nonce"),
             None,
@@ -485,8 +485,8 @@ mod tests {
             BranchId::from(1),
             test_submission(),
             SessionId::new(),
-            AgentId::new("coordinator"),
-            AgentId::new("summarizer"),
+            AgentName::new("coordinator"),
+            AgentName::new("summarizer"),
             b"task".to_vec(),
             Nonce::new("abc123"),
             None,
@@ -520,8 +520,8 @@ mod tests {
             BranchId::from(1),
             submission.clone(),
             session.clone(),
-            AgentId::new("coordinator"),
-            AgentId::new("summarizer"),
+            AgentName::new("coordinator"),
+            AgentName::new("summarizer"),
             b"summarize this".to_vec(),
             nonce.clone(),
             None,
@@ -532,8 +532,8 @@ mod tests {
 
         assert_eq!(msg.submission, submission);
         assert_eq!(msg.session, session);
-        assert_eq!(msg.caller, AgentId::new("coordinator"));
-        assert_eq!(msg.target, AgentId::new("summarizer"));
+        assert_eq!(msg.caller, AgentName::new("coordinator"));
+        assert_eq!(msg.target, AgentName::new("summarizer"));
         assert_eq!(msg.payload, b"summarize this");
         assert_eq!(msg.nonce, nonce);
     }
@@ -545,8 +545,8 @@ mod tests {
             BranchId::from(1),
             submission.clone(),
             SessionId::new(),
-            AgentId::new("coordinator"),
-            AgentId::new("summarizer"),
+            AgentName::new("coordinator"),
+            AgentName::new("summarizer"),
             b"test".to_vec(),
             Nonce::generate(),
             None,

@@ -128,7 +128,7 @@ impl MessageQueue for RecordingQueue {
 
     fn receive_invoke(
         &self,
-        agent: &crate::domain::AgentId,
+        agent: &crate::domain::AgentName,
     ) -> Result<(InvokeMessage, Acknowledgement), QueueError> {
         self.inner.receive_invoke(agent)
     }
@@ -162,7 +162,7 @@ impl MessageQueue for RecordingQueue {
 
     fn receive_delegate(
         &self,
-        target: &crate::domain::AgentId,
+        target: &crate::domain::AgentName,
     ) -> Result<(DelegateMessage, Acknowledgement), QueueError> {
         self.inner.receive_delegate(target)
     }
@@ -185,7 +185,7 @@ impl MessageQueue for RecordingQueue {
 
     fn receive_repair(
         &self,
-        agent: &crate::domain::AgentId,
+        agent: &crate::domain::AgentName,
     ) -> Result<(RepairMessage, Acknowledgement), QueueError> {
         self.inner.receive_repair(agent)
     }
@@ -299,7 +299,7 @@ impl MessageQueue for RecordingQueue {
 mod tests {
     use super::*;
     use crate::domain::{
-        AgentId, BranchId, DagNode, DelegateDiagnostics, HarnessType, InMemoryDagStore,
+        AgentName, BranchId, DagNode, DelegateDiagnostics, HarnessType, InMemoryDagStore,
         InferenceBackendType, InvokeDiagnostics, MessageType, Nonce, Operation, RequestDiagnostics,
         RuntimeDiagnostics, RuntimeType, Sequence, ServiceBackend, ServiceDiagnostics, SessionId,
         SubmissionId,
@@ -326,8 +326,8 @@ mod tests {
         SubmissionId::from("sub-test-001".to_string())
     }
 
-    fn test_agent_id() -> AgentId {
-        AgentId::new("echo")
+    fn test_agent_id() -> AgentName {
+        AgentName::new("echo")
     }
 
     fn test_invoke() -> InvokeMessage {
@@ -393,8 +393,8 @@ mod tests {
             BranchId::from(1),
             test_submission(),
             test_session(),
-            AgentId::new("echo"),
-            AgentId::new("summarizer"),
+            AgentName::new("echo"),
+            AgentName::new("summarizer"),
             b"delegate this".to_vec(),
             Nonce::new("test-nonce"),
             None,

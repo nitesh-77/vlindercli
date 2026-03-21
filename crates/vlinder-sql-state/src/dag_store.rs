@@ -604,7 +604,7 @@ mod tests {
     use super::*;
     use vlinder_core::domain::workers::dag::build_dag_node;
     use vlinder_core::domain::{
-        AgentId, BranchId, CompleteMessage, DelegateDiagnostics, DelegateMessage, HarnessType,
+        AgentName, BranchId, CompleteMessage, DelegateDiagnostics, DelegateMessage, HarnessType,
         InferenceBackendType, InvokeDiagnostics, InvokeMessage, Nonce, Operation,
         RequestDiagnostics, RequestMessage, RuntimeDiagnostics, RuntimeType, Sequence,
         ServiceBackend, Snapshot, SubmissionId,
@@ -630,7 +630,7 @@ mod tests {
             sess(),
             HarnessType::Cli,
             RuntimeType::Container,
-            AgentId::new("agent-a"),
+            AgentName::new("agent-a"),
             payload.to_vec(),
             state,
             InvokeDiagnostics {
@@ -646,7 +646,7 @@ mod tests {
             BranchId::from(1),
             sub(),
             sess(),
-            AgentId::new("agent-a"),
+            AgentName::new("agent-a"),
             ServiceBackend::Infer(InferenceBackendType::Ollama),
             Operation::Run,
             Sequence::first(),
@@ -667,7 +667,7 @@ mod tests {
             BranchId::from(1),
             sub(),
             sess(),
-            AgentId::new("agent-a"),
+            AgentName::new("agent-a"),
             HarnessType::Cli,
             payload.to_vec(),
             state,
@@ -681,8 +681,8 @@ mod tests {
             BranchId::from(1),
             sub(),
             sess(),
-            AgentId::new("coordinator"),
-            AgentId::new("summarizer"),
+            AgentName::new("coordinator"),
+            AgentName::new("summarizer"),
             payload.to_vec(),
             Nonce::new("nonce-1"),
             None,
@@ -810,7 +810,7 @@ mod tests {
             sess1.clone(),
             HarnessType::Cli,
             RuntimeType::Container,
-            AgentId::new("agent-a"),
+            AgentName::new("agent-a"),
             b"a".to_vec(),
             None,
             InvokeDiagnostics {
@@ -827,7 +827,7 @@ mod tests {
             sess2.clone(),
             HarnessType::Cli,
             RuntimeType::Container,
-            AgentId::new("agent-b"),
+            AgentName::new("agent-b"),
             b"b".to_vec(),
             None,
             InvokeDiagnostics {

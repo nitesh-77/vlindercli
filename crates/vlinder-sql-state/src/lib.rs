@@ -366,7 +366,7 @@ mod tests {
     use vlinder_core::domain::session::Session;
     use vlinder_core::domain::workers::dag::build_dag_node;
     use vlinder_core::domain::{
-        AgentId, BranchId, CompleteMessage, DagNodeId, HarnessType, InMemoryDagStore,
+        AgentName, BranchId, CompleteMessage, DagNodeId, HarnessType, InMemoryDagStore,
         InvokeDiagnostics, InvokeMessage, ObservableMessage, RuntimeDiagnostics, RuntimeType,
         Snapshot, SubmissionId,
     };
@@ -382,7 +382,7 @@ mod tests {
             session,
             HarnessType::Cli,
             RuntimeType::Container,
-            AgentId::new(agent),
+            AgentName::new(agent),
             payload.to_vec(),
             None,
             InvokeDiagnostics {
@@ -398,7 +398,7 @@ mod tests {
             BranchId::from(1),
             SubmissionId::from("sub-1".to_string()),
             session,
-            AgentId::new(agent),
+            AgentName::new(agent),
             HarnessType::Cli,
             payload.to_vec(),
             None,

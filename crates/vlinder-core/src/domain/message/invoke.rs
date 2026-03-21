@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::super::diagnostics::{InvokeDiagnostics, RuntimeDiagnostics};
-use super::super::routing_key::{AgentId, RoutingKey, RoutingKind};
+use super::super::routing_key::{AgentName, RoutingKey, RoutingKind};
 use super::super::RuntimeType;
 use super::complete::CompleteMessage;
 use super::identity::{BranchId, DagNodeId, HarnessType, MessageId, SessionId, SubmissionId};
@@ -37,7 +37,7 @@ pub struct InvokeMessage {
     pub session: SessionId,
     pub harness: HarnessType,
     pub runtime: RuntimeType,
-    pub agent_id: AgentId,
+    pub agent_id: AgentName,
     #[serde(with = "base64_serde")]
     pub payload: Vec<u8>,
     /// Initial state hash from the previous turn's State trailer (ADR 055).
@@ -59,7 +59,7 @@ impl InvokeMessage {
         session: SessionId,
         harness: HarnessType,
         runtime: RuntimeType,
-        agent_id: AgentId,
+        agent_id: AgentName,
         payload: Vec<u8>,
         state: Option<String>,
         diagnostics: InvokeDiagnostics,
@@ -162,7 +162,7 @@ mod tests {
             SessionId::new(),
             HarnessType::Cli,
             RuntimeType::Container,
-            AgentId::new("echo"),
+            AgentName::new("echo"),
             b"hello world".to_vec(),
             Some("abc123".to_string()),
             InvokeDiagnostics {
@@ -195,7 +195,7 @@ mod tests {
             SessionId::new(),
             HarnessType::Cli,
             RuntimeType::Container,
-            AgentId::new("echo"),
+            AgentName::new("echo"),
             b"hello world".to_vec(),
             None,
             InvokeDiagnostics {

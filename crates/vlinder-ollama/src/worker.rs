@@ -323,7 +323,7 @@ fn error_json(message: &str) -> Vec<u8> {
 mod tests {
     use super::*;
     use vlinder_core::domain::{
-        AgentId, BranchId, EmbeddingBackendType, InferenceBackendType, RequestDiagnostics,
+        AgentName, BranchId, EmbeddingBackendType, InferenceBackendType, RequestDiagnostics,
         Sequence, ServiceBackend, SessionId, SubmissionId,
     };
     use vlinder_core::queue::InMemoryQueue;
@@ -347,7 +347,7 @@ mod tests {
             BranchId::from(1),
             SubmissionId::from("sub-test".to_string()),
             SessionId::new(),
-            AgentId::new("test-agent"),
+            AgentName::new("test-agent"),
             ServiceBackend::Infer(InferenceBackendType::Ollama),
             operation,
             Sequence::first(),
@@ -368,7 +368,7 @@ mod tests {
             BranchId::from(1),
             SubmissionId::from("sub-test".to_string()),
             SessionId::new(),
-            AgentId::new("test-agent"),
+            AgentName::new("test-agent"),
             ServiceBackend::Embed(EmbeddingBackendType::Ollama),
             Operation::Run,
             Sequence::first(),

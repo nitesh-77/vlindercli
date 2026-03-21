@@ -9,7 +9,7 @@ use std::process::Command;
 use chrono::{DateTime, Utc};
 
 use vlinder_core::domain::{
-    AgentId, BranchId, CompleteMessage, DagNodeId, HarnessType, InvokeDiagnostics, InvokeMessage,
+    AgentName, BranchId, CompleteMessage, DagNodeId, HarnessType, InvokeDiagnostics, InvokeMessage,
     ObservableMessage, RuntimeDiagnostics, RuntimeType, SessionId, SubmissionId,
 };
 use vlinder_git_dag::GitDagWorker;
@@ -83,8 +83,8 @@ pub fn read_head_sha(dir: &Path) -> Option<String> {
 // Message factory helpers
 // ============================================================================
 
-fn test_agent_id() -> AgentId {
-    AgentId::new("test-agent")
+fn test_agent_id() -> AgentName {
+    AgentName::new("test-agent")
 }
 
 /// Create an invoke message with the given payload and state.

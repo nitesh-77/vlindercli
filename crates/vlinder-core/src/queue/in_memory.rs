@@ -1,7 +1,7 @@
 //! In-memory queue implementation.
 
 use crate::domain::{
-    Acknowledgement, AgentId, CompleteMessage, DelegateMessage, ForkMessage, HarnessType,
+    Acknowledgement, AgentName, CompleteMessage, DelegateMessage, ForkMessage, HarnessType,
     InvokeMessage, MessageQueue, ObservableMessage, Operation, QueueError, RepairMessage,
     RequestMessage, ResponseMessage, RoutingKey, RoutingKind, ServiceBackend, SubmissionId,
 };
@@ -81,7 +81,7 @@ impl MessageQueue for InMemoryQueue {
 
     fn receive_invoke(
         &self,
-        agent: &AgentId,
+        agent: &AgentName,
     ) -> Result<(InvokeMessage, Acknowledgement), QueueError> {
         let mut typed = self.typed_queues.lock().unwrap();
 
@@ -199,7 +199,7 @@ impl MessageQueue for InMemoryQueue {
 
     fn receive_delegate(
         &self,
-        target: &AgentId,
+        target: &AgentName,
     ) -> Result<(DelegateMessage, Acknowledgement), QueueError> {
         let mut typed = self.typed_queues.lock().unwrap();
 
@@ -265,7 +265,7 @@ impl MessageQueue for InMemoryQueue {
 
     fn receive_repair(
         &self,
-        agent: &AgentId,
+        agent: &AgentName,
     ) -> Result<(RepairMessage, Acknowledgement), QueueError> {
         let mut typed = self.typed_queues.lock().unwrap();
 
@@ -324,8 +324,8 @@ mod tests {
         VectorStorageType,
     };
 
-    fn test_agent_id() -> AgentId {
-        AgentId::new("echo-agent")
+    fn test_agent_id() -> AgentName {
+        AgentName::new("echo-agent")
     }
 
     fn test_submission() -> SubmissionId {
@@ -536,8 +536,8 @@ mod tests {
             BranchId::from(1),
             test_submission(),
             SessionId::new(),
-            AgentId::new("coordinator"),
-            AgentId::new("summarizer"),
+            AgentName::new("coordinator"),
+            AgentName::new("summarizer"),
             b"payload".to_vec(),
             nonce.clone(),
             None,
@@ -549,11 +549,13 @@ mod tests {
 
         queue.send_delegate(delegate).unwrap();
 
-        let (received, ack) = queue.receive_delegate(&AgentId::new("summarizer")).unwrap();
+        let (received, ack) = queue
+            .receive_delegate(&AgentName::new("summarizer"))
+            .unwrap();
 
         assert_eq!(received.id, original_id);
-        assert_eq!(received.caller, AgentId::new("coordinator"));
-        assert_eq!(received.target, AgentId::new("summarizer"));
+        assert_eq!(received.caller, AgentName::new("coordinator"));
+        assert_eq!(received.target, AgentName::new("summarizer"));
         assert_eq!(received.payload, b"payload");
         assert_eq!(received.nonce, nonce);
 
@@ -568,8 +570,8 @@ mod tests {
             BranchId::from(1),
             test_submission(),
             SessionId::new(),
-            AgentId::new("coordinator"),
-            AgentId::new("summarizer"),
+            AgentName::new("coordinator"),
+            AgentName::new("summarizer"),
             b"payload".to_vec(),
             Nonce::generate(),
             None,
@@ -580,7 +582,7 @@ mod tests {
 
         queue.send_delegate(delegate).unwrap();
 
-        let result = queue.receive_delegate(&AgentId::new("fact-checker"));
+        let result = queue.receive_delegate(&AgentName::new("fact-checker"));
         assert!(matches!(result, Err(QueueError::Timeout)));
     }
 
@@ -594,8 +596,8 @@ mod tests {
             branch: BranchId::from(1),
             submission: test_submission(),
             kind: RoutingKind::DelegateReply {
-                caller: AgentId::new("coordinator"),
-                target: AgentId::new("summarizer"),
+                caller: AgentName::new("coordinator"),
+                target: AgentName::new("summarizer"),
                 nonce: Nonce::new("abc123"),
             },
         };
@@ -627,8 +629,8 @@ mod tests {
             branch: BranchId::from(1),
             submission: test_submission(),
             kind: RoutingKind::DelegateReply {
-                caller: AgentId::new("coordinator"),
-                target: AgentId::new("summarizer"),
+                caller: AgentName::new("coordinator"),
+                target: AgentName::new("summarizer"),
                 nonce: Nonce::new("nonce-a"),
             },
         };
@@ -637,8 +639,8 @@ mod tests {
             branch: BranchId::from(1),
             submission: test_submission(),
             kind: RoutingKind::DelegateReply {
-                caller: AgentId::new("coordinator"),
-                target: AgentId::new("summarizer"),
+                caller: AgentName::new("coordinator"),
+                target: AgentName::new("summarizer"),
                 nonce: Nonce::new("nonce-b"),
             },
         };

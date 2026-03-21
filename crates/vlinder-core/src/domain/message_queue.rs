@@ -10,9 +10,9 @@
 //! `AckFn` acknowledges successful processing.
 
 use super::{
-    AgentId, CompleteMessage, DelegateMessage, ForkMessage, HarnessType, InvokeMessage, Operation,
-    PromoteMessage, RepairMessage, RequestMessage, ResourceId, ResponseMessage, RoutingKey,
-    ServiceBackend, SubmissionId,
+    AgentName, CompleteMessage, DelegateMessage, ForkMessage, HarnessType, InvokeMessage,
+    Operation, PromoteMessage, RepairMessage, RequestMessage, ResourceId, ResponseMessage,
+    RoutingKey, ServiceBackend, SubmissionId,
 };
 use std::fmt;
 
@@ -56,7 +56,7 @@ pub trait MessageQueue {
     /// Returns the typed message with all dimensions intact.
     fn receive_invoke(
         &self,
-        agent: &AgentId,
+        agent: &AgentName,
     ) -> Result<(InvokeMessage, Acknowledgement), QueueError>;
 
     /// Receive a `RequestMessage` for a service-backend/operation pair.
@@ -97,7 +97,7 @@ pub trait MessageQueue {
     /// Receive a `DelegateMessage` for a target agent.
     fn receive_delegate(
         &self,
-        target: &AgentId,
+        target: &AgentName,
     ) -> Result<(DelegateMessage, Acknowledgement), QueueError>;
 
     /// Send a `CompleteMessage` as a delegation reply (ADR 096 §7).
@@ -132,7 +132,7 @@ pub trait MessageQueue {
     /// The sidecar subscribes to repair messages alongside invoke.
     fn receive_repair(
         &self,
-        agent: &AgentId,
+        agent: &AgentName,
     ) -> Result<(RepairMessage, Acknowledgement), QueueError>;
 
     // -------------------------------------------------------------------------
@@ -256,7 +256,7 @@ impl std::error::Error for QueueError {}
 ///
 /// Registry IDs have the format `<registry>/agents/<name>`.
 /// The last path component is the agent name, used as the NATS subject token.
-pub fn agent_routing_key(agent_id: &ResourceId) -> AgentId {
+pub fn agent_routing_key(agent_id: &ResourceId) -> AgentName {
     let name = if let Some(path) = agent_id.path() {
         path.rsplit('/')
             .next()
@@ -265,5 +265,5 @@ pub fn agent_routing_key(agent_id: &ResourceId) -> AgentId {
     } else {
         agent_id.as_str()
     };
-    AgentId::new(name)
+    AgentName::new(name)
 }

@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use vlinder_core::domain::{
-    Agent, AgentId, ExpectsReply, MessageQueue, Registry, ResourceId, Runtime, RuntimeType,
+    Agent, AgentName, ExpectsReply, MessageQueue, Registry, ResourceId, Runtime, RuntimeType,
 };
 
 use crate::config::LambdaRuntimeConfig;
@@ -174,7 +174,7 @@ impl LambdaRuntime {
     /// failures (Lambda itself couldn't run).
     fn dispatch_invocations(&self) {
         for name in self.functions.keys() {
-            let agent_id = AgentId::new(name);
+            let agent_id = AgentName::new(name);
             if let Ok((invoke, ack)) = self.queue.receive_invoke(&agent_id) {
                 let _ = ack();
                 let function_name = format!("vlinder-{name}");
@@ -543,7 +543,7 @@ mod tests {
             SessionId::new(),
             HarnessType::Grpc,
             RuntimeType::Lambda,
-            AgentId::new("echo"),
+            AgentName::new("echo"),
             b"hello lambda".to_vec(),
             None,
             InvokeDiagnostics {
@@ -558,7 +558,7 @@ mod tests {
 
         // The invoke should be consumed — the adapter sends complete via NATS,
         // not the daemon. No complete on the queue from daemon side.
-        let agent_id = AgentId::new("echo");
+        let agent_id = AgentName::new("echo");
         assert!(
             queue.receive_invoke(&agent_id).is_err(),
             "invoke should have been consumed from the queue"
@@ -598,7 +598,7 @@ mod tests {
             SessionId::new(),
             HarnessType::Grpc,
             RuntimeType::Lambda,
-            AgentId::new("echo"),
+            AgentName::new("echo"),
             b"hello".to_vec(),
             None,
             InvokeDiagnostics {

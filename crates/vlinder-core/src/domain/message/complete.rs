@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::super::diagnostics::RuntimeDiagnostics;
-use super::super::routing_key::{AgentId, RoutingKey, RoutingKind};
+use super::super::routing_key::{AgentName, RoutingKey, RoutingKind};
 use super::identity::{BranchId, HarnessType, MessageId, SessionId, SubmissionId};
 use super::PROTOCOL_VERSION;
 
@@ -17,7 +17,7 @@ pub struct CompleteMessage {
     pub branch: BranchId,
     pub submission: SubmissionId,
     pub session: SessionId,
-    pub agent_id: AgentId,
+    pub agent_id: AgentName,
     pub harness: HarnessType,
     #[serde(skip)]
     pub payload: Vec<u8>,
@@ -35,7 +35,7 @@ impl CompleteMessage {
         branch: BranchId,
         submission: SubmissionId,
         session: SessionId,
-        agent_id: AgentId,
+        agent_id: AgentName,
         harness: HarnessType,
         payload: Vec<u8>,
         state: Option<String>,

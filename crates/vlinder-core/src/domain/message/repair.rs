@@ -1,7 +1,7 @@
 //! `RepairMessage`: Platform → Sidecar (replay a failed service call, ADR 113).
 
 use super::super::operation::Operation;
-use super::super::routing_key::{AgentId, RoutingKey, RoutingKind, ServiceBackend};
+use super::super::routing_key::{AgentName, RoutingKey, RoutingKind, ServiceBackend};
 use super::identity::{
     BranchId, DagNodeId, HarnessType, MessageId, Sequence, SessionId, SubmissionId,
 };
@@ -25,7 +25,7 @@ pub struct RepairMessage {
     pub branch: BranchId,
     pub submission: SubmissionId,
     pub session: SessionId,
-    pub agent_id: AgentId,
+    pub agent_id: AgentName,
     pub harness: HarnessType,
     /// The fork point in the DAG (required).
     pub dag_parent: DagNodeId,
@@ -45,7 +45,7 @@ impl RepairMessage {
         branch: BranchId,
         submission: SubmissionId,
         session: SessionId,
-        agent_id: AgentId,
+        agent_id: AgentName,
         harness: HarnessType,
         dag_parent: DagNodeId,
         checkpoint: String,

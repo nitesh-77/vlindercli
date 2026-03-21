@@ -17,9 +17,9 @@ use super::{
 /// the unique identifier that distinguishes one agent from another.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(transparent)]
-pub struct AgentId(String);
+pub struct AgentName(String);
 
-impl AgentId {
+impl AgentName {
     pub fn new(id: impl Into<String>) -> Self {
         Self(id.into())
     }
@@ -29,7 +29,7 @@ impl AgentId {
     }
 }
 
-impl std::fmt::Display for AgentId {
+impl std::fmt::Display for AgentName {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
@@ -205,46 +205,42 @@ pub enum RoutingKind {
     Invoke {
         harness: HarnessType,
         runtime: RuntimeType,
-        agent: AgentId,
+        agent: AgentName,
     },
     Complete {
-        agent: AgentId,
+        agent: AgentName,
         harness: HarnessType,
     },
     Request {
-        agent: AgentId,
+        agent: AgentName,
         service: ServiceBackend,
         operation: Operation,
         sequence: Sequence,
     },
     Response {
         service: ServiceBackend,
-        agent: AgentId,
+        agent: AgentName,
         operation: Operation,
         sequence: Sequence,
     },
     Delegate {
-        caller: AgentId,
-        target: AgentId,
+        caller: AgentName,
+        target: AgentName,
     },
     DelegateReply {
-        caller: AgentId,
-        target: AgentId,
+        caller: AgentName,
+        target: AgentName,
         nonce: Nonce,
     },
     /// Repair: Platform → Sidecar (replay a failed service call, ADR 113).
     Repair {
         harness: HarnessType,
-        agent: AgentId,
+        agent: AgentName,
     },
     /// Fork: CLI → Platform (create a branch).
-    Fork {
-        agent_name: String,
-    },
+    Fork { agent_name: String },
     /// Promote: CLI → Platform (promote a branch to main).
-    Promote {
-        agent_name: String,
-    },
+    Promote { agent_name: String },
 }
 
 impl RoutingKey {
@@ -322,12 +318,12 @@ mod tests {
         SubmissionId::from("sub-2".to_string())
     }
 
-    fn agent() -> AgentId {
-        AgentId::new("echo")
+    fn agent() -> AgentName {
+        AgentName::new("echo")
     }
 
-    fn agent_alt() -> AgentId {
-        AgentId::new("pensieve")
+    fn agent_alt() -> AgentName {
+        AgentName::new("pensieve")
     }
 
     // ========================================================================
@@ -613,7 +609,7 @@ mod tests {
     fn delegate_differs_by_caller() {
         let mut key = base_delegate();
         if let RoutingKind::Delegate { ref mut caller, .. } = key.kind {
-            *caller = AgentId::new("planner");
+            *caller = AgentName::new("planner");
         }
         assert_ne!(base_delegate(), key);
     }
@@ -622,7 +618,7 @@ mod tests {
     fn delegate_differs_by_target() {
         let mut key = base_delegate();
         if let RoutingKind::Delegate { ref mut target, .. } = key.kind {
-            *target = AgentId::new("fact-checker");
+            *target = AgentName::new("fact-checker");
         }
         assert_ne!(base_delegate(), key);
     }

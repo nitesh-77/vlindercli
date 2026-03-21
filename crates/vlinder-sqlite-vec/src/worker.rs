@@ -234,7 +234,7 @@ mod tests {
     use vlinder_core::domain::InMemoryRegistry;
     use vlinder_core::domain::InMemorySecretStore;
     use vlinder_core::domain::SecretStore;
-    use vlinder_core::domain::{Agent, AgentId, Registry};
+    use vlinder_core::domain::{Agent, AgentName, Registry};
     use vlinder_core::domain::{
         BranchId, Operation, RequestDiagnostics, Sequence, ServiceBackend, SessionId, SubmissionId,
         VectorStorageType,
@@ -254,8 +254,8 @@ mod tests {
         }
     }
 
-    fn test_agent_id() -> AgentId {
-        AgentId::new("test-agent")
+    fn test_agent_id() -> AgentName {
+        AgentName::new("test-agent")
     }
 
     fn test_submission() -> SubmissionId {

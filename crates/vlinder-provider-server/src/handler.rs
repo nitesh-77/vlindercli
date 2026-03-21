@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use vlinder_core::domain::{
-    AgentId, DelegateDiagnostics, DelegateMessage, InvokeMessage, MessageQueue, Nonce,
+    AgentName, DelegateDiagnostics, DelegateMessage, InvokeMessage, MessageQueue, Nonce,
     ProviderRoute, Registry, RequestDiagnostics, RequestMessage, RoutingKey, RuntimeDiagnostics,
     SequenceCounter,
 };
@@ -132,7 +132,7 @@ impl InvokeHandler {
         }
 
         let caller = self.invoke.agent_id.clone();
-        let target = AgentId::new(target_name);
+        let target = AgentName::new(target_name);
         let nonce = Nonce::generate();
 
         let delegate = DelegateMessage::new(

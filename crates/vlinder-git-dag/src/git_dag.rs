@@ -769,7 +769,7 @@ mod tests {
     use super::*;
     use std::process::Command;
     use vlinder_core::domain::{
-        Agent, AgentId, BranchId, CompleteMessage, ContainerId, DagNodeId, DelegateDiagnostics,
+        Agent, AgentName, BranchId, CompleteMessage, ContainerId, DagNodeId, DelegateDiagnostics,
         DelegateMessage, HarnessType, InMemoryRegistry, InMemorySecretStore, InferenceBackendType,
         InvokeDiagnostics, InvokeMessage, Nonce, ObservableMessage, Operation, RequestDiagnostics,
         RequestMessage, ResponseMessage, RuntimeDiagnostics, RuntimeInfo, RuntimeType, SecretStore,
@@ -777,8 +777,8 @@ mod tests {
         Snapshot, SubmissionId,
     };
 
-    fn test_agent_id() -> AgentId {
-        AgentId::new("support-agent")
+    fn test_agent_id() -> AgentName {
+        AgentName::new("support-agent")
     }
 
     fn test_invoke(payload: &[u8], epoch_secs: i64) -> (ObservableMessage, DateTime<Utc>) {
@@ -878,8 +878,8 @@ mod tests {
             BranchId::from(1),
             SubmissionId::from("sub-1".to_string()),
             SessionId::try_from(SESSION.to_string()).unwrap(),
-            AgentId::new("coordinator"),
-            AgentId::new("summarizer"),
+            AgentName::new("coordinator"),
+            AgentName::new("summarizer"),
             payload.to_vec(),
             Nonce::new("nonce-1"),
             None,

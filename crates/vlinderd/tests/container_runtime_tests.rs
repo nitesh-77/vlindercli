@@ -9,8 +9,8 @@
 #![cfg(feature = "test-support")]
 
 use vlinder_core::domain::{
-    Agent, AgentId, BranchId, HarnessType, InvokeDiagnostics, InvokeMessage, Runtime, RuntimeType,
-    SessionId, SubmissionId,
+    Agent, AgentName, BranchId, HarnessType, InvokeDiagnostics, InvokeMessage, Runtime,
+    RuntimeType, SessionId, SubmissionId,
 };
 use vlinder_podman_runtime::{ContainerRuntime, PodmanRuntimeConfig};
 use vlinderd::config::Config;

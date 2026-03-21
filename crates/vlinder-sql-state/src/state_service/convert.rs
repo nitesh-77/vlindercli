@@ -183,7 +183,7 @@ mod tests {
     use chrono::Utc;
     use vlinder_core::domain::workers::dag::build_dag_node;
     use vlinder_core::domain::{
-        AgentId, BranchId, DagNodeId, HarnessType, InvokeDiagnostics, InvokeMessage, RuntimeType,
+        AgentName, BranchId, DagNodeId, HarnessType, InvokeDiagnostics, InvokeMessage, RuntimeType,
         SessionId, Snapshot, SubmissionId,
     };
 
@@ -194,7 +194,7 @@ mod tests {
             SessionId::new(),
             HarnessType::Cli,
             RuntimeType::Container,
-            AgentId::new("agent-echo"),
+            AgentName::new("agent-echo"),
             b"hello".to_vec(),
             Some("state-hash-abc".to_string()),
             InvokeDiagnostics {
@@ -234,7 +234,7 @@ mod tests {
             SessionId::new(),
             HarnessType::Cli,
             RuntimeType::Container,
-            AgentId::new("agent-echo"),
+            AgentName::new("agent-echo"),
             b"hello".to_vec(),
             None,
             InvokeDiagnostics {

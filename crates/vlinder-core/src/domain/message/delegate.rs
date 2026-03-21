@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::super::diagnostics::DelegateDiagnostics;
-use super::super::routing_key::{AgentId, Nonce, RoutingKey, RoutingKind};
+use super::super::routing_key::{AgentName, Nonce, RoutingKey, RoutingKind};
 use super::identity::{BranchId, MessageId, SessionId, SubmissionId};
 use super::PROTOCOL_VERSION;
 
@@ -18,8 +18,8 @@ pub struct DelegateMessage {
     pub branch: BranchId,
     pub submission: SubmissionId,
     pub session: SessionId,
-    pub caller: AgentId,
-    pub target: AgentId,
+    pub caller: AgentName,
+    pub target: AgentName,
     #[serde(skip)]
     pub payload: Vec<u8>,
     /// Uniqueness token for this delegation.
@@ -38,8 +38,8 @@ impl DelegateMessage {
         branch: BranchId,
         submission: SubmissionId,
         session: SessionId,
-        caller: AgentId,
-        target: AgentId,
+        caller: AgentName,
+        target: AgentName,
         payload: Vec<u8>,
         nonce: Nonce,
         state: Option<String>,

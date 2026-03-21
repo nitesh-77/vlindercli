@@ -7,7 +7,7 @@
 use std::time::Duration;
 
 use vlinder_core::domain::{
-    AgentId, ContainerId, DagNodeId, HarnessType, HealthWindow, ImageDigest, ImageRef,
+    AgentName, ContainerId, DagNodeId, HarnessType, HealthWindow, ImageDigest, ImageRef,
     InvokeDiagnostics, InvokeMessage, RuntimeType,
 };
 
@@ -79,7 +79,7 @@ impl Sidecar {
         let mut durable_session: Option<DurableSession> = None;
 
         loop {
-            let agent_id = AgentId::new(&self.agent_name);
+            let agent_id = AgentName::new(&self.agent_name);
 
             // Poll for service responses first (durable mode).
             if let Some(session) = durable_session.take() {
@@ -160,7 +160,7 @@ impl Sidecar {
                     delegate.session.clone(),
                     HarnessType::Cli,
                     RuntimeType::Container,
-                    AgentId::new(&self.agent_name),
+                    AgentName::new(&self.agent_name),
                     delegate.payload.clone(),
                     None,
                     InvokeDiagnostics {

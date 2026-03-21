@@ -19,7 +19,7 @@ use tokio::runtime::Runtime;
 use std::str::FromStr;
 
 use vlinder_core::domain::{
-    Acknowledgement, AgentId, BranchId, CompleteMessage, DagNodeId, DelegateDiagnostics,
+    Acknowledgement, AgentName, BranchId, CompleteMessage, DagNodeId, DelegateDiagnostics,
     DelegateMessage, HarnessType, InvokeDiagnostics, InvokeMessage, MessageId, MessageQueue, Nonce,
     Operation, QueueError, RepairMessage, RequestDiagnostics, RequestMessage, ResponseMessage,
     RoutingKey, RoutingKind, RuntimeDiagnostics, RuntimeType, Sequence, ServiceBackend,
@@ -370,7 +370,7 @@ impl MessageQueue for NatsQueue {
 
     fn receive_invoke(
         &self,
-        agent: &AgentId,
+        agent: &AgentName,
     ) -> Result<(InvokeMessage, Acknowledgement), QueueError> {
         // Build filter: vlinder.{session}.{branch}.{submission}.invoke.{harness}.{runtime}.{agent}
         let filter = format!("vlinder.*.*.*.invoke.*.*.{}", agent.as_str());
@@ -405,7 +405,7 @@ impl MessageQueue for NatsQueue {
                     .map_err(|_| QueueError::ReceiveFailed("unknown harness type".to_string()))?,
                 runtime: RuntimeType::from_str(&get_header(headers, "runtime")?)
                     .map_err(|_| QueueError::ReceiveFailed("unknown runtime type".to_string()))?,
-                agent_id: AgentId::new(get_header(headers, "agent-id")?),
+                agent_id: AgentName::new(get_header(headers, "agent-id")?),
                 payload: js_msg.payload.to_vec(),
                 state: get_header(headers, "state").ok(),
                 diagnostics,
@@ -457,7 +457,7 @@ impl MessageQueue for NatsQueue {
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
                 session: SessionId::try_from(get_header(headers, "session-id")?)
                     .map_err(QueueError::ReceiveFailed)?,
-                agent_id: AgentId::new(get_header(headers, "agent-id")?),
+                agent_id: AgentName::new(get_header(headers, "agent-id")?),
                 service: ServiceBackend::from_parts(
                     ServiceType::from_str(&get_header(headers, "service")?).map_err(|_| {
                         QueueError::ReceiveFailed("unknown service type".to_string())
@@ -522,7 +522,7 @@ impl MessageQueue for NatsQueue {
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
                 session: SessionId::try_from(get_header(headers, "session-id")?)
                     .map_err(QueueError::ReceiveFailed)?,
-                agent_id: AgentId::new(get_header(headers, "agent-id")?),
+                agent_id: AgentName::new(get_header(headers, "agent-id")?),
                 service: ServiceBackend::from_parts(
                     ServiceType::from_str(&get_header(headers, "service")?).map_err(|_| {
                         QueueError::ReceiveFailed("unknown service type".to_string())
@@ -578,7 +578,7 @@ impl MessageQueue for NatsQueue {
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
                 session: SessionId::try_from(get_header(headers, "session-id")?)
                     .map_err(QueueError::ReceiveFailed)?,
-                agent_id: AgentId::new(get_header(headers, "agent-id")?),
+                agent_id: AgentName::new(get_header(headers, "agent-id")?),
                 harness: HarnessType::from_str(&get_header(headers, "harness")?)
                     .map_err(|_| QueueError::ReceiveFailed("unknown harness type".to_string()))?,
                 payload: js_msg.payload.to_vec(),
@@ -624,7 +624,7 @@ impl MessageQueue for NatsQueue {
 
     fn receive_delegate(
         &self,
-        target: &AgentId,
+        target: &AgentName,
     ) -> Result<(DelegateMessage, Acknowledgement), QueueError> {
         let filter = format!("vlinder.*.*.*.delegate.*.{}", target.as_str());
 
@@ -653,8 +653,8 @@ impl MessageQueue for NatsQueue {
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
                 session: SessionId::try_from(get_header(headers, "session-id")?)
                     .map_err(QueueError::ReceiveFailed)?,
-                caller: AgentId::new(get_header(headers, "caller-agent")?),
-                target: AgentId::new(get_header(headers, "target-agent")?),
+                caller: AgentName::new(get_header(headers, "caller-agent")?),
+                target: AgentName::new(get_header(headers, "target-agent")?),
                 payload: js_msg.payload.to_vec(),
                 nonce: Nonce::new(get_header(headers, "nonce")?),
                 state: get_header(headers, "state").ok(),
@@ -729,7 +729,7 @@ impl MessageQueue for NatsQueue {
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
                 session: SessionId::try_from(get_header(headers, "session-id")?)
                     .map_err(QueueError::ReceiveFailed)?,
-                agent_id: AgentId::new(get_header(headers, "agent-id")?),
+                agent_id: AgentName::new(get_header(headers, "agent-id")?),
                 harness: HarnessType::from_str(&get_header(headers, "harness")?)
                     .map_err(|_| QueueError::ReceiveFailed("unknown harness type".to_string()))?,
                 payload: js_msg.payload.to_vec(),
@@ -777,7 +777,7 @@ impl MessageQueue for NatsQueue {
 
     fn receive_repair(
         &self,
-        agent: &AgentId,
+        agent: &AgentName,
     ) -> Result<(RepairMessage, Acknowledgement), QueueError> {
         // Build filter: vlinder.{session}.{branch}.{submission}.repair.{harness}.{agent}
         let filter = format!("vlinder.*.*.*.repair.*.{}", agent.as_str());
@@ -800,7 +800,7 @@ impl MessageQueue for NatsQueue {
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
                 session: SessionId::try_from(get_header(headers, "session-id")?)
                     .map_err(QueueError::ReceiveFailed)?,
-                agent_id: AgentId::new(get_header(headers, "agent-id")?),
+                agent_id: AgentName::new(get_header(headers, "agent-id")?),
                 harness: HarnessType::from_str(&get_header(headers, "harness")?)
                     .map_err(|_| QueueError::ReceiveFailed("unknown harness type".to_string()))?,
                 dag_parent: DagNodeId::from(get_header(headers, "dag-parent")?),
@@ -982,36 +982,36 @@ pub fn subject_to_routing_key(subject: &str) -> Option<RoutingKey> {
         "invoke" if s.len() == 8 => Some(RoutingKind::Invoke {
             harness: HarnessType::from_str(s[5]).ok()?,
             runtime: RuntimeType::from_str(s[6]).ok()?,
-            agent: AgentId::new(s[7]),
+            agent: AgentName::new(s[7]),
         }),
         "req" if s.len() == 10 => Some(RoutingKind::Request {
-            agent: AgentId::new(s[5]),
+            agent: AgentName::new(s[5]),
             service: ServiceBackend::from_parts(ServiceType::from_str(s[6]).ok()?, s[7])?,
             operation: Operation::from_str(s[8]).ok()?,
             sequence: Sequence::from(s[9].parse::<u32>().ok()?),
         }),
         "res" if s.len() == 10 => Some(RoutingKind::Response {
             service: ServiceBackend::from_parts(ServiceType::from_str(s[5]).ok()?, s[6])?,
-            agent: AgentId::new(s[7]),
+            agent: AgentName::new(s[7]),
             operation: Operation::from_str(s[8]).ok()?,
             sequence: Sequence::from(s[9].parse::<u32>().ok()?),
         }),
         "complete" if s.len() == 7 => Some(RoutingKind::Complete {
-            agent: AgentId::new(s[5]),
+            agent: AgentName::new(s[5]),
             harness: HarnessType::from_str(s[6]).ok()?,
         }),
         "delegate" if s.len() == 7 => Some(RoutingKind::Delegate {
-            caller: AgentId::new(s[5]),
-            target: AgentId::new(s[6]),
+            caller: AgentName::new(s[5]),
+            target: AgentName::new(s[6]),
         }),
         "delegate-reply" if s.len() == 8 => Some(RoutingKind::DelegateReply {
-            caller: AgentId::new(s[5]),
-            target: AgentId::new(s[6]),
+            caller: AgentName::new(s[5]),
+            target: AgentName::new(s[6]),
             nonce: Nonce::new(s[7]),
         }),
         "repair" if s.len() == 7 => Some(RoutingKind::Repair {
             harness: HarnessType::from_str(s[5]).ok()?,
-            agent: AgentId::new(s[6]),
+            agent: AgentName::new(s[6]),
         }),
         "fork" if s.len() == 6 => Some(RoutingKind::Fork {
             agent_name: s[5].to_string(),
@@ -1301,11 +1301,11 @@ mod tests {
     fn submission_alt() -> SubmissionId {
         SubmissionId::from("sub-2".to_string())
     }
-    fn agent() -> AgentId {
-        AgentId::new("echo")
+    fn agent() -> AgentName {
+        AgentName::new("echo")
     }
-    fn agent_alt() -> AgentId {
-        AgentId::new("pensieve")
+    fn agent_alt() -> AgentName {
+        AgentName::new("pensieve")
     }
 
     // ========================================================================
@@ -1812,7 +1812,7 @@ mod tests {
             submission: submission(),
             kind: RoutingKind::Delegate {
                 caller: agent(),
-                target: AgentId::new("fact-checker"),
+                target: AgentName::new("fact-checker"),
             },
         };
         assert_injective(&a, &b);

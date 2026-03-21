@@ -69,7 +69,7 @@ pub use message::{
 };
 pub use message_queue::{agent_routing_key, Acknowledgement, MessageQueue, QueueError};
 pub use routing_key::{
-    AgentId, EmbeddingBackendType, InferenceBackendType, Nonce, RoutingKey, RoutingKind,
+    AgentName, EmbeddingBackendType, InferenceBackendType, Nonce, RoutingKey, RoutingKind,
     ServiceBackend,
 };
 

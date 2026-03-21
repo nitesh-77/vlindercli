@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use super::super::diagnostics::ServiceDiagnostics;
 use super::super::operation::Operation;
-use super::super::routing_key::{AgentId, RoutingKey, RoutingKind, ServiceBackend};
+use super::super::routing_key::{AgentName, RoutingKey, RoutingKind, ServiceBackend};
 use super::identity::{BranchId, MessageId, Sequence, SessionId, SubmissionId};
 use super::request::RequestMessage;
 use super::PROTOCOL_VERSION;
@@ -19,7 +19,7 @@ pub struct ResponseMessage {
     pub branch: BranchId,
     pub submission: SubmissionId,
     pub session: SessionId,
-    pub agent_id: AgentId,
+    pub agent_id: AgentName,
     pub service: ServiceBackend,
     pub operation: Operation,
     pub sequence: Sequence,
