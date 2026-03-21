@@ -272,7 +272,7 @@ pub fn handle_repair(
 
     let agent = ctx
         .registry
-        .get_agent_by_name(repair.agent_id.as_str())
+        .get_agent_by_name(repair.agent_name.as_str())
         .expect("agent not found");
 
     // Build checkpoint hosts with :3544 suffix (same as durable mode).
@@ -301,7 +301,7 @@ pub fn handle_repair(
         repair.branch,
         repair.submission.clone(),
         repair.session.clone(),
-        repair.agent_id.clone(),
+        repair.agent_name.clone(),
         repair.service,
         repair.operation,
         repair.sequence,
@@ -330,7 +330,7 @@ pub fn handle_repair(
         repair.session.clone(),
         repair.harness,
         vlinder_core::domain::RuntimeType::Container,
-        repair.agent_id.clone(),
+        repair.agent_name.clone(),
         repair.payload.clone(),
         repair.state.clone(),
         vlinder_core::domain::InvokeDiagnostics {

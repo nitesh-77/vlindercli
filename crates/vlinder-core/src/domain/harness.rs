@@ -10,9 +10,9 @@
 use std::sync::Arc;
 
 use crate::domain::{
-    BranchId, DagNodeId, DagStore, ForkMessage, HarnessType, InvokeDiagnostics, InvokeMessage,
-    JobId, JobStatus, MessageQueue, MessageType, PromoteMessage, Registry, ResourceId, SessionId,
-    SessionStartMessage, SubmissionId,
+    AgentName, BranchId, DagNodeId, DagStore, ForkMessage, HarnessType, InvokeDiagnostics,
+    InvokeMessage, JobId, JobStatus, MessageQueue, MessageType, PromoteMessage, Registry,
+    ResourceId, SessionId, SessionStartMessage, SubmissionId,
 };
 
 /// Common harness operations shared across all harness types.
@@ -73,7 +73,7 @@ pub trait Harness {
 /// The CLI reads these from the `DagStore` (node lookup + session context).
 /// The harness wraps them in a `ForkMessage` and sends through the queue.
 pub struct ForkParams {
-    pub agent_name: String,
+    pub agent_name: AgentName,
     pub branch_name: String,
     pub fork_point: DagNodeId,
 }
@@ -83,7 +83,7 @@ pub struct ForkParams {
 /// The CLI reads these from the `DagStore` (branch lookup + session context).
 /// The harness wraps them in a `PromoteMessage` and sends through the queue.
 pub struct PromoteParams {
-    pub agent_name: String,
+    pub agent_name: AgentName,
 }
 
 /// Build an enriched payload from DAG-derived history.

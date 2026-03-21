@@ -751,7 +751,7 @@ impl MessageQueue for NatsQueue {
             headers.insert("branch-id", msg.branch.to_string());
             headers.insert("submission-id", msg.submission.as_str());
             headers.insert("session-id", msg.session.as_str());
-            headers.insert("agent-id", msg.agent_id.as_str());
+            headers.insert("agent-id", msg.agent_name.as_str());
             headers.insert("harness", msg.harness.as_str());
             headers.insert("dag-parent", msg.dag_parent.as_str());
             headers.insert("checkpoint", msg.checkpoint.as_str());
@@ -800,7 +800,7 @@ impl MessageQueue for NatsQueue {
                 submission: SubmissionId::from(get_header(headers, "submission-id")?),
                 session: SessionId::try_from(get_header(headers, "session-id")?)
                     .map_err(QueueError::ReceiveFailed)?,
-                agent_id: AgentName::new(get_header(headers, "agent-id")?),
+                agent_name: AgentName::new(get_header(headers, "agent-id")?),
                 harness: HarnessType::from_str(&get_header(headers, "harness")?)
                     .map_err(|_| QueueError::ReceiveFailed("unknown harness type".to_string()))?,
                 dag_parent: DagNodeId::from(get_header(headers, "dag-parent")?),
@@ -1014,10 +1014,10 @@ pub fn subject_to_routing_key(subject: &str) -> Option<RoutingKey> {
             agent: AgentName::new(s[6]),
         }),
         "fork" if s.len() == 6 => Some(RoutingKind::Fork {
-            agent_name: s[5].to_string(),
+            agent_name: AgentName::new(s[5]),
         }),
         "promote" if s.len() == 6 => Some(RoutingKind::Promote {
-            agent_name: s[5].to_string(),
+            agent_name: AgentName::new(s[5]),
         }),
         _ => None,
     };

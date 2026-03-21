@@ -6,6 +6,8 @@
 //!   renames promoted branch to "main"
 //! - Git: updates refs accordingly
 
+use crate::domain::AgentName;
+
 use super::identity::{BranchId, MessageId, SessionId, SubmissionId};
 use super::PROTOCOL_VERSION;
 
@@ -23,7 +25,7 @@ pub struct PromoteMessage {
     pub branch: BranchId,
     pub submission: SubmissionId,
     pub session: SessionId,
-    pub agent_name: String,
+    pub agent_name: AgentName,
 }
 
 impl PromoteMessage {
@@ -31,7 +33,7 @@ impl PromoteMessage {
         branch: BranchId,
         submission: SubmissionId,
         session: SessionId,
-        agent_name: String,
+        agent_name: AgentName,
     ) -> Self {
         Self {
             id: MessageId::new(),

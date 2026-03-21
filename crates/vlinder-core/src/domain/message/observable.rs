@@ -232,7 +232,7 @@ impl ObservableMessageHeaders {
                 branch,
                 submission,
                 session,
-                agent_id: agent,
+                agent_name: agent,
                 harness,
                 dag_parent,
                 checkpoint,
@@ -400,10 +400,10 @@ impl ObservableMessage {
             }
             ObservableMessage::Delegate(m) => (m.caller.to_string(), m.target.to_string()),
             ObservableMessage::Repair(m) => {
-                (m.harness.as_str().to_string(), m.agent_id.to_string())
+                (m.harness.as_str().to_string(), m.agent_name.to_string())
             }
-            ObservableMessage::Fork(m) => ("platform".to_string(), m.agent_name.clone()),
-            ObservableMessage::Promote(m) => ("platform".to_string(), m.agent_name.clone()),
+            ObservableMessage::Fork(m) => ("platform".to_string(), m.agent_name.to_string()),
+            ObservableMessage::Promote(m) => ("platform".to_string(), m.agent_name.to_string()),
         }
     }
 

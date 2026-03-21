@@ -10,7 +10,7 @@ use super::proto::{
     RunAgentResponse, SemVer, StartSessionRequest, StartSessionResponse,
 };
 use vlinder_core::domain::{
-    BranchId, DagNodeId, ForkParams, Harness, PromoteParams, ResourceId, SessionId,
+    AgentName, BranchId, DagNodeId, ForkParams, Harness, PromoteParams, ResourceId, SessionId,
 };
 
 /// gRPC server that wraps a Harness implementation.
@@ -107,7 +107,7 @@ impl HarnessService for HarnessServiceServer {
 
         let result = tokio::task::spawn_blocking(move || {
             let params = ForkParams {
-                agent_name: req.agent_name,
+                agent_name: AgentName::new(req.agent_name),
                 branch_name: req.branch_name,
                 fork_point: DagNodeId::from(req.fork_point),
             };
@@ -134,7 +134,7 @@ impl HarnessService for HarnessServiceServer {
 
         let result = tokio::task::spawn_blocking(move || {
             let params = PromoteParams {
-                agent_name: req.agent_name,
+                agent_name: AgentName::new(req.agent_name),
             };
             let session_id = SessionId::try_from(req.session_id)
                 .map_err(|e| format!("invalid session_id: {e}"))?;

@@ -238,9 +238,9 @@ pub enum RoutingKind {
         agent: AgentName,
     },
     /// Fork: CLI → Platform (create a branch).
-    Fork { agent_name: String },
+    Fork { agent_name: AgentName },
     /// Promote: CLI → Platform (promote a branch to main).
-    Promote { agent_name: String },
+    Promote { agent_name: AgentName },
 }
 
 impl RoutingKey {

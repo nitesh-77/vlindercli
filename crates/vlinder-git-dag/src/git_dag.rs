@@ -279,7 +279,7 @@ impl GitDagWorker {
             }
             ObservableMessage::Repair(m) => {
                 self.insert_field(&mut tb, "type", "repair")?;
-                self.insert_field(&mut tb, "agent_id", m.agent_id.as_str())?;
+                self.insert_field(&mut tb, "agent_id", m.agent_name.as_str())?;
                 self.insert_field(&mut tb, "harness", m.harness.as_str())?;
                 self.insert_field(&mut tb, "service", m.service.service_type().as_str())?;
                 self.insert_field(&mut tb, "backend", m.service.backend_str())?;
@@ -719,11 +719,13 @@ fn message_routing(msg: &ObservableMessage) -> (String, String, &'static str) {
         ObservableMessage::Delegate(m) => (m.caller.to_string(), m.target.to_string(), "delegate"),
         ObservableMessage::Repair(m) => (
             m.harness.as_str().to_string(),
-            m.agent_id.to_string(),
+            m.agent_name.to_string(),
             "repair",
         ),
         ObservableMessage::Fork(m) => ("platform".to_string(), m.branch_name.clone(), "fork"),
-        ObservableMessage::Promote(m) => ("platform".to_string(), m.agent_name.clone(), "promote"),
+        ObservableMessage::Promote(m) => {
+            ("platform".to_string(), m.agent_name.to_string(), "promote")
+        }
     }
 }
 
@@ -735,9 +737,9 @@ fn message_agent_name(msg: &ObservableMessage) -> String {
         ObservableMessage::Response(m) => m.agent_id.to_string(),
         ObservableMessage::Complete(m) => m.agent_id.to_string(),
         ObservableMessage::Delegate(m) => m.target.to_string(),
-        ObservableMessage::Repair(m) => m.agent_id.to_string(),
-        ObservableMessage::Fork(m) => m.agent_name.clone(),
-        ObservableMessage::Promote(m) => m.agent_name.clone(),
+        ObservableMessage::Repair(m) => m.agent_name.to_string(),
+        ObservableMessage::Fork(m) => m.agent_name.to_string(),
+        ObservableMessage::Promote(m) => m.agent_name.to_string(),
     }
 }
 
@@ -1681,7 +1683,7 @@ mod tests {
             BranchId::from(1),
             SubmissionId::from("sub-fork".to_string()),
             SessionId::try_from(SESSION.to_string()).unwrap(),
-            agent_name.to_string(),
+            AgentName::new(agent_name),
             branch_name.to_string(),
             DagNodeId::from(fork_point.to_string()),
         );

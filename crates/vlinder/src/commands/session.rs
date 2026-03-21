@@ -1,7 +1,9 @@
 use clap::Subcommand;
 
 use crate::config::CliConfig;
-use vlinder_core::domain::{BranchId, DagStore, ForkParams, MessageType, PromoteParams, SessionId};
+use vlinder_core::domain::{
+    AgentName, BranchId, DagStore, ForkParams, MessageType, PromoteParams, SessionId,
+};
 
 use super::connect::{connect_harness, open_dag_store};
 
@@ -197,7 +199,7 @@ fn fork(session_id_or_name: &str, from_hash: &str, branch_name: &str) {
     let timeline = BranchId::from(1);
 
     let params = ForkParams {
-        agent_name,
+        agent_name: AgentName::new(agent_name),
         branch_name: branch_name.to_string(),
         fork_point: node.id.clone(),
     };
@@ -249,7 +251,9 @@ fn promote(session_id_or_name: &str, branch_name: &str) {
 
     let harness = connect_harness(&config);
 
-    let params = PromoteParams { agent_name };
+    let params = PromoteParams {
+        agent_name: AgentName::new(agent_name),
+    };
 
     harness
         .promote_timeline(params, session_id, branch.id)

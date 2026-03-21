@@ -25,7 +25,7 @@ pub struct RepairMessage {
     pub branch: BranchId,
     pub submission: SubmissionId,
     pub session: SessionId,
-    pub agent_id: AgentName,
+    pub agent_name: AgentName,
     pub harness: HarnessType,
     /// The fork point in the DAG (required).
     pub dag_parent: DagNodeId,
@@ -61,7 +61,7 @@ impl RepairMessage {
             branch,
             submission,
             session,
-            agent_id,
+            agent_name: agent_id,
             harness,
             dag_parent,
             checkpoint,
@@ -81,7 +81,7 @@ impl RepairMessage {
             submission: self.submission.clone(),
             kind: RoutingKind::Repair {
                 harness: self.harness,
-                agent: self.agent_id.clone(),
+                agent: self.agent_name.clone(),
             },
         }
     }

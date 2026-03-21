@@ -8,6 +8,8 @@
 //! Unlike service messages, `ForkMessage` carries no payload — the fork point
 //! hash and branch name are all that's needed to define the topology change.
 
+use crate::domain::AgentName;
+
 use super::identity::{BranchId, DagNodeId, MessageId, SessionId, SubmissionId};
 use super::PROTOCOL_VERSION;
 
@@ -27,7 +29,7 @@ pub struct ForkMessage {
     pub submission: SubmissionId,
     pub session: SessionId,
     /// Agent that owns the session being forked (needed for git tree path).
-    pub agent_name: String,
+    pub agent_name: AgentName,
     /// Branch name for the new timeline (e.g., "repair-infer-3").
     pub branch_name: String,
     /// The `DagNode` to fork from.
@@ -39,7 +41,7 @@ impl ForkMessage {
         branch: BranchId,
         submission: SubmissionId,
         session: SessionId,
-        agent_name: String,
+        agent_name: AgentName,
         branch_name: String,
         fork_point: DagNodeId,
     ) -> Self {
