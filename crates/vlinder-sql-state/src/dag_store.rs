@@ -178,7 +178,7 @@ const DAG_NODE_COLUMNS: &str = "hash, parent_hash, created_at, message_blob, pay
 
 impl DagStore for SqliteDagStore {
     fn insert_node(&self, node: &DagNode) -> Result<(), String> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("db connection lock poisoned");
 
         // Serialize the full message as JSON blob (source of truth).
         let message_blob = serde_json::to_string(&node.message)
@@ -218,7 +218,7 @@ impl DagStore for SqliteDagStore {
     }
 
     fn get_node(&self, hash: &DagNodeId) -> Result<Option<DagNode>, String> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("db connection lock poisoned");
         let sql = format!("SELECT {DAG_NODE_COLUMNS} FROM dag_nodes WHERE hash = ?1");
         let mut stmt = conn
             .prepare(&sql)
@@ -233,7 +233,7 @@ impl DagStore for SqliteDagStore {
     }
 
     fn get_node_by_prefix(&self, prefix: &str) -> Result<Option<DagNode>, String> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("db connection lock poisoned");
         let pattern = format!("{prefix}%");
 
         // Count matches first to detect ambiguity
@@ -264,7 +264,7 @@ impl DagStore for SqliteDagStore {
     }
 
     fn get_session_nodes(&self, session_id: &SessionId) -> Result<Vec<DagNode>, String> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("db connection lock poisoned");
         let sql = format!(
             "SELECT {DAG_NODE_COLUMNS} FROM dag_nodes WHERE session_id = ?1 ORDER BY created_at"
         );
@@ -284,7 +284,7 @@ impl DagStore for SqliteDagStore {
     }
 
     fn get_children(&self, parent_hash: &DagNodeId) -> Result<Vec<DagNode>, String> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("db connection lock poisoned");
         let sql = format!("SELECT {DAG_NODE_COLUMNS} FROM dag_nodes WHERE parent_hash = ?1");
         let mut stmt = conn
             .prepare(&sql)
@@ -311,7 +311,7 @@ impl DagStore for SqliteDagStore {
         session_id: &SessionId,
         fork_point: Option<&DagNodeId>,
     ) -> Result<BranchId, String> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("db connection lock poisoned");
         conn.execute(
             "INSERT INTO branches (name, session_id, fork_point, created_at)
              VALUES (?1, ?2, ?3, ?4)",
@@ -327,7 +327,7 @@ impl DagStore for SqliteDagStore {
     }
 
     fn get_branch_by_name(&self, name: &str) -> Result<Option<Branch>, String> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("db connection lock poisoned");
         let mut stmt = conn
             .prepare(
                 "SELECT id, name, session_id, fork_point, head, created_at, broken_at
@@ -341,7 +341,7 @@ impl DagStore for SqliteDagStore {
     }
 
     fn get_branch(&self, id: BranchId) -> Result<Option<Branch>, String> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("db connection lock poisoned");
         let mut stmt = conn
             .prepare(
                 "SELECT id, name, session_id, fork_point, head, created_at, broken_at
@@ -355,7 +355,7 @@ impl DagStore for SqliteDagStore {
     }
 
     fn list_sessions(&self) -> Result<Vec<SessionSummary>, String> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("db connection lock poisoned");
         let mut stmt = conn
             .prepare(
                 "SELECT
@@ -409,7 +409,7 @@ impl DagStore for SqliteDagStore {
     }
 
     fn get_nodes_by_submission(&self, submission_id: &str) -> Result<Vec<DagNode>, String> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("db connection lock poisoned");
         let sql = format!(
             "SELECT {DAG_NODE_COLUMNS} FROM dag_nodes WHERE submission_id = ?1 ORDER BY created_at"
         );
@@ -429,7 +429,7 @@ impl DagStore for SqliteDagStore {
     }
 
     fn get_branches_for_session(&self, session_id: &SessionId) -> Result<Vec<Branch>, String> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("db connection lock poisoned");
         let mut stmt = conn
             .prepare(
                 "SELECT id, name, session_id, fork_point, head, created_at, broken_at
@@ -455,7 +455,7 @@ impl DagStore for SqliteDagStore {
         branch_id: BranchId,
         message_type: Option<MessageType>,
     ) -> Result<Option<DagNode>, String> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("db connection lock poisoned");
         let branch_id_str = branch_id.to_string();
 
         if let Some(mt) = message_type {
@@ -485,7 +485,7 @@ impl DagStore for SqliteDagStore {
     }
 
     fn rename_branch(&self, id: BranchId, new_name: &str) -> Result<(), String> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("db connection lock poisoned");
         let rows = conn
             .execute(
                 "UPDATE branches SET name = ?1 WHERE id = ?2",
@@ -503,7 +503,7 @@ impl DagStore for SqliteDagStore {
         id: BranchId,
         broken_at: chrono::DateTime<chrono::Utc>,
     ) -> Result<(), String> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("db connection lock poisoned");
         let rows = conn
             .execute(
                 "UPDATE branches SET broken_at = ?1 WHERE id = ?2",
@@ -525,7 +525,7 @@ impl DagStore for SqliteDagStore {
         session_id: &SessionId,
         branch_id: BranchId,
     ) -> Result<(), String> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("db connection lock poisoned");
         let rows = conn
             .execute(
                 "UPDATE sessions SET default_branch = ?1 WHERE id = ?2",
@@ -539,7 +539,7 @@ impl DagStore for SqliteDagStore {
     }
 
     fn create_session(&self, session: &Session) -> Result<(), String> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("db connection lock poisoned");
         conn.execute(
             "INSERT OR IGNORE INTO sessions (id, name, agent_name, default_branch, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -556,7 +556,7 @@ impl DagStore for SqliteDagStore {
     }
 
     fn get_session(&self, session_id: &SessionId) -> Result<Option<Session>, String> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("db connection lock poisoned");
         let mut stmt = conn
             .prepare(
                 "SELECT id, name, agent_name, default_branch, created_at
@@ -570,7 +570,7 @@ impl DagStore for SqliteDagStore {
     }
 
     fn get_session_by_name(&self, name: &str) -> Result<Option<Session>, String> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("db connection lock poisoned");
         let mut stmt = conn
             .prepare(
                 "SELECT id, name, agent_name, default_branch, created_at

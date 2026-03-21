@@ -46,7 +46,7 @@ impl SqliteRegistryRepository {
     }
 
     fn init_schema(&self) -> Result<(), RepositoryError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("db connection lock poisoned");
         conn.execute(
             "CREATE TABLE IF NOT EXISTS models (
                 name TEXT PRIMARY KEY,
@@ -84,7 +84,7 @@ impl SqliteRegistryRepository {
 impl RegistryRepository for SqliteRegistryRepository {
     fn save_model(&self, model: &Model) -> Result<(), RepositoryError> {
         let stored = StoredModel::from_model(model);
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("db connection lock poisoned");
 
         let model_type = match stored.model_type {
             vlinder_core::domain::ModelType::Inference => "inference",
@@ -112,7 +112,7 @@ impl RegistryRepository for SqliteRegistryRepository {
     }
 
     fn load_models(&self) -> Result<Vec<Model>, RepositoryError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("db connection lock poisoned");
         let mut stmt = conn
             .prepare("SELECT name, model_type, provider, model_path, digest FROM models")
             .map_err(|e| RepositoryError::Database(e.to_string()))?;
@@ -166,7 +166,7 @@ impl RegistryRepository for SqliteRegistryRepository {
     }
 
     fn delete_model(&self, name: &str) -> Result<bool, RepositoryError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("db connection lock poisoned");
         let affected = conn
             .execute("DELETE FROM models WHERE name = ?1", [name])
             .map_err(|e| RepositoryError::Database(e.to_string()))?;
@@ -174,7 +174,7 @@ impl RegistryRepository for SqliteRegistryRepository {
     }
 
     fn model_exists(&self, name: &str) -> Result<bool, RepositoryError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("db connection lock poisoned");
         let count: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM models WHERE name = ?1",
@@ -187,7 +187,7 @@ impl RegistryRepository for SqliteRegistryRepository {
 
     fn save_agent(&self, agent: &Agent) -> Result<(), RepositoryError> {
         let stored = StoredAgent::from_agent(agent)?;
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("db connection lock poisoned");
 
         conn.execute(
             "INSERT OR REPLACE INTO agents (name, description, source, runtime, executable,
@@ -214,7 +214,7 @@ impl RegistryRepository for SqliteRegistryRepository {
     }
 
     fn load_agents(&self) -> Result<Vec<Agent>, RepositoryError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("db connection lock poisoned");
         let mut stmt = conn
             .prepare(
                 "SELECT name, description, source, runtime, executable,
@@ -251,7 +251,7 @@ impl RegistryRepository for SqliteRegistryRepository {
     }
 
     fn delete_agent(&self, name: &str) -> Result<bool, RepositoryError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("db connection lock poisoned");
         let affected = conn
             .execute("DELETE FROM agents WHERE name = ?1", [name])
             .map_err(|e| RepositoryError::Database(e.to_string()))?;
@@ -259,7 +259,7 @@ impl RegistryRepository for SqliteRegistryRepository {
     }
 
     fn agent_exists(&self, name: &str) -> Result<bool, RepositoryError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("db connection lock poisoned");
         let count: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM agents WHERE name = ?1",

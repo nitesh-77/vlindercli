@@ -113,7 +113,7 @@ impl SqliteStateStore {
     }
 
     pub fn put_value(&self, hash: &str, content: &[u8]) -> Result<(), String> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("db connection lock poisoned");
         conn.execute(
             "INSERT OR IGNORE INTO state_values (hash, content) VALUES (?1, ?2)",
             rusqlite::params![hash, content],
@@ -123,7 +123,7 @@ impl SqliteStateStore {
     }
 
     pub fn get_value(&self, hash: &str) -> Result<Option<Vec<u8>>, String> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("db connection lock poisoned");
         let mut stmt = conn
             .prepare("SELECT content FROM state_values WHERE hash = ?1")
             .map_err(|e| format!("get_value prepare failed: {e}"))?;
@@ -140,7 +140,7 @@ impl SqliteStateStore {
         entries: &HashMap<String, String>,
     ) -> Result<(), String> {
         let json = sorted_entries_json(entries);
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("db connection lock poisoned");
         conn.execute(
             "INSERT OR IGNORE INTO state_snapshots (hash, entries) VALUES (?1, ?2)",
             rusqlite::params![hash, json],
@@ -150,7 +150,7 @@ impl SqliteStateStore {
     }
 
     pub fn get_snapshot(&self, hash: &str) -> Result<Option<HashMap<String, String>>, String> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("db connection lock poisoned");
         let mut stmt = conn
             .prepare("SELECT entries FROM state_snapshots WHERE hash = ?1")
             .map_err(|e| format!("get_snapshot prepare failed: {e}"))?;
@@ -175,7 +175,7 @@ impl SqliteStateStore {
         snapshot_hash: &str,
         parent_hash: &str,
     ) -> Result<(), String> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("db connection lock poisoned");
         conn.execute(
             "INSERT OR IGNORE INTO state_commits (hash, snapshot_hash, parent_hash) VALUES (?1, ?2, ?3)",
             rusqlite::params![hash, snapshot_hash, parent_hash],
@@ -184,7 +184,7 @@ impl SqliteStateStore {
     }
 
     pub fn get_state_commit(&self, hash: &str) -> Result<Option<StateCommit>, String> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("db connection lock poisoned");
         let mut stmt = conn
             .prepare("SELECT hash, snapshot_hash, parent_hash FROM state_commits WHERE hash = ?1")
             .map_err(|e| format!("get_state_commit prepare failed: {e}"))?;

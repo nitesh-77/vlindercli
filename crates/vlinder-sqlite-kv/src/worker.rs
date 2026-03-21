@@ -59,7 +59,12 @@ impl KvWorker {
         session_id: &str,
     ) -> Result<Arc<SqliteObjectStorage>, String> {
         let cache_key = format!("{agent_id}:{session_id}");
-        if let Some(storage) = self.stores.read().unwrap().get(&cache_key) {
+        if let Some(storage) = self
+            .stores
+            .read()
+            .expect("stores lock poisoned")
+            .get(&cache_key)
+        {
             return Ok(storage.clone());
         }
 
@@ -97,7 +102,12 @@ impl KvWorker {
         session_id: &str,
     ) -> Result<Arc<SqliteStateStore>, String> {
         let cache_key = format!("{agent_id}:{session_id}");
-        if let Some(store) = self.state_stores.read().unwrap().get(&cache_key) {
+        if let Some(store) = self
+            .state_stores
+            .read()
+            .expect("state_stores lock poisoned")
+            .get(&cache_key)
+        {
             return Ok(store.clone());
         }
 
@@ -332,7 +342,10 @@ impl KvWorker {
             ) {
                 Ok(new_state) => {
                     let response = serde_json::json!({"state": new_state});
-                    (serde_json::to_vec(&response).unwrap(), Some(new_state))
+                    (
+                        serde_json::to_vec(&response).expect("json! value always serializes"),
+                        Some(new_state),
+                    )
                 }
                 Err(e) => (format!("[error] {e}").into_bytes(), None),
             };
