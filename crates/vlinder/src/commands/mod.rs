@@ -92,6 +92,7 @@ mod tests {
                     name: "todoapp".to_string(),
                     session: None,
                     branch: None,
+                    prompt: None,
                 }
             }
         );
@@ -109,6 +110,7 @@ mod tests {
                     name: "todoapp".to_string(),
                     session: None,
                     branch: Some("fix-typo".to_string()),
+                    prompt: None,
                 }
             }
         );
@@ -132,6 +134,7 @@ mod tests {
                     name: "todoapp".to_string(),
                     session: Some("my-session".to_string()),
                     branch: None,
+                    prompt: None,
                 }
             }
         );
@@ -157,6 +160,7 @@ mod tests {
                     name: "todoapp".to_string(),
                     session: Some("my-session".to_string()),
                     branch: Some("fix-typo".to_string()),
+                    prompt: None,
                 }
             }
         );

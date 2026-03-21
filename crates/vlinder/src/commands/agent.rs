@@ -56,6 +56,9 @@ pub enum AgentCommand {
         /// Resume on a named branch (created by `session fork`)
         #[arg(long)]
         branch: Option<String>,
+        /// Single message to send (non-interactive, prints response and exits)
+        #[arg(short, long)]
+        prompt: Option<String>,
     },
     /// List deployed agents
     List,
@@ -85,7 +88,13 @@ pub fn execute(cmd: AgentCommand) {
             name,
             session,
             branch,
-        } => run(&name, session.as_deref(), branch.as_deref()),
+            prompt,
+        } => run(
+            &name,
+            session.as_deref(),
+            branch.as_deref(),
+            prompt.as_deref(),
+        ),
         AgentCommand::List => list(),
         AgentCommand::Get { name } => get(&name),
         AgentCommand::Delete { name } => delete(&name),
@@ -137,7 +146,7 @@ pub(super) fn deploy_agent_from_path(agent_dir: &Path, registry: &dyn Registry) 
     })
 }
 
-fn run(name: &str, session: Option<&str>, branch: Option<&str>) {
+fn run(name: &str, session: Option<&str>, branch: Option<&str>, prompt: Option<&str>) {
     let config = CliConfig::load();
     let registry = connect_registry(&config);
 
@@ -171,8 +180,7 @@ fn run(name: &str, session: Option<&str>, branch: Option<&str>) {
         }
     };
 
-    // Run REPL with synchronous run_agent (ADR 092)
-    repl::run(|input| {
+    let invoke = |input: &str| -> String {
         match harness.run_agent(
             &agent_id,
             input,
@@ -185,7 +193,15 @@ fn run(name: &str, session: Option<&str>, branch: Option<&str>) {
             Ok(result) => result,
             Err(e) => format!("[error] {e}"),
         }
-    });
+    };
+
+    if let Some(message) = prompt {
+        // Non-interactive: send single message, print response, exit.
+        println!("{}", invoke(message));
+    } else {
+        // Interactive REPL.
+        repl::run(invoke);
+    }
 }
 
 /// Resolve session default branch: look up session by name, continue on its default branch.
