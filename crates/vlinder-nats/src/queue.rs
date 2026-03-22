@@ -267,14 +267,18 @@ impl MessageQueue for NatsQueue {
         _key: DataRoutingKey,
         _msg: InvokeMessageV2,
     ) -> Result<(), QueueError> {
-        todo!("NATS send_invoke_v2 — wired in step 6")
+        // Real NATS implementation wired in a later step.
+        Err(QueueError::SendFailed(
+            "NATS send_invoke_v2 not yet implemented".to_string(),
+        ))
     }
 
     fn receive_invoke_v2(
         &self,
         _agent: &AgentName,
     ) -> Result<(DataRoutingKey, InvokeMessageV2, Acknowledgement), QueueError> {
-        todo!("NATS receive_invoke_v2 — wired in step 6")
+        // Returns Timeout so callers fall through to the v1 path.
+        Err(QueueError::Timeout)
     }
 
     fn send_request(&self, msg: RequestMessage) -> Result<(), QueueError> {
