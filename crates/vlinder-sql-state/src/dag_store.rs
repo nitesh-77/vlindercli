@@ -148,30 +148,40 @@ fn row_to_dag_node(row: &rusqlite::Row) -> Result<DagNode, rusqlite::Error> {
         .unwrap_or_default();
     let blob: String = row.get(3)?;
     let payload: Vec<u8> = row.get(4)?;
-    let mut message: ObservableMessage = serde_json::from_str(&blob).map_err(|e| {
-        rusqlite::Error::FromSqlConversionFailure(
-            3,
-            rusqlite::types::Type::Text,
-            format!("invalid message_blob JSON: {e}").into(),
-        )
-    })?;
-    // Payload is #[serde(skip)] on several message types, so patch it back
-    // from the dedicated column.
-    if !payload.is_empty() {
-        message.set_payload(payload);
-    }
     let snapshot_json: String = row.get(5)?;
     let state: vlinder_core::domain::Snapshot = serde_json::from_str(&snapshot_json)
         .unwrap_or_else(|_| vlinder_core::domain::Snapshot::empty());
 
-    Ok(DagNode {
-        id: DagNodeId::from(row.get::<_, String>(0)?),
-        parent_id: DagNodeId::from(row.get::<_, String>(1)?),
-        created_at,
-        state,
-        message: Some(message),
-        message_v2: None,
-    })
+    // Try v2 format first, fall back to legacy ObservableMessage (ADR 122 tech debt).
+    if let Ok(v2) = serde_json::from_str::<vlinder_core::domain::ObservableMessageV2>(&blob) {
+        Ok(DagNode {
+            id: DagNodeId::from(row.get::<_, String>(0)?),
+            parent_id: DagNodeId::from(row.get::<_, String>(1)?),
+            created_at,
+            state,
+            message: None,
+            message_v2: Some(v2),
+        })
+    } else {
+        let mut message: ObservableMessage = serde_json::from_str(&blob).map_err(|e| {
+            rusqlite::Error::FromSqlConversionFailure(
+                3,
+                rusqlite::types::Type::Text,
+                format!("invalid message_blob JSON: {e}").into(),
+            )
+        })?;
+        if !payload.is_empty() {
+            message.set_payload(payload);
+        }
+        Ok(DagNode {
+            id: DagNodeId::from(row.get::<_, String>(0)?),
+            parent_id: DagNodeId::from(row.get::<_, String>(1)?),
+            created_at,
+            state,
+            message: Some(message),
+            message_v2: None,
+        })
+    }
 }
 
 /// Column list for queries that return full `DagNode`s.
@@ -179,20 +189,53 @@ const DAG_NODE_COLUMNS: &str = "hash, parent_hash, created_at, message_blob, pay
 
 impl DagStore for SqliteDagStore {
     fn insert_node(&self, node: &DagNode) -> Result<(), String> {
-        let msg = node
-            .message
-            .as_ref()
-            .expect("insert_node: message required");
         let conn = self.conn.lock().expect("db connection lock poisoned");
 
-        // Serialize the full message as JSON blob (source of truth).
-        let message_blob = serde_json::to_string(msg)
-            .map_err(|e| format!("serialize message_blob failed: {e}"))?;
+        // Extract fields from whichever message format is present (ADR 122 tech debt).
+        let (from, to, diagnostics_json, stderr, state, checkpoint, operation, message_blob) =
+            if let Some(ref v2) = node.message_v2 {
+                match v2 {
+                    vlinder_core::domain::ObservableMessageV2::InvokeV2 { key, msg } => {
+                        let vlinder_core::domain::DataMessageKind::Invoke {
+                            harness, agent, ..
+                        } = &key.kind;
+                        let diag = serde_json::to_vec(&msg.diagnostics).unwrap_or_default();
+                        let blob = serde_json::to_string(v2)
+                            .map_err(|e| format!("serialize message_blob failed: {e}"))?;
+                        (
+                            harness.as_str().to_string(),
+                            agent.to_string(),
+                            diag,
+                            Vec::<u8>::new(),
+                            msg.state.as_deref().map(str::to_string),
+                            None::<String>,
+                            None::<String>,
+                            blob,
+                        )
+                    }
+                }
+            } else {
+                let msg = node
+                    .message
+                    .as_ref()
+                    .expect("insert_node: either message or message_v2 must be present");
+                let (f, t) = msg.sender_receiver();
+                let blob = serde_json::to_string(msg)
+                    .map_err(|e| format!("serialize message_blob failed: {e}"))?;
+                (
+                    f,
+                    t,
+                    msg.diagnostics_json(),
+                    msg.stderr().to_vec(),
+                    msg.state().map(str::to_string),
+                    msg.checkpoint().map(str::to_string),
+                    msg.operation().map(str::to_string),
+                    blob,
+                )
+            };
+
         let snapshot_json = serde_json::to_string(&node.state)
             .map_err(|e| format!("serialize snapshot failed: {e}"))?;
-
-        // Extract indexed columns from the message for query performance.
-        let (from, to) = msg.sender_receiver();
 
         conn.execute(
             "INSERT OR IGNORE INTO dag_nodes (hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state, protocol_version, checkpoint, operation, message_blob, timeline_id, snapshot)
@@ -206,13 +249,13 @@ impl DagStore for SqliteDagStore {
                 node.session_id().as_str(),
                 node.submission_id().as_str(),
                 node.payload(),
-                msg.diagnostics_json(),
-                msg.stderr(),
+                diagnostics_json,
+                stderr,
                 node.created_at.to_rfc3339(),
-                msg.state(),
+                state,
                 node.protocol_version(),
-                msg.checkpoint(),
-                msg.operation(),
+                checkpoint,
+                operation,
                 message_blob,
                 node.branch_id().as_i64(),
                 snapshot_json,

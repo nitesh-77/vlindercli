@@ -12,12 +12,46 @@ use vlinder_core::domain::{
 // =============================================================================
 
 fn dag_node_to_proto(node: &DagNode) -> proto::DagNode {
-    let msg = node
-        .message
-        .as_ref()
-        .expect("dag_node_to_proto: message required");
-    let (from, to) = msg.sender_receiver();
-    let message_blob = serde_json::to_string(msg).ok();
+    // Extract fields from whichever message format is present (ADR 122 tech debt).
+    let (from, to, diagnostics, stderr, state, checkpoint, operation, message_blob) =
+        if let Some(ref v2) = node.message_v2 {
+            match v2 {
+                vlinder_core::domain::ObservableMessageV2::InvokeV2 { key, msg } => {
+                    let vlinder_core::domain::DataMessageKind::Invoke { harness, agent, .. } =
+                        &key.kind;
+                    let diag = serde_json::to_vec(&msg.diagnostics).unwrap_or_default();
+                    let blob = serde_json::to_string(v2).ok();
+                    (
+                        harness.as_str().to_string(),
+                        agent.to_string(),
+                        diag,
+                        Vec::<u8>::new(),
+                        msg.state.as_deref().map(str::to_string),
+                        None::<String>,
+                        None::<String>,
+                        blob,
+                    )
+                }
+            }
+        } else {
+            let msg = node
+                .message
+                .as_ref()
+                .expect("dag_node_to_proto: either message or message_v2 must be present");
+            let (f, t) = msg.sender_receiver();
+            let blob = serde_json::to_string(msg).ok();
+            (
+                f,
+                t,
+                msg.diagnostics_json(),
+                msg.stderr().to_vec(),
+                msg.state().map(str::to_string),
+                msg.checkpoint().map(str::to_string),
+                msg.operation().map(str::to_string),
+                blob,
+            )
+        };
+
     proto::DagNode {
         hash: node.id.to_string(),
         parent_hash: node.parent_id.to_string(),
@@ -27,13 +61,13 @@ fn dag_node_to_proto(node: &DagNode) -> proto::DagNode {
         session_id: node.session_id().as_str().to_string(),
         submission_id: node.submission_id().to_string(),
         payload: node.payload().to_vec(),
-        diagnostics: msg.diagnostics_json(),
-        stderr: msg.stderr().to_vec(),
+        diagnostics,
+        stderr,
         created_at: node.created_at.to_rfc3339(),
-        state: msg.state().map(std::string::ToString::to_string),
+        state,
         protocol_version: node.protocol_version().to_string(),
-        checkpoint: msg.checkpoint().map(std::string::ToString::to_string),
-        operation: msg.operation().map(std::string::ToString::to_string),
+        checkpoint,
+        operation,
         message_blob,
     }
 }
@@ -63,29 +97,36 @@ impl TryFrom<proto::DagNode> for DagNode {
             .parse()
             .map_err(|e| format!("invalid created_at: {e}"))?;
 
-        let mut message: ObservableMessage = node
+        let blob = node
             .message_blob
             .as_ref()
-            .ok_or_else(|| "missing message_blob".to_string())
-            .and_then(|blob| {
-                serde_json::from_str(blob).map_err(|e| format!("invalid message_blob JSON: {e}"))
-            })?;
+            .ok_or_else(|| "missing message_blob".to_string())?;
 
-        // Payload is #[serde(skip)] on most message types, so it's lost
-        // during JSON round-trip through message_blob. Restore it from
-        // the dedicated proto field.
-        if !node.payload.is_empty() {
-            message.set_payload(node.payload);
+        // Try v2 format first, fall back to legacy (ADR 122 tech debt).
+        if let Ok(v2) = serde_json::from_str::<vlinder_core::domain::ObservableMessageV2>(blob) {
+            Ok(Self {
+                id: DagNodeId::from(node.hash),
+                parent_id: DagNodeId::from(node.parent_hash),
+                created_at,
+                state: vlinder_core::domain::Snapshot::empty(),
+                message: None,
+                message_v2: Some(v2),
+            })
+        } else {
+            let mut message: ObservableMessage = serde_json::from_str(blob)
+                .map_err(|e| format!("invalid message_blob JSON: {e}"))?;
+            if !node.payload.is_empty() {
+                message.set_payload(node.payload);
+            }
+            Ok(Self {
+                id: DagNodeId::from(node.hash),
+                parent_id: DagNodeId::from(node.parent_hash),
+                created_at,
+                state: vlinder_core::domain::Snapshot::empty(),
+                message: Some(message),
+                message_v2: None,
+            })
         }
-
-        Ok(Self {
-            id: DagNodeId::from(node.hash),
-            parent_id: DagNodeId::from(node.parent_hash),
-            created_at,
-            state: vlinder_core::domain::Snapshot::empty(),
-            message: Some(message),
-            message_v2: None,
-        })
     }
 }
 

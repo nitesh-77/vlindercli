@@ -9,11 +9,14 @@
 
 use std::sync::Arc;
 
+use chrono::Utc;
+
 use crate::domain::workers::dag::build_dag_node;
 use crate::domain::{
-    Acknowledgement, CompleteMessage, DagNodeId, DagStore, DataRoutingKey, DelegateMessage,
-    ForkMessage, InvokeMessage, InvokeMessageV2, MessageQueue, ObservableMessage, PromoteMessage,
-    QueueError, RepairMessage, RequestMessage, ResponseMessage, Snapshot, SubmissionId,
+    hash_dag_node, Acknowledgement, CompleteMessage, DagNode, DagNodeId, DagStore, DataRoutingKey,
+    DelegateMessage, ForkMessage, Instance, InvokeMessage, InvokeMessageV2, MessageQueue,
+    MessageType, ObservableMessage, ObservableMessageV2, PromoteMessage, QueueError, RepairMessage,
+    RequestMessage, ResponseMessage, Snapshot, StateHash, SubmissionId,
 };
 
 /// A `MessageQueue` decorator that synchronously records DAG nodes on send.
@@ -81,6 +84,74 @@ impl RecordingQueue {
             tracing::warn!(error = %node_id, "Failed to record DAG node (outbox): {e}");
         }
     }
+
+    /// Record a DAG node for a v2 invoke message.
+    fn record_v2(&self, key: &DataRoutingKey, msg: &InvokeMessageV2) {
+        let branch_id = key.branch;
+
+        let dag_parent_override = if msg.dag_parent.is_empty() {
+            None
+        } else {
+            Some(msg.dag_parent.clone())
+        };
+
+        let parent_node = dag_parent_override
+            .and_then(|id| {
+                self.store.get_node(&id).unwrap_or_else(|e| {
+                    tracing::warn!(error = %e, "Failed to look up dag_parent node");
+                    None
+                })
+            })
+            .or_else(|| {
+                self.store
+                    .latest_node_on_branch(branch_id, None)
+                    .unwrap_or_else(|e| {
+                        tracing::warn!(error = %e, branch = branch_id.as_i64(), "Failed to query latest node on branch");
+                        None
+                    })
+            });
+
+        let parent_id = parent_node
+            .as_ref()
+            .map_or_else(DagNodeId::root, |n| n.id.clone());
+        let parent_state = parent_node
+            .as_ref()
+            .map(|n| &n.state)
+            .cloned()
+            .unwrap_or_else(Snapshot::empty);
+
+        let diagnostics_json = serde_json::to_vec(&msg.diagnostics).unwrap_or_default();
+        let id = hash_dag_node(
+            &msg.payload,
+            &parent_id,
+            &MessageType::Invoke,
+            &diagnostics_json,
+            &key.session,
+        );
+
+        let state = match &msg.state {
+            Some(s) if !s.is_empty() => {
+                parent_state.with_state(Instance::from("kv"), StateHash::from(s.clone()))
+            }
+            _ => parent_state,
+        };
+
+        let node = DagNode {
+            id: id.clone(),
+            parent_id,
+            created_at: Utc::now(),
+            state,
+            message: None,
+            message_v2: Some(ObservableMessageV2::InvokeV2 {
+                key: key.clone(),
+                msg: msg.clone(),
+            }),
+        };
+
+        if let Err(e) = self.store.insert_node(&node) {
+            tracing::warn!(error = %id, "Failed to record DAG node (outbox): {e}");
+        }
+    }
 }
 
 impl MessageQueue for RecordingQueue {
@@ -94,8 +165,7 @@ impl MessageQueue for RecordingQueue {
     }
 
     fn send_invoke_v2(&self, key: DataRoutingKey, msg: InvokeMessageV2) -> Result<(), QueueError> {
-        // DAG recording for v2 invoke is wired in a later step.
-        tracing::warn!("send_invoke_v2: DAG recording not yet wired");
+        self.record_v2(&key, &msg);
         self.inner.send_invoke_v2(key, msg)
     }
 
