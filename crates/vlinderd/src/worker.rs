@@ -498,7 +498,9 @@ fn run_dag_git_worker(config: &Config, shutdown: &AtomicBool) {
     use std::collections::HashMap;
     use vlinder_core::domain::DagWorker;
     use vlinder_git_dag::GitDagWorker;
-    use vlinder_nats::{from_nats_headers, subject_to_routing_key, NatsQueue};
+    use vlinder_nats::{
+        from_nats_headers, invoke_v2_parse_subject, subject_to_routing_key, NatsQueue,
+    };
 
     let nats = NatsQueue::connect(&config.queue.nats_config()).expect("Failed to connect to NATS");
 
@@ -570,13 +572,27 @@ fn run_dag_git_worker(config: &Config, shutdown: &AtomicBool) {
                     "DAG git received NATS message",
                 );
 
-                // Pipeline: subject → RoutingKey → typed headers → assemble.
-                let observable = subject_to_routing_key(&subject)
+                // Try v2 data-plane subject first, fall back to legacy pipeline.
+                let created_at = chrono::Utc::now();
+                if let Some(key) = invoke_v2_parse_subject(&subject) {
+                    if let Ok(invoke_msg) =
+                        serde_json::from_slice::<vlinder_core::domain::InvokeMessageV2>(&payload)
+                    {
+                        let v2 = vlinder_core::domain::ObservableMessageV2::InvokeV2 {
+                            key,
+                            msg: invoke_msg,
+                        };
+                        git_worker.on_observable_message_v2(&v2, created_at);
+                    } else {
+                        tracing::warn!(
+                            subject = subject.as_str(),
+                            "DAG git: failed to deserialize InvokeMessageV2"
+                        );
+                    }
+                } else if let Some(observable) = subject_to_routing_key(&subject)
                     .and_then(|key| from_nats_headers(&key, &headers))
-                    .map(|hdrs| hdrs.assemble(payload.clone()));
-
-                if let Some(observable) = observable {
-                    let created_at = chrono::Utc::now();
+                    .map(|hdrs| hdrs.assemble(payload.clone()))
+                {
                     git_worker.on_observable_message(&observable, created_at);
                 } else {
                     tracing::warn!(
