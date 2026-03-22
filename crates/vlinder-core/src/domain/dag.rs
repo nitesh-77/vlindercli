@@ -231,8 +231,17 @@ pub struct Branch {
 /// Git is one implementation (`GitDagWorker`). Any backend that can
 /// preserve the chronological message stream would implement this.
 pub trait DagWorker: Send {
-    /// Persist a single observable message.
+    /// Persist a single observable message (legacy path).
     fn on_observable_message(&mut self, msg: &super::ObservableMessage, created_at: DateTime<Utc>);
+
+    /// Persist a v2 observable message (data-plane path, ADR 121).
+    fn on_observable_message_v2(
+        &mut self,
+        _msg: &super::ObservableMessageV2,
+        _created_at: DateTime<Utc>,
+    ) {
+        // Default no-op — implementations opt in.
+    }
 }
 
 /// Persistence layer for DAG nodes.

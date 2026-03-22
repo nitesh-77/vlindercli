@@ -48,7 +48,10 @@ use chrono::{DateTime, Utc};
 use git2::{FileMode, Oid, Repository, RepositoryInitOptions, Signature, TreeBuilder};
 
 use vlinder_core::domain::workers::dag::build_dag_node;
-use vlinder_core::domain::{DagNodeId, DagWorker, ObservableMessage, Registry, Snapshot};
+use vlinder_core::domain::{
+    hash_dag_node, DagNodeId, DagWorker, DataMessageKind, MessageType, ObservableMessage,
+    ObservableMessageV2, Registry, Snapshot,
+};
 
 /// DAG worker that writes commits to a git repository.
 ///
@@ -314,7 +317,10 @@ impl GitDagWorker {
 
     /// Build the accumulated tree: nested under `<agent>/<session>/` with timeline
     /// indexes (ADR 114). Returns (tree OID, canonical hash) for the new message.
-    #[allow(clippy::too_many_arguments)]
+    ///
+    /// Retained for reference — v1 `on_observable_message` now calls
+    /// `build_message_subtree` + `nest_and_commit` instead.
+    #[allow(clippy::too_many_arguments, dead_code)]
     fn build_accumulated_tree(
         &self,
         msg: &ObservableMessage,
@@ -537,6 +543,264 @@ impl GitDagWorker {
             .map_err(|e| format!("insert diagnostics.toml failed: {e}"))?;
         Ok(())
     }
+
+    /// Shared logic: nest the per-message subtree under `agent/session/`, build
+    /// timeline indexes, add registry metadata, create the commit, and handle
+    /// fork/promote branch operations.
+    ///
+    /// Both `on_observable_message` (v1) and `on_observable_message_v2` call this
+    /// after building their message-specific subtree.
+    #[allow(clippy::too_many_arguments)]
+    fn nest_and_commit(
+        &self,
+        msg_tree_oid: Oid,
+        agent_name: &str,
+        session_id: &str,
+        from: &str,
+        to: &str,
+        msg_type: &str,
+        active_timeline: &str,
+        parent_commit_oid: Option<Oid>,
+        created_at: DateTime<Utc>,
+        submission: &str,
+        state: Option<&str>,
+        checkpoint: Option<&str>,
+        protocol_version: &str,
+        fork_branch: Option<&str>,
+    ) -> Result<(), String> {
+        // Get parent tree from HEAD
+        let parent_tree = parent_commit_oid
+            .and_then(|oid| self.repo.find_commit(oid).ok())
+            .and_then(|c| c.tree().ok());
+
+        // Navigate existing subtrees
+        let existing_agent_tree = parent_tree
+            .as_ref()
+            .and_then(|t| self.get_subtree(t, agent_name));
+        let existing_session_tree = existing_agent_tree
+            .as_ref()
+            .and_then(|t| self.get_subtree(t, session_id));
+        let existing_timelines_tree = existing_session_tree
+            .as_ref()
+            .and_then(|t| self.get_subtree(t, "timelines"));
+
+        // Sequence number = count of existing message dirs + 1
+        let seq = existing_session_tree
+            .as_ref()
+            .map_or(0, |t| self.session_message_count(t))
+            + 1;
+
+        let msg_dir = format!("{seq:03}-{from}-{msg_type}");
+
+        // Build session subtree: existing messages + new one + timelines
+        let mut session_tb = self
+            .repo
+            .treebuilder(existing_session_tree.as_ref())
+            .map_err(|e| format!("session treebuilder failed: {e}"))?;
+        let _ = session_tb.remove("timelines");
+        session_tb
+            .insert(&msg_dir, msg_tree_oid, FileMode::Tree.into())
+            .map_err(|e| format!("insert message dir failed: {e}"))?;
+
+        // Build timelines subtree
+        let mut timelines_tb = self
+            .repo
+            .treebuilder(existing_timelines_tree.as_ref())
+            .map_err(|e| format!("timelines treebuilder failed: {e}"))?;
+
+        // Append new message dir to the active timeline index file
+        let timeline_content = if let Some(ref tl_tree) = existing_timelines_tree {
+            if let Some(entry) = tl_tree.get_name(active_timeline) {
+                if let Ok(blob) = self.repo.find_blob(entry.id()) {
+                    let existing = String::from_utf8_lossy(blob.content()).to_string();
+                    format!("{existing}\n{msg_dir}")
+                } else {
+                    msg_dir.clone()
+                }
+            } else {
+                msg_dir.clone()
+            }
+        } else {
+            msg_dir.clone()
+        };
+
+        let timeline_oid = self.write_blob(timeline_content.as_bytes())?;
+        timelines_tb
+            .insert(active_timeline, timeline_oid, FileMode::Blob.into())
+            .map_err(|e| format!("insert timeline '{active_timeline}' failed: {e}"))?;
+
+        let active_oid = self.write_blob(active_timeline.as_bytes())?;
+        timelines_tb
+            .insert("ACTIVE", active_oid, FileMode::Blob.into())
+            .map_err(|e| format!("insert ACTIVE failed: {e}"))?;
+
+        let timelines_tree_oid = timelines_tb
+            .write()
+            .map_err(|e| format!("write timelines tree failed: {e}"))?;
+        session_tb
+            .insert("timelines", timelines_tree_oid, FileMode::Tree.into())
+            .map_err(|e| format!("insert timelines dir failed: {e}"))?;
+
+        let session_tree_oid = session_tb
+            .write()
+            .map_err(|e| format!("write session tree failed: {e}"))?;
+
+        // Build agent subtree
+        let mut agent_tb = self
+            .repo
+            .treebuilder(existing_agent_tree.as_ref())
+            .map_err(|e| format!("agent treebuilder failed: {e}"))?;
+        agent_tb
+            .insert(session_id, session_tree_oid, FileMode::Tree.into())
+            .map_err(|e| format!("insert session dir failed: {e}"))?;
+        let agent_tree_oid = agent_tb
+            .write()
+            .map_err(|e| format!("write agent tree failed: {e}"))?;
+
+        // Build root tree
+        let mut root_tb = self
+            .repo
+            .treebuilder(parent_tree.as_ref())
+            .map_err(|e| format!("root treebuilder failed: {e}"))?;
+        root_tb
+            .insert(agent_name, agent_tree_oid, FileMode::Tree.into())
+            .map_err(|e| format!("insert agent dir failed: {e}"))?;
+
+        // Add top-level metadata from registry
+        let _ = root_tb.remove("agent.toml");
+        let _ = root_tb.remove("platform.toml");
+        let _ = root_tb.remove("models");
+
+        if let Some(ref registry) = self.registry {
+            if let Some(agent) = registry.get_agent_by_name(agent_name) {
+                if let Ok(agent_toml) = toml::to_string_pretty(&agent) {
+                    if let Ok(oid) = self.write_blob(agent_toml.as_bytes()) {
+                        let _ = root_tb.insert("agent.toml", oid, FileMode::Blob.into());
+                    }
+                }
+
+                if !agent.requirements.models.is_empty() {
+                    if let Ok(models_oid) =
+                        self.build_models_subtree(registry, &agent.requirements.models)
+                    {
+                        let _ = root_tb.insert("models", models_oid, FileMode::Tree.into());
+                    }
+                }
+            }
+
+            let platform_toml = format!(
+                "version = \"{}\"\ncommit = \"{}\"\nregistry_host = \"{}\"\n",
+                env!("CARGO_PKG_VERSION"),
+                env!("VLINDER_GIT_SHA"),
+                self.registry_host,
+            );
+            if let Ok(oid) = self.write_blob(platform_toml.as_bytes()) {
+                let _ = root_tb.insert("platform.toml", oid, FileMode::Blob.into());
+            }
+        }
+
+        let tree_oid = root_tb
+            .write()
+            .map_err(|e| format!("write root tree failed: {e}"))?;
+        let tree = self
+            .repo
+            .find_tree(tree_oid)
+            .map_err(|e| format!("find tree failed: {e}"))?;
+
+        // Build commit message with trailers
+        let mut message = format!(
+            "{msg_type}: {from} \u{2192} {to}\n\nSession: {session_id}\nSubmission: {submission}",
+        );
+        if let Some(st) = state {
+            message.push_str("\nState: ");
+            message.push_str(st);
+        }
+        if let Some(cp) = checkpoint {
+            message.push_str("\nCheckpoint: ");
+            message.push_str(cp);
+        }
+        if !protocol_version.is_empty() {
+            message.push_str("\nProtocol-Version: ");
+            message.push_str(protocol_version);
+        }
+
+        // Author = message sender, committer = platform
+        let author_email = format!("{}@{}", from, self.registry_host);
+        let timestamp = git2::Time::new(created_at.timestamp(), 0);
+        let author = Signature::new(from, &author_email, &timestamp)
+            .map_err(|e| format!("author signature failed: {e}"))?;
+        let committer = Signature::new("vlinder", "vlinder@localhost", &timestamp)
+            .map_err(|e| format!("committer signature failed: {e}"))?;
+
+        // Parent: main HEAD (all commits on main)
+        let parent_commit = parent_commit_oid.and_then(|oid| self.repo.find_commit(oid).ok());
+        let parents: Vec<&git2::Commit> = parent_commit.iter().collect();
+
+        tracing::debug!(
+            msg_type,
+            from,
+            to,
+            session = session_id,
+            parent = ?parent_commit_oid,
+            "Committing message",
+        );
+
+        // Commit to HEAD (advances whatever branch HEAD points to)
+        let commit_oid = self
+            .repo
+            .commit(Some("HEAD"), &author, &committer, &message, &tree, &parents)
+            .map_err(|e| format!("commit failed: {e}"))?;
+
+        // Fork-specific: create a git branch at this commit
+        if let Some(branch_name) = fork_branch {
+            let commit = self
+                .repo
+                .find_commit(commit_oid)
+                .map_err(|e| format!("find fork commit failed: {e}"))?;
+            self.repo
+                .branch(branch_name, &commit, false)
+                .map_err(|e| format!("create branch '{branch_name}' failed: {e}"))?;
+            tracing::info!(
+                branch = %branch_name,
+                commit = %commit_oid,
+                "Created git branch for fork"
+            );
+        }
+
+        // Promote-specific: rename git branches
+        if msg_type == "promote" {
+            let commit = self
+                .repo
+                .find_commit(commit_oid)
+                .map_err(|e| format!("find promote commit failed: {e}"))?;
+
+            let sealed_name = format!("broken-{}", chrono::Utc::now().format("%Y%m%d-%H%M%S"));
+            if let Ok(mut old_main) = self.repo.find_branch("main", git2::BranchType::Local) {
+                old_main
+                    .rename(&sealed_name, false)
+                    .map_err(|e| format!("rename main to '{sealed_name}' failed: {e}"))?;
+            }
+
+            self.repo
+                .branch("main", &commit, true)
+                .map_err(|e| format!("create promoted main branch failed: {e}"))?;
+
+            tracing::info!(
+                commit = %commit_oid,
+                sealed_name = %sealed_name,
+                "Promoted branch to main in git"
+            );
+        }
+
+        // Sync working tree so `ls` shows the folder structure
+        self.repo
+            .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+            .map_err(|e| format!("checkout HEAD failed: {e}"))?;
+
+        tracing::debug!(commit = %commit_oid, session = session_id, "Commit succeeded");
+
+        Ok(())
+    }
 }
 
 impl DagWorker for GitDagWorker {
@@ -546,7 +810,7 @@ impl DagWorker for GitDagWorker {
             let agent_name = message_agent_name(msg);
             let (from, to, msg_type) = message_routing(msg);
 
-            // 1. Resolve state from HEAD (stateless — no in-memory maps)
+            // 1. Resolve canonical parent from HEAD (stateless — no in-memory maps)
             let parent_commit_oid = self.head_commit();
             let canonical_parent = match parent_commit_oid {
                 Some(oid) => {
@@ -566,129 +830,145 @@ impl DagWorker for GitDagWorker {
                 None => DagNodeId::root(),
             };
 
-            // 2. Build accumulated tree (nested under agent/session)
-            let (tree_oid, _canonical_hash) = self.build_accumulated_tree(
-                msg,
-                created_at,
+            // 2. Build per-message subtree
+            let (msg_tree_oid, _canonical_hash) =
+                self.build_message_subtree(msg, created_at, &canonical_parent)?;
+
+            // 3. Determine fork/promote and timeline values
+            let active_timeline = match msg {
+                ObservableMessage::Fork(m) => m.branch_name.as_str(),
+                _ => "main",
+            };
+            let fork_branch = match msg {
+                ObservableMessage::Fork(m) => Some(m.branch_name.as_str()),
+                _ => None,
+            };
+
+            // 4. Nest under agent/session, commit, handle fork/promote
+            self.nest_and_commit(
+                msg_tree_oid,
+                &agent_name,
+                &session_id,
                 &from,
                 &to,
                 msg_type,
+                active_timeline,
                 parent_commit_oid,
-                &canonical_parent,
-            )?;
-            let tree = self
-                .repo
-                .find_tree(tree_oid)
-                .map_err(|e| format!("find tree failed: {e}"))?;
-
-            // 3. Build commit message with trailers for filtering
-            let mut message = format!(
-                "{}: {} \u{2192} {}\n\nSession: {}\nSubmission: {}",
-                msg_type,
-                from,
-                to,
-                msg.session(),
-                msg.submission(),
-            );
-            if let Some(state) = message_state(msg) {
-                message.push_str("\nState: ");
-                message.push_str(state);
-            }
-            if let Some(checkpoint) = message_checkpoint(msg) {
-                message.push_str("\nCheckpoint: ");
-                message.push_str(checkpoint);
-            }
-            let pv = msg.protocol_version();
-            if !pv.is_empty() {
-                message.push_str("\nProtocol-Version: ");
-                message.push_str(pv);
-            }
-
-            // 4. Author = message sender (ADR 069), committer = platform
-            let author_email = format!("{}@{}", from, self.registry_host);
-            let timestamp = git2::Time::new(created_at.timestamp(), 0);
-            let author = Signature::new(&from, &author_email, &timestamp)
-                .map_err(|e| format!("author signature failed: {e}"))?;
-            let committer = Signature::new("vlinder", "vlinder@localhost", &timestamp)
-                .map_err(|e| format!("committer signature failed: {e}"))?;
-
-            // 5. Parent: main HEAD (all commits on main)
-            let parent_commit = parent_commit_oid.and_then(|oid| self.repo.find_commit(oid).ok());
-            let parents: Vec<&git2::Commit> = parent_commit.iter().collect();
-
-            tracing::debug!(
-                msg_type,
-                from = from.as_str(),
-                to = to.as_str(),
-                session = %session_id,
-                parent = ?parent_commit_oid,
-                "Committing message",
-            );
-
-            // 6. Commit to HEAD (advances whatever branch HEAD points to)
-            let commit_oid = self
-                .repo
-                .commit(Some("HEAD"), &author, &committer, &message, &tree, &parents)
-                .map_err(|e| format!("commit failed: {e}"))?;
-
-            // 7. Fork-specific: create a git branch at this commit
-            if let ObservableMessage::Fork(fork_msg) = msg {
-                let commit = self
-                    .repo
-                    .find_commit(commit_oid)
-                    .map_err(|e| format!("find fork commit failed: {e}"))?;
-                self.repo
-                    .branch(&fork_msg.branch_name, &commit, false)
-                    .map_err(|e| {
-                        format!("create branch '{}' failed: {}", fork_msg.branch_name, e)
-                    })?;
-                tracing::info!(
-                    branch = %fork_msg.branch_name,
-                    fork_point = %fork_msg.fork_point,
-                    commit = %commit_oid,
-                    "Created git branch for fork"
-                );
-            }
-
-            // 7b. Promote-specific: rename git branches
-            if let ObservableMessage::Promote(_promote_msg) = msg {
-                let commit = self
-                    .repo
-                    .find_commit(commit_oid)
-                    .map_err(|e| format!("find promote commit failed: {e}"))?;
-
-                // Rename old main to broken-{date}
-                let sealed_name = format!("broken-{}", chrono::Utc::now().format("%Y%m%d-%H%M%S"));
-                if let Ok(mut old_main) = self.repo.find_branch("main", git2::BranchType::Local) {
-                    old_main
-                        .rename(&sealed_name, false)
-                        .map_err(|e| format!("rename main to '{sealed_name}' failed: {e}"))?;
-                }
-
-                // Create new main at this commit
-                self.repo
-                    .branch("main", &commit, true)
-                    .map_err(|e| format!("create promoted main branch failed: {e}"))?;
-
-                tracing::info!(
-                    commit = %commit_oid,
-                    sealed_name = %sealed_name,
-                    "Promoted branch to main in git"
-                );
-            }
-
-            // 8. Sync working tree so `ls` shows the folder structure
-            self.repo
-                .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
-                .map_err(|e| format!("checkout HEAD failed: {e}"))?;
-
-            tracing::debug!(commit = %commit_oid, session = %session_id, "Commit succeeded");
-
-            Ok(())
+                created_at,
+                msg.submission().as_str(),
+                message_state(msg),
+                message_checkpoint(msg),
+                msg.protocol_version(),
+                fork_branch,
+            )
         })();
 
         if let Err(e) = result {
             tracing::error!(error = %e, "Failed to write git commit");
+        }
+    }
+
+    fn on_observable_message_v2(&mut self, msg: &ObservableMessageV2, created_at: DateTime<Utc>) {
+        let result = (|| -> Result<(), String> {
+            match msg {
+                ObservableMessageV2::InvokeV2 { key, msg: invoke } => {
+                    let DataMessageKind::Invoke {
+                        harness,
+                        runtime,
+                        agent,
+                    } = &key.kind;
+
+                    let session_id = key.session.as_str();
+                    let agent_name = agent.as_str();
+                    let from = harness.as_str();
+                    let to = agent_name;
+                    let msg_type = "invoke";
+
+                    // Resolve canonical parent from HEAD
+                    let parent_commit_oid = self.head_commit();
+                    let canonical_parent =
+                        match parent_commit_oid {
+                            Some(oid) => {
+                                let commit = self
+                                    .repo
+                                    .find_commit(oid)
+                                    .map_err(|e| format!("find commit failed: {e}"))?;
+                                let tree = commit
+                                    .tree()
+                                    .map_err(|e| format!("tree lookup failed: {e}"))?;
+                                DagNodeId::from(self.session_canonical_hash_from_tree(
+                                    &tree, agent_name, session_id,
+                                ))
+                            }
+                            None => DagNodeId::root(),
+                        };
+
+                    // Build message subtree inline
+                    let mut tb = self
+                        .repo
+                        .treebuilder(None)
+                        .map_err(|e| format!("treebuilder failed: {e}"))?;
+
+                    let created_at_str =
+                        created_at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+
+                    self.insert_field(&mut tb, "session_id", session_id)?;
+                    self.insert_field(&mut tb, "submission_id", key.submission.as_str())?;
+                    self.insert_field(&mut tb, "protocol_version", "v1")?;
+                    self.insert_field(&mut tb, "created_at", &created_at_str)?;
+
+                    let payload_oid = self.write_blob(&invoke.payload)?;
+                    tb.insert("payload", payload_oid, FileMode::Blob.into())
+                        .map_err(|e| format!("insert payload failed: {e}"))?;
+
+                    self.insert_field(&mut tb, "type", "invoke")?;
+                    self.insert_field(&mut tb, "harness", from)?;
+                    self.insert_field(&mut tb, "runtime", runtime.as_str())?;
+                    self.insert_field(&mut tb, "agent_id", agent_name)?;
+                    if let Some(ref state) = invoke.state {
+                        self.insert_field(&mut tb, "state", state)?;
+                    }
+                    self.insert_diagnostics_toml(&mut tb, &invoke.diagnostics)?;
+
+                    // Compute canonical hash
+                    let diagnostics_json =
+                        serde_json::to_vec(&invoke.diagnostics).unwrap_or_default();
+                    let canonical_hash = hash_dag_node(
+                        &invoke.payload,
+                        &canonical_parent,
+                        &MessageType::Invoke,
+                        &diagnostics_json,
+                        &key.session,
+                    );
+                    self.insert_field(&mut tb, "hash", canonical_hash.as_str())?;
+
+                    let msg_tree_oid = tb
+                        .write()
+                        .map_err(|e| format!("write message subtree failed: {e}"))?;
+
+                    // Nest under agent/session, commit
+                    self.nest_and_commit(
+                        msg_tree_oid,
+                        agent_name,
+                        session_id,
+                        from,
+                        to,
+                        msg_type,
+                        "main",
+                        parent_commit_oid,
+                        created_at,
+                        key.submission.as_str(),
+                        invoke.state.as_deref(),
+                        None, // invoke has no checkpoint
+                        "v1",
+                        None, // invoke is not a fork
+                    )
+                }
+            }
+        })();
+
+        if let Err(e) = result {
+            tracing::error!(error = %e, "Failed to write git commit for v2 message");
         }
     }
 }
@@ -1754,5 +2034,105 @@ mod tests {
         // ACTIVE should point to the fork branch
         let active = std::fs::read_to_string(session_path.join("ACTIVE")).unwrap();
         assert_eq!(active, "repair-branch");
+    }
+
+    // --- V2 invoke tests ---
+
+    use vlinder_core::domain::{DataMessageKind, DataRoutingKey, InvokeMessageV2, MessageId};
+
+    fn test_invoke_v2(payload: &[u8], epoch_secs: i64) -> (ObservableMessageV2, DateTime<Utc>) {
+        let key = DataRoutingKey {
+            session: SessionId::try_from(SESSION.to_string()).unwrap(),
+            branch: BranchId::from(1),
+            submission: SubmissionId::from("sub-1".to_string()),
+            kind: DataMessageKind::Invoke {
+                harness: HarnessType::Cli,
+                runtime: RuntimeType::Container,
+                agent: test_agent_id(),
+            },
+        };
+        let msg = InvokeMessageV2 {
+            id: MessageId::new(),
+            state: None,
+            diagnostics: InvokeDiagnostics {
+                harness_version: "0.1.0".to_string(),
+            },
+            dag_parent: DagNodeId::root(),
+            payload: payload.to_vec(),
+        };
+        let created_at = DateTime::from_timestamp(epoch_secs, 0).unwrap();
+        (ObservableMessageV2::InvokeV2 { key, msg }, created_at)
+    }
+
+    #[test]
+    fn v2_invoke_creates_commit() {
+        let (mut worker, tmp) = test_worker();
+        let (msg, ts) = test_invoke_v2(b"hello v2", 1000);
+
+        worker.on_observable_message_v2(&msg, ts);
+
+        let count = git(tmp.path(), &["rev-list", "--count", "main"]).unwrap();
+        assert_eq!(count, "2"); // initial + invoke
+    }
+
+    #[test]
+    fn v2_invoke_commit_message_has_trailers() {
+        let (mut worker, tmp) = test_worker();
+        let (msg, ts) = test_invoke_v2(b"question", 1000);
+
+        worker.on_observable_message_v2(&msg, ts);
+
+        let log = git(tmp.path(), &["log", "-1", "--format=%B", "main"]).unwrap();
+        assert!(log.contains("invoke: cli"), "should have invoke type line");
+        assert!(log.contains("Session:"), "should have Session trailer");
+        assert!(
+            log.contains("Submission:"),
+            "should have Submission trailer"
+        );
+        assert!(
+            log.contains("Protocol-Version: v1"),
+            "should have protocol version"
+        );
+    }
+
+    #[test]
+    fn v2_invoke_directory_has_per_field_files() {
+        let (mut worker, tmp) = test_worker();
+        let (msg, ts) = test_invoke_v2(b"payload data", 1000);
+
+        worker.on_observable_message_v2(&msg, ts);
+
+        let show = |field: &str| -> String {
+            let path = format!("main:{AGENT}/{SESSION}/001-cli-invoke/{field}");
+            git(tmp.path(), &["show", &path]).unwrap()
+        };
+
+        assert_eq!(show("type"), "invoke");
+        assert_eq!(show("harness"), "cli");
+        assert_eq!(show("runtime"), "container");
+        assert_eq!(show("agent_id"), "support-agent");
+        assert_eq!(show("payload"), "payload data");
+        assert_eq!(show("protocol_version"), "v1");
+        assert!(!show("hash").is_empty());
+    }
+
+    #[test]
+    fn v2_invoke_chains_with_v1_complete() {
+        let (mut worker, tmp) = test_worker();
+
+        // V2 invoke
+        let (invoke, t1) = test_invoke_v2(b"question", 1000);
+        worker.on_observable_message_v2(&invoke, t1);
+
+        // V1 complete
+        let (complete, t2) = test_complete(b"answer", 1001);
+        worker.on_observable_message(&complete, t2);
+
+        let count = git(tmp.path(), &["rev-list", "--count", "main"]).unwrap();
+        assert_eq!(count, "3"); // initial + invoke + complete
+
+        // Complete should parent on invoke
+        let parents = git(tmp.path(), &["log", "--format=%P", "-1", "main"]).unwrap();
+        assert!(!parents.is_empty(), "complete should have a parent");
     }
 }
