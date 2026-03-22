@@ -140,19 +140,36 @@ fn get(session_id_or_name: &str) {
         println!("Turn {sub_id}");
         for node in messages {
             let ts = node.created_at.format("%H:%M:%S%.3f");
-            let msg = node.message.as_ref().expect("dag node missing message");
-            let (from, to) = msg.sender_receiver();
+            let (from, to, operation, checkpoint) = if let Some(ref v2) = node.message_v2 {
+                match v2 {
+                    vlinder_core::domain::ObservableMessageV2::InvokeV2 { key, .. } => {
+                        let vlinder_core::domain::DataMessageKind::Invoke {
+                            harness, agent, ..
+                        } = &key.kind;
+                        (harness.as_str().to_string(), agent.to_string(), None, None)
+                    }
+                }
+            } else {
+                let msg = node.message.as_ref().expect("dag node missing message");
+                let (f, t) = msg.sender_receiver();
+                (
+                    f,
+                    t,
+                    msg.operation().map(str::to_string),
+                    msg.checkpoint().map(str::to_string),
+                )
+            };
             let mut parts = vec![
-                format!("{}", ts),
+                format!("{ts}"),
                 node.id.as_str()[..8].to_string(),
                 node.message_type().as_str().to_string(),
                 from,
-                format!("-> {}", to),
+                format!("-> {to}"),
             ];
-            if let Some(op) = msg.operation() {
+            if let Some(ref op) = operation {
                 parts.push(format!("op:{op}"));
             }
-            if let Some(ckpt) = msg.checkpoint() {
+            if let Some(ref ckpt) = checkpoint {
                 parts.push(format!("ckpt:{ckpt}"));
             }
             println!("  {}", parts.join(" "));
@@ -324,11 +341,16 @@ fn find_agent_name(store: &dyn DagStore, session_id: &SessionId) -> Option<Strin
     nodes
         .iter()
         .find(|n| n.message_type() == MessageType::Invoke)
-        .map(|n| {
-            n.message
-                .as_ref()
-                .expect("invoke node missing message")
-                .sender_receiver()
-                .1
+        .and_then(|n| {
+            if let Some(ref v2) = n.message_v2 {
+                match v2 {
+                    vlinder_core::domain::ObservableMessageV2::InvokeV2 { key, .. } => {
+                        let vlinder_core::domain::DataMessageKind::Invoke { agent, .. } = &key.kind;
+                        Some(agent.to_string())
+                    }
+                }
+            } else {
+                n.message.as_ref().map(|m| m.sender_receiver().1)
+            }
         })
 }

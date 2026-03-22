@@ -39,21 +39,44 @@ fn get(submission_id: &str) {
     }
 
     for node in &nodes {
-        let msg = node.message.as_ref().expect("dag node missing message");
-        let (from, to) = msg.sender_receiver();
+        let (from, to, operation, checkpoint, state) = if let Some(ref v2) = node.message_v2 {
+            match v2 {
+                vlinder_core::domain::ObservableMessageV2::InvokeV2 { key, msg } => {
+                    let vlinder_core::domain::DataMessageKind::Invoke { harness, agent, .. } =
+                        &key.kind;
+                    (
+                        harness.as_str().to_string(),
+                        agent.to_string(),
+                        None,
+                        None,
+                        msg.state.as_deref(),
+                    )
+                }
+            }
+        } else {
+            let msg = node.message.as_ref().expect("dag node missing message");
+            let (f, t) = msg.sender_receiver();
+            (
+                f,
+                t,
+                msg.operation().map(str::to_string),
+                msg.checkpoint().map(str::to_string),
+                msg.state(),
+            )
+        };
         println!("Hash:       {}", node.id);
         println!("Parent:     {}", node.parent_id);
         println!("Type:       {}", node.message_type().as_str());
         println!("From:       {from}");
         println!("To:         {to}");
         println!("Session:    {}", node.session_id());
-        if let Some(op) = msg.operation() {
+        if let Some(op) = operation {
             println!("Operation:  {op}");
         }
-        if let Some(ckpt) = msg.checkpoint() {
+        if let Some(ckpt) = checkpoint {
             println!("Checkpoint: {ckpt}");
         }
-        if let Some(state) = msg.state() {
+        if let Some(state) = state {
             println!("State:      {state}");
         }
         println!("Created:    {}", node.created_at);

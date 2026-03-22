@@ -295,8 +295,7 @@ fn resolve_branch_tip(
 
     // Read state from the tip node
     let initial_state = if let Ok(Some(node)) = store.get_node(&tip_hash) {
-        let msg = node.message.as_ref().expect("tip node missing message");
-        let state = msg.state().unwrap_or("");
+        let state = node.message_state().unwrap_or("");
         if state.is_empty() {
             None
         } else {
