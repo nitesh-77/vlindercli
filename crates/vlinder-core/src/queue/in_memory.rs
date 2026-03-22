@@ -1,9 +1,10 @@
 //! In-memory queue implementation.
 
 use crate::domain::{
-    Acknowledgement, AgentName, CompleteMessage, DelegateMessage, ForkMessage, HarnessType,
-    InvokeMessage, MessageQueue, ObservableMessage, Operation, QueueError, RepairMessage,
-    RequestMessage, ResponseMessage, RoutingKey, RoutingKind, ServiceBackend, SubmissionId,
+    Acknowledgement, AgentName, CompleteMessage, DataMessageKind, DataRoutingKey, DelegateMessage,
+    ForkMessage, HarnessType, InvokeMessage, InvokeMessageV2, MessageQueue, ObservableMessage,
+    ObservableMessageV2, Operation, QueueError, RepairMessage, RequestMessage, ResponseMessage,
+    RoutingKey, RoutingKind, ServiceBackend, SubmissionId,
 };
 #[cfg(test)]
 use crate::domain::{
@@ -20,13 +21,16 @@ use std::sync::{Arc, Mutex};
 /// ACK/NACK operations are no-ops since messages are removed from the queue
 /// immediately on receive (no durability or redelivery support).
 pub struct InMemoryQueue {
-    /// Messages keyed by `RoutingKey` (ADR 096 §5).
+    /// Data-plane messages keyed by `DataRoutingKey` (ADR 121).
+    data_queues: Arc<Mutex<HashMap<DataRoutingKey, VecDeque<ObservableMessageV2>>>>,
+    /// Legacy messages keyed by `RoutingKey` (ADR 096 §5).
     pub(crate) typed_queues: Arc<Mutex<HashMap<RoutingKey, VecDeque<ObservableMessage>>>>,
 }
 
 impl InMemoryQueue {
     pub fn new() -> Self {
         Self {
+            data_queues: Arc::new(Mutex::new(HashMap::new())),
             typed_queues: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -47,6 +51,41 @@ impl MessageQueue for InMemoryQueue {
             .or_default()
             .push_back(ObservableMessage::Invoke(msg));
         Ok(())
+    }
+
+    fn send_invoke_v2(&self, key: DataRoutingKey, msg: InvokeMessageV2) -> Result<(), QueueError> {
+        let v2 = ObservableMessageV2::InvokeV2 {
+            key: key.clone(),
+            msg,
+        };
+        let mut data = self
+            .data_queues
+            .lock()
+            .map_err(|e| QueueError::SendFailed(format!("lock poisoned: {e}")))?;
+        data.entry(key).or_default().push_back(v2);
+        Ok(())
+    }
+
+    fn receive_invoke_v2(
+        &self,
+        agent: &AgentName,
+    ) -> Result<(DataRoutingKey, InvokeMessageV2, Acknowledgement), QueueError> {
+        let mut data = self
+            .data_queues
+            .lock()
+            .map_err(|e| QueueError::ReceiveFailed(format!("lock poisoned: {e}")))?;
+
+        for (key, queue) in data.iter_mut() {
+            let DataMessageKind::Invoke { agent: ref a, .. } = key.kind;
+            if a == agent {
+                if let Some(ObservableMessageV2::InvokeV2 { msg, .. }) = queue.pop_front() {
+                    let key = key.clone();
+                    return Ok((key, msg, Box::new(|| Ok(()))));
+                }
+            }
+        }
+
+        Err(QueueError::Timeout)
     }
 
     fn send_request(&self, msg: RequestMessage) -> Result<(), QueueError> {
@@ -660,5 +699,96 @@ mod tests {
 
         let result = queue.receive_delegate_reply(&reply_key_b);
         assert!(matches!(result, Err(QueueError::Timeout)));
+    }
+
+    // ========================================================================
+    // V2 invoke tests (ADR 121 — data plane)
+    // ========================================================================
+
+    fn test_data_routing_key() -> DataRoutingKey {
+        DataRoutingKey {
+            session: SessionId::new(),
+            branch: BranchId::from(1),
+            submission: test_submission(),
+            kind: DataMessageKind::Invoke {
+                harness: HarnessType::Cli,
+                runtime: RuntimeType::Container,
+                agent: test_agent_id(),
+            },
+        }
+    }
+
+    fn test_invoke_v2() -> InvokeMessageV2 {
+        InvokeMessageV2 {
+            id: crate::domain::MessageId::from("msg-v2".to_string()),
+            state: Some("state-abc".to_string()),
+            diagnostics: InvokeDiagnostics {
+                harness_version: "0.1.0".to_string(),
+            },
+            dag_parent: crate::domain::DagNodeId::root(),
+            payload: b"hello".to_vec(),
+        }
+    }
+
+    #[test]
+    fn send_and_receive_invoke_v2() {
+        let queue = InMemoryQueue::new();
+        let key = test_data_routing_key();
+        let msg = test_invoke_v2();
+
+        queue.send_invoke_v2(key, msg.clone()).unwrap();
+
+        let (recv_key, recv_msg, ack) = queue.receive_invoke_v2(&test_agent_id()).unwrap();
+
+        assert_eq!(recv_msg, msg);
+        assert_eq!(recv_key.submission, test_submission());
+        ack().unwrap();
+    }
+
+    #[test]
+    fn receive_invoke_v2_times_out_for_wrong_agent() {
+        let queue = InMemoryQueue::new();
+        let key = test_data_routing_key();
+        let msg = test_invoke_v2();
+
+        queue.send_invoke_v2(key, msg).unwrap();
+
+        let result = queue.receive_invoke_v2(&AgentName::new("other-agent"));
+        assert!(matches!(result, Err(QueueError::Timeout)));
+    }
+
+    #[test]
+    fn invoke_v2_does_not_interfere_with_v1() {
+        let queue = InMemoryQueue::new();
+
+        // Send a v1 invoke
+        let v1 = InvokeMessage::new(
+            BranchId::from(1),
+            test_submission(),
+            SessionId::new(),
+            HarnessType::Cli,
+            RuntimeType::Container,
+            test_agent_id(),
+            b"v1-payload".to_vec(),
+            None,
+            InvokeDiagnostics {
+                harness_version: String::new(),
+            },
+            crate::domain::DagNodeId::root(),
+        );
+        queue.send_invoke(v1).unwrap();
+
+        // Send a v2 invoke
+        let key = test_data_routing_key();
+        let v2 = test_invoke_v2();
+        queue.send_invoke_v2(key, v2.clone()).unwrap();
+
+        // v2 receive only gets v2
+        let (_, recv_v2, _) = queue.receive_invoke_v2(&test_agent_id()).unwrap();
+        assert_eq!(recv_v2, v2);
+
+        // v1 receive only gets v1
+        let (recv_v1, _) = queue.receive_invoke(&test_agent_id()).unwrap();
+        assert_eq!(recv_v1.payload, b"v1-payload");
     }
 }

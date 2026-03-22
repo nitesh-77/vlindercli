@@ -19,11 +19,12 @@ use tokio::runtime::Runtime;
 use std::str::FromStr;
 
 use vlinder_core::domain::{
-    Acknowledgement, AgentName, BranchId, CompleteMessage, DagNodeId, DelegateDiagnostics,
-    DelegateMessage, HarnessType, InvokeDiagnostics, InvokeMessage, MessageId, MessageQueue, Nonce,
-    Operation, QueueError, RepairMessage, RequestDiagnostics, RequestMessage, ResponseMessage,
-    RoutingKey, RoutingKind, RuntimeDiagnostics, RuntimeType, Sequence, ServiceBackend,
-    ServiceDiagnostics, ServiceType, SessionId, SubmissionId,
+    Acknowledgement, AgentName, BranchId, CompleteMessage, DagNodeId, DataRoutingKey,
+    DelegateDiagnostics, DelegateMessage, HarnessType, InvokeDiagnostics, InvokeMessage,
+    InvokeMessageV2, MessageId, MessageQueue, Nonce, Operation, QueueError, RepairMessage,
+    RequestDiagnostics, RequestMessage, ResponseMessage, RoutingKey, RoutingKind,
+    RuntimeDiagnostics, RuntimeType, Sequence, ServiceBackend, ServiceDiagnostics, ServiceType,
+    SessionId, SubmissionId,
 };
 
 /// NATS queue with `JetStream` durability.
@@ -259,6 +260,21 @@ impl MessageQueue for NatsQueue {
 
             Ok(())
         })
+    }
+
+    fn send_invoke_v2(
+        &self,
+        _key: DataRoutingKey,
+        _msg: InvokeMessageV2,
+    ) -> Result<(), QueueError> {
+        todo!("NATS send_invoke_v2 — wired in step 6")
+    }
+
+    fn receive_invoke_v2(
+        &self,
+        _agent: &AgentName,
+    ) -> Result<(DataRoutingKey, InvokeMessageV2, Acknowledgement), QueueError> {
+        todo!("NATS receive_invoke_v2 — wired in step 6")
     }
 
     fn send_request(&self, msg: RequestMessage) -> Result<(), QueueError> {

@@ -10,9 +10,9 @@
 //! `AckFn` acknowledges successful processing.
 
 use super::{
-    AgentName, CompleteMessage, DelegateMessage, ForkMessage, HarnessType, InvokeMessage,
-    Operation, PromoteMessage, RepairMessage, RequestMessage, ResourceId, ResponseMessage,
-    RoutingKey, ServiceBackend, SubmissionId,
+    AgentName, CompleteMessage, DataRoutingKey, DelegateMessage, ForkMessage, HarnessType,
+    InvokeMessage, InvokeMessageV2, Operation, PromoteMessage, RepairMessage, RequestMessage,
+    ResourceId, ResponseMessage, RoutingKey, ServiceBackend, SubmissionId,
 };
 use std::fmt;
 
@@ -31,6 +31,24 @@ pub trait MessageQueue {
     ///
     /// Implementation determines routing from message dimensions.
     fn send_invoke(&self, msg: InvokeMessage) -> Result<(), QueueError>;
+
+    // -------------------------------------------------------------------------
+    // Data-plane invoke (ADR 121)
+    // -------------------------------------------------------------------------
+
+    /// Send an invoke on the data plane (ADR 121).
+    ///
+    /// Routing key and payload are separate: the key goes into the subject,
+    /// the payload goes into the NATS message body.
+    fn send_invoke_v2(&self, key: DataRoutingKey, msg: InvokeMessageV2) -> Result<(), QueueError>;
+
+    /// Receive an invoke from the data plane (ADR 121).
+    ///
+    /// Returns the routing key, payload, and acknowledgement.
+    fn receive_invoke_v2(
+        &self,
+        agent: &AgentName,
+    ) -> Result<(DataRoutingKey, InvokeMessageV2, Acknowledgement), QueueError>;
 
     /// Send a `RequestMessage` (Runtime → Service).
     ///

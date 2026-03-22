@@ -11,9 +11,9 @@ use std::sync::Arc;
 
 use crate::domain::workers::dag::build_dag_node;
 use crate::domain::{
-    Acknowledgement, CompleteMessage, DagNodeId, DagStore, DelegateMessage, ForkMessage,
-    InvokeMessage, MessageQueue, ObservableMessage, PromoteMessage, QueueError, RepairMessage,
-    RequestMessage, ResponseMessage, Snapshot, SubmissionId,
+    Acknowledgement, CompleteMessage, DagNodeId, DagStore, DataRoutingKey, DelegateMessage,
+    ForkMessage, InvokeMessage, InvokeMessageV2, MessageQueue, ObservableMessage, PromoteMessage,
+    QueueError, RepairMessage, RequestMessage, ResponseMessage, Snapshot, SubmissionId,
 };
 
 /// A `MessageQueue` decorator that synchronously records DAG nodes on send.
@@ -91,6 +91,19 @@ impl MessageQueue for RecordingQueue {
     fn send_invoke(&self, msg: InvokeMessage) -> Result<(), QueueError> {
         self.record(&msg.clone().into());
         self.inner.send_invoke(msg)
+    }
+
+    fn send_invoke_v2(&self, key: DataRoutingKey, msg: InvokeMessageV2) -> Result<(), QueueError> {
+        // DAG recording for v2 invoke is wired in a later step.
+        tracing::warn!("send_invoke_v2: DAG recording not yet wired");
+        self.inner.send_invoke_v2(key, msg)
+    }
+
+    fn receive_invoke_v2(
+        &self,
+        agent: &crate::domain::AgentName,
+    ) -> Result<(DataRoutingKey, InvokeMessageV2, Acknowledgement), QueueError> {
+        self.inner.receive_invoke_v2(agent)
     }
 
     fn send_request(&self, msg: RequestMessage) -> Result<(), QueueError> {
