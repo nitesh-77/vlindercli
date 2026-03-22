@@ -4,7 +4,10 @@
 //! and constructing complete messages. The main module wires these to
 //! the Lambda Runtime API and real HTTP.
 
-use vlinder_core::domain::{CompleteMessage, InvokeMessage, RuntimeDiagnostics, RuntimeInfo};
+use vlinder_core::domain::{
+    AgentName, BranchId, CompleteMessage, HarnessType, InvokeMessage, RuntimeDiagnostics,
+    RuntimeInfo, SessionId, SubmissionId,
+};
 
 /// Deserialize a Lambda invocation body into an `InvokeMessage`.
 ///
@@ -35,13 +38,27 @@ pub fn build_lambda_diagnostics(
 ///
 /// Combines the invoke context, agent output, final state, and diagnostics
 /// into a `CompleteMessage` ready to send to NATS.
+#[allow(clippy::too_many_arguments)]
 pub fn build_complete(
-    invoke: &InvokeMessage,
+    branch: BranchId,
+    submission: SubmissionId,
+    session: SessionId,
+    agent_id: AgentName,
+    harness: HarnessType,
     output: Vec<u8>,
     final_state: Option<String>,
     diagnostics: RuntimeDiagnostics,
 ) -> CompleteMessage {
-    invoke.create_reply_with_diagnostics(output, final_state, diagnostics)
+    CompleteMessage::new(
+        branch,
+        submission,
+        session,
+        agent_id,
+        harness,
+        output,
+        final_state,
+        diagnostics,
+    )
 }
 
 /// Build the Lambda Runtime API error body.
@@ -146,7 +163,11 @@ mod tests {
         let diag = build_lambda_diagnostics("fn", "us-east-1", 100);
 
         let complete = build_complete(
-            &invoke,
+            invoke.branch,
+            invoke.submission.clone(),
+            invoke.session.clone(),
+            invoke.agent_id.clone(),
+            invoke.harness,
             b"output bytes".to_vec(),
             Some("final-state-hash".to_string()),
             diag,
@@ -163,7 +184,16 @@ mod tests {
         let invoke = deserialize_invoke(&json).unwrap();
         let diag = build_lambda_diagnostics("fn", "us-east-1", 50);
 
-        let complete = build_complete(&invoke, b"out".to_vec(), None, diag);
+        let complete = build_complete(
+            invoke.branch,
+            invoke.submission.clone(),
+            invoke.session.clone(),
+            invoke.agent_id.clone(),
+            invoke.harness,
+            b"out".to_vec(),
+            None,
+            diag,
+        );
 
         assert!(complete.state.is_none());
     }

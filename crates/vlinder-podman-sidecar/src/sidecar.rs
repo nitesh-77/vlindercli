@@ -7,7 +7,7 @@
 use std::time::Duration;
 
 use vlinder_core::domain::{
-    AgentName, ContainerId, HarnessType, HealthWindow, ImageDigest, ImageRef,
+    AgentName, ContainerId, DataMessageKind, HarnessType, HealthWindow, ImageDigest, ImageRef,
 };
 
 use vlinder_provider_server::factory;
@@ -115,6 +115,48 @@ impl Sidecar {
                             event = "durable.response_error",
                             error = %e,
                             "Failed to receive service response"
+                        );
+                        break;
+                    }
+                }
+            } else if let Ok((key, invoke_v2, ack)) =
+                self.dispatch.queue.receive_invoke_v2(&agent_id)
+            {
+                let _ = ack();
+                let DataMessageKind::Invoke {
+                    harness,
+                    runtime: _,
+                    agent,
+                } = &key.kind;
+                tracing::info!(
+                    event = "dispatch.started.v2",
+                    sha = %key.submission,
+                    session = %key.session,
+                    agent = %agent,
+                    "Dispatching v2 invoke to container"
+                );
+                match dispatch::handle_invoke(
+                    &self.dispatch,
+                    &mut self.health,
+                    key.branch,
+                    key.submission.clone(),
+                    key.session.clone(),
+                    agent.clone(),
+                    *harness,
+                    invoke_v2.payload,
+                    invoke_v2.state,
+                    None,
+                ) {
+                    Ok(InvokeOutcome::Done) => {}
+                    Ok(InvokeOutcome::Pending(session)) => {
+                        durable_session = Some(*session);
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            event = "dispatch.error",
+                            error = %e,
+                            agent = %self.agent_name,
+                            "Dispatch failed"
                         );
                         break;
                     }

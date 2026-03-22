@@ -7,7 +7,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use vlinder_core::domain::{
-    Agent, AgentName, ExpectsReply, MessageQueue, Registry, ResourceId, Runtime, RuntimeType,
+    Agent, AgentName, CompleteMessage, DataMessageKind, ExpectsReply, MessageQueue, Registry,
+    ResourceId, Runtime, RuntimeDiagnostics, RuntimeType,
 };
 
 use crate::config::LambdaRuntimeConfig;
@@ -175,7 +176,52 @@ impl LambdaRuntime {
     fn dispatch_invocations(&self) {
         for name in self.functions.keys() {
             let agent_id = AgentName::new(name);
-            if let Ok((invoke, ack)) = self.queue.receive_invoke(&agent_id) {
+
+            // Try v2 first (ADR 121 — data plane).
+            if let Ok((key, invoke_v2, ack)) = self.queue.receive_invoke_v2(&agent_id) {
+                let _ = ack();
+                let function_name = format!("vlinder-{name}");
+
+                let DataMessageKind::Invoke {
+                    harness,
+                    runtime: _,
+                    agent,
+                } = &key.kind;
+
+                let json_payload = serde_json::json!({ "key": key, "msg": invoke_v2 });
+                let json_bytes =
+                    serde_json::to_vec(&json_payload).unwrap_or_else(|_| b"{}".to_vec());
+
+                match self.client.invoke_function(&function_name, &json_bytes) {
+                    Ok(_) => {
+                        tracing::info!(
+                            event = "lambda.invoke_ok.v2",
+                            agent = name.as_str(),
+                            function = function_name.as_str(),
+                            "Lambda v2 invocation succeeded"
+                        );
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            event = "lambda.invoke_failed.v2",
+                            agent = name.as_str(),
+                            error = %e,
+                            "Lambda v2 invocation failed"
+                        );
+                        let complete = CompleteMessage::new(
+                            key.branch,
+                            key.submission.clone(),
+                            key.session.clone(),
+                            agent.clone(),
+                            *harness,
+                            format!("[error] Lambda invoke failed: {e}").into_bytes(),
+                            None,
+                            RuntimeDiagnostics::placeholder(0),
+                        );
+                        let _ = self.queue.send_complete(complete);
+                    }
+                }
+            } else if let Ok((invoke, ack)) = self.queue.receive_invoke(&agent_id) {
                 let _ = ack();
                 let function_name = format!("vlinder-{name}");
 
@@ -608,6 +654,126 @@ mod tests {
         );
         let submission = invoke.submission.clone();
         queue.send_invoke(invoke).unwrap();
+
+        // Tick — invoke_function fails, so daemon sends error complete.
+        runtime.tick();
+
+        let (complete, ack) = queue
+            .receive_complete(&submission, HarnessType::Grpc)
+            .expect("should receive error complete from daemon");
+        ack().unwrap();
+        let payload_str = String::from_utf8_lossy(&complete.payload);
+        assert!(
+            payload_str.contains("[error]"),
+            "expected error payload, got: {payload_str}"
+        );
+    }
+
+    #[test]
+    fn invoke_v2_dispatches_to_lambda_consumes_from_queue() {
+        use vlinder_core::domain::{
+            BranchId, DagNodeId, DataMessageKind, DataRoutingKey, HarnessType, InvokeDiagnostics,
+            InvokeMessageV2, MessageId, SessionId, SubmissionId,
+        };
+
+        let registry = test_registry();
+        let agent = make_lambda_agent("echo");
+        registry.register_agent(agent).unwrap();
+
+        let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
+        let config = test_config();
+        let mut runtime = LambdaRuntime::with_client(
+            &config,
+            registry,
+            queue.clone(),
+            Box::new(MockLambdaClient::new()),
+        );
+
+        // Deploy first.
+        runtime.tick();
+        assert_eq!(runtime.functions.len(), 1);
+
+        // Enqueue a v2 invoke message.
+        let key = DataRoutingKey {
+            session: SessionId::new(),
+            branch: BranchId::from(1),
+            submission: SubmissionId::new(),
+            kind: DataMessageKind::Invoke {
+                harness: HarnessType::Grpc,
+                runtime: RuntimeType::Lambda,
+                agent: AgentName::new("echo"),
+            },
+        };
+        let msg = InvokeMessageV2 {
+            id: MessageId::new(),
+            state: None,
+            diagnostics: InvokeDiagnostics {
+                harness_version: "test".to_string(),
+            },
+            dag_parent: DagNodeId::root(),
+            payload: b"hello lambda v2".to_vec(),
+        };
+        queue.send_invoke_v2(key, msg).unwrap();
+
+        // Tick — should dispatch the v2 invocation.
+        runtime.tick();
+
+        // The v2 invoke should be consumed.
+        let agent_id = AgentName::new("echo");
+        assert!(
+            queue.receive_invoke_v2(&agent_id).is_err(),
+            "v2 invoke should have been consumed from the queue"
+        );
+    }
+
+    #[test]
+    fn invoke_v2_failure_sends_error_complete() {
+        use vlinder_core::domain::{
+            BranchId, DagNodeId, DataMessageKind, DataRoutingKey, HarnessType, InvokeDiagnostics,
+            InvokeMessageV2, MessageId, SessionId, SubmissionId,
+        };
+
+        let registry = test_registry();
+        let agent = make_lambda_agent("echo");
+        registry.register_agent(agent).unwrap();
+
+        let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
+        let config = test_config();
+
+        // Use a failing mock client.
+        let mut runtime = LambdaRuntime::with_client(
+            &config,
+            registry,
+            queue.clone(),
+            Box::new(FailingLambdaClient),
+        );
+
+        // Deploy first (create_role/create_function succeed on FailingLambdaClient).
+        runtime.tick();
+        assert_eq!(runtime.functions.len(), 1);
+
+        // Enqueue a v2 invoke message.
+        let submission = SubmissionId::new();
+        let key = DataRoutingKey {
+            session: SessionId::new(),
+            branch: BranchId::from(1),
+            submission: submission.clone(),
+            kind: DataMessageKind::Invoke {
+                harness: HarnessType::Grpc,
+                runtime: RuntimeType::Lambda,
+                agent: AgentName::new("echo"),
+            },
+        };
+        let msg = InvokeMessageV2 {
+            id: MessageId::new(),
+            state: None,
+            diagnostics: InvokeDiagnostics {
+                harness_version: "test".to_string(),
+            },
+            dag_parent: DagNodeId::root(),
+            payload: b"hello".to_vec(),
+        };
+        queue.send_invoke_v2(key, msg).unwrap();
 
         // Tick — invoke_function fails, so daemon sends error complete.
         runtime.tick();

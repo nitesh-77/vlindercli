@@ -293,7 +293,16 @@ fn handle_invocation(
         .unwrap_or_else(|_| "unknown".to_string());
 
     let diagnostics = build_lambda_diagnostics(&config.agent, &region, duration_ms);
-    let complete = build_complete(&invoke, output.clone(), final_state, diagnostics);
+    let complete = build_complete(
+        invoke.branch,
+        invoke.submission.clone(),
+        invoke.session.clone(),
+        invoke.agent_id.clone(),
+        invoke.harness,
+        output.clone(),
+        final_state,
+        diagnostics,
+    );
 
     queue
         .send_complete(complete)
