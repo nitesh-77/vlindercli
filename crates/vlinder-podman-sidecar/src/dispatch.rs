@@ -12,9 +12,10 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use vlinder_core::domain::{
-    CompleteMessage, ContainerId, ExpectsReply, HealthWindow, HttpMethod, ImageDigest, ImageRef,
-    InvokeMessage, MessageQueue, ProviderHost, ProviderRoute, Registry, RepairMessage,
-    RequestDiagnostics, RequestMessage, ResponseMessage, RoutingKey, SequenceCounter,
+    AgentName, BranchId, CompleteMessage, ContainerId, HarnessType, HealthWindow, HttpMethod,
+    ImageDigest, ImageRef, MessageQueue, ProviderHost, ProviderRoute, Registry, RepairMessage,
+    RequestDiagnostics, RequestMessage, ResponseMessage, RoutingKey, RuntimeDiagnostics,
+    SequenceCounter, SessionId, SubmissionId,
 };
 
 use vlinder_provider_server::handler::InvokeHandler;
@@ -37,7 +38,11 @@ pub struct DispatchContext {
 
 /// State for an in-progress durable invocation waiting for a service response.
 pub struct DurableSession {
-    pub invoke: InvokeMessage,
+    pub branch: BranchId,
+    pub submission: SubmissionId,
+    pub session: SessionId,
+    pub agent_id: AgentName,
+    pub harness: HarnessType,
     pub reply_key: Option<RoutingKey>,
     pub hosts: Vec<ProviderHost>,
     pub sequence: SequenceCounter,
@@ -54,43 +59,49 @@ pub enum InvokeOutcome {
 }
 
 /// Handle a single invocation: POST to agent, detect mode, handle response.
+#[allow(clippy::too_many_arguments, clippy::needless_pass_by_value)]
 pub fn handle_invoke(
     ctx: &DispatchContext,
     health: &mut HealthWindow,
-    invoke: &InvokeMessage,
+    branch: BranchId,
+    submission: SubmissionId,
+    session: SessionId,
+    agent_id: AgentName,
+    harness: HarnessType,
+    payload: Vec<u8>,
+    initial_state: Option<String>,
     reply_key: Option<&RoutingKey>,
 ) -> Result<InvokeOutcome, String> {
     let started_at = Instant::now();
     let mut trace = TraceLog::new();
 
-    // Look up agent to build provider hosts and determine initial state.
+    // Look up agent to build provider hosts and resolve initial state.
     let agent = ctx
         .registry
-        .get_agent_by_name(invoke.agent_id.as_str())
+        .get_agent_by_name(agent_id.as_str())
         .expect("agent not found");
     let hosts = build_hosts(&agent);
-    let initial_state = if agent.object_storage.is_some() {
-        Some(invoke.state.clone().unwrap_or_default())
+    let resolved_state = if agent.object_storage.is_some() {
+        Some(initial_state.unwrap_or_default())
     } else {
         None
     };
 
     // Spawn provider server for unmanaged mode — drops when this function returns.
-    let state = std::sync::Arc::new(std::sync::RwLock::new(initial_state));
+    let state = std::sync::Arc::new(std::sync::RwLock::new(resolved_state));
     let handler = InvokeHandler::new(
         ctx.queue.clone(),
         ctx.registry.clone(),
-        invoke.branch,
-        invoke.submission.clone(),
-        invoke.session.clone(),
-        invoke.agent_id.clone(),
+        branch,
+        submission.clone(),
+        session.clone(),
+        agent_id.clone(),
         std::sync::Arc::clone(&state),
     );
     let provider_server = ProviderServer::start(handler, hosts, state, 3544);
 
     let client = ureq::Agent::new();
     let agent_url = format!("http://127.0.0.1:{}/invoke", ctx.container_port);
-    let payload = invoke.payload.clone();
 
     trace.log(format!("POST {} ({} bytes)", agent_url, payload.len()));
 
@@ -129,7 +140,11 @@ pub fn handle_invoke(
                 handle_action(
                     ctx,
                     &output,
-                    invoke,
+                    branch,
+                    submission,
+                    session,
+                    agent_id,
+                    harness,
                     reply_key,
                     checkpoint_hosts,
                     sequence,
@@ -149,8 +164,16 @@ pub fn handle_invoke(
                     ctx.image_digest.as_ref(),
                 );
                 trace.log("Sending complete");
-                let complete =
-                    invoke.create_reply_with_diagnostics(output, final_state, diagnostics);
+                let complete = CompleteMessage::new(
+                    branch,
+                    submission,
+                    session,
+                    agent_id,
+                    harness,
+                    output,
+                    final_state,
+                    diagnostics,
+                );
                 send_reply(&ctx.queue, complete, reply_key);
                 Ok(InvokeOutcome::Done)
             }
@@ -166,15 +189,32 @@ pub fn handle_invoke(
                 reason = %err_body,
                 "Agent container returned an error"
             );
-            let complete = invoke
-                .create_reply(format!("[error] agent container error: {err_body}").into_bytes());
+            let complete = CompleteMessage::new(
+                branch,
+                submission,
+                session,
+                agent_id,
+                harness,
+                format!("[error] agent container error: {err_body}").into_bytes(),
+                None,
+                RuntimeDiagnostics::placeholder(0),
+            );
             send_reply(&ctx.queue, complete, reply_key);
             Err(format!("Agent returned error: {err_body}"))
         }
         Err(e) => {
             let msg = format!("Request to agent failed: {e}");
             tracing::warn!(event = "container.unreachable", error = %msg);
-            let complete = invoke.create_reply(format!("[error] {msg}").into_bytes());
+            let complete = CompleteMessage::new(
+                branch,
+                submission,
+                session,
+                agent_id,
+                harness,
+                format!("[error] {msg}").into_bytes(),
+                None,
+                RuntimeDiagnostics::placeholder(0),
+            );
             send_reply(&ctx.queue, complete, reply_key);
             Err(msg)
         }
@@ -241,7 +281,11 @@ pub fn handle_service_response(
             handle_action(
                 ctx,
                 &output,
-                &session.invoke,
+                session.branch,
+                session.submission,
+                session.session,
+                session.agent_id,
+                session.harness,
                 session.reply_key.as_ref(),
                 session.hosts,
                 session.sequence,
@@ -251,9 +295,16 @@ pub fn handle_service_response(
         Err(e) => {
             let msg = format!("Callback to agent failed: {e}");
             trace.log(&msg);
-            let complete = session
-                .invoke
-                .create_reply(format!("[error] {msg}").into_bytes());
+            let complete = CompleteMessage::new(
+                session.branch,
+                session.submission,
+                session.session,
+                session.agent_id,
+                session.harness,
+                format!("[error] {msg}").into_bytes(),
+                None,
+                RuntimeDiagnostics::placeholder(0),
+            );
             send_reply(&ctx.queue, complete, session.reply_key.as_ref());
             Err(msg)
         }
@@ -325,23 +376,6 @@ pub fn handle_repair(
         .send_request(request.clone())
         .map_err(|e| format!("Failed to send repair request: {e}"))?;
 
-    // Build a synthetic InvokeMessage so DurableSession can create
-    // CompleteMessage replies when the agent finishes.
-    let invoke = InvokeMessage::new(
-        repair.branch,
-        repair.submission.clone(),
-        repair.session.clone(),
-        repair.harness,
-        vlinder_core::domain::RuntimeType::Container,
-        repair.agent_name.clone(),
-        repair.payload.clone(),
-        repair.state.clone(),
-        vlinder_core::domain::InvokeDiagnostics {
-            harness_version: env!("CARGO_PKG_VERSION").to_string(),
-        },
-        repair.dag_parent.clone(),
-    );
-
     let sequence = SequenceCounter::new();
     // Advance past the repair's sequence so subsequent calls don't collide.
     for _ in 0..repair.sequence.as_u32() {
@@ -349,7 +383,11 @@ pub fn handle_repair(
     }
 
     Ok(InvokeOutcome::Pending(Box::new(DurableSession {
-        invoke,
+        branch: repair.branch,
+        submission: repair.submission.clone(),
+        session: repair.session.clone(),
+        agent_id: repair.agent_name.clone(),
+        harness: repair.harness,
         reply_key: None,
         hosts,
         sequence,
@@ -359,10 +397,15 @@ pub fn handle_repair(
 }
 
 /// Parse and execute a JSON action from the agent.
+#[allow(clippy::too_many_arguments)]
 fn handle_action(
     ctx: &DispatchContext,
     action_bytes: &[u8],
-    invoke: &InvokeMessage,
+    branch: BranchId,
+    submission: SubmissionId,
+    session: SessionId,
+    agent_id: AgentName,
+    harness: HarnessType,
     reply_key: Option<&RoutingKey>,
     hosts: Vec<ProviderHost>,
     sequence: SequenceCounter,
@@ -391,7 +434,16 @@ fn handle_action(
                 payload.len(),
                 started_at.elapsed().as_millis()
             ));
-            let complete = invoke.create_reply(payload.as_bytes().to_vec());
+            let complete = CompleteMessage::new(
+                branch,
+                submission,
+                session,
+                agent_id,
+                harness,
+                payload.as_bytes().to_vec(),
+                None,
+                RuntimeDiagnostics::placeholder(0),
+            );
             send_reply(&ctx.queue, complete, reply_key);
             Ok(InvokeOutcome::Done)
         }
@@ -425,10 +477,10 @@ fn handle_action(
             };
 
             let mut request = RequestMessage::new(
-                invoke.branch,
-                invoke.submission.clone(),
-                invoke.session.clone(),
-                invoke.agent_id.clone(),
+                branch,
+                submission.clone(),
+                session.clone(),
+                agent_id.clone(),
                 route.service_backend,
                 route.operation,
                 seq,
@@ -450,7 +502,11 @@ fn handle_action(
                 .map_err(|e| format!("Failed to send request: {e}"))?;
 
             Ok(InvokeOutcome::Pending(Box::new(DurableSession {
-                invoke: invoke.clone(),
+                branch,
+                submission,
+                session,
+                agent_id,
+                harness,
                 reply_key: reply_key.cloned(),
                 hosts,
                 sequence,

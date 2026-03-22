@@ -7,8 +7,7 @@
 use std::time::Duration;
 
 use vlinder_core::domain::{
-    AgentName, ContainerId, DagNodeId, HarnessType, HealthWindow, ImageDigest, ImageRef,
-    InvokeDiagnostics, InvokeMessage, RuntimeType,
+    AgentName, ContainerId, HarnessType, HealthWindow, ImageDigest, ImageRef,
 };
 
 use vlinder_provider_server::factory;
@@ -129,7 +128,18 @@ impl Sidecar {
                     agent = %self.agent_name,
                     "Dispatching to container"
                 );
-                match dispatch::handle_invoke(&self.dispatch, &mut self.health, &invoke, None) {
+                match dispatch::handle_invoke(
+                    &self.dispatch,
+                    &mut self.health,
+                    invoke.branch,
+                    invoke.submission.clone(),
+                    invoke.session.clone(),
+                    invoke.agent_id.clone(),
+                    invoke.harness,
+                    invoke.payload.clone(),
+                    invoke.state.clone(),
+                    None,
+                ) {
                     Ok(InvokeOutcome::Done) => {}
                     Ok(InvokeOutcome::Pending(session)) => {
                         durable_session = Some(*session);
@@ -154,25 +164,17 @@ impl Sidecar {
                     caller = %delegate.caller,
                     "Dispatching delegated work"
                 );
-                let invoke = InvokeMessage::new(
-                    delegate.branch,
-                    delegate.submission.clone(),
-                    delegate.session.clone(),
-                    HarnessType::Cli,
-                    RuntimeType::Container,
-                    AgentName::new(&self.agent_name),
-                    delegate.payload.clone(),
-                    None,
-                    InvokeDiagnostics {
-                        harness_version: env!("CARGO_PKG_VERSION").to_string(),
-                    },
-                    DagNodeId::root(),
-                );
                 let reply_key = Some(delegate.reply_routing_key());
                 match dispatch::handle_invoke(
                     &self.dispatch,
                     &mut self.health,
-                    &invoke,
+                    delegate.branch,
+                    delegate.submission.clone(),
+                    delegate.session.clone(),
+                    AgentName::new(&self.agent_name),
+                    HarnessType::Cli,
+                    delegate.payload.clone(),
+                    None,
                     reply_key.as_ref(),
                 ) {
                     Ok(InvokeOutcome::Done) => {}
