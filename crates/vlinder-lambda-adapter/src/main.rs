@@ -263,7 +263,10 @@ fn handle_invocation(
     let handler = InvokeHandler::new(
         queue.clone(),
         registry.clone(),
-        invoke.clone(),
+        invoke.branch,
+        invoke.submission.clone(),
+        invoke.session.clone(),
+        invoke.agent_id.clone(),
         std::sync::Arc::clone(&state),
     );
     let provider_server = ProviderServer::start(handler, hosts, state, 3544);

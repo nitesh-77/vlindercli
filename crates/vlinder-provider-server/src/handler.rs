@@ -7,9 +7,9 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use vlinder_core::domain::{
-    AgentName, DelegateDiagnostics, DelegateMessage, InvokeMessage, MessageQueue, Nonce,
-    ProviderRoute, Registry, RequestDiagnostics, RequestMessage, RoutingKey, RuntimeDiagnostics,
-    SequenceCounter,
+    AgentName, BranchId, DelegateDiagnostics, DelegateMessage, MessageQueue, Nonce, ProviderRoute,
+    Registry, RequestDiagnostics, RequestMessage, RoutingKey, RuntimeDiagnostics, SequenceCounter,
+    SessionId, SubmissionId,
 };
 
 /// Handles data-plane logic for a single invoke.
@@ -20,7 +20,10 @@ use vlinder_core::domain::{
 pub struct InvokeHandler {
     queue: Arc<dyn MessageQueue + Send + Sync>,
     registry: Arc<dyn Registry>,
-    invoke: InvokeMessage,
+    branch: BranchId,
+    submission: SubmissionId,
+    session: SessionId,
+    agent_id: AgentName,
     state: Arc<RwLock<Option<String>>>,
     sequence: SequenceCounter,
     pending_replies: HashMap<String, RoutingKey>,
@@ -30,13 +33,19 @@ impl InvokeHandler {
     pub fn new(
         queue: Arc<dyn MessageQueue + Send + Sync>,
         registry: Arc<dyn Registry>,
-        invoke: InvokeMessage,
+        branch: BranchId,
+        submission: SubmissionId,
+        session: SessionId,
+        agent_id: AgentName,
         state: Arc<RwLock<Option<String>>>,
     ) -> Self {
         Self {
             queue,
             registry,
-            invoke,
+            branch,
+            submission,
+            session,
+            agent_id,
             state,
             sequence: SequenceCounter::new(),
             pending_replies: HashMap::new(),
@@ -67,10 +76,10 @@ impl InvokeHandler {
         };
 
         let mut request = RequestMessage::new(
-            self.invoke.branch,
-            self.invoke.submission.clone(),
-            self.invoke.session.clone(),
-            self.invoke.agent_id.clone(),
+            self.branch,
+            self.submission.clone(),
+            self.session.clone(),
+            self.agent_id.clone(),
             route.service_backend,
             route.operation,
             seq,
@@ -131,14 +140,14 @@ impl InvokeHandler {
             );
         }
 
-        let caller = self.invoke.agent_id.clone();
+        let caller = self.agent_id.clone();
         let target = AgentName::new(target_name);
         let nonce = Nonce::generate();
 
         let delegate = DelegateMessage::new(
-            self.invoke.branch,
-            self.invoke.submission.clone(),
-            self.invoke.session.clone(),
+            self.branch,
+            self.submission.clone(),
+            self.session.clone(),
             caller.clone(),
             target.clone(),
             input.as_bytes().to_vec(),
@@ -154,7 +163,7 @@ impl InvokeHandler {
 
         tracing::info!(
             event = "delegation.sent",
-            sha = %self.invoke.submission,
+            sha = %self.submission,
             caller = %caller, target = %target,
             nonce = %nonce, "Delegating to agent via provider server"
         );
