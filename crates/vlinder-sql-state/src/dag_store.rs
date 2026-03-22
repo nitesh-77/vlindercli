@@ -169,7 +169,8 @@ fn row_to_dag_node(row: &rusqlite::Row) -> Result<DagNode, rusqlite::Error> {
         parent_id: DagNodeId::from(row.get::<_, String>(1)?),
         created_at,
         state,
-        message,
+        message: Some(message),
+        message_v2: None,
     })
 }
 
@@ -178,16 +179,20 @@ const DAG_NODE_COLUMNS: &str = "hash, parent_hash, created_at, message_blob, pay
 
 impl DagStore for SqliteDagStore {
     fn insert_node(&self, node: &DagNode) -> Result<(), String> {
+        let msg = node
+            .message
+            .as_ref()
+            .expect("insert_node: message required");
         let conn = self.conn.lock().expect("db connection lock poisoned");
 
         // Serialize the full message as JSON blob (source of truth).
-        let message_blob = serde_json::to_string(&node.message)
+        let message_blob = serde_json::to_string(msg)
             .map_err(|e| format!("serialize message_blob failed: {e}"))?;
         let snapshot_json = serde_json::to_string(&node.state)
             .map_err(|e| format!("serialize snapshot failed: {e}"))?;
 
         // Extract indexed columns from the message for query performance.
-        let (from, to) = node.message.from_to();
+        let (from, to) = msg.sender_receiver();
 
         conn.execute(
             "INSERT OR IGNORE INTO dag_nodes (hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state, protocol_version, checkpoint, operation, message_blob, timeline_id, snapshot)
@@ -201,13 +206,13 @@ impl DagStore for SqliteDagStore {
                 node.session_id().as_str(),
                 node.submission_id().as_str(),
                 node.payload(),
-                node.message.diagnostics_json(),
-                node.message.stderr(),
+                msg.diagnostics_json(),
+                msg.stderr(),
                 node.created_at.to_rfc3339(),
-                node.message.state(),
+                msg.state(),
                 node.protocol_version(),
-                node.message.checkpoint(),
-                node.message.operation(),
+                msg.checkpoint(),
+                msg.operation(),
                 message_blob,
                 node.branch_id().as_i64(),
                 snapshot_json,
@@ -721,7 +726,7 @@ mod tests {
         let retrieved = store.get_node(&node.id).unwrap().unwrap();
 
         assert_eq!(retrieved.message_type(), MessageType::Delegate);
-        let (from, to) = retrieved.message.from_to();
+        let (from, to) = retrieved.message.as_ref().unwrap().sender_receiver();
         assert_eq!(from, "coordinator");
         assert_eq!(to, "summarizer");
     }

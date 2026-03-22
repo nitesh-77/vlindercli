@@ -12,8 +12,12 @@ use vlinder_core::domain::{
 // =============================================================================
 
 fn dag_node_to_proto(node: &DagNode) -> proto::DagNode {
-    let (from, to) = node.message.from_to();
-    let message_blob = serde_json::to_string(&node.message).ok();
+    let msg = node
+        .message
+        .as_ref()
+        .expect("dag_node_to_proto: message required");
+    let (from, to) = msg.sender_receiver();
+    let message_blob = serde_json::to_string(msg).ok();
     proto::DagNode {
         hash: node.id.to_string(),
         parent_hash: node.parent_id.to_string(),
@@ -23,19 +27,13 @@ fn dag_node_to_proto(node: &DagNode) -> proto::DagNode {
         session_id: node.session_id().as_str().to_string(),
         submission_id: node.submission_id().to_string(),
         payload: node.payload().to_vec(),
-        diagnostics: node.message.diagnostics_json(),
-        stderr: node.message.stderr().to_vec(),
+        diagnostics: msg.diagnostics_json(),
+        stderr: msg.stderr().to_vec(),
         created_at: node.created_at.to_rfc3339(),
-        state: node.message.state().map(std::string::ToString::to_string),
+        state: msg.state().map(std::string::ToString::to_string),
         protocol_version: node.protocol_version().to_string(),
-        checkpoint: node
-            .message
-            .checkpoint()
-            .map(std::string::ToString::to_string),
-        operation: node
-            .message
-            .operation()
-            .map(std::string::ToString::to_string),
+        checkpoint: msg.checkpoint().map(std::string::ToString::to_string),
+        operation: msg.operation().map(std::string::ToString::to_string),
         message_blob,
     }
 }
@@ -85,7 +83,8 @@ impl TryFrom<proto::DagNode> for DagNode {
             parent_id: DagNodeId::from(node.parent_hash),
             created_at,
             state: vlinder_core::domain::Snapshot::empty(),
-            message,
+            message: Some(message),
+            message_v2: None,
         })
     }
 }
@@ -222,7 +221,10 @@ mod tests {
         assert_eq!(recovered.session_id(), original.session_id());
         assert_eq!(recovered.submission_id(), original.submission_id());
         assert_eq!(recovered.payload(), original.payload());
-        assert_eq!(recovered.message.state(), original.message.state());
+        assert_eq!(
+            recovered.message.as_ref().unwrap().state(),
+            original.message.as_ref().unwrap().state()
+        );
         assert_eq!(recovered.protocol_version(), original.protocol_version());
     }
 
@@ -248,7 +250,7 @@ mod tests {
         let proto_node: proto::DagNode = node.clone().into();
         let recovered: DagNode = proto_node.try_into().unwrap();
 
-        assert_eq!(recovered.message.state(), None);
+        assert_eq!(recovered.message.as_ref().unwrap().state(), None);
     }
 
     #[test]

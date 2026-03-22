@@ -381,8 +381,8 @@ impl ObservableMessage {
         }
     }
 
-    /// Extract (from, to) routing pair.
-    pub fn from_to(&self) -> (String, String) {
+    /// Extract (sender, receiver) routing pair.
+    pub fn sender_receiver(&self) -> (String, String) {
         match self {
             ObservableMessage::Invoke(m) => {
                 (m.harness.as_str().to_string(), m.agent_id.to_string())

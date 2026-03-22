@@ -138,7 +138,8 @@ fn get(session_id_or_name: &str, branch_name: &str) {
         println!("Turn {sub_id}");
         for node in messages {
             let ts = node.created_at.format("%H:%M:%S%.3f");
-            let (from, to) = node.message.from_to();
+            let msg = node.message.as_ref().expect("dag node missing message");
+            let (from, to) = msg.sender_receiver();
             let mut parts = vec![
                 format!("{}", ts),
                 node.id.as_str()[..8].to_string(),
@@ -146,10 +147,10 @@ fn get(session_id_or_name: &str, branch_name: &str) {
                 from,
                 format!("-> {}", to),
             ];
-            if let Some(op) = node.message.operation() {
+            if let Some(op) = msg.operation() {
                 parts.push(format!("op:{op}"));
             }
-            if let Some(ckpt) = node.message.checkpoint() {
+            if let Some(ckpt) = msg.checkpoint() {
                 parts.push(format!("ckpt:{ckpt}"));
             }
             println!("  {}", parts.join(" "));

@@ -104,27 +104,77 @@ pub struct DagNode {
     pub parent_id: super::DagNodeId,
     pub created_at: DateTime<Utc>,
     pub state: Snapshot,
-    pub message: super::ObservableMessage,
+    /// Legacy message format. Exactly one of `message` / `message_v2` is `Some`.
+    pub message: Option<super::ObservableMessage>,
+    /// V2 message format (ADR 121). Exactly one of `message` / `message_v2` is `Some`.
+    pub message_v2: Option<super::ObservableMessageV2>,
+}
+
+/// Unified reference to whichever message format a `DagNode` holds.
+///
+/// Eliminates repeated `if let Some(v2) ... else msg()` in every accessor.
+/// New v2 variants are added here once; all accessors get them for free.
+enum MessageRef<'a> {
+    V1(&'a super::ObservableMessage),
+    V2(
+        &'a super::routing_key::DataRoutingKey,
+        &'a super::message::invoke::InvokeMessageV2,
+    ),
 }
 
 impl DagNode {
+    fn message_ref(&self) -> MessageRef<'_> {
+        match &self.message_v2 {
+            Some(super::ObservableMessageV2::InvokeV2 { key, msg }) => MessageRef::V2(key, msg),
+            _ => MessageRef::V1(
+                self.message
+                    .as_ref()
+                    .expect("DagNode: either message or message_v2 must be Some"),
+            ),
+        }
+    }
+
     pub fn message_type(&self) -> MessageType {
-        self.message.message_type()
+        match self.message_ref() {
+            MessageRef::V1(m) => m.message_type(),
+            MessageRef::V2(_, _) => MessageType::Invoke,
+        }
     }
     pub fn session_id(&self) -> &super::SessionId {
-        self.message.session()
+        match self.message_ref() {
+            MessageRef::V1(m) => m.session(),
+            MessageRef::V2(key, _) => &key.session,
+        }
     }
     pub fn submission_id(&self) -> &super::SubmissionId {
-        self.message.submission()
+        match self.message_ref() {
+            MessageRef::V1(m) => m.submission(),
+            MessageRef::V2(key, _) => &key.submission,
+        }
     }
     pub fn payload(&self) -> &[u8] {
-        self.message.payload()
+        match self.message_ref() {
+            MessageRef::V1(m) => m.payload(),
+            MessageRef::V2(_, msg) => &msg.payload,
+        }
     }
     pub fn protocol_version(&self) -> &str {
-        self.message.protocol_version()
+        match self.message_ref() {
+            MessageRef::V1(m) => m.protocol_version(),
+            MessageRef::V2(_, _) => "v1",
+        }
     }
     pub fn branch_id(&self) -> &super::BranchId {
-        self.message.branch()
+        match self.message_ref() {
+            MessageRef::V1(m) => m.branch(),
+            MessageRef::V2(key, _) => &key.branch,
+        }
+    }
+    pub fn message_state(&self) -> Option<&str> {
+        match self.message_ref() {
+            MessageRef::V1(m) => m.state(),
+            MessageRef::V2(_, msg) => msg.state.as_deref(),
+        }
     }
 }
 
@@ -392,7 +442,16 @@ impl DagStore for InMemoryDagStore {
                 let agent_name = nodes
                     .iter()
                     .find(|n| n.message_type() == MessageType::Invoke)
-                    .map(|n| n.message.from_to().1)
+                    .map(|n| match n.message_ref() {
+                        MessageRef::V2(key, _) => {
+                            let super::DataMessageKind::Invoke { agent, .. } = &key.kind;
+                            agent.to_string()
+                        }
+                        MessageRef::V1(m) => {
+                            let (_from, to) = m.sender_receiver();
+                            to
+                        }
+                    })
                     .unwrap_or_default();
                 let started_at = nodes.first().map(|n| n.created_at).unwrap_or_default();
                 let message_count = nodes

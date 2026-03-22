@@ -43,7 +43,8 @@ pub fn build_dag_node(
         parent_id: parent_id.clone(),
         created_at: Utc::now(),
         state,
-        message: msg.clone(),
+        message: Some(msg.clone()),
+        message_v2: None,
     }
 }
 
@@ -55,9 +56,10 @@ pub fn build_dag_node(
 mod tests {
     use super::*;
     use crate::domain::{
-        AgentName, BranchId, CompleteMessage, DagStore, DelegateDiagnostics, DelegateMessage,
-        HarnessType, InMemoryDagStore, InferenceBackendType, InvokeDiagnostics, InvokeMessage,
-        MessageType, Nonce, Operation, RequestDiagnostics, RequestMessage, ResponseMessage,
+        AgentName, BranchId, CompleteMessage, DagStore, DataMessageKind, DataRoutingKey,
+        DelegateDiagnostics, DelegateMessage, HarnessType, InMemoryDagStore, InferenceBackendType,
+        InvokeDiagnostics, InvokeMessage, InvokeMessageV2, MessageId, MessageType, Nonce,
+        ObservableMessageV2, Operation, RequestDiagnostics, RequestMessage, ResponseMessage,
         RuntimeDiagnostics, RuntimeType, Sequence, ServiceBackend, SessionId, SubmissionId,
     };
 
@@ -170,7 +172,7 @@ mod tests {
         let root = DagNodeId::root();
         let node = build_dag_node(&msg, &root, &Snapshot::empty());
         assert_eq!(node.message_type(), MessageType::Invoke);
-        let (from, to) = node.message.from_to();
+        let (from, to) = node.message.as_ref().unwrap().sender_receiver();
         assert_eq!(from, "cli");
         assert_eq!(to, "myagent");
         assert_eq!(*node.session_id(), session());
@@ -186,7 +188,7 @@ mod tests {
         let parent = DagNodeId::from("parent-abc".to_string());
         let node = build_dag_node(&msg, &parent, &Snapshot::empty());
         assert_eq!(node.message_type(), MessageType::Request);
-        let (from, to) = node.message.from_to();
+        let (from, to) = node.message.as_ref().unwrap().sender_receiver();
         assert_eq!(from, "myagent");
         assert_eq!(to, "infer.ollama");
         assert_eq!(node.parent_id, parent);
@@ -198,7 +200,7 @@ mod tests {
         let root = DagNodeId::root();
         let node = build_dag_node(&msg, &root, &Snapshot::empty());
         assert_eq!(node.message_type(), MessageType::Response);
-        let (from, to) = node.message.from_to();
+        let (from, to) = node.message.as_ref().unwrap().sender_receiver();
         assert_eq!(from, "infer.ollama");
         assert_eq!(to, "myagent");
     }
@@ -209,7 +211,7 @@ mod tests {
         let root = DagNodeId::root();
         let node = build_dag_node(&msg, &root, &Snapshot::empty());
         assert_eq!(node.message_type(), MessageType::Delegate);
-        let (from, to) = node.message.from_to();
+        let (from, to) = node.message.as_ref().unwrap().sender_receiver();
         assert_eq!(from, "coordinator");
         assert_eq!(to, "summarizer");
     }
@@ -222,7 +224,10 @@ mod tests {
         }
         let root = DagNodeId::root();
         let node = build_dag_node(&msg, &root, &Snapshot::empty());
-        assert_eq!(node.message.checkpoint(), Some("summarize"));
+        assert_eq!(
+            node.message.as_ref().unwrap().checkpoint(),
+            Some("summarize")
+        );
     }
 
     #[test]
@@ -230,7 +235,7 @@ mod tests {
         let msg = test_invoke(b"payload");
         let root = DagNodeId::root();
         let node = build_dag_node(&msg, &root, &Snapshot::empty());
-        assert_eq!(node.message.checkpoint(), None);
+        assert_eq!(node.message.as_ref().unwrap().checkpoint(), None);
     }
 
     #[test]
@@ -238,7 +243,69 @@ mod tests {
         let msg = test_complete(b"done", Some("state-hash".to_string()));
         let root = DagNodeId::root();
         let node = build_dag_node(&msg, &root, &Snapshot::empty());
-        assert_eq!(node.message.state(), Some("state-hash"));
+        assert_eq!(node.message.as_ref().unwrap().state(), Some("state-hash"));
+    }
+
+    // --- DagNode accessors on v2 invoke ---
+
+    #[test]
+    fn dag_node_accessors_on_v2_invoke() {
+        let session = session();
+        let sub = submission();
+        let key = DataRoutingKey {
+            session: session.clone(),
+            branch: BranchId::from(1),
+            submission: sub.clone(),
+            kind: DataMessageKind::Invoke {
+                harness: HarnessType::Cli,
+                runtime: RuntimeType::Container,
+                agent: AgentName::new("myagent"),
+            },
+        };
+        let msg = InvokeMessageV2 {
+            id: MessageId::new(),
+            state: Some("state-xyz".to_string()),
+            diagnostics: InvokeDiagnostics {
+                harness_version: "0.1.0".to_string(),
+            },
+            dag_parent: DagNodeId::root(),
+            payload: b"v2-payload".to_vec(),
+        };
+
+        let node = DagNode {
+            id: DagNodeId::from("v2-hash".to_string()),
+            parent_id: DagNodeId::root(),
+            created_at: chrono::Utc::now(),
+            state: Snapshot::empty(),
+            message: None,
+            message_v2: Some(ObservableMessageV2::InvokeV2 {
+                key: key.clone(),
+                msg,
+            }),
+        };
+
+        assert_eq!(node.message_type(), MessageType::Invoke);
+        assert_eq!(*node.session_id(), session);
+        assert_eq!(*node.submission_id(), sub);
+        assert_eq!(*node.branch_id(), BranchId::from(1));
+        assert_eq!(node.payload(), b"v2-payload");
+        assert_eq!(node.message_state(), Some("state-xyz"));
+        assert_eq!(node.protocol_version(), "v1");
+    }
+
+    #[test]
+    #[should_panic(expected = "either message or message_v2 must be Some")]
+    fn dag_node_panics_when_both_none() {
+        let node = DagNode {
+            id: DagNodeId::from("empty".to_string()),
+            parent_id: DagNodeId::root(),
+            created_at: chrono::Utc::now(),
+            state: Snapshot::empty(),
+            message: None,
+            message_v2: None,
+        };
+        // Any accessor should panic
+        let _ = node.message_type();
     }
 
     // --- Integration: ObservableMessage → DagNode → store round-trip ---
@@ -258,7 +325,7 @@ mod tests {
         let nodes = store.get_session_nodes(&session()).unwrap();
         assert_eq!(nodes.len(), 1);
         assert_eq!(nodes[0].message_type(), MessageType::Invoke);
-        let (from, to) = nodes[0].message.from_to();
+        let (from, to) = nodes[0].message.as_ref().unwrap().sender_receiver();
         assert_eq!(from, "cli");
         assert_eq!(to, "myagent");
     }

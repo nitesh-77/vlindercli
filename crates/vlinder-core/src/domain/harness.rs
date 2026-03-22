@@ -191,7 +191,7 @@ impl CoreHarness {
         // State: prefer DAG's latest Complete, fall back to initial_state
         let last_state = last_complete_node
             .as_ref()
-            .and_then(|n| n.message.state().map(std::string::ToString::to_string))
+            .and_then(|n| n.message_state().map(std::string::ToString::to_string))
             .or_else(|| initial_state.map(std::string::ToString::to_string));
 
         let job_id =

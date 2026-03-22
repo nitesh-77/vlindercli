@@ -39,20 +39,21 @@ fn get(submission_id: &str) {
     }
 
     for node in &nodes {
-        let (from, to) = node.message.from_to();
+        let msg = node.message.as_ref().expect("dag node missing message");
+        let (from, to) = msg.sender_receiver();
         println!("Hash:       {}", node.id);
         println!("Parent:     {}", node.parent_id);
         println!("Type:       {}", node.message_type().as_str());
         println!("From:       {from}");
         println!("To:         {to}");
         println!("Session:    {}", node.session_id());
-        if let Some(op) = node.message.operation() {
+        if let Some(op) = msg.operation() {
             println!("Operation:  {op}");
         }
-        if let Some(ckpt) = node.message.checkpoint() {
+        if let Some(ckpt) = msg.checkpoint() {
             println!("Checkpoint: {ckpt}");
         }
-        if let Some(state) = node.message.state() {
+        if let Some(state) = msg.state() {
             println!("State:      {state}");
         }
         println!("Created:    {}", node.created_at);
