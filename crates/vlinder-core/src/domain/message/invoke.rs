@@ -133,6 +133,22 @@ impl InvokeMessage {
     }
 }
 
+/// Data-plane invoke payload — everything NOT in the subject.
+///
+/// The subject carries routing (session, branch, submission, harness, runtime, agent)
+/// and protocol version. This struct carries the domain data that goes in the
+/// NATS payload.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct InvokeMessageV2 {
+    pub id: MessageId,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state: Option<String>,
+    pub diagnostics: InvokeDiagnostics,
+    pub dag_parent: DagNodeId,
+    #[serde(with = "base64_serde")]
+    pub payload: Vec<u8>,
+}
+
 impl ExpectsReply for InvokeMessage {
     type Reply = CompleteMessage;
 
@@ -214,5 +230,60 @@ mod tests {
             "payload should be a string, got {payload_val:?}"
         );
         assert_eq!(payload_val.as_str().unwrap(), "aGVsbG8gd29ybGQ=");
+    }
+
+    #[test]
+    fn invoke_message_v2_json_round_trip() {
+        let msg = InvokeMessageV2 {
+            id: MessageId::from("msg-v2".to_string()),
+            state: Some("abc123".to_string()),
+            diagnostics: InvokeDiagnostics {
+                harness_version: "0.1.0".to_string(),
+            },
+            dag_parent: DagNodeId::root(),
+            payload: b"hello world".to_vec(),
+        };
+
+        let json = serde_json::to_string(&msg).unwrap();
+        let back: InvokeMessageV2 = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(back, msg);
+    }
+
+    #[test]
+    fn invoke_message_v2_payload_is_base64() {
+        let msg = InvokeMessageV2 {
+            id: MessageId::from("msg-v2".to_string()),
+            state: None,
+            diagnostics: InvokeDiagnostics {
+                harness_version: "0.1.0".to_string(),
+            },
+            dag_parent: DagNodeId::root(),
+            payload: b"hello world".to_vec(),
+        };
+
+        let json = serde_json::to_string(&msg).unwrap();
+        let raw: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert!(raw["payload"].is_string());
+        assert_eq!(raw["payload"].as_str().unwrap(), "aGVsbG8gd29ybGQ=");
+    }
+
+    #[test]
+    fn invoke_message_v2_omits_none_state() {
+        let msg = InvokeMessageV2 {
+            id: MessageId::from("msg-v2".to_string()),
+            state: None,
+            diagnostics: InvokeDiagnostics {
+                harness_version: "0.1.0".to_string(),
+            },
+            dag_parent: DagNodeId::root(),
+            payload: b"test".to_vec(),
+        };
+
+        let json = serde_json::to_string(&msg).unwrap();
+        let raw: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert!(raw.get("state").is_none());
     }
 }

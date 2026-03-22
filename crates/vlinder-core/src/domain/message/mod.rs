@@ -16,6 +16,7 @@ pub mod fork;
 pub mod identity;
 pub mod invoke;
 pub mod observable;
+pub mod observable_v2;
 pub mod promote;
 pub mod repair;
 pub mod request;
@@ -30,8 +31,9 @@ pub use identity::{
     BranchId, DagNodeId, HarnessType, Instance, MessageId, Sequence, SequenceCounter, SessionId,
     StateHash, SubmissionId,
 };
-pub use invoke::InvokeMessage;
+pub use invoke::{InvokeMessage, InvokeMessageV2};
 pub use observable::{MessageDetails, ObservableMessage, ObservableMessageHeaders};
+pub use observable_v2::ObservableMessageV2;
 pub use promote::PromoteMessage;
 pub use repair::RepairMessage;
 pub use request::RequestMessage;

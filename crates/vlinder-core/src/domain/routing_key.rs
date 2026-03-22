@@ -290,6 +290,31 @@ impl RoutingKey {
     }
 }
 
+// ============================================================================
+// Data-plane routing (ADR 121)
+// ============================================================================
+
+/// Data plane routing key — agent execution messages.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct DataRoutingKey {
+    pub session: SessionId,
+    pub branch: BranchId,
+    pub submission: SubmissionId,
+    pub kind: DataMessageKind,
+}
+
+/// Data plane message kinds.
+///
+/// New variants are added here as each message type migrates from `RoutingKind`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum DataMessageKind {
+    Invoke {
+        harness: HarnessType,
+        runtime: RuntimeType,
+        agent: AgentName,
+    },
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

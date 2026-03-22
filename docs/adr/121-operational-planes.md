@@ -94,9 +94,9 @@ The subject hierarchy matches the type hierarchy:
 
 | Plane | Subject prefix | Example |
 |---|---|---|
-| Data | `vlinder.data.{session}.{branch}.{sub}...` | `vlinder.data.abc123.1.sub456.invoke.cli.container.echo` |
-| Session | `vlinder.session.{session}.{branch}.{sub}...` | `vlinder.session.abc123.1.sub456.fork.echo` |
-| Infra | `vlinder.infra...` | `vlinder.infra.deploy.todoapp` |
+| Data | `vlinder.data.v1.{session}.{branch}.{sub}...` | `vlinder.data.v1.abc123.1.sub456.invoke.cli.container.echo` |
+| Session | `vlinder.session.v1.{session}.{branch}.{sub}...` | `vlinder.session.v1.abc123.1.sub456.fork.echo` |
+| Infra | `vlinder.infra.v1...` | `vlinder.infra.v1.deploy.todoapp` |
 
 Consumers subscribe to `vlinder.data.>` for data only, `vlinder.session.>` for session only, `vlinder.infra.>` for infra only, or `vlinder.>` for everything.
 
@@ -129,15 +129,28 @@ Repair carries `harness` and `agent` — it routes to the agent's sidecar and tr
 
 ## Implementation Strategy
 
-Incremental migration — no big-bang refactoring:
+Strangler fig — one message type at a time, each e2e-green:
 
-1. **Define new types alongside existing.** Create `DataRoutingKey`, `SessionRoutingKey`, `DataMessageKind`, `SessionMessageKind`. Don't touch `RoutingKey`.
-2. **Add `From` conversions.** `From<DataRoutingKey> for RoutingKey` and `From<SessionRoutingKey> for RoutingKey`. New code constructs plane-specific types; the rest of the codebase doesn't change.
-3. **Add accessors.** `RoutingKey::as_data()` and `RoutingKey::as_session()` return `Option<&DataRoutingKey>` / `Option<&SessionRoutingKey>`. Call sites that only handle one plane start using these.
-4. **Migrate call sites one at a time.** Each function that constructs or matches a `RoutingKey` switches to the plane-specific type. `From` impls keep everything compiling.
-5. **Change `RoutingKey` from struct to enum.** When all call sites are migrated, the `From` impls become enum variants.
+1. **Add payload type.** Define `FooMessageV2` with only the fields that aren't in the routing key (id, state, diagnostics, payload). No routing fields — those live in `DataRoutingKey`.
+2. **Add v2 trait methods.** `send_foo_v2(key, msg)` / `receive_foo_v2(agent)` alongside old methods. Implement in InMemoryQueue (second hashmap), NatsQueue, RecordingQueue.
+3. **Add `message_v2` to DagNode.** `Option<ObservableMessageV2>`, always `None` initially. Invariant: exactly one of `message` / `message_v2` is `Some`.
+4. **Wire receive side.** Sidecar, lambda, provider handler accept v2 types. Never fires yet — nobody sends v2.
+5. **Wire read paths.** `insert_node`, `dag_node_to_proto`, proto converter, CLI commands, git-dag consumer handle `message_v2`. The v2 branch never executes yet — `message_v2` is always `None`.
+6. **Wire NATS subject.** Single-source format: subject builder, parser, and filter derive from shared constants. Subject includes protocol version: `vlinder.data.v1.{session}.{branch}.{sub}.{kind}...`
+7. **Wire send side (the switch).** Harness constructs `DataRoutingKey` + `FooMessageV2`, calls `send_foo_v2`. Everything is already waiting. **This is the only commit that changes runtime behavior.**
+8. **Remove old.** Delete `send_foo`, `receive_foo`, `ObservableMessage::Foo` variant, `From<FooMessage>`, dead match arms, old header serialization.
 
-Each step compiles independently. Each step is committable.
+Each step compiles and passes e2e independently. Steps 1-6 are pure additions — the old path is untouched. Step 7 is the cutover. Step 8 is cleanup.
+
+### Wire format
+
+The v2 wire format separates concerns cleanly:
+
+- **Subject** — routing + protocol version. Parsed without touching the payload.
+- **Headers** — NATS concerns only (`Nats-Msg-Id` for dedup). No domain data.
+- **Payload** — `serde_json::to_vec(&FooMessageV2)`. Self-contained, no header extraction needed. Diagnostics, state, and all domain metadata live here.
+
+This eliminates `from_nats_headers`, manual header insertion/extraction, and the risk of header size limits for structured data like diagnostics.
 
 ## Consequences
 
