@@ -10,9 +10,10 @@
 use std::sync::Arc;
 
 use crate::domain::{
-    AgentName, BranchId, DagNodeId, DagStore, ForkMessage, HarnessType, InvokeDiagnostics,
-    InvokeMessage, JobId, JobStatus, MessageQueue, MessageType, PromoteMessage, Registry,
-    ResourceId, SessionId, SessionStartMessage, SubmissionId,
+    AgentName, BranchId, DagNodeId, DagStore, DataMessageKind, DataRoutingKey, ForkMessage,
+    HarnessType, InvokeDiagnostics, InvokeMessageV2, JobId, JobStatus, MessageId, MessageQueue,
+    MessageType, PromoteMessage, Registry, ResourceId, SessionId, SessionStartMessage,
+    SubmissionId,
 };
 
 /// Common harness operations shared across all harness types.
@@ -137,9 +138,9 @@ impl CoreHarness {
         }
     }
 
-    /// Build an `InvokeMessage` from session state and register a job.
+    /// Build a v2 invoke from session state and register a job.
     ///
-    /// Returns the message and the job ID.
+    /// Returns the routing key, payload message, and job ID.
     #[allow(clippy::too_many_arguments)]
     fn build_invoke(
         &self,
@@ -150,8 +151,7 @@ impl CoreHarness {
         sealed: bool,
         initial_state: Option<&str>,
         dag_parent: &DagNodeId,
-    ) -> Result<(InvokeMessage, JobId), String> {
-        // Reject invocations on sealed timelines (ADR 093)
+    ) -> Result<(DataRoutingKey, InvokeMessageV2, JobId), String> {
         if sealed {
             return Err(
                 "Timeline is sealed. Use `vlinder timeline repair` to fork a new timeline."
@@ -188,7 +188,6 @@ impl CoreHarness {
             input,
         );
         let submission = SubmissionId::new();
-        // State: prefer DAG's latest Complete, fall back to initial_state
         let last_state = last_complete_node
             .as_ref()
             .and_then(|n| n.message_state().map(std::string::ToString::to_string))
@@ -198,24 +197,28 @@ impl CoreHarness {
             self.registry
                 .create_job(submission.clone(), agent_id.clone(), input.to_string());
 
-        let invoke_diag = InvokeDiagnostics {
-            harness_version: env!("CARGO_PKG_VERSION").to_string(),
+        let key = DataRoutingKey {
+            session: session_id.clone(),
+            branch: timeline,
+            submission,
+            kind: DataMessageKind::Invoke {
+                harness: self.harness_type(),
+                runtime,
+                agent: crate::domain::agent_routing_key(agent_id),
+            },
         };
 
-        let invoke = InvokeMessage::new(
-            timeline,
-            submission,
-            session_id.clone(),
-            self.harness_type(),
-            runtime,
-            crate::domain::agent_routing_key(agent_id),
-            enriched_payload.as_bytes().to_vec(),
-            last_state,
-            invoke_diag,
-            dag_parent.clone(),
-        );
+        let msg = InvokeMessageV2 {
+            id: MessageId::new(),
+            state: last_state,
+            diagnostics: InvokeDiagnostics {
+                harness_version: env!("CARGO_PKG_VERSION").to_string(),
+            },
+            dag_parent: dag_parent.clone(),
+            payload: enriched_payload.as_bytes().to_vec(),
+        };
 
-        Ok((invoke, job_id))
+        Ok((key, msg, job_id))
     }
 }
 
@@ -249,7 +252,7 @@ impl Harness for CoreHarness {
         initial_state: Option<String>,
         dag_parent: DagNodeId,
     ) -> Result<String, String> {
-        let (invoke_msg, job_id) = self.build_invoke(
+        let (key, msg, job_id) = self.build_invoke(
             agent_id,
             input,
             &session_id,
@@ -260,10 +263,24 @@ impl Harness for CoreHarness {
         )?;
         self.registry.update_job_status(&job_id, JobStatus::Running);
 
-        let complete = self
-            .queue
-            .run_agent(invoke_msg)
+        let harness = self.harness_type();
+        let submission = key.submission.clone();
+        self.queue
+            .send_invoke_v2(key, msg)
             .map_err(|e| format!("queue error: {e}"))?;
+
+        let complete = loop {
+            match self.queue.receive_complete(&submission, harness) {
+                Ok((reply, ack)) => {
+                    let _ = ack();
+                    break reply;
+                }
+                Err(crate::domain::QueueError::Timeout) => {
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                }
+                Err(e) => return Err(format!("queue error: {e}")),
+            }
+        };
 
         let result = String::from_utf8_lossy(&complete.payload).to_string();
         self.registry
