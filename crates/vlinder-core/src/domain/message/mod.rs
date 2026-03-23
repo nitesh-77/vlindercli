@@ -1,7 +1,7 @@
 //! Message types for queue communication (ADR 044).
 //!
 //! Typed messages with explicit fields for observability:
-//! - `InvokeMessageV2`: Harness → Runtime (start a submission, ADR 121)
+//! - `InvokeMessage`: Harness → Runtime (start a submission, ADR 121)
 //! - `RequestMessage`: Runtime → Service (agent calls a service)
 //! - `ResponseMessage`: Service → Runtime (service replies)
 //! - `CompleteMessage`: Runtime → Harness (submission finished)
@@ -31,7 +31,7 @@ pub use identity::{
     BranchId, DagNodeId, HarnessType, Instance, MessageId, Sequence, SequenceCounter, SessionId,
     StateHash, SubmissionId,
 };
-pub use invoke::InvokeMessageV2;
+pub use invoke::InvokeMessage;
 pub use observable::{MessageDetails, ObservableMessage, ObservableMessageHeaders};
 pub use observable_v2::ObservableMessageV2;
 pub use promote::PromoteMessage;

@@ -10,7 +10,7 @@
 
 use vlinder_core::domain::{
     Agent, AgentName, BranchId, DataMessageKind, DataRoutingKey, HarnessType, InvokeDiagnostics,
-    InvokeMessageV2, MessageId, Runtime, RuntimeType, SessionId, SubmissionId,
+    InvokeMessage, MessageId, Runtime, RuntimeType, SessionId, SubmissionId,
 };
 use vlinder_podman_runtime::{ContainerRuntime, PodmanRuntimeConfig};
 use vlinderd::config::Config;
@@ -52,7 +52,7 @@ fn container_runtime_executes_echo_agent() {
     registry.register_agent(agent).unwrap();
     let agent_id = AgentName::new("echo-container");
 
-    // Send InvokeMessageV2
+    // Send invoke
     let submission = SubmissionId::new();
     let session = SessionId::new();
     let key = DataRoutingKey {
@@ -74,7 +74,7 @@ fn container_runtime_executes_echo_agent() {
         dag_parent: String::new().into(),
         payload: b"hello from container".to_vec(),
     };
-    queue.send_invoke_v2(&key, &invoke).unwrap();
+    queue.send_invoke(&key, &invoke).unwrap();
 
     // Tick until work completes
     let start = std::time::Instant::now();

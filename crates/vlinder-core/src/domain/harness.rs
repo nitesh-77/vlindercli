@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use crate::domain::{
     AgentName, BranchId, DagNodeId, DagStore, DataMessageKind, DataRoutingKey, ForkMessage,
-    HarnessType, InvokeDiagnostics, InvokeMessageV2, JobId, JobStatus, MessageId, MessageQueue,
+    HarnessType, InvokeDiagnostics, InvokeMessage, JobId, JobStatus, MessageId, MessageQueue,
     MessageType, PromoteMessage, Registry, ResourceId, SessionId, SessionStartMessage,
     SubmissionId,
 };
@@ -138,7 +138,7 @@ impl CoreHarness {
         }
     }
 
-    /// Build a v2 invoke from session state and register a job.
+    /// Build an invoke from session state and register a job.
     ///
     /// Returns the routing key, payload message, and job ID.
     #[allow(clippy::too_many_arguments)]
@@ -151,7 +151,7 @@ impl CoreHarness {
         sealed: bool,
         initial_state: Option<&str>,
         dag_parent: &DagNodeId,
-    ) -> Result<(DataRoutingKey, InvokeMessageV2, JobId), String> {
+    ) -> Result<(DataRoutingKey, InvokeMessage, JobId), String> {
         if sealed {
             return Err(
                 "Timeline is sealed. Use `vlinder timeline repair` to fork a new timeline."
@@ -208,7 +208,7 @@ impl CoreHarness {
             },
         };
 
-        let msg = InvokeMessageV2 {
+        let msg = InvokeMessage {
             id: MessageId::new(),
             state: last_state,
             diagnostics: InvokeDiagnostics {
@@ -266,7 +266,7 @@ impl Harness for CoreHarness {
         let harness = self.harness_type();
         let submission = key.submission.clone();
         self.queue
-            .send_invoke_v2(key, msg)
+            .send_invoke(key, msg)
             .map_err(|e| format!("queue error: {e}"))?;
 
         let complete = loop {

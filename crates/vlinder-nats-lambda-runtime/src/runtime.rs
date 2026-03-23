@@ -169,7 +169,7 @@ impl LambdaRuntime {
 
     /// Poll queue for invocations and dispatch to Lambda functions.
     ///
-    /// Serializes the `LambdaInvokePayload` (key + `InvokeMessageV2`) as the Lambda payload. The adapter
+    /// Serializes the `LambdaInvokePayload` (key + `InvokeMessage`) as the Lambda payload. The adapter
     /// inside the container deserializes it, runs the `ProviderServer`, and
     /// sends complete to NATS — the daemon only needs to handle invoke-level
     /// failures (Lambda itself couldn't run).
@@ -177,8 +177,8 @@ impl LambdaRuntime {
         for name in self.functions.keys() {
             let agent_id = AgentName::new(name);
 
-            // Try v2 first (ADR 121 — data plane).
-            if let Ok((key, invoke_v2, ack)) = self.queue.receive_invoke_v2(&agent_id) {
+            // Receive invoke (ADR 121 — data plane).
+            if let Ok((key, invoke, ack)) = self.queue.receive_invoke(&agent_id) {
                 let _ = ack();
                 let function_name = format!("vlinder-{name}");
 
@@ -188,25 +188,25 @@ impl LambdaRuntime {
                     agent,
                 } = &key.kind;
 
-                let json_payload = serde_json::json!({ "key": key, "msg": invoke_v2 });
+                let json_payload = serde_json::json!({ "key": key, "msg": invoke });
                 let json_bytes =
                     serde_json::to_vec(&json_payload).unwrap_or_else(|_| b"{}".to_vec());
 
                 match self.client.invoke_function(&function_name, &json_bytes) {
                     Ok(_) => {
                         tracing::info!(
-                            event = "lambda.invoke_ok.v2",
+                            event = "lambda.invoke_ok",
                             agent = name.as_str(),
                             function = function_name.as_str(),
-                            "Lambda v2 invocation succeeded"
+                            "Lambda invocation succeeded"
                         );
                     }
                     Err(e) => {
                         tracing::error!(
-                            event = "lambda.invoke_failed.v2",
+                            event = "lambda.invoke_failed",
                             agent = name.as_str(),
                             error = %e,
-                            "Lambda v2 invocation failed"
+                            "Lambda invocation failed"
                         );
                         let complete = CompleteMessage::new(
                             key.branch,
@@ -528,10 +528,10 @@ mod tests {
     }
 
     #[test]
-    fn invoke_v2_dispatches_to_lambda_consumes_from_queue() {
+    fn invoke_dispatches_to_lambda_consumes_from_queue() {
         use vlinder_core::domain::{
             BranchId, DagNodeId, DataMessageKind, DataRoutingKey, HarnessType, InvokeDiagnostics,
-            InvokeMessageV2, MessageId, SessionId, SubmissionId,
+            InvokeMessage, MessageId, SessionId, SubmissionId,
         };
 
         let registry = test_registry();
@@ -551,7 +551,7 @@ mod tests {
         runtime.tick();
         assert_eq!(runtime.functions.len(), 1);
 
-        // Enqueue a v2 invoke message.
+        // Enqueue an invoke message.
         let key = DataRoutingKey {
             session: SessionId::new(),
             branch: BranchId::from(1),
@@ -562,33 +562,33 @@ mod tests {
                 agent: AgentName::new("echo"),
             },
         };
-        let msg = InvokeMessageV2 {
+        let msg = InvokeMessage {
             id: MessageId::new(),
             state: None,
             diagnostics: InvokeDiagnostics {
                 harness_version: "test".to_string(),
             },
             dag_parent: DagNodeId::root(),
-            payload: b"hello lambda v2".to_vec(),
+            payload: b"hello lambda".to_vec(),
         };
-        queue.send_invoke_v2(key, msg).unwrap();
+        queue.send_invoke(key, msg).unwrap();
 
-        // Tick — should dispatch the v2 invocation.
+        // Tick — should dispatch the invocation.
         runtime.tick();
 
-        // The v2 invoke should be consumed.
+        // The invoke should be consumed.
         let agent_id = AgentName::new("echo");
         assert!(
-            queue.receive_invoke_v2(&agent_id).is_err(),
-            "v2 invoke should have been consumed from the queue"
+            queue.receive_invoke(&agent_id).is_err(),
+            "invoke should have been consumed from the queue"
         );
     }
 
     #[test]
-    fn invoke_v2_failure_sends_error_complete() {
+    fn invoke_failure_sends_error_complete() {
         use vlinder_core::domain::{
             BranchId, DagNodeId, DataMessageKind, DataRoutingKey, HarnessType, InvokeDiagnostics,
-            InvokeMessageV2, MessageId, SessionId, SubmissionId,
+            InvokeMessage, MessageId, SessionId, SubmissionId,
         };
 
         let registry = test_registry();
@@ -610,7 +610,7 @@ mod tests {
         runtime.tick();
         assert_eq!(runtime.functions.len(), 1);
 
-        // Enqueue a v2 invoke message.
+        // Enqueue an invoke message.
         let submission = SubmissionId::new();
         let key = DataRoutingKey {
             session: SessionId::new(),
@@ -622,7 +622,7 @@ mod tests {
                 agent: AgentName::new("echo"),
             },
         };
-        let msg = InvokeMessageV2 {
+        let msg = InvokeMessage {
             id: MessageId::new(),
             state: None,
             diagnostics: InvokeDiagnostics {
@@ -631,7 +631,7 @@ mod tests {
             dag_parent: DagNodeId::root(),
             payload: b"hello".to_vec(),
         };
-        queue.send_invoke_v2(key, msg).unwrap();
+        queue.send_invoke(key, msg).unwrap();
 
         // Tick — invoke_function fails, so daemon sends error complete.
         runtime.tick();

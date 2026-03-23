@@ -958,7 +958,7 @@ impl DagWorker for GitDagWorker {
         })();
 
         if let Err(e) = result {
-            tracing::error!(error = %e, "Failed to write git commit for v2 message");
+            tracing::error!(error = %e, "Failed to write git commit for data message");
         }
     }
 }
@@ -2012,13 +2012,13 @@ mod tests {
         assert_eq!(active, "repair-branch");
     }
 
-    // --- V2 invoke tests ---
+    // --- Invoke tests ---
 
     use vlinder_core::domain::{
-        DataMessageKind, DataRoutingKey, InvokeDiagnostics, InvokeMessageV2, MessageId,
+        DataMessageKind, DataRoutingKey, InvokeDiagnostics, InvokeMessage, MessageId,
     };
 
-    fn test_invoke_v2(payload: &[u8], epoch_secs: i64) -> (ObservableMessageV2, DateTime<Utc>) {
+    fn test_data_invoke(payload: &[u8], epoch_secs: i64) -> (ObservableMessageV2, DateTime<Utc>) {
         let key = DataRoutingKey {
             session: SessionId::try_from(SESSION.to_string()).unwrap(),
             branch: BranchId::from(1),
@@ -2029,7 +2029,7 @@ mod tests {
                 agent: test_agent_id(),
             },
         };
-        let msg = InvokeMessageV2 {
+        let msg = InvokeMessage {
             id: MessageId::new(),
             state: None,
             diagnostics: InvokeDiagnostics {
@@ -2043,9 +2043,9 @@ mod tests {
     }
 
     #[test]
-    fn v2_invoke_creates_commit() {
+    fn data_invoke_creates_commit() {
         let (mut worker, tmp) = test_worker();
-        let (msg, ts) = test_invoke_v2(b"hello v2", 1000);
+        let (msg, ts) = test_data_invoke(b"hello", 1000);
 
         worker.on_observable_message_v2(&msg, ts);
 
@@ -2054,9 +2054,9 @@ mod tests {
     }
 
     #[test]
-    fn v2_invoke_commit_message_has_trailers() {
+    fn data_invoke_commit_message_has_trailers() {
         let (mut worker, tmp) = test_worker();
-        let (msg, ts) = test_invoke_v2(b"question", 1000);
+        let (msg, ts) = test_data_invoke(b"question", 1000);
 
         worker.on_observable_message_v2(&msg, ts);
 
@@ -2074,9 +2074,9 @@ mod tests {
     }
 
     #[test]
-    fn v2_invoke_directory_has_per_field_files() {
+    fn data_invoke_directory_has_per_field_files() {
         let (mut worker, tmp) = test_worker();
-        let (msg, ts) = test_invoke_v2(b"payload data", 1000);
+        let (msg, ts) = test_data_invoke(b"payload data", 1000);
 
         worker.on_observable_message_v2(&msg, ts);
 
@@ -2095,14 +2095,14 @@ mod tests {
     }
 
     #[test]
-    fn v2_invoke_chains_with_v1_complete() {
+    fn data_invoke_chains_with_complete() {
         let (mut worker, tmp) = test_worker();
 
-        // V2 invoke
-        let (invoke, t1) = test_invoke_v2(b"question", 1000);
+        // Invoke
+        let (invoke, t1) = test_data_invoke(b"question", 1000);
         worker.on_observable_message_v2(&invoke, t1);
 
-        // V1 complete
+        // Complete
         let (complete, t2) = test_complete(b"answer", 1001);
         worker.on_observable_message(&complete, t2);
 

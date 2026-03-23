@@ -20,7 +20,7 @@ use std::str::FromStr;
 
 use vlinder_core::domain::{
     Acknowledgement, AgentName, BranchId, CompleteMessage, DagNodeId, DataRoutingKey,
-    DelegateDiagnostics, DelegateMessage, HarnessType, InvokeMessageV2, MessageId, MessageQueue,
+    DelegateDiagnostics, DelegateMessage, HarnessType, InvokeMessage, MessageId, MessageQueue,
     Nonce, Operation, QueueError, RepairMessage, RequestDiagnostics, RequestMessage,
     ResponseMessage, RoutingKey, RoutingKind, RuntimeDiagnostics, RuntimeType, Sequence,
     ServiceBackend, ServiceDiagnostics, ServiceType, SessionId, SubmissionId,
@@ -226,10 +226,10 @@ impl NatsQueue {
 }
 
 impl MessageQueue for NatsQueue {
-    fn send_invoke_v2(&self, key: DataRoutingKey, msg: InvokeMessageV2) -> Result<(), QueueError> {
-        let subject = invoke_v2_subject(&key);
+    fn send_invoke(&self, key: DataRoutingKey, msg: InvokeMessage) -> Result<(), QueueError> {
+        let subject = invoke_subject(&key);
         let payload = serde_json::to_vec(&msg)
-            .map_err(|e| QueueError::SendFailed(format!("serialize invoke v2: {e}")))?;
+            .map_err(|e| QueueError::SendFailed(format!("serialize invoke: {e}")))?;
 
         self.inner.runtime.block_on(async {
             let mut headers = async_nats::HeaderMap::new();
@@ -247,22 +247,22 @@ impl MessageQueue for NatsQueue {
         })
     }
 
-    fn receive_invoke_v2(
+    fn receive_invoke(
         &self,
         agent: &AgentName,
-    ) -> Result<(DataRoutingKey, InvokeMessageV2, Acknowledgement), QueueError> {
-        let filter = invoke_v2_filter(agent);
+    ) -> Result<(DataRoutingKey, InvokeMessage, Acknowledgement), QueueError> {
+        let filter = invoke_filter(agent);
 
         self.inner.runtime.block_on(async {
             let (js_msg, ack_fn) = self.fetch_one(&filter).await?;
 
             let subject = js_msg.subject.as_str();
-            let key = invoke_v2_parse_subject(subject).ok_or_else(|| {
-                QueueError::ReceiveFailed(format!("invalid invoke v2 subject: {subject}"))
+            let key = invoke_parse_subject(subject).ok_or_else(|| {
+                QueueError::ReceiveFailed(format!("invalid invoke subject: {subject}"))
             })?;
 
-            let msg: InvokeMessageV2 = serde_json::from_slice(&js_msg.payload)
-                .map_err(|e| QueueError::ReceiveFailed(format!("deserialize invoke v2: {e}")))?;
+            let msg: InvokeMessage = serde_json::from_slice(&js_msg.payload)
+                .map_err(|e| QueueError::ReceiveFailed(format!("deserialize invoke: {e}")))?;
 
             Ok((key, msg, ack_fn))
         })
@@ -861,12 +861,12 @@ impl MessageQueue for NatsQueue {
 // All three operations derive from this single format definition.
 // ============================================================================
 
-const INVOKE_V2_PREFIX: &str = "vlinder.data.v1";
-const INVOKE_V2_KIND: &str = "invoke";
-const INVOKE_V2_SEGMENT_COUNT: usize = 10;
+const INVOKE_PREFIX: &str = "vlinder.data.v1";
+const INVOKE_KIND: &str = "invoke";
+const INVOKE_SEGMENT_COUNT: usize = 10;
 
 /// Build a NATS subject from a `DataRoutingKey` for invoke.
-fn invoke_v2_subject(key: &DataRoutingKey) -> String {
+fn invoke_subject(key: &DataRoutingKey) -> String {
     use vlinder_core::domain::DataMessageKind;
     let DataMessageKind::Invoke {
         harness,
@@ -874,19 +874,19 @@ fn invoke_v2_subject(key: &DataRoutingKey) -> String {
         agent,
     } = &key.kind;
     format!(
-        "{INVOKE_V2_PREFIX}.{}.{}.{}.{INVOKE_V2_KIND}.{harness}.{runtime}.{agent}",
+        "{INVOKE_PREFIX}.{}.{}.{}.{INVOKE_KIND}.{harness}.{runtime}.{agent}",
         key.session, key.branch, key.submission
     )
 }
 
 /// Parse a NATS subject back into a `DataRoutingKey` for invoke.
-pub fn invoke_v2_parse_subject(subject: &str) -> Option<DataRoutingKey> {
+pub fn invoke_parse_subject(subject: &str) -> Option<DataRoutingKey> {
     use vlinder_core::domain::DataMessageKind;
     let s: Vec<&str> = subject.split('.').collect();
-    if s.len() != INVOKE_V2_SEGMENT_COUNT {
+    if s.len() != INVOKE_SEGMENT_COUNT {
         return None;
     }
-    if s[0] != "vlinder" || s[1] != "data" || s[2] != "v1" || s[6] != INVOKE_V2_KIND {
+    if s[0] != "vlinder" || s[1] != "data" || s[2] != "v1" || s[6] != INVOKE_KIND {
         return None;
     }
 
@@ -902,12 +902,9 @@ pub fn invoke_v2_parse_subject(subject: &str) -> Option<DataRoutingKey> {
     })
 }
 
-/// NATS wildcard filter for receiving invoke v2 messages for a specific agent.
-fn invoke_v2_filter(agent: &AgentName) -> String {
-    format!(
-        "{INVOKE_V2_PREFIX}.*.*.*.{INVOKE_V2_KIND}.*.*.{}",
-        agent.as_str()
-    )
+/// NATS wildcard filter for receiving invoke messages for a specific agent.
+fn invoke_filter(agent: &AgentName) -> String {
+    format!("{INVOKE_PREFIX}.*.*.*.{INVOKE_KIND}.*.*.{}", agent.as_str())
 }
 
 /// Serialize a routing key to a NATS subject string (ADR 096 §8).
@@ -2014,9 +2011,8 @@ mod tests {
     // from_nats_headers: RoutingKey + headers → ObservableMessageHeaders
     // ========================================================================
 
-    // Invoke header tests removed — `invoke_to_nats_headers` and
-    // `from_nats_headers` for Invoke are no longer part of the v1 pipeline.
-    // The v2 invoke path is tested separately.
+    // Invoke header tests removed — invoke uses the data-plane subject
+    // format (ADR 121), not the header-based v1 pipeline.
 
     #[test]
     fn from_nats_headers_delegate_reply_returns_none() {
@@ -2210,11 +2206,11 @@ mod tests {
     }
 
     // ========================================================================
-    // Invoke v2 subject format (ADR 121)
+    // Invoke subject format (ADR 121)
     // ========================================================================
 
     #[test]
-    fn invoke_v2_subject_format() {
+    fn data_invoke_subject_format() {
         let key = DataRoutingKey {
             session: session(),
             branch: timeline(),
@@ -2226,7 +2222,7 @@ mod tests {
             },
         };
         assert_eq!(
-            invoke_v2_subject(&key),
+            invoke_subject(&key),
             format!(
                 "vlinder.data.v1.{}.{}.{}.invoke.cli.container.echo",
                 session(),
@@ -2237,7 +2233,7 @@ mod tests {
     }
 
     #[test]
-    fn invoke_v2_subject_round_trips() {
+    fn data_invoke_subject_round_trips() {
         let key = DataRoutingKey {
             session: session(),
             branch: timeline(),
@@ -2248,43 +2244,43 @@ mod tests {
                 agent: agent(),
             },
         };
-        let subject = invoke_v2_subject(&key);
-        let recovered = invoke_v2_parse_subject(&subject)
-            .unwrap_or_else(|| panic!("failed to parse: {subject}"));
+        let subject = invoke_subject(&key);
+        let recovered =
+            invoke_parse_subject(&subject).unwrap_or_else(|| panic!("failed to parse: {subject}"));
         assert_eq!(recovered, key);
     }
 
     #[test]
-    fn invoke_v2_filter_matches_agent() {
-        let filter = invoke_v2_filter(&agent());
+    fn data_invoke_filter_matches_agent() {
+        let filter = invoke_filter(&agent());
         assert_eq!(filter, "vlinder.data.v1.*.*.*.invoke.*.*.echo");
     }
 
     #[test]
-    fn invoke_v2_parse_rejects_old_format() {
+    fn data_invoke_parse_rejects_old_format() {
         let old = format!(
             "vlinder.{}.{}.{}.invoke.cli.container.echo",
             session(),
             timeline(),
             submission()
         );
-        assert!(invoke_v2_parse_subject(&old).is_none());
+        assert!(invoke_parse_subject(&old).is_none());
     }
 
     #[test]
-    fn invoke_v2_parse_rejects_wrong_segment_count() {
-        assert!(invoke_v2_parse_subject("vlinder.data.v1").is_none());
-        assert!(invoke_v2_parse_subject("").is_none());
+    fn data_invoke_parse_rejects_wrong_segment_count() {
+        assert!(invoke_parse_subject("vlinder.data.v1").is_none());
+        assert!(invoke_parse_subject("").is_none());
     }
 
     #[test]
-    fn invoke_v2_parse_rejects_wrong_version() {
+    fn data_invoke_parse_rejects_wrong_version() {
         let subject = format!(
             "vlinder.data.v2.{}.{}.{}.invoke.cli.container.echo",
             session(),
             timeline(),
             submission()
         );
-        assert!(invoke_v2_parse_subject(&subject).is_none());
+        assert!(invoke_parse_subject(&subject).is_none());
     }
 }

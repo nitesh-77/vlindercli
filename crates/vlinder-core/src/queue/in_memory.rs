@@ -2,9 +2,9 @@
 
 use crate::domain::{
     Acknowledgement, AgentName, CompleteMessage, DataMessageKind, DataRoutingKey, DelegateMessage,
-    ForkMessage, HarnessType, InvokeMessageV2, MessageQueue, ObservableMessage,
-    ObservableMessageV2, Operation, QueueError, RepairMessage, RequestMessage, ResponseMessage,
-    RoutingKey, RoutingKind, ServiceBackend, SubmissionId,
+    ForkMessage, HarnessType, InvokeMessage, MessageQueue, ObservableMessage, ObservableMessageV2,
+    Operation, QueueError, RepairMessage, RequestMessage, ResponseMessage, RoutingKey, RoutingKind,
+    ServiceBackend, SubmissionId,
 };
 #[cfg(test)]
 use crate::domain::{
@@ -43,7 +43,7 @@ impl Default for InMemoryQueue {
 }
 
 impl MessageQueue for InMemoryQueue {
-    fn send_invoke_v2(&self, key: DataRoutingKey, msg: InvokeMessageV2) -> Result<(), QueueError> {
+    fn send_invoke(&self, key: DataRoutingKey, msg: InvokeMessage) -> Result<(), QueueError> {
         let v2 = ObservableMessageV2::InvokeV2 {
             key: key.clone(),
             msg,
@@ -56,10 +56,10 @@ impl MessageQueue for InMemoryQueue {
         Ok(())
     }
 
-    fn receive_invoke_v2(
+    fn receive_invoke(
         &self,
         agent: &AgentName,
-    ) -> Result<(DataRoutingKey, InvokeMessageV2, Acknowledgement), QueueError> {
+    ) -> Result<(DataRoutingKey, InvokeMessage, Acknowledgement), QueueError> {
         let mut data = self
             .data_queues
             .lock()
@@ -353,7 +353,7 @@ mod tests {
                 agent: test_agent_id(),
             },
         };
-        let msg = InvokeMessageV2 {
+        let msg = InvokeMessage {
             id: MessageId::from("msg-invoke-1".to_string()),
             state: None,
             diagnostics: InvokeDiagnostics {
@@ -364,10 +364,10 @@ mod tests {
         };
         let original_id = msg.id.clone();
 
-        queue.send_invoke_v2(key, msg).unwrap();
+        queue.send_invoke(key, msg).unwrap();
 
         // Receive typed message
-        let (recv_key, received, ack) = queue.receive_invoke_v2(&test_agent_id()).unwrap();
+        let (recv_key, received, ack) = queue.receive_invoke(&test_agent_id()).unwrap();
 
         assert_eq!(received.id, original_id);
         assert!(matches!(
@@ -400,7 +400,7 @@ mod tests {
                 agent: agent_id.clone(),
             },
         };
-        let msg = InvokeMessageV2 {
+        let msg = InvokeMessage {
             id: MessageId::from("msg-invoke-2".to_string()),
             state: None,
             diagnostics: InvokeDiagnostics {
@@ -410,9 +410,9 @@ mod tests {
             payload: b"input".to_vec(),
         };
 
-        queue.send_invoke_v2(key, msg).unwrap();
+        queue.send_invoke(key, msg).unwrap();
 
-        let (recv_key, _, _) = queue.receive_invoke_v2(&test_agent_id()).unwrap();
+        let (recv_key, _, _) = queue.receive_invoke(&test_agent_id()).unwrap();
 
         // All dimensions preserved for reply construction
         assert_eq!(recv_key.submission, submission);
@@ -684,7 +684,7 @@ mod tests {
     }
 
     // ========================================================================
-    // V2 invoke tests (ADR 121 — data plane)
+    // Invoke tests (ADR 121 — data plane)
     // ========================================================================
 
     fn test_data_routing_key() -> DataRoutingKey {
@@ -700,9 +700,9 @@ mod tests {
         }
     }
 
-    fn test_invoke_v2() -> InvokeMessageV2 {
-        InvokeMessageV2 {
-            id: crate::domain::MessageId::from("msg-v2".to_string()),
+    fn test_invoke() -> InvokeMessage {
+        InvokeMessage {
+            id: crate::domain::MessageId::from("msg-1".to_string()),
             state: Some("state-abc".to_string()),
             diagnostics: InvokeDiagnostics {
                 harness_version: "0.1.0".to_string(),
@@ -713,14 +713,14 @@ mod tests {
     }
 
     #[test]
-    fn send_and_receive_invoke_v2() {
+    fn send_and_receive_invoke() {
         let queue = InMemoryQueue::new();
         let key = test_data_routing_key();
-        let msg = test_invoke_v2();
+        let msg = test_invoke();
 
-        queue.send_invoke_v2(key, msg.clone()).unwrap();
+        queue.send_invoke(key, msg.clone()).unwrap();
 
-        let (recv_key, recv_msg, ack) = queue.receive_invoke_v2(&test_agent_id()).unwrap();
+        let (recv_key, recv_msg, ack) = queue.receive_invoke(&test_agent_id()).unwrap();
 
         assert_eq!(recv_msg, msg);
         assert_eq!(recv_key.submission, test_submission());
@@ -728,23 +728,23 @@ mod tests {
     }
 
     #[test]
-    fn receive_invoke_v2_times_out_for_wrong_agent() {
+    fn receive_invoke_times_out_for_wrong_agent() {
         let queue = InMemoryQueue::new();
         let key = test_data_routing_key();
-        let msg = test_invoke_v2();
+        let msg = test_invoke();
 
-        queue.send_invoke_v2(key, msg).unwrap();
+        queue.send_invoke(key, msg).unwrap();
 
-        let result = queue.receive_invoke_v2(&AgentName::new("other-agent"));
+        let result = queue.receive_invoke(&AgentName::new("other-agent"));
         assert!(matches!(result, Err(QueueError::Timeout)));
     }
 
     #[test]
-    fn multiple_invoke_v2_messages_delivered_in_order() {
+    fn multiple_invoke_messages_delivered_in_order() {
         let queue = InMemoryQueue::new();
 
         let key = test_data_routing_key();
-        let msg1 = InvokeMessageV2 {
+        let msg1 = InvokeMessage {
             id: crate::domain::MessageId::from("msg-first".to_string()),
             state: None,
             diagnostics: InvokeDiagnostics {
@@ -753,7 +753,7 @@ mod tests {
             dag_parent: crate::domain::DagNodeId::root(),
             payload: b"first".to_vec(),
         };
-        let msg2 = InvokeMessageV2 {
+        let msg2 = InvokeMessage {
             id: crate::domain::MessageId::from("msg-second".to_string()),
             state: None,
             diagnostics: InvokeDiagnostics {
@@ -763,13 +763,13 @@ mod tests {
             payload: b"second".to_vec(),
         };
 
-        queue.send_invoke_v2(key.clone(), msg1.clone()).unwrap();
-        queue.send_invoke_v2(key, msg2.clone()).unwrap();
+        queue.send_invoke(key.clone(), msg1.clone()).unwrap();
+        queue.send_invoke(key, msg2.clone()).unwrap();
 
-        let (_, recv1, _) = queue.receive_invoke_v2(&test_agent_id()).unwrap();
+        let (_, recv1, _) = queue.receive_invoke(&test_agent_id()).unwrap();
         assert_eq!(recv1, msg1);
 
-        let (_, recv2, _) = queue.receive_invoke_v2(&test_agent_id()).unwrap();
+        let (_, recv2, _) = queue.receive_invoke(&test_agent_id()).unwrap();
         assert_eq!(recv2, msg2);
     }
 }

@@ -58,7 +58,7 @@ mod tests {
     use crate::domain::{
         AgentName, BranchId, CompleteMessage, DagStore, DataMessageKind, DataRoutingKey,
         DelegateDiagnostics, DelegateMessage, HarnessType, InMemoryDagStore, InferenceBackendType,
-        InvokeDiagnostics, InvokeMessageV2, MessageId, MessageType, Nonce, ObservableMessageV2,
+        InvokeDiagnostics, InvokeMessage, MessageId, MessageType, Nonce, ObservableMessageV2,
         Operation, RequestDiagnostics, RequestMessage, ResponseMessage, RuntimeDiagnostics,
         RuntimeType, Sequence, ServiceBackend, SessionId, SubmissionId,
     };
@@ -242,10 +242,10 @@ mod tests {
         assert_eq!(node.message.as_ref().unwrap().state(), Some("state-hash"));
     }
 
-    // --- DagNode accessors on v2 invoke ---
+    // --- DagNode accessors on invoke ---
 
     #[test]
-    fn dag_node_accessors_on_v2_invoke() {
+    fn dag_node_accessors_on_invoke() {
         let session = session();
         let sub = submission();
         let key = DataRoutingKey {
@@ -258,18 +258,18 @@ mod tests {
                 agent: AgentName::new("myagent"),
             },
         };
-        let msg = InvokeMessageV2 {
+        let msg = InvokeMessage {
             id: MessageId::new(),
             state: Some("state-xyz".to_string()),
             diagnostics: InvokeDiagnostics {
                 harness_version: "0.1.0".to_string(),
             },
             dag_parent: DagNodeId::root(),
-            payload: b"v2-payload".to_vec(),
+            payload: b"test-payload".to_vec(),
         };
 
         let node = DagNode {
-            id: DagNodeId::from("v2-hash".to_string()),
+            id: DagNodeId::from("test-hash".to_string()),
             parent_id: DagNodeId::root(),
             created_at: chrono::Utc::now(),
             state: Snapshot::empty(),
@@ -284,7 +284,7 @@ mod tests {
         assert_eq!(*node.session_id(), session);
         assert_eq!(*node.submission_id(), sub);
         assert_eq!(*node.branch_id(), BranchId::from(1));
-        assert_eq!(node.payload(), b"v2-payload");
+        assert_eq!(node.payload(), b"test-payload");
         assert_eq!(node.message_state(), Some("state-xyz"));
         assert_eq!(node.protocol_version(), "v1");
     }

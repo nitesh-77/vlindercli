@@ -1,4 +1,4 @@
-//! `InvokeMessageV2`: Data-plane invoke payload (ADR 121).
+//! `InvokeMessage`: Data-plane invoke payload (ADR 121).
 
 use serde::{Deserialize, Serialize};
 
@@ -26,7 +26,7 @@ mod base64_serde {
 /// and protocol version. This struct carries the domain data that goes in the
 /// NATS payload.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct InvokeMessageV2 {
+pub struct InvokeMessage {
     pub id: MessageId,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub state: Option<String>,
@@ -41,9 +41,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn invoke_message_v2_json_round_trip() {
-        let msg = InvokeMessageV2 {
-            id: MessageId::from("msg-v2".to_string()),
+    fn invoke_message_json_round_trip() {
+        let msg = InvokeMessage {
+            id: MessageId::from("msg-1".to_string()),
             state: Some("abc123".to_string()),
             diagnostics: InvokeDiagnostics {
                 harness_version: "0.1.0".to_string(),
@@ -53,15 +53,15 @@ mod tests {
         };
 
         let json = serde_json::to_string(&msg).unwrap();
-        let back: InvokeMessageV2 = serde_json::from_str(&json).unwrap();
+        let back: InvokeMessage = serde_json::from_str(&json).unwrap();
 
         assert_eq!(back, msg);
     }
 
     #[test]
-    fn invoke_message_v2_payload_is_base64() {
-        let msg = InvokeMessageV2 {
-            id: MessageId::from("msg-v2".to_string()),
+    fn invoke_message_payload_is_base64() {
+        let msg = InvokeMessage {
+            id: MessageId::from("msg-1".to_string()),
             state: None,
             diagnostics: InvokeDiagnostics {
                 harness_version: "0.1.0".to_string(),
@@ -78,9 +78,9 @@ mod tests {
     }
 
     #[test]
-    fn invoke_message_v2_omits_none_state() {
-        let msg = InvokeMessageV2 {
-            id: MessageId::from("msg-v2".to_string()),
+    fn invoke_message_omits_none_state() {
+        let msg = InvokeMessage {
+            id: MessageId::from("msg-1".to_string()),
             state: None,
             diagnostics: InvokeDiagnostics {
                 harness_version: "0.1.0".to_string(),

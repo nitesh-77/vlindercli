@@ -1,7 +1,7 @@
 //! Message queue trait definition (ADR 044).
 //!
 //! Typed message methods for send and receive:
-//! - `send_invoke_v2()` / `receive_invoke_v2()`: Harness → Runtime (ADR 121)
+//! - `send_invoke()` / `receive_invoke()`: Harness → Runtime (ADR 121)
 //! - `send_request()` / `receive_request()`: Runtime → Service
 //! - `send_response()` / `receive_response()`: Service → Runtime
 //! - `send_complete()` / `receive_complete()`: Runtime → Harness
@@ -11,7 +11,7 @@
 
 use super::{
     AgentName, CompleteMessage, DataRoutingKey, DelegateMessage, ForkMessage, HarnessType,
-    InvokeMessageV2, Operation, PromoteMessage, RepairMessage, RequestMessage, ResourceId,
+    InvokeMessage, Operation, PromoteMessage, RepairMessage, RequestMessage, ResourceId,
     ResponseMessage, RoutingKey, ServiceBackend, SubmissionId,
 };
 use std::fmt;
@@ -31,15 +31,15 @@ pub trait MessageQueue {
     ///
     /// Routing key and payload are separate: the key goes into the subject,
     /// the payload goes into the NATS message body.
-    fn send_invoke_v2(&self, key: DataRoutingKey, msg: InvokeMessageV2) -> Result<(), QueueError>;
+    fn send_invoke(&self, key: DataRoutingKey, msg: InvokeMessage) -> Result<(), QueueError>;
 
     /// Receive an invoke from the data plane (ADR 121).
     ///
     /// Returns the routing key, payload, and acknowledgement.
-    fn receive_invoke_v2(
+    fn receive_invoke(
         &self,
         agent: &AgentName,
-    ) -> Result<(DataRoutingKey, InvokeMessageV2, Acknowledgement), QueueError>;
+    ) -> Result<(DataRoutingKey, InvokeMessage, Acknowledgement), QueueError>;
 
     /// Send a `RequestMessage` (Runtime → Service).
     ///

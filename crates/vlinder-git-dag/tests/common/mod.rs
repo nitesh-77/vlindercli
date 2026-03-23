@@ -10,7 +10,7 @@ use chrono::{DateTime, Utc};
 
 use vlinder_core::domain::{
     AgentName, BranchId, CompleteMessage, DagNodeId, DataMessageKind, DataRoutingKey, HarnessType,
-    InvokeDiagnostics, InvokeMessageV2, MessageId, ObservableMessage, ObservableMessageV2,
+    InvokeDiagnostics, InvokeMessage, MessageId, ObservableMessage, ObservableMessageV2,
     RuntimeDiagnostics, RuntimeType, SessionId, SubmissionId,
 };
 use vlinder_git_dag::GitDagWorker;
@@ -88,7 +88,7 @@ fn test_agent_id() -> AgentName {
     AgentName::new("test-agent")
 }
 
-/// Create a v2 invoke message for testing.
+/// Create an invoke message for testing.
 pub fn make_invoke(
     session: &str,
     submission: &str,
@@ -106,7 +106,7 @@ pub fn make_invoke(
             agent: test_agent_id(),
         },
     };
-    let msg = InvokeMessageV2 {
+    let msg = InvokeMessage {
         id: MessageId::new(),
         state,
         diagnostics: InvokeDiagnostics {

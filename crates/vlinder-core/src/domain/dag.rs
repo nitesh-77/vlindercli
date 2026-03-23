@@ -118,7 +118,7 @@ enum MessageRef<'a> {
     V1(&'a super::ObservableMessage),
     V2(
         &'a super::routing_key::DataRoutingKey,
-        &'a super::message::invoke::InvokeMessageV2,
+        &'a super::message::invoke::InvokeMessage,
     ),
 }
 

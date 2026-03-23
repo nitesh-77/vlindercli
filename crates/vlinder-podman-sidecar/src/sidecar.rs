@@ -119,9 +119,7 @@ impl Sidecar {
                         break;
                     }
                 }
-            } else if let Ok((key, invoke_v2, ack)) =
-                self.dispatch.queue.receive_invoke_v2(&agent_id)
-            {
+            } else if let Ok((key, invoke, ack)) = self.dispatch.queue.receive_invoke(&agent_id) {
                 let _ = ack();
                 let DataMessageKind::Invoke {
                     harness,
@@ -129,11 +127,11 @@ impl Sidecar {
                     agent,
                 } = &key.kind;
                 tracing::info!(
-                    event = "dispatch.started.v2",
+                    event = "dispatch.started",
                     sha = %key.submission,
                     session = %key.session,
                     agent = %agent,
-                    "Dispatching v2 invoke to container"
+                    "Dispatching invoke to container"
                 );
                 match dispatch::handle_invoke(
                     &self.dispatch,
@@ -143,8 +141,8 @@ impl Sidecar {
                     key.session.clone(),
                     agent.clone(),
                     *harness,
-                    invoke_v2.payload,
-                    invoke_v2.state,
+                    invoke.payload,
+                    invoke.state,
                     None,
                 ) {
                     Ok(InvokeOutcome::Done) => {}

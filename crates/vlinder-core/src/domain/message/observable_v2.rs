@@ -1,7 +1,7 @@
 //! `ObservableMessageV2` — clean message types with routing separated from payload.
 
 use super::super::routing_key::DataRoutingKey;
-use super::invoke::InvokeMessageV2;
+use super::invoke::InvokeMessage;
 
 /// Observable message with routing and payload cleanly separated.
 ///
@@ -11,6 +11,6 @@ use super::invoke::InvokeMessageV2;
 pub enum ObservableMessageV2 {
     InvokeV2 {
         key: DataRoutingKey,
-        msg: InvokeMessageV2,
+        msg: InvokeMessage,
     },
 }

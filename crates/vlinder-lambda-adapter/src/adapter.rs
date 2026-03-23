@@ -5,7 +5,7 @@
 //! the Lambda Runtime API and real HTTP.
 
 use vlinder_core::domain::{
-    AgentName, BranchId, CompleteMessage, DataRoutingKey, HarnessType, InvokeMessageV2,
+    AgentName, BranchId, CompleteMessage, DataRoutingKey, HarnessType, InvokeMessage,
     RuntimeDiagnostics, RuntimeInfo, SessionId, SubmissionId,
 };
 
@@ -13,7 +13,7 @@ use vlinder_core::domain::{
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct LambdaInvokePayload {
     pub key: DataRoutingKey,
-    pub msg: InvokeMessageV2,
+    pub msg: InvokeMessage,
 }
 
 /// Deserialize a Lambda invocation body.
@@ -82,7 +82,7 @@ mod tests {
     use super::*;
     use vlinder_core::domain::{
         AgentName, BranchId, DagNodeId, DataMessageKind, DataRoutingKey, HarnessType,
-        InvokeDiagnostics, InvokeMessageV2, MessageId, RuntimeType, SessionId, SubmissionId,
+        InvokeDiagnostics, InvokeMessage, MessageId, RuntimeType, SessionId, SubmissionId,
     };
 
     /// Build a test `LambdaInvokePayload` and serialize it to JSON, simulating
@@ -100,7 +100,7 @@ mod tests {
                     agent: AgentName::new("echo-lambda"),
                 },
             },
-            msg: InvokeMessageV2 {
+            msg: InvokeMessage {
                 id: MessageId::new(),
                 state: Some("state-abc".to_string()),
                 diagnostics: InvokeDiagnostics {

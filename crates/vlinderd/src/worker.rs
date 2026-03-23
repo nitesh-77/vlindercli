@@ -499,7 +499,7 @@ fn run_dag_git_worker(config: &Config, shutdown: &AtomicBool) {
     use vlinder_core::domain::DagWorker;
     use vlinder_git_dag::GitDagWorker;
     use vlinder_nats::{
-        from_nats_headers, invoke_v2_parse_subject, subject_to_routing_key, NatsQueue,
+        from_nats_headers, invoke_parse_subject, subject_to_routing_key, NatsQueue,
     };
 
     let nats = NatsQueue::connect(&config.queue.nats_config()).expect("Failed to connect to NATS");
@@ -572,11 +572,11 @@ fn run_dag_git_worker(config: &Config, shutdown: &AtomicBool) {
                     "DAG git received NATS message",
                 );
 
-                // Try v2 data-plane subject first, fall back to legacy pipeline.
+                // Try data-plane subject first, fall back to legacy pipeline.
                 let created_at = chrono::Utc::now();
-                if let Some(key) = invoke_v2_parse_subject(&subject) {
+                if let Some(key) = invoke_parse_subject(&subject) {
                     if let Ok(invoke_msg) =
-                        serde_json::from_slice::<vlinder_core::domain::InvokeMessageV2>(&payload)
+                        serde_json::from_slice::<vlinder_core::domain::InvokeMessage>(&payload)
                     {
                         let v2 = vlinder_core::domain::ObservableMessageV2::InvokeV2 {
                             key,
@@ -586,7 +586,7 @@ fn run_dag_git_worker(config: &Config, shutdown: &AtomicBool) {
                     } else {
                         tracing::warn!(
                             subject = subject.as_str(),
-                            "DAG git: failed to deserialize InvokeMessageV2"
+                            "DAG git: failed to deserialize InvokeMessage"
                         );
                     }
                 } else if let Some(observable) = subject_to_routing_key(&subject)
