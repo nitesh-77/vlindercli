@@ -4,12 +4,16 @@
 # Docs: https://embarkstudios.github.io/cargo-deny/
 
 [advisories]
-# Fail on any known vulnerability
-vulnerability = "deny"
-# Warn on unmaintained crates
-unmaintained = "warn"
-# Warn on crates that have been yanked
-yanked = "warn"
+version = 2
+unmaintained = "workspace"
+
+# rustls-webpki 0.101 CRL validation advisory.
+# Transitive dep from AWS SDK's rustls 0.21 (aws-smithy-http-client).
+# Blocked until AWS updates their HTTP client stack.
+# Tracking: github.com/awslabs/aws-sdk-rust/discussions/1257
+[[advisories.ignore]]
+id = "RUSTSEC-2026-0049"
+reason = "Transitive dep from AWS SDK's rustls 0.21 — can't upgrade until aws-smithy-http-client drops rustls 0.21"
 
 [licenses]
 # Allow only permissive licenses

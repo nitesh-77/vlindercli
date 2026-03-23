@@ -57,10 +57,10 @@ ed25519-dalek = { version = "2", features = ["rand_core"] }
 rand = "0.8"
 ureq = { version = "3", features = ["json"] }
 async-openai = { version = "0.32", default-features = false, features = ["chat-completion-types"] }
-git2 = "0.19"
+git2 = "0.20"
 
 # NATS messaging (async engine with sync facade)
-async-nats = "0.38"
+async-nats = "0.46"
 tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
 futures = "0.3"
 
