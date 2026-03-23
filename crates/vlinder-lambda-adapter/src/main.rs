@@ -244,16 +244,26 @@ fn handle_invocation(
     request_id: &str,
     body: &[u8],
 ) -> Result<Vec<u8>, String> {
-    let invoke = deserialize_invoke(body)?;
+    let payload = deserialize_invoke(body)?;
+    let key = payload.key;
+    let invoke_msg = payload.msg;
     let started_at = Instant::now();
+
+    // Extract routing from key
+    let agent_name = match &key.kind {
+        vlinder_core::domain::DataMessageKind::Invoke { agent, .. } => agent.as_str().to_string(),
+    };
+    let harness = match &key.kind {
+        vlinder_core::domain::DataMessageKind::Invoke { harness, .. } => *harness,
+    };
 
     // Look up agent for provider host table and initial state.
     let agent = registry
-        .get_agent_by_name(invoke.agent_id.as_str())
-        .ok_or_else(|| format!("agent '{}' not found in registry", invoke.agent_id))?;
+        .get_agent_by_name(&agent_name)
+        .ok_or_else(|| format!("agent '{agent_name}' not found in registry"))?;
     let hosts = build_hosts(&agent);
     let initial_state = if agent.object_storage.is_some() {
-        Some(invoke.state.clone().unwrap_or_default())
+        Some(invoke_msg.state.clone().unwrap_or_default())
     } else {
         None
     };
@@ -263,10 +273,10 @@ fn handle_invocation(
     let handler = InvokeHandler::new(
         queue.clone(),
         registry.clone(),
-        invoke.branch,
-        invoke.submission.clone(),
-        invoke.session.clone(),
-        invoke.agent_id.clone(),
+        key.branch,
+        key.submission.clone(),
+        key.session.clone(),
+        vlinder_core::domain::AgentName::new(&agent_name),
         std::sync::Arc::clone(&state),
     );
     let provider_server = ProviderServer::start(handler, hosts, state, 3544);
@@ -275,7 +285,7 @@ fn handle_invocation(
     let agent_url = format!("http://127.0.0.1:{}/invoke", config.agent_port);
     let agent_response = http
         .post(&agent_url)
-        .send_bytes(&invoke.payload)
+        .send_bytes(&invoke_msg.payload)
         .map_err(|e| format!("POST to agent failed: {e}"))?;
 
     let mut output = Vec::new();
@@ -294,11 +304,11 @@ fn handle_invocation(
 
     let diagnostics = build_lambda_diagnostics(&config.agent, &region, duration_ms);
     let complete = build_complete(
-        invoke.branch,
-        invoke.submission.clone(),
-        invoke.session.clone(),
-        invoke.agent_id.clone(),
-        invoke.harness,
+        key.branch,
+        key.submission.clone(),
+        key.session.clone(),
+        vlinder_core::domain::AgentName::new(&agent_name),
+        harness,
         output.clone(),
         final_state,
         diagnostics,

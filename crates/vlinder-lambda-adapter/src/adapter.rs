@@ -5,16 +5,23 @@
 //! the Lambda Runtime API and real HTTP.
 
 use vlinder_core::domain::{
-    AgentName, BranchId, CompleteMessage, HarnessType, InvokeMessage, RuntimeDiagnostics,
-    RuntimeInfo, SessionId, SubmissionId,
+    AgentName, BranchId, CompleteMessage, DataRoutingKey, HarnessType, InvokeMessageV2,
+    RuntimeDiagnostics, RuntimeInfo, SessionId, SubmissionId,
 };
 
-/// Deserialize a Lambda invocation body into an `InvokeMessage`.
+/// Lambda invocation payload — routing key + message, serialized together.
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct LambdaInvokePayload {
+    pub key: DataRoutingKey,
+    pub msg: InvokeMessageV2,
+}
+
+/// Deserialize a Lambda invocation body.
 ///
-/// The daemon serializes the full `InvokeMessage` as the Lambda payload.
-/// This is the adapter's entry point for each invocation.
-pub fn deserialize_invoke(body: &[u8]) -> Result<InvokeMessage, String> {
-    serde_json::from_slice(body).map_err(|e| format!("failed to deserialize InvokeMessage: {e}"))
+/// The daemon serializes a `LambdaInvokePayload` as the Lambda payload.
+pub fn deserialize_invoke(body: &[u8]) -> Result<LambdaInvokePayload, String> {
+    serde_json::from_slice(body)
+        .map_err(|e| format!("failed to deserialize LambdaInvokePayload: {e}"))
 }
 
 /// Build Lambda-specific runtime diagnostics.
@@ -74,40 +81,49 @@ pub fn build_error_body(message: &str) -> String {
 mod tests {
     use super::*;
     use vlinder_core::domain::{
-        AgentName, BranchId, DagNodeId, HarnessType, InvokeDiagnostics, RuntimeType, SessionId,
-        SubmissionId,
+        AgentName, BranchId, DagNodeId, DataMessageKind, DataRoutingKey, HarnessType,
+        InvokeDiagnostics, InvokeMessageV2, MessageId, RuntimeType, SessionId, SubmissionId,
     };
 
-    /// Build a test `InvokeMessage` and serialize it to JSON, simulating what
-    /// the daemon sends as the Lambda payload.
+    /// Build a test `LambdaInvokePayload` and serialize it to JSON, simulating
+    /// what the daemon sends as the Lambda payload.
     fn make_invoke_json(payload: &[u8]) -> Vec<u8> {
-        let invoke = InvokeMessage::new(
-            BranchId::from(1),
-            SubmissionId::from("sub-test".to_string()),
-            SessionId::try_from("d4761d76-dee4-4ebf-9df4-43b52efa4f78".to_string()).unwrap(),
-            HarnessType::Cli,
-            RuntimeType::Lambda,
-            AgentName::new("echo-lambda"),
-            payload.to_vec(),
-            Some("state-abc".to_string()),
-            InvokeDiagnostics {
-                harness_version: "0.1.0".to_string(),
+        let invoke = LambdaInvokePayload {
+            key: DataRoutingKey {
+                session: SessionId::try_from("d4761d76-dee4-4ebf-9df4-43b52efa4f78".to_string())
+                    .unwrap(),
+                branch: BranchId::from(1),
+                submission: SubmissionId::from("sub-test".to_string()),
+                kind: DataMessageKind::Invoke {
+                    harness: HarnessType::Cli,
+                    runtime: RuntimeType::Lambda,
+                    agent: AgentName::new("echo-lambda"),
+                },
             },
-            DagNodeId::root(),
-        );
+            msg: InvokeMessageV2 {
+                id: MessageId::new(),
+                state: Some("state-abc".to_string()),
+                diagnostics: InvokeDiagnostics {
+                    harness_version: "0.1.0".to_string(),
+                },
+                dag_parent: DagNodeId::root(),
+                payload: payload.to_vec(),
+            },
+        };
         serde_json::to_vec(&invoke).unwrap()
     }
 
     #[test]
     fn deserialize_invoke_round_trips() {
         let json = make_invoke_json(b"hello from lambda");
-        let invoke = deserialize_invoke(&json).unwrap();
+        let inv = deserialize_invoke(&json).unwrap();
 
-        assert_eq!(invoke.agent_id.as_str(), "echo-lambda");
-        assert_eq!(invoke.payload, b"hello from lambda");
-        assert_eq!(invoke.runtime, RuntimeType::Lambda);
-        assert_eq!(invoke.state, Some("state-abc".to_string()));
-        assert_eq!(invoke.diagnostics.harness_version, "0.1.0");
+        let DataMessageKind::Invoke { agent, runtime, .. } = &inv.key.kind;
+        assert_eq!(agent.as_str(), "echo-lambda");
+        assert_eq!(*runtime, RuntimeType::Lambda);
+        assert_eq!(inv.msg.payload, b"hello from lambda");
+        assert_eq!(inv.msg.state, Some("state-abc".to_string()));
+        assert_eq!(inv.msg.diagnostics.harness_version, "0.1.0");
     }
 
     #[test]
@@ -126,16 +142,16 @@ mod tests {
     #[test]
     fn deserialize_invoke_preserves_empty_payload() {
         let json = make_invoke_json(b"");
-        let invoke = deserialize_invoke(&json).unwrap();
-        assert!(invoke.payload.is_empty());
+        let inv = deserialize_invoke(&json).unwrap();
+        assert!(inv.msg.payload.is_empty());
     }
 
     #[test]
     fn deserialize_invoke_preserves_binary_payload() {
         let binary: Vec<u8> = (0..=255).collect();
         let json = make_invoke_json(&binary);
-        let invoke = deserialize_invoke(&json).unwrap();
-        assert_eq!(invoke.payload, binary);
+        let inv = deserialize_invoke(&json).unwrap();
+        assert_eq!(inv.msg.payload, binary);
     }
 
     #[test]
@@ -159,15 +175,23 @@ mod tests {
     #[test]
     fn build_complete_carries_output_and_state() {
         let json = make_invoke_json(b"input");
-        let invoke = deserialize_invoke(&json).unwrap();
+        let inv = deserialize_invoke(&json).unwrap();
         let diag = build_lambda_diagnostics("fn", "us-east-1", 100);
 
+        let DataRoutingKey {
+            session,
+            branch,
+            submission,
+            kind,
+        } = inv.key;
+        let DataMessageKind::Invoke { agent, harness, .. } = kind;
+
         let complete = build_complete(
-            invoke.branch,
-            invoke.submission.clone(),
-            invoke.session.clone(),
-            invoke.agent_id.clone(),
-            invoke.harness,
+            branch,
+            submission,
+            session,
+            agent,
+            harness,
             b"output bytes".to_vec(),
             Some("final-state-hash".to_string()),
             diag,
@@ -181,15 +205,23 @@ mod tests {
     #[test]
     fn build_complete_with_no_state() {
         let json = make_invoke_json(b"input");
-        let invoke = deserialize_invoke(&json).unwrap();
+        let inv = deserialize_invoke(&json).unwrap();
         let diag = build_lambda_diagnostics("fn", "us-east-1", 50);
 
+        let DataRoutingKey {
+            session,
+            branch,
+            submission,
+            kind,
+        } = inv.key;
+        let DataMessageKind::Invoke { agent, harness, .. } = kind;
+
         let complete = build_complete(
-            invoke.branch,
-            invoke.submission.clone(),
-            invoke.session.clone(),
-            invoke.agent_id.clone(),
-            invoke.harness,
+            branch,
+            submission,
+            session,
+            agent,
+            harness,
             b"out".to_vec(),
             None,
             diag,
