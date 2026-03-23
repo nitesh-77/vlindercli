@@ -59,7 +59,10 @@ jobs:
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
       - name: Audit dependencies for known vulnerabilities
-        run: cargo audit
+        # RUSTSEC-2026-0049: rustls-webpki 0.101 CRL validation bug.
+        # Transitive dep from AWS SDK's rustls 0.21 (aws-smithy-http-client).
+        # Blocked until AWS updates: github.com/awslabs/aws-sdk-rust/discussions/1257
+        run: cargo audit --ignore RUSTSEC-2026-0049
       - name: Check advisories via cargo-deny
         run: cargo install cargo-deny --locked && cargo deny check advisories
 
