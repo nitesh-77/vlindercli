@@ -20,11 +20,10 @@ use std::str::FromStr;
 
 use vlinder_core::domain::{
     Acknowledgement, AgentName, BranchId, CompleteMessage, DagNodeId, DataRoutingKey,
-    DelegateDiagnostics, DelegateMessage, HarnessType, InvokeDiagnostics, InvokeMessage,
-    InvokeMessageV2, MessageId, MessageQueue, Nonce, Operation, QueueError, RepairMessage,
-    RequestDiagnostics, RequestMessage, ResponseMessage, RoutingKey, RoutingKind,
-    RuntimeDiagnostics, RuntimeType, Sequence, ServiceBackend, ServiceDiagnostics, ServiceType,
-    SessionId, SubmissionId,
+    DelegateDiagnostics, DelegateMessage, HarnessType, InvokeMessageV2, MessageId, MessageQueue,
+    Nonce, Operation, QueueError, RepairMessage, RequestDiagnostics, RequestMessage,
+    ResponseMessage, RoutingKey, RoutingKind, RuntimeDiagnostics, RuntimeType, Sequence,
+    ServiceBackend, ServiceDiagnostics, ServiceType, SessionId, SubmissionId,
 };
 
 /// NATS queue with `JetStream` durability.
@@ -227,41 +226,6 @@ impl NatsQueue {
 }
 
 impl MessageQueue for NatsQueue {
-    fn send_invoke(&self, msg: InvokeMessage) -> Result<(), QueueError> {
-        let subject = routing_key_to_subject(&msg.routing_key());
-
-        self.inner.runtime.block_on(async {
-            let mut headers = async_nats::HeaderMap::new();
-            headers.insert("msg-id", msg.id.as_str());
-            headers.insert("protocol-version", msg.protocol_version.as_str());
-            headers.insert("branch-id", msg.branch.to_string());
-            headers.insert("submission-id", msg.submission.as_str());
-            headers.insert("session-id", msg.session.as_str());
-            headers.insert("harness", msg.harness.as_str());
-            headers.insert("runtime", msg.runtime.as_str());
-            headers.insert("agent-id", msg.agent_id.as_str());
-            if let Some(ref state) = msg.state {
-                headers.insert("state", state.as_str());
-            }
-            if let Ok(diag_json) = serde_json::to_string(&msg.diagnostics) {
-                headers.insert("diagnostics", diag_json.as_str());
-            }
-            if !msg.dag_parent.is_empty() {
-                headers.insert("dag-parent", msg.dag_parent.as_str());
-            }
-
-            self.inner
-                .jetstream
-                .publish_with_headers(subject, headers, msg.payload.into())
-                .await
-                .map_err(|e| QueueError::SendFailed(e.to_string()))?
-                .await
-                .map_err(|e| QueueError::SendFailed(e.to_string()))?;
-
-            Ok(())
-        })
-    }
-
     fn send_invoke_v2(&self, key: DataRoutingKey, msg: InvokeMessageV2) -> Result<(), QueueError> {
         let subject = invoke_v2_subject(&key);
         let payload = serde_json::to_vec(&msg)
@@ -408,54 +372,6 @@ impl MessageQueue for NatsQueue {
                 .map_err(|e| QueueError::SendFailed(e.to_string()))?;
 
             Ok(())
-        })
-    }
-
-    fn receive_invoke(
-        &self,
-        agent: &AgentName,
-    ) -> Result<(InvokeMessage, Acknowledgement), QueueError> {
-        // Build filter: vlinder.{session}.{branch}.{submission}.invoke.{harness}.{runtime}.{agent}
-        let filter = format!("vlinder.*.*.*.invoke.*.*.{}", agent.as_str());
-
-        self.inner.runtime.block_on(async {
-            let (js_msg, ack_fn) = self.fetch_one(&filter).await?;
-
-            // Extract typed message from headers
-            let headers = js_msg
-                .headers
-                .as_ref()
-                .ok_or_else(|| QueueError::ReceiveFailed("missing headers".to_string()))?;
-
-            let diagnostics = get_header(headers, "diagnostics")
-                .ok()
-                .and_then(|s| serde_json::from_str(&s).ok())
-                .unwrap_or_else(|| InvokeDiagnostics {
-                    harness_version: String::new(),
-                });
-
-            let msg = InvokeMessage {
-                id: MessageId::from(get_header(headers, "msg-id")?),
-                protocol_version: get_header(headers, "protocol-version").unwrap_or_default(),
-                branch: get_header(headers, "branch-id")
-                    .ok()
-                    .and_then(|s| s.parse::<i64>().ok())
-                    .map_or(BranchId::from(1), BranchId::from),
-                submission: SubmissionId::from(get_header(headers, "submission-id")?),
-                session: SessionId::try_from(get_header(headers, "session-id")?)
-                    .map_err(QueueError::ReceiveFailed)?,
-                harness: HarnessType::from_str(&get_header(headers, "harness")?)
-                    .map_err(|_| QueueError::ReceiveFailed("unknown harness type".to_string()))?,
-                runtime: RuntimeType::from_str(&get_header(headers, "runtime")?)
-                    .map_err(|_| QueueError::ReceiveFailed("unknown runtime type".to_string()))?,
-                agent_id: AgentName::new(get_header(headers, "agent-id")?),
-                payload: js_msg.payload.to_vec(),
-                state: get_header(headers, "state").ok(),
-                diagnostics,
-                dag_parent: DagNodeId::from(get_header(headers, "dag-parent").unwrap_or_default()),
-            };
-
-            Ok((msg, ack_fn))
         })
     }
 
@@ -1131,28 +1047,6 @@ pub fn subject_to_routing_key(subject: &str) -> Option<RoutingKey> {
     })
 }
 
-/// Serialize an `InvokeMessage` into NATS headers (sans payload).
-///
-/// Inverse of `from_nats_headers` for the Invoke variant.
-/// This is the single source of truth for which fields go into NATS headers;
-/// `send_invoke` delegates here.
-pub fn invoke_to_nats_headers(msg: &InvokeMessage) -> HashMap<String, String> {
-    let mut h = HashMap::new();
-    h.insert("msg-id".to_string(), msg.id.as_str().to_string());
-    h.insert("protocol-version".to_string(), msg.protocol_version.clone());
-    h.insert("session-id".to_string(), msg.session.as_str().to_string());
-    if let Some(ref state) = msg.state {
-        h.insert("state".to_string(), state.clone());
-    }
-    if let Ok(diag_json) = serde_json::to_string(&msg.diagnostics) {
-        h.insert("diagnostics".to_string(), diag_json);
-    }
-    if !msg.dag_parent.is_empty() {
-        h.insert("dag-parent".to_string(), msg.dag_parent.to_string());
-    }
-    h
-}
-
 /// Serialize a `RequestMessage` into NATS headers (sans payload).
 pub fn request_to_nats_headers(msg: &RequestMessage) -> HashMap<String, String> {
     let mut h = HashMap::new();
@@ -1261,20 +1155,6 @@ pub fn from_nats_headers<S: BuildHasher>(
     let state = headers.get("state").cloned();
 
     let details = match &key.kind {
-        RoutingKind::Invoke { .. } => {
-            let diagnostics = headers
-                .get("diagnostics")
-                .and_then(|s| serde_json::from_str(s).ok())
-                .unwrap_or_else(|| InvokeDiagnostics {
-                    harness_version: String::new(),
-                });
-            let dag_parent =
-                DagNodeId::from(headers.get("dag-parent").cloned().unwrap_or_default());
-            Some(MessageDetails::Invoke {
-                diagnostics,
-                dag_parent,
-            })
-        }
         RoutingKind::Request { .. } => {
             let diagnostics = headers
                 .get("diagnostics")
@@ -1324,7 +1204,7 @@ pub fn from_nats_headers<S: BuildHasher>(
             let nonce = Nonce::new(headers.get("nonce")?.clone());
             Some(MessageDetails::Delegate { diagnostics, nonce })
         }
-        RoutingKind::DelegateReply { .. } => None,
+        RoutingKind::Invoke { .. } | RoutingKind::DelegateReply { .. } => None,
         RoutingKind::Repair { .. } => {
             let dag_parent = DagNodeId::from(headers.get("dag-parent").cloned()?);
             let checkpoint = headers.get("checkpoint").cloned()?;
@@ -2134,81 +2014,9 @@ mod tests {
     // from_nats_headers: RoutingKey + headers → ObservableMessageHeaders
     // ========================================================================
 
-    /// Build a test `InvokeMessage` for header round-trip tests.
-    fn test_invoke_message(state: Option<String>) -> InvokeMessage {
-        InvokeMessage::new(
-            timeline(),
-            submission(),
-            SessionId::try_from("d4761d76-dee4-4ebf-9df4-43b52efa4f78".to_string()).unwrap(),
-            HarnessType::Cli,
-            RuntimeType::Container,
-            agent(),
-            b"hello-payload".to_vec(),
-            state,
-            InvokeDiagnostics {
-                harness_version: "0.1.0".to_string(),
-            },
-            DagNodeId::root(),
-        )
-    }
-
-    #[test]
-    fn invoke_headers_round_trip() {
-        use vlinder_core::domain::ObservableMessage;
-
-        let original = test_invoke_message(Some("state-abc".to_string()));
-        let key = original.routing_key();
-        let headers = invoke_to_nats_headers(&original);
-
-        let recovered = from_nats_headers(&key, &headers)
-            .expect("should produce Invoke headers")
-            .assemble(original.payload.clone());
-
-        if let ObservableMessage::Invoke(m) = &recovered {
-            assert_eq!(m.id, original.id);
-            assert_eq!(m.protocol_version, original.protocol_version);
-            assert_eq!(m.branch, original.branch);
-            assert_eq!(m.submission, original.submission);
-            assert_eq!(m.session, original.session);
-            assert_eq!(m.harness, original.harness);
-            assert_eq!(m.runtime, original.runtime);
-            assert_eq!(m.agent_id, original.agent_id);
-            assert_eq!(m.payload, original.payload);
-            assert_eq!(m.state, original.state);
-        } else {
-            panic!("expected Invoke, got {recovered:?}");
-        }
-    }
-
-    #[test]
-    fn invoke_headers_round_trip_without_state() {
-        use vlinder_core::domain::ObservableMessage;
-
-        let original = test_invoke_message(None);
-        let key = original.routing_key();
-        let headers = invoke_to_nats_headers(&original);
-
-        let recovered = from_nats_headers(&key, &headers)
-            .unwrap()
-            .assemble(original.payload.clone());
-
-        if let ObservableMessage::Invoke(m) = &recovered {
-            assert_eq!(m.state, None);
-            assert_eq!(m.id, original.id);
-        } else {
-            panic!("expected Invoke");
-        }
-    }
-
-    #[test]
-    fn from_nats_headers_invoke_missing_msg_id_returns_none() {
-        let original = test_invoke_message(None);
-        let key = original.routing_key();
-        let mut headers = invoke_to_nats_headers(&original);
-        headers.remove("msg-id");
-
-        assert!(from_nats_headers(&key, &headers).is_none());
-    }
+    // Invoke header tests removed — `invoke_to_nats_headers` and
+    // `from_nats_headers` for Invoke are no longer part of the v1 pipeline.
+    // The v2 invoke path is tested separately.
 
     #[test]
     fn from_nats_headers_delegate_reply_returns_none() {

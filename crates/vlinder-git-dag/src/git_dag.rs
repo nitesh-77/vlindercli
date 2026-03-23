@@ -210,16 +210,6 @@ impl GitDagWorker {
 
         // Type-specific fields + diagnostics
         match msg {
-            ObservableMessage::Invoke(m) => {
-                self.insert_field(&mut tb, "type", "invoke")?;
-                self.insert_field(&mut tb, "harness", m.harness.as_str())?;
-                self.insert_field(&mut tb, "runtime", m.runtime.as_str())?;
-                self.insert_field(&mut tb, "agent_id", m.agent_id.as_str())?;
-                if let Some(ref state) = m.state {
-                    self.insert_field(&mut tb, "state", state)?;
-                }
-                self.insert_diagnostics_toml(&mut tb, &m.diagnostics)?;
-            }
             ObservableMessage::Request(m) => {
                 self.insert_field(&mut tb, "type", "request")?;
                 self.insert_field(&mut tb, "agent_id", m.agent_id.as_str())?;
@@ -976,11 +966,6 @@ impl DagWorker for GitDagWorker {
 /// Extract (from, to, `type_str`) from an `ObservableMessage` for commit metadata.
 fn message_routing(msg: &ObservableMessage) -> (String, String, &'static str) {
     match msg {
-        ObservableMessage::Invoke(m) => (
-            m.harness.as_str().to_string(),
-            m.agent_id.to_string(),
-            "invoke",
-        ),
         ObservableMessage::Request(m) => (
             m.agent_id.to_string(),
             format!("{}.{}", m.service.service_type(), m.service.backend_str()),
@@ -1012,7 +997,6 @@ fn message_routing(msg: &ObservableMessage) -> (String, String, &'static str) {
 /// Extract the agent name for registry lookup.
 fn message_agent_name(msg: &ObservableMessage) -> String {
     match msg {
-        ObservableMessage::Invoke(m) => m.agent_id.to_string(),
         ObservableMessage::Request(m) => m.agent_id.to_string(),
         ObservableMessage::Response(m) => m.agent_id.to_string(),
         ObservableMessage::Complete(m) => m.agent_id.to_string(),
@@ -1026,7 +1010,6 @@ fn message_agent_name(msg: &ObservableMessage) -> String {
 /// Extract state from the message if present.
 fn message_state(msg: &ObservableMessage) -> Option<&str> {
     match msg {
-        ObservableMessage::Invoke(m) => m.state.as_deref(),
         ObservableMessage::Request(m) => m.state.as_deref(),
         ObservableMessage::Response(m) => m.state.as_deref(),
         ObservableMessage::Complete(m) => m.state.as_deref(),
@@ -1053,10 +1036,9 @@ mod tests {
     use vlinder_core::domain::{
         Agent, AgentName, BranchId, CompleteMessage, ContainerId, DagNodeId, DelegateDiagnostics,
         DelegateMessage, HarnessType, InMemoryRegistry, InMemorySecretStore, InferenceBackendType,
-        InvokeDiagnostics, InvokeMessage, Nonce, ObservableMessage, Operation, RequestDiagnostics,
-        RequestMessage, ResponseMessage, RuntimeDiagnostics, RuntimeInfo, RuntimeType, SecretStore,
-        Sequence, ServiceBackend, ServiceDiagnostics, ServiceMetrics, ServiceType, SessionId,
-        Snapshot, SubmissionId,
+        Nonce, ObservableMessage, Operation, RequestDiagnostics, RequestMessage, ResponseMessage,
+        RuntimeDiagnostics, RuntimeInfo, RuntimeType, SecretStore, Sequence, ServiceBackend,
+        ServiceDiagnostics, ServiceMetrics, ServiceType, SessionId, Snapshot, SubmissionId,
     };
 
     fn test_agent_id() -> AgentName {
@@ -1064,22 +1046,18 @@ mod tests {
     }
 
     fn test_invoke(payload: &[u8], epoch_secs: i64) -> (ObservableMessage, DateTime<Utc>) {
-        let msg = InvokeMessage::new(
+        let msg = CompleteMessage::new(
             BranchId::from(1),
             SubmissionId::from("sub-1".to_string()),
             SessionId::try_from(SESSION.to_string()).unwrap(),
-            HarnessType::Cli,
-            RuntimeType::Container,
             test_agent_id(),
+            HarnessType::Cli,
             payload.to_vec(),
             None,
-            InvokeDiagnostics {
-                harness_version: "0.1.0".to_string(),
-            },
-            DagNodeId::root(),
+            RuntimeDiagnostics::placeholder(0),
         );
         let created_at = DateTime::from_timestamp(epoch_secs, 0).unwrap();
-        (ObservableMessage::Invoke(msg), created_at)
+        (ObservableMessage::Complete(msg), created_at)
     }
 
     fn test_request(payload: &[u8], epoch_secs: i64) -> (ObservableMessage, DateTime<Utc>) {
@@ -1274,7 +1252,7 @@ mod tests {
         worker.on_observable_message(&msg, ts);
 
         let subject = git(tmp.path(), &["log", "-1", "--format=%s", "main"]).unwrap();
-        assert_eq!(subject, "invoke: cli \u{2192} support-agent");
+        assert_eq!(subject, "complete: support-agent \u{2192} cli");
     }
 
     #[test]
@@ -1345,7 +1323,7 @@ mod tests {
         worker.on_observable_message(&msg, ts);
 
         let author = git(tmp.path(), &["log", "-1", "--format=%an <%ae>", "main"]).unwrap();
-        assert_eq!(author, "cli <cli@registry.local:9000>");
+        assert_eq!(author, "support-agent <support-agent@registry.local:9000>");
     }
 
     #[test]
@@ -1379,20 +1357,19 @@ mod tests {
 
         worker.on_observable_message(&msg, ts);
 
-        let dir = "001-cli-invoke";
+        let dir = "001-support-agent-complete";
         let show = |field: &str| show_session_file(tmp.path(), dir, field);
 
-        assert_eq!(show("type").unwrap(), "invoke");
+        assert_eq!(show("type").unwrap(), "complete");
         assert_eq!(show("session_id").unwrap(), SESSION);
         assert_eq!(show("submission_id").unwrap(), "sub-1");
         assert_eq!(show("harness").unwrap(), "cli");
-        assert_eq!(show("runtime").unwrap(), "container");
         assert!(show("agent_id").unwrap().contains("support-agent"));
         assert_eq!(show("payload").unwrap(), "my-payload");
         assert_eq!(show("created_at").unwrap(), "1970-01-01T00:16:40.000Z");
         assert!(!show("protocol_version").unwrap().is_empty());
         let diag = show("diagnostics.toml").unwrap();
-        assert!(diag.contains("harness_version"), "diag: {diag}");
+        assert!(diag.contains("duration_ms"), "diag: {diag}");
     }
 
     #[test]
@@ -1500,26 +1477,22 @@ mod tests {
     #[test]
     fn state_file_present_when_state_set() {
         let (mut worker, tmp) = test_worker();
-        let invoke = InvokeMessage::new(
+        let complete = CompleteMessage::new(
             BranchId::from(1),
             SubmissionId::from("sub-1".to_string()),
             SessionId::try_from(SESSION.to_string()).unwrap(),
-            HarnessType::Cli,
-            RuntimeType::Container,
             test_agent_id(),
+            HarnessType::Cli,
             b"hello".to_vec(),
             Some("abc123state".to_string()),
-            InvokeDiagnostics {
-                harness_version: "0.1.0".to_string(),
-            },
-            DagNodeId::root(),
+            RuntimeDiagnostics::placeholder(0),
         );
-        let msg = ObservableMessage::Invoke(invoke);
+        let msg = ObservableMessage::Complete(complete);
         let ts = DateTime::from_timestamp(1000, 0).unwrap();
 
         worker.on_observable_message(&msg, ts);
 
-        let state = show_session_file(tmp.path(), "001-cli-invoke", "state").unwrap();
+        let state = show_session_file(tmp.path(), "001-support-agent-complete", "state").unwrap();
         assert_eq!(state, "abc123state");
     }
 
@@ -1530,7 +1503,7 @@ mod tests {
 
         worker.on_observable_message(&msg, ts);
 
-        let result = show_session_file(tmp.path(), "001-cli-invoke", "state");
+        let result = show_session_file(tmp.path(), "001-support-agent-complete", "state");
         assert!(result.is_err(), "should not have state file when None");
     }
 
@@ -1565,7 +1538,7 @@ mod tests {
             &["ls-tree", "--name-only", &format!("main:{AGENT}/{SESSION}")],
         )
         .unwrap();
-        assert!(ls.contains("001-cli-invoke"), "ls: {ls}");
+        assert!(ls.contains("001-support-agent-complete"), "ls: {ls}");
         assert!(ls.contains("002-support-agent-request"), "ls: {ls}");
         assert!(ls.contains("003-infer.ollama-response"), "ls: {ls}");
         assert!(ls.contains("timelines"), "ls: {ls}");
@@ -1669,22 +1642,18 @@ mod tests {
         epoch_secs: i64,
         session: &str,
     ) -> (ObservableMessage, DateTime<Utc>) {
-        let msg = InvokeMessage::new(
+        let msg = CompleteMessage::new(
             BranchId::from(1),
             SubmissionId::from("sub-1".to_string()),
             SessionId::try_from(session.to_string()).unwrap(),
-            HarnessType::Cli,
-            RuntimeType::Container,
             test_agent_id(),
+            HarnessType::Cli,
             payload.to_vec(),
             None,
-            InvokeDiagnostics {
-                harness_version: "0.1.0".to_string(),
-            },
-            DagNodeId::root(),
+            RuntimeDiagnostics::placeholder(0),
         );
         let created_at = DateTime::from_timestamp(epoch_secs, 0).unwrap();
-        (ObservableMessage::Invoke(msg), created_at)
+        (ObservableMessage::Complete(msg), created_at)
     }
 
     #[test]
@@ -1734,7 +1703,7 @@ mod tests {
             &["ls-tree", "--name-only", &format!("main:{AGENT}/{SESSION}")],
         )
         .unwrap();
-        assert!(ls1.contains("001-cli-invoke"), "ls1: {ls1}");
+        assert!(ls1.contains("001-support-agent-complete"), "ls1: {ls1}");
 
         let ls2 = git(
             tmp.path(),
@@ -1745,7 +1714,7 @@ mod tests {
             ],
         )
         .unwrap();
-        assert!(ls2.contains("001-cli-invoke"), "ls2: {ls2}");
+        assert!(ls2.contains("001-support-agent-complete"), "ls2: {ls2}");
     }
 
     #[test]
@@ -1774,7 +1743,7 @@ mod tests {
             &["ls-tree", "--name-only", &format!("main:{AGENT}/{SESSION}")],
         )
         .unwrap();
-        assert!(ls.contains("001-cli-invoke"), "ls: {ls}");
+        assert!(ls.contains("001-support-agent-complete"), "ls: {ls}");
         assert!(ls.contains("002-support-agent-request"), "ls: {ls}");
     }
 
@@ -1795,7 +1764,10 @@ mod tests {
             &["show", &format!("main:{AGENT}/{SESSION}/timelines/main")],
         )
         .unwrap();
-        assert!(timeline.contains("001-cli-invoke"), "timeline: {timeline}");
+        assert!(
+            timeline.contains("001-support-agent-complete"),
+            "timeline: {timeline}"
+        );
         assert!(
             timeline.contains("002-support-agent-request"),
             "timeline: {timeline}"
@@ -1825,7 +1797,11 @@ mod tests {
         worker.on_observable_message(&msg, ts);
 
         // Working tree should have the agent/session/message folder structure
-        let msg_dir = tmp.path().join(AGENT).join(SESSION).join("001-cli-invoke");
+        let msg_dir = tmp
+            .path()
+            .join(AGENT)
+            .join(SESSION)
+            .join("001-support-agent-complete");
         assert!(msg_dir.exists(), "message dir should exist in working tree");
 
         let payload = std::fs::read_to_string(msg_dir.join("payload")).unwrap();
@@ -1857,7 +1833,7 @@ mod tests {
 
         worker.on_observable_message(&msg, ts);
 
-        let hash = show_session_file(tmp.path(), "001-cli-invoke", "hash").unwrap();
+        let hash = show_session_file(tmp.path(), "001-support-agent-complete", "hash").unwrap();
         assert_eq!(
             hash,
             expected_node.id.to_string(),
@@ -1877,7 +1853,7 @@ mod tests {
         );
         worker.on_observable_message(&m1, t1);
 
-        let hash1 = show_session_file(tmp.path(), "001-cli-invoke", "hash").unwrap();
+        let hash1 = show_session_file(tmp.path(), "001-support-agent-complete", "hash").unwrap();
         assert_eq!(hash1, expected1.id.to_string());
 
         let (m2, t2) = test_request(b"second", 1001);
@@ -2038,7 +2014,9 @@ mod tests {
 
     // --- V2 invoke tests ---
 
-    use vlinder_core::domain::{DataMessageKind, DataRoutingKey, InvokeMessageV2, MessageId};
+    use vlinder_core::domain::{
+        DataMessageKind, DataRoutingKey, InvokeDiagnostics, InvokeMessageV2, MessageId,
+    };
 
     fn test_invoke_v2(payload: &[u8], epoch_secs: i64) -> (ObservableMessageV2, DateTime<Utc>) {
         let key = DataRoutingKey {

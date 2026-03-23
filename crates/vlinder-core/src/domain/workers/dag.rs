@@ -58,9 +58,9 @@ mod tests {
     use crate::domain::{
         AgentName, BranchId, CompleteMessage, DagStore, DataMessageKind, DataRoutingKey,
         DelegateDiagnostics, DelegateMessage, HarnessType, InMemoryDagStore, InferenceBackendType,
-        InvokeDiagnostics, InvokeMessage, InvokeMessageV2, MessageId, MessageType, Nonce,
-        ObservableMessageV2, Operation, RequestDiagnostics, RequestMessage, ResponseMessage,
-        RuntimeDiagnostics, RuntimeType, Sequence, ServiceBackend, SessionId, SubmissionId,
+        InvokeDiagnostics, InvokeMessageV2, MessageId, MessageType, Nonce, ObservableMessageV2,
+        Operation, RequestDiagnostics, RequestMessage, ResponseMessage, RuntimeDiagnostics,
+        RuntimeType, Sequence, ServiceBackend, SessionId, SubmissionId,
     };
 
     fn session() -> SessionId {
@@ -74,19 +74,15 @@ mod tests {
     }
 
     fn test_invoke(payload: &[u8]) -> ObservableMessage {
-        InvokeMessage::new(
+        CompleteMessage::new(
             BranchId::from(1),
             submission(),
             session(),
-            HarnessType::Cli,
-            RuntimeType::Container,
             AgentName::new("myagent"),
+            HarnessType::Cli,
             payload.to_vec(),
             None,
-            InvokeDiagnostics {
-                harness_version: "0.1.0".to_string(),
-            },
-            DagNodeId::root(),
+            RuntimeDiagnostics::placeholder(0),
         )
         .into()
     }
@@ -171,10 +167,10 @@ mod tests {
         let msg = test_invoke(b"invoke-payload");
         let root = DagNodeId::root();
         let node = build_dag_node(&msg, &root, &Snapshot::empty());
-        assert_eq!(node.message_type(), MessageType::Invoke);
+        assert_eq!(node.message_type(), MessageType::Complete);
         let (from, to) = node.message.as_ref().unwrap().sender_receiver();
-        assert_eq!(from, "cli");
-        assert_eq!(to, "myagent");
+        assert_eq!(from, "myagent");
+        assert_eq!(to, "cli");
         assert_eq!(*node.session_id(), session());
         assert_eq!(*node.submission_id(), submission());
         assert_eq!(node.payload(), b"invoke-payload");
@@ -324,10 +320,10 @@ mod tests {
 
         let nodes = store.get_session_nodes(&session()).unwrap();
         assert_eq!(nodes.len(), 1);
-        assert_eq!(nodes[0].message_type(), MessageType::Invoke);
+        assert_eq!(nodes[0].message_type(), MessageType::Complete);
         let (from, to) = nodes[0].message.as_ref().unwrap().sender_receiver();
-        assert_eq!(from, "cli");
-        assert_eq!(to, "myagent");
+        assert_eq!(from, "myagent");
+        assert_eq!(to, "cli");
     }
 
     #[test]
@@ -368,19 +364,15 @@ mod tests {
         // Different session
         let sess2 =
             SessionId::try_from("e2660cff-33d6-4428-acca-2d297dcc1cad".to_string()).unwrap();
-        let msg2: ObservableMessage = InvokeMessage::new(
+        let msg2: ObservableMessage = CompleteMessage::new(
             BranchId::from(1),
             submission_alt(),
             sess2.clone(),
-            HarnessType::Cli,
-            RuntimeType::Container,
             AgentName::new("agent-b"),
+            HarnessType::Cli,
             b"sess2-first".to_vec(),
             None,
-            InvokeDiagnostics {
-                harness_version: "0.1.0".to_string(),
-            },
-            DagNodeId::root(),
+            RuntimeDiagnostics::placeholder(0),
         )
         .into();
         let node2 = build_dag_node(&msg2, &root, &Snapshot::empty());

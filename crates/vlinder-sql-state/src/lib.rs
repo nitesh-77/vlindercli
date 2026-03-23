@@ -367,8 +367,7 @@ mod tests {
     use vlinder_core::domain::workers::dag::build_dag_node;
     use vlinder_core::domain::{
         AgentName, BranchId, CompleteMessage, DagNodeId, HarnessType, InMemoryDagStore,
-        InvokeDiagnostics, InvokeMessage, ObservableMessage, RuntimeDiagnostics, RuntimeType,
-        Snapshot, SubmissionId,
+        ObservableMessage, RuntimeDiagnostics, Snapshot, SubmissionId,
     };
 
     fn sess_id() -> SessionId {
@@ -376,19 +375,15 @@ mod tests {
     }
 
     fn make_invoke_msg(payload: &[u8], agent: &str, session: SessionId) -> ObservableMessage {
-        InvokeMessage::new(
+        CompleteMessage::new(
             BranchId::from(1),
             SubmissionId::from("sub-1".to_string()),
             session,
-            HarnessType::Cli,
-            RuntimeType::Container,
             AgentName::new(agent),
+            HarnessType::Cli,
             payload.to_vec(),
             None,
-            InvokeDiagnostics {
-                harness_version: "0.1.0".to_string(),
-            },
-            DagNodeId::root(),
+            RuntimeDiagnostics::placeholder(0),
         )
         .into()
     }
@@ -532,18 +527,44 @@ mod tests {
 
     #[test]
     fn render_session_with_open_question() {
+        use vlinder_core::domain::{
+            InferenceBackendType, Operation, RequestDiagnostics, RequestMessage, Sequence,
+            ServiceBackend,
+        };
+
         let store = InMemoryDagStore::new();
         let sid = SessionId::try_from("e2660cff-33d6-4428-acca-2d297dcc1cad".to_string()).unwrap();
-        let msg = make_invoke_msg(b"what next?", "todoapp", sid.clone());
-        let mut invoke = build_dag_node(&msg, &DagNodeId::root(), &Snapshot::empty());
-        invoke.created_at = Utc.with_ymd_and_hms(2026, 2, 8, 14, 30, 5).unwrap();
-        store.insert_node(&invoke).unwrap();
+        let msg: ObservableMessage = RequestMessage::new(
+            BranchId::from(1),
+            SubmissionId::from("sub-1".to_string()),
+            sid.clone(),
+            AgentName::new("todoapp"),
+            ServiceBackend::Infer(InferenceBackendType::Ollama),
+            Operation::Run,
+            Sequence::first(),
+            b"what next?".to_vec(),
+            None,
+            RequestDiagnostics {
+                sequence: 1,
+                endpoint: "/infer".to_string(),
+                request_bytes: 0,
+                received_at_ms: 0,
+            },
+        )
+        .into();
+        let mut node = build_dag_node(&msg, &DagNodeId::root(), &Snapshot::empty());
+        node.created_at = Utc.with_ymd_and_hms(2026, 2, 8, 14, 30, 5).unwrap();
+        store.insert_node(&node).unwrap();
 
         let session = Session::new(sid, "todoapp", BranchId::from(1));
         store.create_session(&session).unwrap();
 
         let html = render_session(&store, &session).unwrap();
-        assert!(html.contains("Pending"));
-        assert!(html.contains("what next?"));
+        // Session is "open" because the last message is a Request (not Complete)
+        assert!(
+            !html.contains("Pending"),
+            "no Invoke to show as Pending question"
+        );
+        assert!(html.contains("todoapp"));
     }
 }

@@ -448,10 +448,13 @@ impl DagStore for InMemoryDagStore {
             .into_iter()
             .map(|(session_id, mut nodes)| {
                 nodes.sort_by(|a, b| a.created_at.cmp(&b.created_at));
-                let agent_name = nodes
+                // Prefer Invoke for agent name (v2 path), fall back to first
+                // Complete or any node (v1 sessions may not have an Invoke node).
+                let invoke_node = nodes
                     .iter()
-                    .find(|n| n.message_type() == MessageType::Invoke)
-                    .map(|n| match n.message_ref() {
+                    .find(|n| n.message_type() == MessageType::Invoke);
+                let agent_name = if let Some(n) = invoke_node {
+                    match n.message_ref() {
                         MessageRef::V2(key, _) => {
                             let super::DataMessageKind::Invoke { agent, .. } = &key.kind;
                             agent.to_string()
@@ -460,8 +463,21 @@ impl DagStore for InMemoryDagStore {
                             let (_from, to) = m.sender_receiver();
                             to
                         }
-                    })
-                    .unwrap_or_default();
+                    }
+                } else {
+                    // No invoke node — extract agent from the first Complete
+                    nodes
+                        .iter()
+                        .find(|n| n.message_type() == MessageType::Complete)
+                        .and_then(|n| match n.message_ref() {
+                            MessageRef::V1(m) => {
+                                let (from, _to) = m.sender_receiver();
+                                Some(from)
+                            }
+                            MessageRef::V2(..) => None,
+                        })
+                        .unwrap_or_default()
+                };
                 let started_at = nodes.first().map(|n| n.created_at).unwrap_or_default();
                 let message_count = nodes
                     .iter()

@@ -10,7 +10,7 @@
 //! 3. Wait for agent to be ready on localhost
 //! 4. Enter Lambda Runtime API loop:
 //!    a. GET /runtime/invocation/next (blocks until Lambda dispatches)
-//!    b. Deserialize `InvokeMessage` from body
+//!    b. Deserialize `LambdaInvokePayload` from body
 //!    c. Start `ProviderServer`, POST payload to agent
 //!    d. Build complete message with diagnostics and state
 //!    e. Send complete to NATS
@@ -233,7 +233,7 @@ fn runtime_api_loop(
 
 /// Handle a single Lambda invocation.
 ///
-/// The invocation body is a JSON-serialized `InvokeMessage` (sent by the daemon).
+/// The invocation body is a JSON-serialized `LambdaInvokePayload` (sent by the daemon).
 /// We deserialize it, start a `ProviderServer`, POST the payload to the agent,
 /// build diagnostics, send complete to NATS, and return the agent's output.
 fn handle_invocation(

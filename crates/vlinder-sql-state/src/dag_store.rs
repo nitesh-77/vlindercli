@@ -653,9 +653,8 @@ mod tests {
     use vlinder_core::domain::workers::dag::build_dag_node;
     use vlinder_core::domain::{
         AgentName, BranchId, CompleteMessage, DelegateDiagnostics, DelegateMessage, HarnessType,
-        InferenceBackendType, InvokeDiagnostics, InvokeMessage, Nonce, Operation,
-        RequestDiagnostics, RequestMessage, RuntimeDiagnostics, RuntimeType, Sequence,
-        ServiceBackend, Snapshot, SubmissionId,
+        InferenceBackendType, Nonce, Operation, RequestDiagnostics, RequestMessage,
+        RuntimeDiagnostics, Sequence, ServiceBackend, Snapshot, SubmissionId,
     };
 
     fn test_store() -> SqliteDagStore {
@@ -672,19 +671,15 @@ mod tests {
     }
 
     fn make_invoke(payload: &[u8], state: Option<String>) -> ObservableMessage {
-        InvokeMessage::new(
+        CompleteMessage::new(
             BranchId::from(1),
             sub(),
             sess(),
-            HarnessType::Cli,
-            RuntimeType::Container,
             AgentName::new("agent-a"),
+            HarnessType::Cli,
             payload.to_vec(),
             state,
-            InvokeDiagnostics {
-                harness_version: "0.1.0".to_string(),
-            },
-            DagNodeId::root(),
+            RuntimeDiagnostics::placeholder(0),
         )
         .into()
     }
@@ -852,36 +847,28 @@ mod tests {
         let sess2 =
             SessionId::try_from("e2660cff-33d6-4428-acca-2d297dcc1cad".to_string()).unwrap();
 
-        let msg_a: ObservableMessage = InvokeMessage::new(
+        let msg_a: ObservableMessage = CompleteMessage::new(
             BranchId::from(1),
             sub(),
             sess1.clone(),
-            HarnessType::Cli,
-            RuntimeType::Container,
             AgentName::new("agent-a"),
+            HarnessType::Cli,
             b"a".to_vec(),
             None,
-            InvokeDiagnostics {
-                harness_version: "0.1.0".to_string(),
-            },
-            DagNodeId::root(),
+            RuntimeDiagnostics::placeholder(0),
         )
         .into();
         let node_a = build_dag_node(&msg_a, &DagNodeId::root(), &Snapshot::empty());
 
-        let msg_b: ObservableMessage = InvokeMessage::new(
+        let msg_b: ObservableMessage = CompleteMessage::new(
             BranchId::from(1),
             sub(),
             sess2.clone(),
-            HarnessType::Cli,
-            RuntimeType::Container,
             AgentName::new("agent-b"),
+            HarnessType::Cli,
             b"b".to_vec(),
             None,
-            InvokeDiagnostics {
-                harness_version: "0.1.0".to_string(),
-            },
-            DagNodeId::root(),
+            RuntimeDiagnostics::placeholder(0),
         )
         .into();
         let node_b = build_dag_node(&msg_b, &DagNodeId::root(), &Snapshot::empty());
@@ -984,20 +971,20 @@ mod tests {
     fn latest_node_on_branch_filters_by_message_type() {
         let store = test_store();
 
-        let invoke = make_invoke(b"question", None);
-        let node1 = build_dag_node(&invoke, &DagNodeId::root(), &Snapshot::empty());
+        let request = make_request(b"question");
+        let node1 = build_dag_node(&request, &DagNodeId::root(), &Snapshot::empty());
         store.insert_node(&node1).unwrap();
 
         let complete = make_complete(b"answer", None);
         let node2 = build_dag_node(&complete, &node1.id, &Snapshot::empty());
         store.insert_node(&node2).unwrap();
 
-        // Filter for Invoke — should return node1, not node2
-        let latest_invoke = store
-            .latest_node_on_branch(BranchId::from(1), Some(MessageType::Invoke))
+        // Filter for Request — should return node1, not node2
+        let latest_request = store
+            .latest_node_on_branch(BranchId::from(1), Some(MessageType::Request))
             .unwrap()
             .unwrap();
-        assert_eq!(latest_invoke.id, node1.id);
+        assert_eq!(latest_request.id, node1.id);
 
         // Filter for Complete — should return node2
         let latest_complete = store

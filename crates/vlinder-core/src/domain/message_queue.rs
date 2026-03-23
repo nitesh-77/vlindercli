@@ -1,7 +1,7 @@
 //! Message queue trait definition (ADR 044).
 //!
 //! Typed message methods for send and receive:
-//! - `send_invoke()` / `receive_invoke()`: Harness → Runtime
+//! - `send_invoke_v2()` / `receive_invoke_v2()`: Harness → Runtime (ADR 121)
 //! - `send_request()` / `receive_request()`: Runtime → Service
 //! - `send_response()` / `receive_response()`: Service → Runtime
 //! - `send_complete()` / `receive_complete()`: Runtime → Harness
@@ -11,8 +11,8 @@
 
 use super::{
     AgentName, CompleteMessage, DataRoutingKey, DelegateMessage, ForkMessage, HarnessType,
-    InvokeMessage, InvokeMessageV2, Operation, PromoteMessage, RepairMessage, RequestMessage,
-    ResourceId, ResponseMessage, RoutingKey, ServiceBackend, SubmissionId,
+    InvokeMessageV2, Operation, PromoteMessage, RepairMessage, RequestMessage, ResourceId,
+    ResponseMessage, RoutingKey, ServiceBackend, SubmissionId,
 };
 use std::fmt;
 
@@ -24,16 +24,7 @@ pub type Acknowledgement = Box<dyn FnOnce() -> Result<(), QueueError> + Send>;
 /// A message queue for sending and receiving typed messages (ADR 044).
 pub trait MessageQueue {
     // -------------------------------------------------------------------------
-    // Typed message methods (ADR 044)
-    // -------------------------------------------------------------------------
-
-    /// Send an `InvokeMessage` (Harness → Runtime).
-    ///
-    /// Implementation determines routing from message dimensions.
-    fn send_invoke(&self, msg: InvokeMessage) -> Result<(), QueueError>;
-
-    // -------------------------------------------------------------------------
-    // Data-plane invoke (ADR 121)
+    // Invoke (ADR 121 — data plane)
     // -------------------------------------------------------------------------
 
     /// Send an invoke on the data plane (ADR 121).
@@ -68,14 +59,6 @@ pub trait MessageQueue {
     // -------------------------------------------------------------------------
     // Typed receive methods (ADR 044)
     // -------------------------------------------------------------------------
-
-    /// Receive an `InvokeMessage` for a specific agent.
-    ///
-    /// Returns the typed message with all dimensions intact.
-    fn receive_invoke(
-        &self,
-        agent: &AgentName,
-    ) -> Result<(InvokeMessage, Acknowledgement), QueueError>;
 
     /// Receive a `RequestMessage` for a service-backend/operation pair.
     ///
@@ -206,25 +189,13 @@ pub trait MessageQueue {
             || self.receive_complete(&submission, harness),
         )
     }
-
-    /// Send an invocation and block until the agent completes.
-    ///
-    /// Used by the harness to run an agent to completion.
-    fn run_agent(&self, msg: InvokeMessage) -> Result<CompleteMessage, QueueError> {
-        let submission = msg.submission.clone();
-        let harness = msg.harness;
-        send_and_wait(
-            || self.send_invoke(msg),
-            || self.receive_complete(&submission, harness),
-        )
-    }
 }
 
 // --- Request-reply internals ---
 
 /// Send a message and poll until the correlated reply arrives (ADR 092).
 ///
-/// Single implementation behind `call_service()` and `run_agent()`.
+/// Single implementation behind `call_service()` and `repair_agent()`.
 fn send_and_wait<T>(
     send: impl FnOnce() -> Result<(), QueueError>,
     receive: impl Fn() -> Result<(T, Acknowledgement), QueueError>,

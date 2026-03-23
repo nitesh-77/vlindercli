@@ -12,7 +12,7 @@ use super::PROTOCOL_VERSION;
 /// Session start message: CLI → Platform
 ///
 /// Creates a new conversation session. The session must exist in the store
-/// before any `InvokeMessage` references it (FK: `dag_nodes.session_id` → sessions.id).
+/// before any invoke message references it (FK: `dag_nodes.session_id` → sessions.id).
 #[derive(Clone, Debug)]
 pub struct SessionStartMessage {
     pub id: MessageId,

@@ -14,8 +14,8 @@ use chrono::Utc;
 use crate::domain::workers::dag::build_dag_node;
 use crate::domain::{
     hash_dag_node, Acknowledgement, CompleteMessage, DagNode, DagNodeId, DagStore, DataRoutingKey,
-    DelegateMessage, ForkMessage, Instance, InvokeMessage, InvokeMessageV2, MessageQueue,
-    MessageType, ObservableMessage, ObservableMessageV2, PromoteMessage, QueueError, RepairMessage,
+    DelegateMessage, ForkMessage, Instance, InvokeMessageV2, MessageQueue, MessageType,
+    ObservableMessage, ObservableMessageV2, PromoteMessage, QueueError, RepairMessage,
     RequestMessage, ResponseMessage, Snapshot, StateHash, SubmissionId,
 };
 
@@ -44,9 +44,8 @@ impl RecordingQueue {
     fn record(&self, observable: &ObservableMessage) {
         let branch_id = *observable.branch();
 
-        // Explicit dag_parent on Invoke/Fork overrides the latest node on the timeline.
+        // Explicit dag_parent on Fork overrides the latest node on the timeline.
         let dag_parent_override: Option<DagNodeId> = match observable {
-            ObservableMessage::Invoke(m) if !m.dag_parent.is_empty() => Some(m.dag_parent.clone()),
             ObservableMessage::Fork(m) => Some(m.fork_point.clone()),
             _ => None,
         };
@@ -159,11 +158,6 @@ impl MessageQueue for RecordingQueue {
     // Send methods — record DAG node, then forward
     // -------------------------------------------------------------------------
 
-    fn send_invoke(&self, msg: InvokeMessage) -> Result<(), QueueError> {
-        self.record(&msg.clone().into());
-        self.inner.send_invoke(msg)
-    }
-
     fn send_invoke_v2(&self, key: DataRoutingKey, msg: InvokeMessageV2) -> Result<(), QueueError> {
         self.record_v2(&key, &msg);
         self.inner.send_invoke_v2(key, msg)
@@ -208,13 +202,6 @@ impl MessageQueue for RecordingQueue {
     // -------------------------------------------------------------------------
     // Receive methods — delegate straight through
     // -------------------------------------------------------------------------
-
-    fn receive_invoke(
-        &self,
-        agent: &crate::domain::AgentName,
-    ) -> Result<(InvokeMessage, Acknowledgement), QueueError> {
-        self.inner.receive_invoke(agent)
-    }
 
     fn receive_request(
         &self,
@@ -382,10 +369,10 @@ impl MessageQueue for RecordingQueue {
 mod tests {
     use super::*;
     use crate::domain::{
-        AgentName, BranchId, DagNode, DelegateDiagnostics, HarnessType, InMemoryDagStore,
-        InferenceBackendType, InvokeDiagnostics, MessageType, Nonce, Operation, RequestDiagnostics,
-        RuntimeDiagnostics, RuntimeType, Sequence, ServiceBackend, ServiceDiagnostics, SessionId,
-        SubmissionId,
+        AgentName, BranchId, DagNode, DataMessageKind, DataRoutingKey, DelegateDiagnostics,
+        HarnessType, InMemoryDagStore, InferenceBackendType, InvokeDiagnostics, InvokeMessageV2,
+        MessageId, MessageType, Nonce, Operation, RequestDiagnostics, RuntimeDiagnostics,
+        RuntimeType, Sequence, ServiceBackend, ServiceDiagnostics, SessionId, SubmissionId,
     };
     use crate::queue::InMemoryQueue;
 
@@ -413,21 +400,27 @@ mod tests {
         AgentName::new("echo")
     }
 
-    fn test_invoke() -> InvokeMessage {
-        InvokeMessage::new(
-            BranchId::from(1),
-            test_submission(),
-            test_session(),
-            HarnessType::Cli,
-            RuntimeType::Container,
-            test_agent_id(),
-            b"hello".to_vec(),
-            None,
-            InvokeDiagnostics {
+    fn test_invoke() -> (DataRoutingKey, InvokeMessageV2) {
+        let key = DataRoutingKey {
+            session: test_session(),
+            branch: BranchId::from(1),
+            submission: test_submission(),
+            kind: DataMessageKind::Invoke {
+                harness: HarnessType::Cli,
+                runtime: RuntimeType::Container,
+                agent: test_agent_id(),
+            },
+        };
+        let msg = InvokeMessageV2 {
+            id: MessageId::new(),
+            state: None,
+            diagnostics: InvokeDiagnostics {
                 harness_version: "0.1.0".to_string(),
             },
-            DagNodeId::root(),
-        )
+            dag_parent: DagNodeId::root(),
+            payload: b"hello".to_vec(),
+        };
+        (key, msg)
     }
 
     fn test_request() -> RequestMessage {
@@ -492,10 +485,10 @@ mod tests {
         let store = test_store();
         let queue = test_queue(Arc::clone(&store));
 
-        let msg = test_invoke();
-        let sid = msg.session.clone();
+        let (key, msg) = test_invoke();
+        let sid = key.session.clone();
 
-        queue.send_invoke(msg).unwrap();
+        queue.send_invoke_v2(key, msg).unwrap();
 
         let nodes = store.get_session_nodes(&sid).unwrap();
         assert_eq!(nodes.len(), 1);
@@ -569,14 +562,14 @@ mod tests {
         let store = test_store();
         let queue = test_queue(Arc::clone(&store));
 
-        let invoke = test_invoke();
-        let sid = invoke.session.clone();
+        let (key, msg) = test_invoke();
+        let sid = key.session.clone();
 
         let mut request = test_request();
         // Use same session
         request.session = sid.clone();
 
-        queue.send_invoke(invoke).unwrap();
+        queue.send_invoke_v2(key, msg).unwrap();
         queue.send_request(request).unwrap();
 
         let nodes = store.get_session_nodes(&sid).unwrap();
@@ -597,16 +590,16 @@ mod tests {
         let ses_bbb =
             SessionId::try_from("7897b0a7-937b-4457-87c3-07c4cab30c55".to_string()).unwrap();
 
-        let mut invoke1 = test_invoke();
-        invoke1.session = ses_aaa.clone();
-        invoke1.payload = b"hello-aaa".to_vec();
+        let (mut key1, mut msg1) = test_invoke();
+        key1.session = ses_aaa.clone();
+        msg1.payload = b"hello-aaa".to_vec();
 
-        let mut invoke2 = test_invoke();
-        invoke2.session = ses_bbb.clone();
-        invoke2.payload = b"hello-bbb".to_vec();
+        let (mut key2, mut msg2) = test_invoke();
+        key2.session = ses_bbb.clone();
+        msg2.payload = b"hello-bbb".to_vec();
 
-        queue.send_invoke(invoke1).unwrap();
-        queue.send_invoke(invoke2).unwrap();
+        queue.send_invoke_v2(key1, msg1).unwrap();
+        queue.send_invoke_v2(key2, msg2).unwrap();
 
         let nodes1 = store.get_session_nodes(&ses_aaa).unwrap();
         let nodes2 = store.get_session_nodes(&ses_bbb).unwrap();
@@ -628,11 +621,11 @@ mod tests {
         );
 
         // Send a message through the inner queue's trait method
-        let msg = test_invoke();
-        inner.send_invoke(msg).unwrap();
+        let (key, msg) = test_invoke();
+        inner.send_invoke_v2(key, msg).unwrap();
 
         // Receive through the recording queue — should delegate to inner
-        let result = queue.receive_invoke(&test_agent_id());
+        let result = queue.receive_invoke_v2(&test_agent_id());
         assert!(result.is_ok());
     }
 
@@ -731,7 +724,8 @@ mod tests {
         let queue = RecordingQueue::new(inner, store);
 
         // Send should still succeed despite store failure
-        let result = queue.send_invoke(test_invoke());
+        let (key, msg) = test_invoke();
+        let result = queue.send_invoke_v2(key, msg);
         assert!(result.is_ok());
     }
 
@@ -741,18 +735,18 @@ mod tests {
         let queue = test_queue(Arc::clone(&store));
 
         // Send a normal invoke first to populate the chain
-        let invoke1 = test_invoke();
-        let sid = invoke1.session.clone();
-        queue.send_invoke(invoke1).unwrap();
+        let (key1, msg1) = test_invoke();
+        let sid = key1.session.clone();
+        queue.send_invoke_v2(key1, msg1).unwrap();
 
         let nodes = store.get_session_nodes(&sid).unwrap();
         assert_eq!(nodes.len(), 1);
         let first_id = nodes[0].id.clone();
 
         // Send a second invoke (same session) — normally chains off first
-        let mut invoke2 = test_invoke();
-        invoke2.payload = b"second".to_vec();
-        queue.send_invoke(invoke2).unwrap();
+        let (key2, mut msg2) = test_invoke();
+        msg2.payload = b"second".to_vec();
+        queue.send_invoke_v2(key2, msg2).unwrap();
 
         let nodes = store.get_session_nodes(&sid).unwrap();
         assert_eq!(nodes.len(), 2);
@@ -760,10 +754,10 @@ mod tests {
 
         // Send a third invoke with explicit dag_parent pointing to first node,
         // bypassing the chain cache (which would point to second node)
-        let mut invoke3 = test_invoke();
-        invoke3.payload = b"forked".to_vec();
-        invoke3.dag_parent = first_id.clone();
-        queue.send_invoke(invoke3).unwrap();
+        let (key3, mut msg3) = test_invoke();
+        msg3.payload = b"forked".to_vec();
+        msg3.dag_parent = first_id.clone();
+        queue.send_invoke_v2(key3, msg3).unwrap();
 
         let nodes = store.get_session_nodes(&sid).unwrap();
         assert_eq!(nodes.len(), 3);

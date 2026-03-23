@@ -13,11 +13,11 @@ use super::PROTOCOL_VERSION;
 /// to the agent's checkpoint handler. The agent does not know it's a repair —
 /// the checkpoint handler processes the response identically.
 ///
-/// Unlike `InvokeMessage`, `dag_parent` and `checkpoint` are always required.
+/// Unlike invoke messages, `dag_parent` and `checkpoint` are always required.
 /// Unlike `RequestMessage`, there are no diagnostics (the agent didn't initiate
 /// this call).
 ///
-/// Reply type: `CompleteMessage` (same as `InvokeMessage`).
+/// Reply type: `CompleteMessage` (same as invoke).
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RepairMessage {
     pub id: MessageId,

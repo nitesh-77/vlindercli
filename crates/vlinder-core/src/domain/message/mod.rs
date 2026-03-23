@@ -1,7 +1,7 @@
 //! Message types for queue communication (ADR 044).
 //!
 //! Typed messages with explicit fields for observability:
-//! - `InvokeMessage`: Harness → Runtime (start a submission)
+//! - `InvokeMessageV2`: Harness → Runtime (start a submission, ADR 121)
 //! - `RequestMessage`: Runtime → Service (agent calls a service)
 //! - `ResponseMessage`: Service → Runtime (service replies)
 //! - `CompleteMessage`: Runtime → Harness (submission finished)
@@ -31,7 +31,7 @@ pub use identity::{
     BranchId, DagNodeId, HarnessType, Instance, MessageId, Sequence, SequenceCounter, SessionId,
     StateHash, SubmissionId,
 };
-pub use invoke::{InvokeMessage, InvokeMessageV2};
+pub use invoke::InvokeMessageV2;
 pub use observable::{MessageDetails, ObservableMessage, ObservableMessageHeaders};
 pub use observable_v2::ObservableMessageV2;
 pub use promote::PromoteMessage;
@@ -57,15 +57,12 @@ pub trait ExpectsReply {
 
 #[cfg(test)]
 mod tests {
-    use super::super::diagnostics::{
-        DelegateDiagnostics, InvokeDiagnostics, RequestDiagnostics, RuntimeDiagnostics,
-    };
+    use super::super::diagnostics::{DelegateDiagnostics, RequestDiagnostics, RuntimeDiagnostics};
     use super::super::operation::Operation;
     use super::super::routing_key::{
         AgentName, InferenceBackendType, Nonce, RoutingKey, RoutingKind, ServiceBackend,
     };
     use super::super::storage::ObjectStorageType;
-    use super::super::RuntimeType;
     use super::*;
 
     fn test_submission() -> SubmissionId {
@@ -74,12 +71,6 @@ mod tests {
 
     fn test_agent_id() -> AgentName {
         AgentName::new("echo-agent")
-    }
-
-    fn test_invoke_diag() -> InvokeDiagnostics {
-        InvokeDiagnostics {
-            harness_version: "0.1.0".to_string(),
-        }
     }
 
     fn test_request_diag() -> RequestDiagnostics {
@@ -92,33 +83,6 @@ mod tests {
     }
 
     // --- Typed message tests ---
-
-    #[test]
-    fn invoke_message_creation() {
-        let submission = test_submission();
-        let session = SessionId::new();
-        let agent_id = test_agent_id();
-        let msg = InvokeMessage::new(
-            BranchId::from(1),
-            submission.clone(),
-            session.clone(),
-            HarnessType::Cli,
-            RuntimeType::Container,
-            agent_id.clone(),
-            b"hello".to_vec(),
-            None,
-            test_invoke_diag(),
-            DagNodeId::root(),
-        );
-
-        assert_eq!(msg.submission, submission);
-        assert_eq!(msg.session, session);
-        assert_eq!(msg.harness, HarnessType::Cli);
-        assert_eq!(msg.runtime, RuntimeType::Container);
-        assert_eq!(msg.agent_id, agent_id);
-        assert_eq!(msg.payload, b"hello");
-        assert_eq!(msg.state, None);
-    }
 
     #[test]
     fn request_message_creation() {
@@ -202,30 +166,6 @@ mod tests {
     // --- ExpectsReply trait tests ---
 
     #[test]
-    fn invoke_create_reply_returns_complete() {
-        let invoke = InvokeMessage::new(
-            BranchId::from(1),
-            test_submission(),
-            SessionId::new(),
-            HarnessType::Cli,
-            RuntimeType::Container,
-            test_agent_id(),
-            b"input".to_vec(),
-            None,
-            test_invoke_diag(),
-            DagNodeId::root(),
-        );
-
-        let complete: CompleteMessage = invoke.create_reply(b"output".to_vec());
-
-        assert_eq!(complete.submission, invoke.submission);
-        assert_eq!(complete.session, invoke.session);
-        assert_eq!(complete.agent_id, invoke.agent_id);
-        assert_eq!(complete.harness, invoke.harness);
-        assert_eq!(complete.payload, b"output");
-    }
-
-    #[test]
     fn request_create_reply_returns_response() {
         let request = RequestMessage::new(
             BranchId::from(1),
@@ -255,27 +195,25 @@ mod tests {
     // --- ObservableMessage tests ---
 
     #[test]
-    fn observable_message_from_invoke() {
-        let invoke = InvokeMessage::new(
+    fn observable_message_from_complete() {
+        let complete = CompleteMessage::new(
             BranchId::from(1),
             test_submission(),
             SessionId::new(),
-            HarnessType::Cli,
-            RuntimeType::Container,
             test_agent_id(),
+            HarnessType::Cli,
             b"test".to_vec(),
             None,
-            test_invoke_diag(),
-            DagNodeId::root(),
+            RuntimeDiagnostics::placeholder(0),
         );
-        let id = invoke.id.clone();
-        let submission = invoke.submission.clone();
+        let id = complete.id.clone();
+        let submission = complete.submission.clone();
 
-        let observable: ObservableMessage = invoke.into();
+        let observable: ObservableMessage = complete.into();
 
         assert_eq!(observable.id(), &id);
         assert_eq!(observable.submission(), &submission);
-        assert!(matches!(observable, ObservableMessage::Invoke(_)));
+        assert!(matches!(observable, ObservableMessage::Complete(_)));
     }
 
     #[test]
@@ -304,20 +242,18 @@ mod tests {
     fn observable_message_common_accessors() {
         let submission = test_submission();
         let session = SessionId::new();
-        let invoke = InvokeMessage::new(
+        let complete = CompleteMessage::new(
             BranchId::from(1),
             submission.clone(),
             session.clone(),
-            HarnessType::Cli,
-            RuntimeType::Container,
             test_agent_id(),
+            HarnessType::Cli,
             b"payload".to_vec(),
             None,
-            test_invoke_diag(),
-            DagNodeId::root(),
+            RuntimeDiagnostics::placeholder(0),
         );
 
-        let observable: ObservableMessage = invoke.into();
+        let observable: ObservableMessage = complete.into();
 
         assert_eq!(observable.submission(), &submission);
         assert_eq!(observable.session(), &session);
@@ -325,37 +261,6 @@ mod tests {
     }
 
     // --- Routing key tests (ADR 096 §4) ---
-
-    #[test]
-    fn invoke_routing_key() {
-        let msg = InvokeMessage::new(
-            BranchId::from(1),
-            test_submission(),
-            SessionId::new(),
-            HarnessType::Cli,
-            RuntimeType::Container,
-            test_agent_id(),
-            b"test".to_vec(),
-            None,
-            test_invoke_diag(),
-            DagNodeId::root(),
-        );
-
-        let key = msg.routing_key();
-        assert_eq!(
-            key,
-            RoutingKey {
-                session: msg.session.clone(),
-                branch: msg.branch,
-                submission: msg.submission.clone(),
-                kind: RoutingKind::Invoke {
-                    harness: msg.harness,
-                    runtime: msg.runtime,
-                    agent: msg.agent_id.clone(),
-                },
-            }
-        );
-    }
 
     #[test]
     fn request_routing_key() {
@@ -567,26 +472,6 @@ mod tests {
     }
 
     #[test]
-    fn routing_key_reply_key_round_trip() {
-        let invoke = InvokeMessage::new(
-            BranchId::from(1),
-            test_submission(),
-            SessionId::new(),
-            HarnessType::Cli,
-            RuntimeType::Container,
-            test_agent_id(),
-            b"input".to_vec(),
-            None,
-            test_invoke_diag(),
-            DagNodeId::root(),
-        );
-        let complete = invoke.create_reply(b"output".to_vec());
-
-        let reply_key = invoke.routing_key().reply_key(None).unwrap();
-        assert_eq!(reply_key, complete.routing_key());
-    }
-
-    #[test]
     fn request_reply_key_matches_response_routing_key() {
         let request = RequestMessage::new(
             BranchId::from(1),
@@ -604,43 +489,5 @@ mod tests {
 
         let reply_key = request.routing_key().reply_key(None).unwrap();
         assert_eq!(reply_key, response.routing_key());
-    }
-
-    // --- ObservableMessageHeaders assemble tests ---
-
-    #[test]
-    fn invoke_headers_assemble_produces_invoke_message() {
-        let headers = ObservableMessageHeaders {
-            id: MessageId::from("msg-1".to_string()),
-            protocol_version: "0.1.0".to_string(),
-            state: Some("state-abc".to_string()),
-            routing_key: RoutingKey {
-                session: SessionId::new(),
-                branch: BranchId::from(1),
-                submission: test_submission(),
-                kind: RoutingKind::Invoke {
-                    harness: HarnessType::Cli,
-                    runtime: RuntimeType::Container,
-                    agent: test_agent_id(),
-                },
-            },
-            details: MessageDetails::Invoke {
-                diagnostics: test_invoke_diag(),
-                dag_parent: DagNodeId::root(),
-            },
-        };
-
-        let msg = headers.assemble(b"hello".to_vec());
-
-        assert!(matches!(&msg, ObservableMessage::Invoke(_)));
-        if let ObservableMessage::Invoke(m) = &msg {
-            assert_eq!(m.id, MessageId::from("msg-1".to_string()));
-            assert_eq!(m.harness, HarnessType::Cli);
-            assert_eq!(m.runtime, RuntimeType::Container);
-            assert_eq!(m.agent_id, test_agent_id());
-            assert_eq!(m.payload, b"hello");
-            assert_eq!(m.state, Some("state-abc".to_string()));
-            assert_eq!(m.submission, test_submission());
-        }
     }
 }

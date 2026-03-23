@@ -9,8 +9,9 @@ use std::process::Command;
 use chrono::{DateTime, Utc};
 
 use vlinder_core::domain::{
-    AgentName, BranchId, CompleteMessage, DagNodeId, HarnessType, InvokeDiagnostics, InvokeMessage,
-    ObservableMessage, RuntimeDiagnostics, RuntimeType, SessionId, SubmissionId,
+    AgentName, BranchId, CompleteMessage, DagNodeId, DataMessageKind, DataRoutingKey, HarnessType,
+    InvokeDiagnostics, InvokeMessageV2, MessageId, ObservableMessage, ObservableMessageV2,
+    RuntimeDiagnostics, RuntimeType, SessionId, SubmissionId,
 };
 use vlinder_git_dag::GitDagWorker;
 
@@ -87,30 +88,35 @@ fn test_agent_id() -> AgentName {
     AgentName::new("test-agent")
 }
 
-/// Create an invoke message with the given payload and state.
+/// Create a v2 invoke message for testing.
 pub fn make_invoke(
     session: &str,
     submission: &str,
     payload: &[u8],
     state: Option<String>,
     epoch_secs: i64,
-) -> (ObservableMessage, DateTime<Utc>) {
-    let msg = InvokeMessage::new(
-        BranchId::from(1),
-        SubmissionId::from(submission.to_string()),
-        SessionId::try_from(session.to_string()).unwrap(),
-        HarnessType::Cli,
-        RuntimeType::Container,
-        test_agent_id(),
-        payload.to_vec(),
+) -> (ObservableMessageV2, DateTime<Utc>) {
+    let key = DataRoutingKey {
+        session: SessionId::try_from(session.to_string()).unwrap(),
+        branch: BranchId::from(1),
+        submission: SubmissionId::from(submission.to_string()),
+        kind: DataMessageKind::Invoke {
+            harness: HarnessType::Cli,
+            runtime: RuntimeType::Container,
+            agent: test_agent_id(),
+        },
+    };
+    let msg = InvokeMessageV2 {
+        id: MessageId::new(),
         state,
-        InvokeDiagnostics {
+        diagnostics: InvokeDiagnostics {
             harness_version: "0.1.0".to_string(),
         },
-        DagNodeId::root(),
-    );
+        dag_parent: DagNodeId::root(),
+        payload: payload.to_vec(),
+    };
     let created_at = DateTime::from_timestamp(epoch_secs, 0).unwrap();
-    (ObservableMessage::Invoke(msg), created_at)
+    (ObservableMessageV2::InvokeV2 { key, msg }, created_at)
 }
 
 /// Create a complete message with the given payload and state.

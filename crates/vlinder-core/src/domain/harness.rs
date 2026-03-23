@@ -20,7 +20,7 @@ use crate::domain::{
 pub trait Harness {
     /// Identify which transport submitted the job.
     ///
-    /// Stamped into every `InvokeMessage` and used by the completion
+    /// Stamped into every invoke message and used by the completion
     /// path to route responses back to the correct consumer.
     fn harness_type(&self) -> HarnessType;
 

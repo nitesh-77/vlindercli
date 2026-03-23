@@ -223,24 +223,20 @@ mod tests {
     use chrono::Utc;
     use vlinder_core::domain::workers::dag::build_dag_node;
     use vlinder_core::domain::{
-        AgentName, BranchId, DagNodeId, HarnessType, InvokeDiagnostics, InvokeMessage, RuntimeType,
+        AgentName, BranchId, CompleteMessage, DagNodeId, HarnessType, RuntimeDiagnostics,
         SessionId, Snapshot, SubmissionId,
     };
 
     fn sample_dag_node() -> DagNode {
-        let msg: ObservableMessage = InvokeMessage::new(
+        let msg: ObservableMessage = CompleteMessage::new(
             BranchId::from(1),
             SubmissionId::from("sub-001".to_string()),
             SessionId::new(),
-            HarnessType::Cli,
-            RuntimeType::Container,
             AgentName::new("agent-echo"),
+            HarnessType::Cli,
             b"hello".to_vec(),
             Some("state-hash-abc".to_string()),
-            InvokeDiagnostics {
-                harness_version: "0.1.0".to_string(),
-            },
-            DagNodeId::root(),
+            RuntimeDiagnostics::placeholder(0),
         )
         .into();
         build_dag_node(
@@ -271,19 +267,15 @@ mod tests {
 
     #[test]
     fn dag_node_without_state_round_trips() {
-        let msg: ObservableMessage = InvokeMessage::new(
+        let msg: ObservableMessage = CompleteMessage::new(
             BranchId::from(1),
             SubmissionId::from("sub-001".to_string()),
             SessionId::new(),
-            HarnessType::Cli,
-            RuntimeType::Container,
             AgentName::new("agent-echo"),
+            HarnessType::Cli,
             b"hello".to_vec(),
             None,
-            InvokeDiagnostics {
-                harness_version: "0.1.0".to_string(),
-            },
-            DagNodeId::root(),
+            RuntimeDiagnostics::placeholder(0),
         )
         .into();
         let node = build_dag_node(&msg, &DagNodeId::root(), &Snapshot::empty());
@@ -297,7 +289,7 @@ mod tests {
     #[test]
     fn missing_message_blob_fails() {
         let proto_node = proto::DagNode {
-            message_type: "invoke".to_string(),
+            message_type: "complete".to_string(),
             created_at: Utc::now().to_rfc3339(),
             message_blob: None,
             ..Default::default()
@@ -308,7 +300,7 @@ mod tests {
     #[test]
     fn invalid_created_at_fails() {
         let proto_node = proto::DagNode {
-            message_type: "invoke".to_string(),
+            message_type: "complete".to_string(),
             created_at: "not-a-date".to_string(),
             message_blob: Some("{}".to_string()),
             ..Default::default()

@@ -7,8 +7,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use vlinder_core::domain::{
-    Agent, AgentName, CompleteMessage, DataMessageKind, ExpectsReply, MessageQueue, Registry,
-    ResourceId, Runtime, RuntimeDiagnostics, RuntimeType,
+    Agent, AgentName, CompleteMessage, DataMessageKind, MessageQueue, Registry, ResourceId,
+    Runtime, RuntimeDiagnostics, RuntimeType,
 };
 
 use crate::config::LambdaRuntimeConfig;
@@ -169,7 +169,7 @@ impl LambdaRuntime {
 
     /// Poll queue for invocations and dispatch to Lambda functions.
     ///
-    /// Serializes the full `InvokeMessage` as the Lambda payload. The adapter
+    /// Serializes the `LambdaInvokePayload` (key + `InvokeMessageV2`) as the Lambda payload. The adapter
     /// inside the container deserializes it, runs the `ProviderServer`, and
     /// sends complete to NATS — the daemon only needs to handle invoke-level
     /// failures (Lambda itself couldn't run).
@@ -217,37 +217,6 @@ impl LambdaRuntime {
                             format!("[error] Lambda invoke failed: {e}").into_bytes(),
                             None,
                             RuntimeDiagnostics::placeholder(0),
-                        );
-                        let _ = self.queue.send_complete(complete);
-                    }
-                }
-            } else if let Ok((invoke, ack)) = self.queue.receive_invoke(&agent_id) {
-                let _ = ack();
-                let function_name = format!("vlinder-{name}");
-
-                let json_payload = serde_json::to_vec(&invoke).unwrap_or_else(|_| b"{}".to_vec());
-
-                match self.client.invoke_function(&function_name, &json_payload) {
-                    Ok(_) => {
-                        // Adapter sends complete via NATS — nothing to do here.
-                        tracing::info!(
-                            event = "lambda.invoke_ok",
-                            agent = name.as_str(),
-                            function = function_name.as_str(),
-                            "Lambda invocation succeeded"
-                        );
-                    }
-                    Err(e) => {
-                        // Lambda-level failure — adapter never ran, daemon must
-                        // send error complete so the harness doesn't hang.
-                        tracing::error!(
-                            event = "lambda.invoke_failed",
-                            agent = name.as_str(),
-                            error = %e,
-                            "Lambda invocation failed"
-                        );
-                        let complete = invoke.create_reply(
-                            format!("[error] Lambda invoke failed: {e}").into_bytes(),
                         );
                         let _ = self.queue.send_complete(complete);
                     }
@@ -556,117 +525,6 @@ mod tests {
         let deployed = &runtime.functions["echo"];
         assert!(deployed.role_arn.contains("vlinder-agent-echo"));
         assert!(deployed.function_arn.contains("vlinder-echo"));
-    }
-
-    #[test]
-    fn invoke_dispatches_to_lambda_consumes_from_queue() {
-        use vlinder_core::domain::{
-            BranchId, DagNodeId, HarnessType, InvokeDiagnostics, InvokeMessage, SessionId,
-            SubmissionId,
-        };
-
-        let registry = test_registry();
-        let agent = make_lambda_agent("echo");
-        registry.register_agent(agent).unwrap();
-
-        let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
-        let config = test_config();
-        let mut runtime = LambdaRuntime::with_client(
-            &config,
-            registry,
-            queue.clone(),
-            Box::new(MockLambdaClient::new()),
-        );
-
-        // Deploy first.
-        runtime.tick();
-        assert_eq!(runtime.functions.len(), 1);
-
-        // Enqueue an invoke message.
-        let invoke = InvokeMessage::new(
-            BranchId::from(1),
-            SubmissionId::new(),
-            SessionId::new(),
-            HarnessType::Grpc,
-            RuntimeType::Lambda,
-            AgentName::new("echo"),
-            b"hello lambda".to_vec(),
-            None,
-            InvokeDiagnostics {
-                harness_version: "test".to_string(),
-            },
-            DagNodeId::root(),
-        );
-        queue.send_invoke(invoke).unwrap();
-
-        // Tick again — should dispatch the invocation.
-        runtime.tick();
-
-        // The invoke should be consumed — the adapter sends complete via NATS,
-        // not the daemon. No complete on the queue from daemon side.
-        let agent_id = AgentName::new("echo");
-        assert!(
-            queue.receive_invoke(&agent_id).is_err(),
-            "invoke should have been consumed from the queue"
-        );
-    }
-
-    #[test]
-    fn invoke_failure_sends_error_complete() {
-        use vlinder_core::domain::{
-            BranchId, DagNodeId, HarnessType, InvokeDiagnostics, InvokeMessage, SessionId,
-            SubmissionId,
-        };
-
-        let registry = test_registry();
-        let agent = make_lambda_agent("echo");
-        registry.register_agent(agent).unwrap();
-
-        let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
-        let config = test_config();
-
-        // Use a failing mock client.
-        let mut runtime = LambdaRuntime::with_client(
-            &config,
-            registry,
-            queue.clone(),
-            Box::new(FailingLambdaClient),
-        );
-
-        // Deploy first (create_role/create_function succeed on FailingLambdaClient).
-        runtime.tick();
-        assert_eq!(runtime.functions.len(), 1);
-
-        // Enqueue an invoke message.
-        let invoke = InvokeMessage::new(
-            BranchId::from(1),
-            SubmissionId::new(),
-            SessionId::new(),
-            HarnessType::Grpc,
-            RuntimeType::Lambda,
-            AgentName::new("echo"),
-            b"hello".to_vec(),
-            None,
-            InvokeDiagnostics {
-                harness_version: "test".to_string(),
-            },
-            DagNodeId::root(),
-        );
-        let submission = invoke.submission.clone();
-        queue.send_invoke(invoke).unwrap();
-
-        // Tick — invoke_function fails, so daemon sends error complete.
-        runtime.tick();
-
-        let (complete, ack) = queue
-            .receive_complete(&submission, HarnessType::Grpc)
-            .expect("should receive error complete from daemon");
-        ack().unwrap();
-        let payload_str = String::from_utf8_lossy(&complete.payload);
-        assert!(
-            payload_str.contains("[error]"),
-            "expected error payload, got: {payload_str}"
-        );
     }
 
     #[test]

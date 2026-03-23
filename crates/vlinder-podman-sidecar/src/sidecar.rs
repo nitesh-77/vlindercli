@@ -161,41 +161,6 @@ impl Sidecar {
                         break;
                     }
                 }
-            } else if let Ok((invoke, ack)) = self.dispatch.queue.receive_invoke(&agent_id) {
-                let _ = ack();
-                tracing::info!(
-                    event = "dispatch.started",
-                    sha = %invoke.submission,
-                    session = %invoke.session,
-                    agent = %self.agent_name,
-                    "Dispatching to container"
-                );
-                match dispatch::handle_invoke(
-                    &self.dispatch,
-                    &mut self.health,
-                    invoke.branch,
-                    invoke.submission.clone(),
-                    invoke.session.clone(),
-                    invoke.agent_id.clone(),
-                    invoke.harness,
-                    invoke.payload.clone(),
-                    invoke.state.clone(),
-                    None,
-                ) {
-                    Ok(InvokeOutcome::Done) => {}
-                    Ok(InvokeOutcome::Pending(session)) => {
-                        durable_session = Some(*session);
-                    }
-                    Err(e) => {
-                        tracing::error!(
-                            event = "dispatch.error",
-                            error = %e,
-                            agent = %self.agent_name,
-                            "Dispatch failed"
-                        );
-                        break;
-                    }
-                }
             } else if let Ok((delegate, ack)) = self.dispatch.queue.receive_delegate(&agent_id) {
                 let _ = ack();
                 tracing::info!(

@@ -2,7 +2,7 @@
 
 use crate::domain::{
     Acknowledgement, AgentName, CompleteMessage, DataMessageKind, DataRoutingKey, DelegateMessage,
-    ForkMessage, HarnessType, InvokeMessage, InvokeMessageV2, MessageQueue, ObservableMessage,
+    ForkMessage, HarnessType, InvokeMessageV2, MessageQueue, ObservableMessage,
     ObservableMessageV2, Operation, QueueError, RepairMessage, RequestMessage, ResponseMessage,
     RoutingKey, RoutingKind, ServiceBackend, SubmissionId,
 };
@@ -43,16 +43,6 @@ impl Default for InMemoryQueue {
 }
 
 impl MessageQueue for InMemoryQueue {
-    fn send_invoke(&self, msg: InvokeMessage) -> Result<(), QueueError> {
-        let key = msg.routing_key();
-        let mut typed = self.typed_queues.lock().unwrap();
-        typed
-            .entry(key)
-            .or_default()
-            .push_back(ObservableMessage::Invoke(msg));
-        Ok(())
-    }
-
     fn send_invoke_v2(&self, key: DataRoutingKey, msg: InvokeMessageV2) -> Result<(), QueueError> {
         let v2 = ObservableMessageV2::InvokeV2 {
             key: key.clone(),
@@ -116,32 +106,6 @@ impl MessageQueue for InMemoryQueue {
             .or_default()
             .push_back(ObservableMessage::Complete(msg));
         Ok(())
-    }
-
-    fn receive_invoke(
-        &self,
-        agent: &AgentName,
-    ) -> Result<(InvokeMessage, Acknowledgement), QueueError> {
-        let mut typed = self.typed_queues.lock().unwrap();
-
-        for (key, queue) in typed.iter_mut() {
-            let matches = match key {
-                RoutingKey {
-                    kind: RoutingKind::Invoke { agent: ref a, .. },
-                    ..
-                } => a == agent,
-                _ => false,
-            };
-            if matches {
-                if let Some(ObservableMessage::Invoke(msg)) = queue.front() {
-                    let msg = msg.clone();
-                    queue.pop_front();
-                    return Ok((msg, Box::new(|| Ok(()))));
-                }
-            }
-        }
-
-        Err(QueueError::Timeout)
     }
 
     fn receive_request(
@@ -357,7 +321,7 @@ impl MessageQueue for InMemoryQueue {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{BranchId, DagNodeId, Sequence, SessionId, SubmissionId};
+    use crate::domain::{BranchId, DagNodeId, MessageId, Sequence, SessionId, SubmissionId};
     use crate::domain::{
         InferenceBackendType, Nonce, ObjectStorageType, Operation, RoutingKind, RuntimeType,
         VectorStorageType,
@@ -379,30 +343,41 @@ mod tests {
     fn receive_invoke_returns_typed_message() {
         let queue = InMemoryQueue::new();
 
-        let invoke = InvokeMessage::new(
-            BranchId::from(1),
-            test_submission(),
-            SessionId::new(),
-            HarnessType::Cli,
-            RuntimeType::Container,
-            test_agent_id(),
-            b"hello".to_vec(),
-            None,
-            InvokeDiagnostics {
+        let key = DataRoutingKey {
+            session: SessionId::new(),
+            branch: BranchId::from(1),
+            submission: test_submission(),
+            kind: DataMessageKind::Invoke {
+                harness: HarnessType::Cli,
+                runtime: RuntimeType::Container,
+                agent: test_agent_id(),
+            },
+        };
+        let msg = InvokeMessageV2 {
+            id: MessageId::from("msg-invoke-1".to_string()),
+            state: None,
+            diagnostics: InvokeDiagnostics {
                 harness_version: String::new(),
             },
-            DagNodeId::root(),
-        );
-        let original_id = invoke.id.clone();
+            dag_parent: DagNodeId::root(),
+            payload: b"hello".to_vec(),
+        };
+        let original_id = msg.id.clone();
 
-        queue.send_invoke(invoke).unwrap();
+        queue.send_invoke_v2(key, msg).unwrap();
 
         // Receive typed message
-        let (received, ack) = queue.receive_invoke(&test_agent_id()).unwrap();
+        let (recv_key, received, ack) = queue.receive_invoke_v2(&test_agent_id()).unwrap();
 
         assert_eq!(received.id, original_id);
-        assert_eq!(received.harness, HarnessType::Cli);
-        assert_eq!(received.runtime, RuntimeType::Container);
+        assert!(matches!(
+            recv_key.kind,
+            DataMessageKind::Invoke {
+                harness: HarnessType::Cli,
+                runtime: RuntimeType::Container,
+                ..
+            }
+        ));
         assert_eq!(received.payload, b"hello");
 
         ack().unwrap();
@@ -415,29 +390,36 @@ mod tests {
         let submission = test_submission();
         let agent_id = test_agent_id();
 
-        let invoke = InvokeMessage::new(
-            BranchId::from(1),
-            submission.clone(),
-            SessionId::new(),
-            HarnessType::Web,
-            RuntimeType::Container,
-            agent_id.clone(),
-            b"input".to_vec(),
-            None,
-            InvokeDiagnostics {
+        let key = DataRoutingKey {
+            session: SessionId::new(),
+            branch: BranchId::from(1),
+            submission: submission.clone(),
+            kind: DataMessageKind::Invoke {
+                harness: HarnessType::Web,
+                runtime: RuntimeType::Container,
+                agent: agent_id.clone(),
+            },
+        };
+        let msg = InvokeMessageV2 {
+            id: MessageId::from("msg-invoke-2".to_string()),
+            state: None,
+            diagnostics: InvokeDiagnostics {
                 harness_version: String::new(),
             },
-            DagNodeId::root(),
-        );
+            dag_parent: DagNodeId::root(),
+            payload: b"input".to_vec(),
+        };
 
-        queue.send_invoke(invoke).unwrap();
+        queue.send_invoke_v2(key, msg).unwrap();
 
-        let (received, _) = queue.receive_invoke(&test_agent_id()).unwrap();
+        let (recv_key, _, _) = queue.receive_invoke_v2(&test_agent_id()).unwrap();
 
         // All dimensions preserved for reply construction
-        assert_eq!(received.submission, submission);
-        assert_eq!(received.agent_id, agent_id);
-        assert_eq!(received.harness, HarnessType::Web);
+        assert_eq!(recv_key.submission, submission);
+        assert!(matches!(
+            recv_key.kind,
+            DataMessageKind::Invoke { ref agent, harness: HarnessType::Web, .. } if *agent == agent_id
+        ));
     }
 
     #[test]
@@ -758,37 +740,36 @@ mod tests {
     }
 
     #[test]
-    fn invoke_v2_does_not_interfere_with_v1() {
+    fn multiple_invoke_v2_messages_delivered_in_order() {
         let queue = InMemoryQueue::new();
 
-        // Send a v1 invoke
-        let v1 = InvokeMessage::new(
-            BranchId::from(1),
-            test_submission(),
-            SessionId::new(),
-            HarnessType::Cli,
-            RuntimeType::Container,
-            test_agent_id(),
-            b"v1-payload".to_vec(),
-            None,
-            InvokeDiagnostics {
+        let key = test_data_routing_key();
+        let msg1 = InvokeMessageV2 {
+            id: crate::domain::MessageId::from("msg-first".to_string()),
+            state: None,
+            diagnostics: InvokeDiagnostics {
                 harness_version: String::new(),
             },
-            crate::domain::DagNodeId::root(),
-        );
-        queue.send_invoke(v1).unwrap();
+            dag_parent: crate::domain::DagNodeId::root(),
+            payload: b"first".to_vec(),
+        };
+        let msg2 = InvokeMessageV2 {
+            id: crate::domain::MessageId::from("msg-second".to_string()),
+            state: None,
+            diagnostics: InvokeDiagnostics {
+                harness_version: String::new(),
+            },
+            dag_parent: crate::domain::DagNodeId::root(),
+            payload: b"second".to_vec(),
+        };
 
-        // Send a v2 invoke
-        let key = test_data_routing_key();
-        let v2 = test_invoke_v2();
-        queue.send_invoke_v2(key, v2.clone()).unwrap();
+        queue.send_invoke_v2(key.clone(), msg1.clone()).unwrap();
+        queue.send_invoke_v2(key, msg2.clone()).unwrap();
 
-        // v2 receive only gets v2
-        let (_, recv_v2, _) = queue.receive_invoke_v2(&test_agent_id()).unwrap();
-        assert_eq!(recv_v2, v2);
+        let (_, recv1, _) = queue.receive_invoke_v2(&test_agent_id()).unwrap();
+        assert_eq!(recv1, msg1);
 
-        // v1 receive only gets v1
-        let (recv_v1, _) = queue.receive_invoke(&test_agent_id()).unwrap();
-        assert_eq!(recv_v1.payload, b"v1-payload");
+        let (_, recv2, _) = queue.receive_invoke_v2(&test_agent_id()).unwrap();
+        assert_eq!(recv2, msg2);
     }
 }

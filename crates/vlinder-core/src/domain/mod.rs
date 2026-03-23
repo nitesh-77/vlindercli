@@ -62,7 +62,7 @@ pub use diagnostics::{
 };
 pub use message::{
     BranchId, CompleteMessage, DagNodeId, DelegateMessage, ExpectsReply, ForkMessage, HarnessType,
-    Instance, InvokeMessage, InvokeMessageV2, MessageDetails, MessageId, ObservableMessage,
+    Instance, InvokeMessageV2, MessageDetails, MessageId, ObservableMessage,
     ObservableMessageHeaders, ObservableMessageV2, PromoteMessage, RepairMessage, RequestMessage,
     ResponseMessage, Sequence, SequenceCounter, SessionId, SessionStartMessage, StateHash,
     SubmissionId, PROTOCOL_VERSION,

@@ -9,8 +9,8 @@
 #![cfg(feature = "test-support")]
 
 use vlinder_core::domain::{
-    Agent, AgentName, BranchId, HarnessType, InvokeDiagnostics, InvokeMessage, Runtime,
-    RuntimeType, SessionId, SubmissionId,
+    Agent, AgentName, BranchId, DataMessageKind, DataRoutingKey, HarnessType, InvokeDiagnostics,
+    InvokeMessageV2, MessageId, Runtime, RuntimeType, SessionId, SubmissionId,
 };
 use vlinder_podman_runtime::{ContainerRuntime, PodmanRuntimeConfig};
 use vlinderd::config::Config;
@@ -50,25 +50,31 @@ fn container_runtime_executes_echo_agent() {
     )
     .unwrap();
     registry.register_agent(agent).unwrap();
-    let agent_id = AgentId::new("echo-container");
+    let agent_id = AgentName::new("echo-container");
 
-    // Send InvokeMessage
+    // Send InvokeMessageV2
     let submission = SubmissionId::new();
-    let invoke = InvokeMessage::new(
-        BranchId::from(1),
-        submission.clone(),
-        SessionId::new(),
-        HarnessType::Cli,
-        RuntimeType::Container,
-        agent_id,
-        b"hello from container".to_vec(),
-        None,
-        InvokeDiagnostics {
+    let session = SessionId::new();
+    let key = DataRoutingKey {
+        session: session.clone(),
+        branch: BranchId::from(1),
+        submission: submission.clone(),
+        kind: DataMessageKind::Invoke {
+            harness: HarnessType::Cli,
+            runtime: RuntimeType::Container,
+            agent: agent_id,
+        },
+    };
+    let invoke = InvokeMessageV2 {
+        id: MessageId::new(),
+        state: None,
+        diagnostics: InvokeDiagnostics {
             harness_version: String::new(),
         },
-        String::new(),
-    );
-    queue.send_invoke(invoke).unwrap();
+        dag_parent: String::new().into(),
+        payload: b"hello from container".to_vec(),
+    };
+    queue.send_invoke_v2(&key, &invoke).unwrap();
 
     // Tick until work completes
     let start = std::time::Instant::now();
