@@ -10,6 +10,21 @@
 //! - `ForkMessage`: CLI → Platform (create a timeline fork)
 //! - `SessionStartMessage`: CLI → Platform (create a conversation session)
 
+/// Serde helper: encode `Vec<u8>` as a base64 string for JSON-friendly transport.
+pub(crate) mod base64_serde {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(bytes: &Vec<u8>, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&STANDARD.encode(bytes))
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error> {
+        let encoded = String::deserialize(d)?;
+        STANDARD.decode(&encoded).map_err(serde::de::Error::custom)
+    }
+}
+
 pub mod complete;
 pub mod delegate;
 pub mod fork;
@@ -24,7 +39,7 @@ pub mod response;
 pub mod session_start;
 
 // Re-export everything at the module level for backwards compatibility.
-pub use complete::CompleteMessage;
+pub use complete::{CompleteMessage, CompleteMessageV2};
 pub use delegate::DelegateMessage;
 pub use fork::ForkMessage;
 pub use identity::{

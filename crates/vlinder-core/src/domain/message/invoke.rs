@@ -5,21 +5,6 @@ use serde::{Deserialize, Serialize};
 use super::super::diagnostics::InvokeDiagnostics;
 use super::identity::{DagNodeId, MessageId};
 
-/// Serde helper: encode Vec<u8> as a base64 string for JSON-friendly transport.
-mod base64_serde {
-    use base64::{engine::general_purpose::STANDARD, Engine};
-    use serde::{Deserialize, Deserializer, Serializer};
-
-    pub fn serialize<S: Serializer>(bytes: &Vec<u8>, s: S) -> Result<S::Ok, S::Error> {
-        s.serialize_str(&STANDARD.encode(bytes))
-    }
-
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error> {
-        let encoded = String::deserialize(d)?;
-        STANDARD.decode(&encoded).map_err(serde::de::Error::custom)
-    }
-}
-
 /// Data-plane invoke payload — everything NOT in the subject.
 ///
 /// The subject carries routing (session, branch, submission, harness, runtime, agent)
@@ -36,7 +21,7 @@ pub struct InvokeMessage {
     pub state: Option<String>,
     pub diagnostics: InvokeDiagnostics,
     pub dag_parent: DagNodeId,
-    #[serde(with = "base64_serde")]
+    #[serde(with = "super::base64_serde")]
     pub payload: Vec<u8>,
 }
 
