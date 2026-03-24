@@ -211,6 +211,60 @@ impl DagStore for GrpcStateClient {
             .collect()
     }
 
+    fn insert_invoke_node(
+        &self,
+        dag_id: &DagNodeId,
+        parent_id: &DagNodeId,
+        created_at: chrono::DateTime<chrono::Utc>,
+        state: &vlinder_core::domain::Snapshot,
+        key: &vlinder_core::domain::DataRoutingKey,
+        msg: &vlinder_core::domain::InvokeMessage,
+    ) -> Result<(), String> {
+        let vlinder_core::domain::DataMessageKind::Invoke {
+            harness,
+            runtime,
+            agent,
+        } = &key.kind;
+
+        let node = proto::InvokeNodeProto {
+            session_id: key.session.to_string(),
+            branch: key.branch.as_i64(),
+            submission_id: key.submission.to_string(),
+            harness: harness.as_str().to_string(),
+            runtime: runtime.as_str().to_string(),
+            agent: agent.to_string(),
+            message_id: msg.id.to_string(),
+            state: msg.state.clone(),
+            diagnostics: serde_json::to_vec(&msg.diagnostics).unwrap_or_default(),
+            payload: msg.payload.clone(),
+            dag_parent: msg.dag_parent.to_string(),
+            dag_hash: dag_id.to_string(),
+        };
+
+        let snapshot_json =
+            serde_json::to_string(state).map_err(|e| format!("serialize snapshot: {e}"))?;
+
+        let request = proto::InsertInvokeNodeRequest {
+            node: Some(node),
+            parent_hash: parent_id.to_string(),
+            created_at: created_at.to_rfc3339(),
+            snapshot: snapshot_json,
+        };
+
+        let mut client = self.client.clone();
+        let response = self
+            .runtime
+            .block_on(async { client.insert_invoke_node(request).await })
+            .map_err(|e| e.to_string())?;
+
+        let resp = response.into_inner();
+        if resp.success {
+            Ok(())
+        } else {
+            Err(resp.error.unwrap_or_else(|| "unknown error".to_string()))
+        }
+    }
+
     fn get_invoke_node(
         &self,
         dag_hash: &DagNodeId,

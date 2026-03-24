@@ -75,6 +75,19 @@ fn dag_node_to_proto(node: &DagNode) -> proto::DagNode {
 
 impl From<DagNode> for proto::DagNode {
     fn from(node: DagNode) -> Self {
+        if node.message.is_none() && node.message_v2.is_none() {
+            return proto::DagNode {
+                hash: node.id.to_string(),
+                parent_hash: node.parent_id.to_string(),
+                message_type: node.message_type().as_str().to_string(),
+                session_id: node.session_id().as_str().to_string(),
+                submission_id: node.submission_id().to_string(),
+                created_at: node.created_at.to_rfc3339(),
+                protocol_version: node.protocol_version().to_string(),
+                branch_id: node.branch_id().as_i64(),
+                ..Default::default()
+            };
+        }
         dag_node_to_proto(&node)
     }
 }
@@ -103,16 +116,30 @@ impl TryFrom<proto::DagNode> for DagNode {
             .parse::<vlinder_core::domain::MessageType>()
             .unwrap_or(vlinder_core::domain::MessageType::Complete);
 
-        let blob = node
-            .message_blob
-            .as_ref()
-            .ok_or_else(|| "missing message_blob".to_string())?;
+        let blob = node.message_blob.as_deref().unwrap_or("");
 
         let session = SessionId::try_from(node.session_id).unwrap_or_else(|_| {
             SessionId::try_from("00000000-0000-4000-8000-000000000000".to_string()).unwrap()
         });
         let submission = vlinder_core::domain::SubmissionId::from(node.submission_id);
         let pv = node.protocol_version.clone();
+
+        // Empty blob = typed table row (invoke via insert_invoke_node).
+        if blob.is_empty() {
+            return Ok(Self {
+                id: DagNodeId::from(node.hash),
+                parent_id: DagNodeId::from(node.parent_hash),
+                created_at,
+                state: vlinder_core::domain::Snapshot::empty(),
+                msg_type,
+                session,
+                submission,
+                branch: BranchId::from(node.branch_id),
+                protocol_version: pv,
+                message: None,
+                message_v2: None,
+            });
+        }
 
         // Try v2 format first, fall back to legacy (ADR 122 tech debt).
         if let Ok(v2) = serde_json::from_str::<vlinder_core::domain::ObservableMessageV2>(blob) {
@@ -309,14 +336,20 @@ mod tests {
     }
 
     #[test]
-    fn missing_message_blob_fails() {
+    fn missing_message_blob_returns_empty_dag_node() {
         let proto_node = proto::DagNode {
-            message_type: "complete".to_string(),
+            message_type: "invoke".to_string(),
             created_at: Utc::now().to_rfc3339(),
             message_blob: None,
             ..Default::default()
         };
-        assert!(DagNode::try_from(proto_node).is_err());
+        let node = DagNode::try_from(proto_node).unwrap();
+        assert!(node.message.is_none());
+        assert!(node.message_v2.is_none());
+        assert_eq!(
+            node.message_type(),
+            vlinder_core::domain::MessageType::Invoke
+        );
     }
 
     #[test]

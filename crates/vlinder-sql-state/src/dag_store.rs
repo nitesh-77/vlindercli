@@ -244,6 +244,23 @@ fn row_to_dag_node(row: &rusqlite::Row) -> Result<DagNode, rusqlite::Error> {
     let submission = vlinder_core::domain::SubmissionId::from(row.get::<_, String>(9)?);
     let protocol_version: String = row.get(10)?;
 
+    // Empty blob = typed table row (invoke via insert_invoke_node).
+    if blob.is_empty() {
+        return Ok(DagNode {
+            id: DagNodeId::from(row.get::<_, String>(0)?),
+            parent_id: DagNodeId::from(row.get::<_, String>(1)?),
+            created_at,
+            state,
+            msg_type,
+            session,
+            submission,
+            branch,
+            protocol_version,
+            message: None,
+            message_v2: None,
+        });
+    }
+
     // Try v2 format first, fall back to legacy ObservableMessage (ADR 122 tech debt).
     if let Ok(v2) = serde_json::from_str::<vlinder_core::domain::ObservableMessageV2>(&blob) {
         Ok(DagNode {
@@ -457,6 +474,70 @@ impl DagStore for SqliteDagStore {
 
         // Write to typed table (ADR 122).
         insert_typed_node(&conn, node).map_err(|e| format!("insert typed node failed: {e}"))?;
+
+        Ok(())
+    }
+
+    fn insert_invoke_node(
+        &self,
+        dag_id: &DagNodeId,
+        parent_id: &DagNodeId,
+        created_at: chrono::DateTime<chrono::Utc>,
+        state: &vlinder_core::domain::Snapshot,
+        key: &vlinder_core::domain::DataRoutingKey,
+        msg: &vlinder_core::domain::InvokeMessage,
+    ) -> Result<(), String> {
+        let conn = self.conn.lock().expect("db connection lock poisoned");
+        let snapshot_json =
+            serde_json::to_string(state).map_err(|e| format!("serialize snapshot failed: {e}"))?;
+        let vlinder_core::domain::DataMessageKind::Invoke {
+            harness,
+            runtime,
+            agent,
+        } = &key.kind;
+        let diagnostics_json = serde_json::to_vec(&msg.diagnostics).unwrap_or_default();
+
+        conn.execute(
+            "INSERT OR IGNORE INTO dag_nodes (hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state, protocol_version, checkpoint, operation, message_blob, branch_id, snapshot)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+            rusqlite::params![
+                dag_id.as_str(),
+                parent_id.as_str(),
+                "invoke",
+                harness.as_str(),
+                agent.to_string(),
+                key.session.as_str(),
+                key.submission.as_str(),
+                &msg.payload,
+                &diagnostics_json,
+                Vec::<u8>::new(),
+                created_at.to_rfc3339(),
+                msg.state.as_deref(),
+                "v1",
+                None::<String>,
+                None::<String>,
+                "",
+                key.branch.as_i64(),
+                &snapshot_json,
+            ],
+        )
+        .map_err(|e| format!("insert dag_nodes failed: {e}"))?;
+
+        conn.execute(
+            "INSERT OR IGNORE INTO invoke_nodes (dag_hash, harness, runtime, agent, message_id, state, diagnostics, payload)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            rusqlite::params![
+                dag_id.as_str(),
+                harness.as_str(),
+                runtime.as_str(),
+                agent.as_str(),
+                msg.id.as_str(),
+                msg.state.as_deref(),
+                &diagnostics_json,
+                &msg.payload,
+            ],
+        )
+        .map_err(|e| format!("insert invoke_nodes failed: {e}"))?;
 
         Ok(())
     }

@@ -13,10 +13,10 @@ use chrono::Utc;
 
 use crate::domain::workers::dag::build_dag_node;
 use crate::domain::{
-    hash_dag_node, Acknowledgement, CompleteMessage, DagNode, DagNodeId, DagStore, DataRoutingKey,
+    hash_dag_node, Acknowledgement, CompleteMessage, DagNodeId, DagStore, DataRoutingKey,
     DelegateMessage, ForkMessage, Instance, InvokeMessage, MessageQueue, MessageType,
-    ObservableMessage, ObservableMessageV2, PromoteMessage, QueueError, RepairMessage,
-    RequestMessage, ResponseMessage, Snapshot, StateHash, SubmissionId,
+    ObservableMessage, PromoteMessage, QueueError, RepairMessage, RequestMessage, ResponseMessage,
+    Snapshot, StateHash, SubmissionId,
 };
 
 /// A `MessageQueue` decorator that synchronously records DAG nodes on send.
@@ -135,25 +135,11 @@ impl RecordingQueue {
             _ => parent_state,
         };
 
-        let node = DagNode {
-            id: id.clone(),
-            parent_id,
-            created_at: Utc::now(),
-            state,
-            msg_type: MessageType::Invoke,
-            session: key.session.clone(),
-            submission: key.submission.clone(),
-            branch: key.branch,
-            protocol_version: "v1".to_string(),
-            message: None,
-            message_v2: Some(ObservableMessageV2::InvokeV2 {
-                key: key.clone(),
-                msg: msg.clone(),
-            }),
-        };
-
-        if let Err(e) = self.store.insert_node(&node) {
-            tracing::warn!(error = %id, "Failed to record DAG node (outbox): {e}");
+        if let Err(e) = self
+            .store
+            .insert_invoke_node(&id, &parent_id, Utc::now(), &state, key, msg)
+        {
+            tracing::warn!(error = %id, "Failed to record invoke node: {e}");
         }
 
         id

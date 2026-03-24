@@ -240,6 +240,20 @@ pub trait DagStore: Send + Sync {
     /// Insert a node. Idempotent (content-addressed, INSERT OR IGNORE).
     fn insert_node(&self, node: &DagNode) -> Result<(), String>;
 
+    /// Insert a typed invoke node. Writes to `dag_nodes` + `invoke_nodes`.
+    fn insert_invoke_node(
+        &self,
+        dag_id: &super::DagNodeId,
+        parent_id: &super::DagNodeId,
+        created_at: DateTime<Utc>,
+        state: &Snapshot,
+        key: &super::DataRoutingKey,
+        msg: &super::InvokeMessage,
+    ) -> Result<(), String> {
+        let _ = (dag_id, parent_id, created_at, state, key, msg);
+        Err("insert_invoke_node not implemented".to_string())
+    }
+
     /// Retrieve a node by its content-addressed ID.
     fn get_node(&self, id: &super::DagNodeId) -> Result<Option<DagNode>, String>;
 
@@ -366,6 +380,34 @@ impl DagStore for InMemoryDagStore {
             nodes.push(node.clone());
         }
         Ok(())
+    }
+
+    fn insert_invoke_node(
+        &self,
+        dag_id: &super::DagNodeId,
+        parent_id: &super::DagNodeId,
+        created_at: DateTime<Utc>,
+        state: &Snapshot,
+        key: &super::DataRoutingKey,
+        msg: &super::InvokeMessage,
+    ) -> Result<(), String> {
+        let node = DagNode {
+            id: dag_id.clone(),
+            parent_id: parent_id.clone(),
+            created_at,
+            state: state.clone(),
+            msg_type: MessageType::Invoke,
+            session: key.session.clone(),
+            submission: key.submission.clone(),
+            branch: key.branch,
+            protocol_version: "v1".to_string(),
+            message: None,
+            message_v2: Some(super::ObservableMessageV2::InvokeV2 {
+                key: key.clone(),
+                msg: msg.clone(),
+            }),
+        };
+        self.insert_node(&node)
     }
 
     fn get_node(&self, id: &super::DagNodeId) -> Result<Option<DagNode>, String> {
