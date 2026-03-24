@@ -107,6 +107,10 @@ impl TryFrom<proto::DagNode> for DagNode {
             .as_ref()
             .ok_or_else(|| "missing message_blob".to_string())?;
 
+        let session = SessionId::try_from(node.session_id).unwrap_or_else(|_| {
+            SessionId::try_from("00000000-0000-4000-8000-000000000000".to_string()).unwrap()
+        });
+
         // Try v2 format first, fall back to legacy (ADR 122 tech debt).
         if let Ok(v2) = serde_json::from_str::<vlinder_core::domain::ObservableMessageV2>(blob) {
             Ok(Self {
@@ -115,6 +119,7 @@ impl TryFrom<proto::DagNode> for DagNode {
                 created_at,
                 state: vlinder_core::domain::Snapshot::empty(),
                 msg_type,
+                session,
                 message: None,
                 message_v2: Some(v2),
             })
@@ -130,6 +135,7 @@ impl TryFrom<proto::DagNode> for DagNode {
                 created_at,
                 state: vlinder_core::domain::Snapshot::empty(),
                 msg_type,
+                session,
                 message: Some(message),
                 message_v2: None,
             })

@@ -105,6 +105,7 @@ pub struct DagNode {
     pub created_at: DateTime<Utc>,
     pub state: Snapshot,
     pub msg_type: MessageType,
+    pub session: super::SessionId,
     /// Legacy message format. Exactly one of `message` / `message_v2` is `Some`.
     pub message: Option<super::ObservableMessage>,
     /// V2 message format (ADR 121). Exactly one of `message` / `message_v2` is `Some`.
@@ -139,10 +140,7 @@ impl DagNode {
         self.msg_type
     }
     pub fn session_id(&self) -> &super::SessionId {
-        match self.message_ref() {
-            MessageRef::V1(m) => m.session(),
-            MessageRef::V2(key, _) => &key.session,
-        }
+        &self.session
     }
     pub fn submission_id(&self) -> &super::SubmissionId {
         match self.message_ref() {

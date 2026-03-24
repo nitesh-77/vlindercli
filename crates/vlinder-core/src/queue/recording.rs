@@ -141,6 +141,7 @@ impl RecordingQueue {
             created_at: Utc::now(),
             state,
             msg_type: MessageType::Invoke,
+            session: key.session.clone(),
             message: None,
             message_v2: Some(ObservableMessageV2::InvokeV2 {
                 key: key.clone(),
