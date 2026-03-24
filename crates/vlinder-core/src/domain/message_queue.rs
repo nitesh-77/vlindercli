@@ -10,9 +10,9 @@
 //! `AckFn` acknowledges successful processing.
 
 use super::{
-    AgentName, CompleteMessage, DataRoutingKey, DelegateMessage, ForkMessage, HarnessType,
-    InvokeMessage, Operation, PromoteMessage, RepairMessage, RequestMessage, ResourceId,
-    ResponseMessage, RoutingKey, ServiceBackend, SubmissionId,
+    AgentName, CompleteMessage, CompleteMessageV2, DataRoutingKey, DelegateMessage, ForkMessage,
+    HarnessType, InvokeMessage, Operation, PromoteMessage, RepairMessage, RequestMessage,
+    ResourceId, ResponseMessage, RoutingKey, ServiceBackend, SubmissionId,
 };
 use std::fmt;
 
@@ -55,6 +55,30 @@ pub trait MessageQueue {
     ///
     /// Implementation determines routing from message dimensions.
     fn send_complete(&self, msg: CompleteMessage) -> Result<(), QueueError>;
+
+    // -------------------------------------------------------------------------
+    // Complete (ADR 121 — data plane)
+    // -------------------------------------------------------------------------
+
+    /// Send a complete on the data plane (ADR 121).
+    fn send_complete_v2(
+        &self,
+        _key: DataRoutingKey,
+        _msg: CompleteMessageV2,
+    ) -> Result<(), QueueError> {
+        Err(QueueError::SendFailed(
+            "send_complete_v2 not implemented".into(),
+        ))
+    }
+
+    /// Receive a complete from the data plane (ADR 121).
+    fn receive_complete_v2(
+        &self,
+        _submission: &SubmissionId,
+        _harness: HarnessType,
+    ) -> Result<(DataRoutingKey, CompleteMessageV2, Acknowledgement), QueueError> {
+        Err(QueueError::Timeout)
+    }
 
     // -------------------------------------------------------------------------
     // Typed receive methods (ADR 044)
