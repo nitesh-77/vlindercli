@@ -34,6 +34,7 @@ service StateService {
 
   // Typed node operations (ADR 122)
   rpc InsertInvokeNode(InsertInvokeNodeRequest) returns (InsertInvokeNodeResponse);
+  rpc InsertCompleteNode(InsertCompleteNodeRequest) returns (InsertCompleteNodeResponse);
   rpc GetInvokeNode(GetInvokeNodeRequest) returns (GetInvokeNodeResponse);
   rpc GetCompleteNode(GetCompleteNodeRequest) returns (GetCompleteNodeResponse);
 
@@ -241,6 +242,26 @@ message InvokeNodeProto {
   bytes payload = 10;
   string dag_parent = 11;
   string dag_hash = 12;
+}
+
+message InsertCompleteNodeRequest {
+  string dag_hash = 1;
+  string parent_hash = 2;
+  string created_at = 3;
+  string snapshot = 4;
+  string session_id = 5;
+  string submission_id = 6;
+  int64 branch_id = 7;
+  string agent = 8;
+  string harness = 9;
+  string message_id = 10;
+  optional string state = 11;
+  bytes diagnostics = 12;
+  bytes payload = 13;
+}
+message InsertCompleteNodeResponse {
+  bool success = 1;
+  optional string error = 2;
 }
 
 message GetCompleteNodeRequest { string dag_hash = 1; }

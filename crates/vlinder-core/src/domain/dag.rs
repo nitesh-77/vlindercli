@@ -223,6 +223,27 @@ pub trait DagStore: Send + Sync {
         Err("insert_invoke_node not implemented".to_string())
     }
 
+    /// Insert a typed complete node. Writes to `dag_nodes` + `complete_nodes`.
+    #[allow(clippy::too_many_arguments)]
+    fn insert_complete_node(
+        &self,
+        dag_id: &super::DagNodeId,
+        parent_id: &super::DagNodeId,
+        created_at: DateTime<Utc>,
+        state: &Snapshot,
+        session: &super::SessionId,
+        submission: &super::SubmissionId,
+        branch: super::BranchId,
+        agent: &super::AgentName,
+        harness: super::HarnessType,
+        msg: &super::CompleteMessageV2,
+    ) -> Result<(), String> {
+        let _ = (
+            dag_id, parent_id, created_at, state, session, submission, branch, agent, harness, msg,
+        );
+        Err("insert_complete_node not implemented".to_string())
+    }
+
     /// Retrieve a node by its content-addressed ID.
     fn get_node(&self, id: &super::DagNodeId) -> Result<Option<DagNode>, String>;
 
@@ -378,6 +399,34 @@ impl DagStore for InMemoryDagStore {
             session: key.session.clone(),
             submission: key.submission.clone(),
             branch: key.branch,
+            protocol_version: "v1".to_string(),
+            message: None,
+        };
+        self.insert_node(&node)
+    }
+
+    fn insert_complete_node(
+        &self,
+        dag_id: &super::DagNodeId,
+        parent_id: &super::DagNodeId,
+        created_at: DateTime<Utc>,
+        state: &Snapshot,
+        session: &super::SessionId,
+        submission: &super::SubmissionId,
+        branch: super::BranchId,
+        _agent: &super::AgentName,
+        _harness: super::HarnessType,
+        _msg: &super::CompleteMessageV2,
+    ) -> Result<(), String> {
+        let node = DagNode {
+            id: dag_id.clone(),
+            parent_id: parent_id.clone(),
+            created_at,
+            state: state.clone(),
+            msg_type: MessageType::Complete,
+            session: session.clone(),
+            submission: submission.clone(),
+            branch,
             protocol_version: "v1".to_string(),
             message: None,
         };

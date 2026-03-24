@@ -153,8 +153,10 @@ fn get(session_id_or_name: &str) {
                 } else {
                     continue;
                 }
-            } else {
-                let msg = node.message.as_ref().expect("dag node missing message");
+            } else if node.message_type() == vlinder_core::domain::MessageType::Complete {
+                // Complete: skip display details — payload read via get_complete_node elsewhere
+                ("agent".to_string(), "harness".to_string(), None, None)
+            } else if let Some(ref msg) = node.message {
                 let (f, t) = msg.sender_receiver();
                 (
                     f,
@@ -162,6 +164,8 @@ fn get(session_id_or_name: &str) {
                     msg.operation().map(str::to_string),
                     msg.checkpoint().map(str::to_string),
                 )
+            } else {
+                continue;
             };
             let mut parts = vec![
                 format!("{ts}"),

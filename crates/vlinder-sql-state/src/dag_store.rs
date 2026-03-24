@@ -481,6 +481,68 @@ impl DagStore for SqliteDagStore {
         Ok(())
     }
 
+    fn insert_complete_node(
+        &self,
+        dag_id: &DagNodeId,
+        parent_id: &DagNodeId,
+        created_at: chrono::DateTime<chrono::Utc>,
+        state: &vlinder_core::domain::Snapshot,
+        session: &SessionId,
+        submission: &vlinder_core::domain::SubmissionId,
+        branch: BranchId,
+        agent: &vlinder_core::domain::AgentName,
+        harness: vlinder_core::domain::HarnessType,
+        msg: &vlinder_core::domain::CompleteMessageV2,
+    ) -> Result<(), String> {
+        let conn = self.conn.lock().expect("db connection lock poisoned");
+        let snapshot_json =
+            serde_json::to_string(state).map_err(|e| format!("serialize snapshot failed: {e}"))?;
+        let diagnostics_json = serde_json::to_vec(&msg.diagnostics).unwrap_or_default();
+
+        conn.execute(
+            "INSERT OR IGNORE INTO dag_nodes (hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state, protocol_version, checkpoint, operation, message_blob, branch_id, snapshot)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+            rusqlite::params![
+                dag_id.as_str(),
+                parent_id.as_str(),
+                "complete",
+                agent.to_string(),
+                harness.as_str(),
+                session.as_str(),
+                submission.as_str(),
+                &msg.payload,
+                &diagnostics_json,
+                Vec::<u8>::new(),
+                created_at.to_rfc3339(),
+                msg.state.as_deref(),
+                "v1",
+                None::<String>,
+                None::<String>,
+                "",
+                branch.as_i64(),
+                &snapshot_json,
+            ],
+        )
+        .map_err(|e| format!("insert dag_nodes failed: {e}"))?;
+
+        conn.execute(
+            "INSERT OR IGNORE INTO complete_nodes (dag_hash, agent, harness, message_id, state, diagnostics, payload)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            rusqlite::params![
+                dag_id.as_str(),
+                agent.as_str(),
+                harness.as_str(),
+                msg.id.as_str(),
+                msg.state.as_deref(),
+                &diagnostics_json,
+                &msg.payload,
+            ],
+        )
+        .map_err(|e| format!("insert complete_nodes failed: {e}"))?;
+
+        Ok(())
+    }
+
     fn get_node(&self, hash: &DagNodeId) -> Result<Option<DagNode>, String> {
         let conn = self.conn.lock().expect("db connection lock poisoned");
         let sql = format!("SELECT {DAG_NODE_COLUMNS} FROM dag_nodes WHERE hash = ?1");

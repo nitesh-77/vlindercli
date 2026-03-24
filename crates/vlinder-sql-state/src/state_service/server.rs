@@ -11,11 +11,12 @@ use super::proto::{
     GetCompleteNodeResponse, GetInvokeNodeRequest, GetInvokeNodeResponse, GetNodeByPrefixRequest,
     GetNodeRequest, GetNodeResponse, GetNodesBySubmissionRequest, GetNodesBySubmissionResponse,
     GetSessionByNameRequest, GetSessionNodesRequest, GetSessionNodesResponse, GetSessionRequest,
-    GetSessionResponse, InsertInvokeNodeRequest, InsertInvokeNodeResponse, InsertNodeRequest,
-    InsertNodeResponse, InvokeNodeProto, LatestNodeOnBranchRequest, LatestNodeOnBranchResponse,
-    ListSessionsRequest, ListSessionsResponse, PingRequest, RenameBranchRequest,
-    RenameBranchResponse, SealBranchRequest, SealBranchResponse, SemVer,
-    UpdateSessionDefaultBranchRequest, UpdateSessionDefaultBranchResponse,
+    GetSessionResponse, InsertCompleteNodeRequest, InsertCompleteNodeResponse,
+    InsertInvokeNodeRequest, InsertInvokeNodeResponse, InsertNodeRequest, InsertNodeResponse,
+    InvokeNodeProto, LatestNodeOnBranchRequest, LatestNodeOnBranchResponse, ListSessionsRequest,
+    ListSessionsResponse, PingRequest, RenameBranchRequest, RenameBranchResponse,
+    SealBranchRequest, SealBranchResponse, SemVer, UpdateSessionDefaultBranchRequest,
+    UpdateSessionDefaultBranchResponse,
 };
 use vlinder_core::domain::{DagNodeId, DagStore, MessageType, SessionId};
 
@@ -420,6 +421,63 @@ impl StateService for StateServiceServer {
                 error: None,
             })),
             Err(e) => Ok(Response::new(InsertInvokeNodeResponse {
+                success: false,
+                error: Some(e),
+            })),
+        }
+    }
+
+    async fn insert_complete_node(
+        &self,
+        request: Request<InsertCompleteNodeRequest>,
+    ) -> Result<Response<InsertCompleteNodeResponse>, Status> {
+        let req = request.into_inner();
+
+        let dag_id = vlinder_core::domain::DagNodeId::from(req.dag_hash);
+        let parent_id = vlinder_core::domain::DagNodeId::from(req.parent_hash);
+        let created_at: chrono::DateTime<chrono::Utc> = req
+            .created_at
+            .parse()
+            .map_err(|e| Status::invalid_argument(format!("invalid created_at: {e}")))?;
+        let snapshot: vlinder_core::domain::Snapshot = serde_json::from_str(&req.snapshot)
+            .map_err(|e| Status::invalid_argument(format!("invalid snapshot: {e}")))?;
+        let session = vlinder_core::domain::SessionId::try_from(req.session_id)
+            .map_err(Status::invalid_argument)?;
+        let submission = vlinder_core::domain::SubmissionId::from(req.submission_id);
+        let branch = vlinder_core::domain::BranchId::from(req.branch_id);
+        let agent = vlinder_core::domain::AgentName::new(req.agent);
+        let harness: vlinder_core::domain::HarnessType =
+            req.harness.parse().map_err(Status::invalid_argument)?;
+
+        let diagnostics: vlinder_core::domain::RuntimeDiagnostics =
+            serde_json::from_slice(&req.diagnostics)
+                .unwrap_or_else(|_| vlinder_core::domain::RuntimeDiagnostics::placeholder(0));
+
+        let msg = vlinder_core::domain::CompleteMessageV2 {
+            id: vlinder_core::domain::MessageId::from(req.message_id),
+            dag_id: dag_id.clone(),
+            state: req.state,
+            diagnostics,
+            payload: req.payload,
+        };
+
+        match self.store.insert_complete_node(
+            &dag_id,
+            &parent_id,
+            created_at,
+            &snapshot,
+            &session,
+            &submission,
+            branch,
+            &agent,
+            harness,
+            &msg,
+        ) {
+            Ok(()) => Ok(Response::new(InsertCompleteNodeResponse {
+                success: true,
+                error: None,
+            })),
+            Err(e) => Ok(Response::new(InsertCompleteNodeResponse {
                 success: false,
                 error: Some(e),
             })),

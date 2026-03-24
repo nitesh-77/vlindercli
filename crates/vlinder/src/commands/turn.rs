@@ -58,8 +58,20 @@ fn get(submission_id: &str) {
                 } else {
                     continue;
                 }
-            } else {
-                let msg = node.message.as_ref().expect("dag node missing message");
+            } else if node.message_type() == vlinder_core::domain::MessageType::Complete {
+                if let Ok(Some(msg)) = store.get_complete_node(&node.id) {
+                    (
+                        "agent".to_string(),
+                        "harness".to_string(),
+                        None::<String>,
+                        None::<String>,
+                        msg.state,
+                        msg.payload,
+                    )
+                } else {
+                    continue;
+                }
+            } else if let Some(ref msg) = node.message {
                 let (f, t) = msg.sender_receiver();
                 (
                     f,
@@ -69,6 +81,8 @@ fn get(submission_id: &str) {
                     msg.state().map(str::to_string),
                     msg.payload().to_vec(),
                 )
+            } else {
+                continue;
             };
         println!("Hash:       {}", node.id);
         println!("Parent:     {}", node.parent_id);
