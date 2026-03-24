@@ -80,7 +80,7 @@ impl Harness for GrpcHarnessClient {
         let request = proto::RunAgentRequest {
             agent_id: agent_id.as_str().to_string(),
             input: input.to_string(),
-            timeline_id: timeline.to_string(),
+            branch_id: timeline.to_string(),
             sealed,
             initial_state,
             dag_parent: dag_parent.to_string(),
@@ -111,7 +111,7 @@ impl Harness for GrpcHarnessClient {
             agent_name: params.agent_name.to_string(),
             branch_name: params.branch_name,
             fork_point: params.fork_point.to_string(),
-            timeline_id: timeline.to_string(),
+            branch_id: timeline.to_string(),
             session_id: session_id.as_str().to_string(),
         };
 
@@ -137,7 +137,7 @@ impl Harness for GrpcHarnessClient {
     ) -> Result<(), String> {
         let request = proto::PromoteTimelineRequest {
             agent_name: params.agent_name.to_string(),
-            timeline_id: timeline.to_string(),
+            branch_id: timeline.to_string(),
             session_id: session_id.as_str().to_string(),
         };
 

@@ -71,7 +71,7 @@ impl HarnessService for HarnessServiceServer {
             let id = ResourceId::new(&req.agent_id);
             let session_id = SessionId::try_from(req.session_id)
                 .map_err(|e| format!("invalid session_id: {e}"))?;
-            let timeline = BranchId::from(req.timeline_id.parse::<i64>().unwrap_or(0));
+            let timeline = BranchId::from(req.branch_id.parse::<i64>().unwrap_or(0));
             let dag_parent = DagNodeId::from(req.dag_parent);
             harness.run_agent(
                 &id,
@@ -113,7 +113,7 @@ impl HarnessService for HarnessServiceServer {
             };
             let session_id = SessionId::try_from(req.session_id)
                 .map_err(|e| format!("invalid session_id: {e}"))?;
-            let timeline = BranchId::from(req.timeline_id.parse::<i64>().unwrap_or(0));
+            let timeline = BranchId::from(req.branch_id.parse::<i64>().unwrap_or(0));
             harness.fork_timeline(params, session_id, timeline)
         })
         .await
@@ -138,7 +138,7 @@ impl HarnessService for HarnessServiceServer {
             };
             let session_id = SessionId::try_from(req.session_id)
                 .map_err(|e| format!("invalid session_id: {e}"))?;
-            let timeline = BranchId::from(req.timeline_id.parse::<i64>().unwrap_or(0));
+            let timeline = BranchId::from(req.branch_id.parse::<i64>().unwrap_or(0));
             harness.promote_timeline(params, session_id, timeline)
         })
         .await

@@ -49,7 +49,7 @@ impl SqliteDagStore {
                  checkpoint TEXT,
                  operation TEXT,
                  message_blob TEXT,
-                 timeline_id INTEGER NOT NULL DEFAULT 0,
+                 branch_id INTEGER NOT NULL DEFAULT 0,
                  snapshot TEXT NOT NULL DEFAULT '{}'
              );
              CREATE INDEX IF NOT EXISTS idx_dag_nodes_session
@@ -57,7 +57,7 @@ impl SqliteDagStore {
              CREATE INDEX IF NOT EXISTS idx_dag_nodes_parent
                  ON dag_nodes (parent_hash);
              CREATE INDEX IF NOT EXISTS idx_dag_nodes_timeline
-                 ON dag_nodes (timeline_id, message_type, created_at);
+                 ON dag_nodes (branch_id, message_type, created_at);
              -- Typed message tables (ADR 122). Each holds domain-specific
              -- fields; routing and Merkle fields stay in dag_nodes.
              CREATE TABLE IF NOT EXISTS invoke_nodes (
@@ -372,7 +372,7 @@ fn insert_typed_node(conn: &Connection, node: &DagNode) -> Result<(), rusqlite::
 
 /// Column list for queries that return full `DagNode`s.
 const DAG_NODE_COLUMNS: &str =
-    "hash, parent_hash, message_type, created_at, message_blob, payload, snapshot, session_id, timeline_id";
+    "hash, parent_hash, message_type, created_at, message_blob, payload, snapshot, session_id, branch_id";
 
 impl DagStore for SqliteDagStore {
     fn insert_node(&self, node: &DagNode) -> Result<(), String> {
@@ -425,7 +425,7 @@ impl DagStore for SqliteDagStore {
             .map_err(|e| format!("serialize snapshot failed: {e}"))?;
 
         conn.execute(
-            "INSERT OR IGNORE INTO dag_nodes (hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state, protocol_version, checkpoint, operation, message_blob, timeline_id, snapshot)
+            "INSERT OR IGNORE INTO dag_nodes (hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state, protocol_version, checkpoint, operation, message_blob, branch_id, snapshot)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
             rusqlite::params![
                 node.id.as_str(),
@@ -680,7 +680,7 @@ impl DagStore for SqliteDagStore {
         let mut stmt = conn
             .prepare(
                 "SELECT i.harness, i.runtime, i.agent, i.message_id, i.state, i.diagnostics, i.payload,
-                        d.session_id, d.submission_id, d.timeline_id, d.parent_hash
+                        d.session_id, d.submission_id, d.branch_id, d.parent_hash
                  FROM invoke_nodes i
                  JOIN dag_nodes d ON d.hash = i.dag_hash
                  WHERE i.dag_hash = ?1",
@@ -792,7 +792,7 @@ impl DagStore for SqliteDagStore {
         if let Some(mt) = message_type {
             let mut stmt = conn
                 .prepare(&format!(
-                    "SELECT {DAG_NODE_COLUMNS} FROM dag_nodes WHERE timeline_id = ?1 AND message_type = ?2 ORDER BY created_at DESC LIMIT 1"
+                    "SELECT {DAG_NODE_COLUMNS} FROM dag_nodes WHERE branch_id = ?1 AND message_type = ?2 ORDER BY created_at DESC LIMIT 1"
                 ))
                 .map_err(|e| format!("latest_node_on_branch prepare failed: {e}"))?;
 
@@ -805,7 +805,7 @@ impl DagStore for SqliteDagStore {
         } else {
             let mut stmt = conn
                 .prepare(&format!(
-                    "SELECT {DAG_NODE_COLUMNS} FROM dag_nodes WHERE timeline_id = ?1 ORDER BY created_at DESC LIMIT 1"
+                    "SELECT {DAG_NODE_COLUMNS} FROM dag_nodes WHERE branch_id = ?1 ORDER BY created_at DESC LIMIT 1"
                 ))
                 .map_err(|e| format!("latest_node_on_branch prepare failed: {e}"))?;
 

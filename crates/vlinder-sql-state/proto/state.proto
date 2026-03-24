@@ -79,7 +79,7 @@ message DagNode {
   optional string checkpoint = 14;
   optional string operation = 15;
   optional string message_blob = 16;  // JSON-serialized ObservableMessage (source of truth)
-  int64 timeline_id = 17;             // branch ID
+  int64 branch_id = 17;             // branch ID
 }
 
 // =============================================================================
