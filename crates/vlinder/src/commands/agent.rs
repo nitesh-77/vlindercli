@@ -302,6 +302,13 @@ fn resolve_branch_tip(
                 .flatten()
                 .and_then(|(_, msg)| msg.state)
                 .unwrap_or_default()
+        } else if node.message_type() == vlinder_core::domain::MessageType::Complete {
+            store
+                .get_complete_node(&node.id)
+                .ok()
+                .flatten()
+                .and_then(|m| m.state)
+                .unwrap_or_default()
         } else {
             node.message
                 .as_ref()

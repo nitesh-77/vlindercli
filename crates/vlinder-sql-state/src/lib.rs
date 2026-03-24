@@ -251,10 +251,11 @@ fn render_session(
                 );
             }
             MessageType::Complete => {
-                let payload = node
-                    .message
-                    .as_ref()
-                    .map(|m| String::from_utf8_lossy(m.payload()).to_string())
+                let payload = store
+                    .get_complete_node(&node.id)
+                    .ok()
+                    .flatten()
+                    .map(|m| String::from_utf8_lossy(&m.payload).to_string())
                     .unwrap_or_default();
                 let ts = node.created_at.format("%Y-%m-%d %H:%M:%S").to_string();
                 let _ = writeln!(

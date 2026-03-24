@@ -183,20 +183,21 @@ impl CoreHarness {
             .store
             .latest_node_on_branch(timeline, Some(MessageType::Complete))
             .unwrap_or(None);
-        let last_complete_payload = last_complete_node
+        let last_complete = last_complete_node
             .as_ref()
-            .and_then(|n| n.message.as_ref())
-            .map(|m| String::from_utf8_lossy(m.payload()).to_string());
+            .and_then(|n| self.store.get_complete_node(&n.id).ok().flatten());
+        let last_complete_payload = last_complete
+            .as_ref()
+            .map(|m| String::from_utf8_lossy(&m.payload).to_string());
         let enriched_payload = build_payload(
             last_invoke_payload.as_deref(),
             last_complete_payload.as_deref(),
             input,
         );
         let submission = SubmissionId::new();
-        let last_state = last_complete_node
+        let last_state = last_complete
             .as_ref()
-            .and_then(|n| n.message.as_ref())
-            .and_then(|m| m.state().map(std::string::ToString::to_string))
+            .and_then(|m| m.state.as_ref().map(std::string::ToString::to_string))
             .or_else(|| initial_state.map(std::string::ToString::to_string));
 
         let job_id =
