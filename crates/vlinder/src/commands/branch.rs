@@ -138,14 +138,15 @@ fn get(session_id_or_name: &str, branch_name: &str) {
         println!("Turn {sub_id}");
         for node in messages {
             let ts = node.created_at.format("%H:%M:%S%.3f");
-            let (from, to, operation, checkpoint) = if let Some(ref v2) = node.message_v2 {
-                match v2 {
-                    vlinder_core::domain::ObservableMessageV2::InvokeV2 { key, .. } => {
-                        let vlinder_core::domain::DataMessageKind::Invoke {
-                            harness, agent, ..
-                        } = &key.kind;
-                        (harness.as_str().to_string(), agent.to_string(), None, None)
-                    }
+            let (from, to, operation, checkpoint) = if node.message_type()
+                == vlinder_core::domain::MessageType::Invoke
+            {
+                if let Ok(Some((key, _msg))) = store.get_invoke_node(&node.id) {
+                    let vlinder_core::domain::DataMessageKind::Invoke { harness, agent, .. } =
+                        &key.kind;
+                    (harness.as_str().to_string(), agent.to_string(), None, None)
+                } else {
+                    continue;
                 }
             } else {
                 let msg = node.message.as_ref().expect("dag node missing message");

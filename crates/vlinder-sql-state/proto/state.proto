@@ -32,6 +32,9 @@ service StateService {
   rpc GetNodeByPrefix(GetNodeByPrefixRequest) returns (GetNodeResponse);
   rpc GetBranchesForSession(GetBranchesForSessionRequest) returns (GetBranchesForSessionResponse);
 
+  // Typed node queries (ADR 122)
+  rpc GetInvokeNode(GetInvokeNodeRequest) returns (GetInvokeNodeResponse);
+
   // Branch head query
   rpc LatestNodeOnBranch(LatestNodeOnBranchRequest) returns (LatestNodeOnBranchResponse);
 
@@ -199,3 +202,29 @@ message UpdateSessionDefaultBranchRequest {
   int64 branch_id = 2;
 }
 message UpdateSessionDefaultBranchResponse { bool success = 1; optional string error = 2; }
+
+// =============================================================================
+// Typed Node Queries (ADR 122)
+// =============================================================================
+
+message GetInvokeNodeRequest { string dag_hash = 1; }
+message GetInvokeNodeResponse {
+  optional InvokeNodeProto node = 1;
+}
+
+message InvokeNodeProto {
+  // Routing
+  string session_id = 1;
+  int64 branch = 2;
+  string submission_id = 3;
+  string harness = 4;
+  string runtime = 5;
+  string agent = 6;
+  // Payload
+  string message_id = 7;
+  optional string state = 8;
+  bytes diagnostics = 9;
+  bytes payload = 10;
+  string dag_parent = 11;
+  string dag_hash = 12;
+}

@@ -7,12 +7,13 @@ use super::proto::{
     self, state_service_server::StateService, CreateBranchRequest, CreateBranchResponse,
     CreateSessionRequest, CreateSessionResponse, GetBranchByIdRequest, GetBranchByNameRequest,
     GetBranchResponse, GetBranchesForSessionRequest, GetBranchesForSessionResponse,
-    GetChildrenRequest, GetChildrenResponse, GetNodeByPrefixRequest, GetNodeRequest,
-    GetNodeResponse, GetNodesBySubmissionRequest, GetNodesBySubmissionResponse,
-    GetSessionByNameRequest, GetSessionNodesRequest, GetSessionNodesResponse, GetSessionRequest,
-    GetSessionResponse, InsertNodeRequest, InsertNodeResponse, LatestNodeOnBranchRequest,
-    LatestNodeOnBranchResponse, ListSessionsRequest, ListSessionsResponse, PingRequest,
-    RenameBranchRequest, RenameBranchResponse, SealBranchRequest, SealBranchResponse, SemVer,
+    GetChildrenRequest, GetChildrenResponse, GetInvokeNodeRequest, GetInvokeNodeResponse,
+    GetNodeByPrefixRequest, GetNodeRequest, GetNodeResponse, GetNodesBySubmissionRequest,
+    GetNodesBySubmissionResponse, GetSessionByNameRequest, GetSessionNodesRequest,
+    GetSessionNodesResponse, GetSessionRequest, GetSessionResponse, InsertNodeRequest,
+    InsertNodeResponse, InvokeNodeProto, LatestNodeOnBranchRequest, LatestNodeOnBranchResponse,
+    ListSessionsRequest, ListSessionsResponse, PingRequest, RenameBranchRequest,
+    RenameBranchResponse, SealBranchRequest, SealBranchResponse, SemVer,
     UpdateSessionDefaultBranchRequest, UpdateSessionDefaultBranchResponse,
 };
 use vlinder_core::domain::{DagNodeId, DagStore, MessageType, SessionId};
@@ -289,6 +290,48 @@ impl StateService for StateServiceServer {
         Ok(Response::new(GetSessionResponse {
             session: session.map(session_to_proto),
         }))
+    }
+
+    async fn get_invoke_node(
+        &self,
+        request: Request<GetInvokeNodeRequest>,
+    ) -> Result<Response<GetInvokeNodeResponse>, Status> {
+        let req = request.into_inner();
+        let dag_hash = vlinder_core::domain::DagNodeId::from(req.dag_hash);
+        let result = self
+            .store
+            .get_invoke_node(&dag_hash)
+            .map_err(Status::internal)?;
+
+        let node = result.map(|(key, msg)| {
+            let (harness, runtime, agent) = match &key.kind {
+                vlinder_core::domain::DataMessageKind::Invoke {
+                    harness,
+                    runtime,
+                    agent,
+                } => (
+                    harness.as_str().to_string(),
+                    runtime.as_str().to_string(),
+                    agent.to_string(),
+                ),
+            };
+            InvokeNodeProto {
+                session_id: key.session.to_string(),
+                branch: key.branch.as_i64(),
+                submission_id: key.submission.to_string(),
+                harness,
+                runtime,
+                agent,
+                message_id: msg.id.to_string(),
+                state: msg.state,
+                diagnostics: serde_json::to_vec(&msg.diagnostics).unwrap_or_default(),
+                payload: msg.payload,
+                dag_parent: msg.dag_parent.to_string(),
+                dag_hash: msg.dag_id.to_string(),
+            }
+        });
+
+        Ok(Response::new(GetInvokeNodeResponse { node }))
     }
 
     async fn latest_node_on_branch(

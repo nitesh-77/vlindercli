@@ -211,6 +211,62 @@ impl DagStore for GrpcStateClient {
             .collect()
     }
 
+    fn get_invoke_node(
+        &self,
+        dag_hash: &DagNodeId,
+    ) -> Result<
+        Option<(
+            vlinder_core::domain::DataRoutingKey,
+            vlinder_core::domain::InvokeMessage,
+        )>,
+        String,
+    > {
+        let request = proto::GetInvokeNodeRequest {
+            dag_hash: dag_hash.to_string(),
+        };
+
+        let mut client = self.client.clone();
+        let response = self
+            .runtime
+            .block_on(async { client.get_invoke_node(request).await })
+            .map_err(|e| e.to_string())?;
+
+        match response.into_inner().node {
+            Some(n) => {
+                let harness: vlinder_core::domain::HarnessType =
+                    n.harness.parse().map_err(|e: String| e)?;
+                let runtime: vlinder_core::domain::RuntimeType =
+                    n.runtime.parse().map_err(|e: String| e)?;
+                let key = vlinder_core::domain::DataRoutingKey {
+                    session: vlinder_core::domain::SessionId::try_from(n.session_id)?,
+                    branch: vlinder_core::domain::BranchId::from(n.branch),
+                    submission: vlinder_core::domain::SubmissionId::from(n.submission_id),
+                    kind: vlinder_core::domain::DataMessageKind::Invoke {
+                        harness,
+                        runtime,
+                        agent: vlinder_core::domain::AgentName::new(n.agent),
+                    },
+                };
+                let diagnostics: vlinder_core::domain::InvokeDiagnostics =
+                    serde_json::from_slice(&n.diagnostics).unwrap_or_else(|_| {
+                        vlinder_core::domain::InvokeDiagnostics {
+                            harness_version: String::new(),
+                        }
+                    });
+                let msg = vlinder_core::domain::InvokeMessage {
+                    id: vlinder_core::domain::MessageId::from(n.message_id),
+                    dag_id: vlinder_core::domain::DagNodeId::from(n.dag_hash),
+                    state: n.state,
+                    diagnostics,
+                    dag_parent: vlinder_core::domain::DagNodeId::from(n.dag_parent),
+                    payload: n.payload,
+                };
+                Ok(Some((key, msg)))
+            }
+            None => Ok(None),
+        }
+    }
+
     fn get_node_by_prefix(&self, prefix: &str) -> Result<Option<DagNode>, String> {
         let request = proto::GetNodeByPrefixRequest {
             prefix: prefix.to_string(),

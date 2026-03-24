@@ -49,7 +49,7 @@ impl SqliteDagStore {
                  checkpoint TEXT,
                  operation TEXT,
                  message_blob TEXT,
-                 timeline_id TEXT NOT NULL DEFAULT '0',
+                 timeline_id INTEGER NOT NULL DEFAULT 0,
                  snapshot TEXT NOT NULL DEFAULT '{}'
              );
              CREATE INDEX IF NOT EXISTS idx_dag_nodes_session
