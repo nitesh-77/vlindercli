@@ -244,8 +244,10 @@ fn row_to_dag_node(row: &rusqlite::Row) -> Result<DagNode, rusqlite::Error> {
     let submission = vlinder_core::domain::SubmissionId::from(row.get::<_, String>(9)?);
     let protocol_version: String = row.get(10)?;
 
-    // Empty blob = typed table row (invoke via insert_invoke_node).
-    if blob.is_empty() {
+    // Empty or v2 blob = typed table row. Callers use get_invoke_node for content.
+    if blob.is_empty()
+        || serde_json::from_str::<vlinder_core::domain::ObservableMessageV2>(&blob).is_ok()
+    {
         return Ok(DagNode {
             id: DagNodeId::from(row.get::<_, String>(0)?),
             parent_id: DagNodeId::from(row.get::<_, String>(1)?),
@@ -261,22 +263,7 @@ fn row_to_dag_node(row: &rusqlite::Row) -> Result<DagNode, rusqlite::Error> {
         });
     }
 
-    // Try v2 format first, fall back to legacy ObservableMessage (ADR 122 tech debt).
-    if let Ok(v2) = serde_json::from_str::<vlinder_core::domain::ObservableMessageV2>(&blob) {
-        Ok(DagNode {
-            id: DagNodeId::from(row.get::<_, String>(0)?),
-            parent_id: DagNodeId::from(row.get::<_, String>(1)?),
-            created_at,
-            state,
-            msg_type,
-            session,
-            submission,
-            branch,
-            protocol_version,
-            message: None,
-            message_v2: Some(v2),
-        })
-    } else {
+    {
         let mut message: ObservableMessage = serde_json::from_str(&blob).map_err(|e| {
             rusqlite::Error::FromSqlConversionFailure(
                 4,

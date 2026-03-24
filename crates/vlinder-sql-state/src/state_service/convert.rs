@@ -141,22 +141,24 @@ impl TryFrom<proto::DagNode> for DagNode {
             });
         }
 
-        // Try v2 format first, fall back to legacy (ADR 122 tech debt).
-        if let Ok(v2) = serde_json::from_str::<vlinder_core::domain::ObservableMessageV2>(blob) {
-            Ok(Self {
+        // V2 blob = typed table row. Callers use get_invoke_node for content.
+        if serde_json::from_str::<vlinder_core::domain::ObservableMessageV2>(blob).is_ok() {
+            return Ok(Self {
                 id: DagNodeId::from(node.hash),
                 parent_id: DagNodeId::from(node.parent_hash),
                 created_at,
                 state: vlinder_core::domain::Snapshot::empty(),
                 msg_type,
                 session,
-                submission: submission.clone(),
+                submission,
                 branch: BranchId::from(node.branch_id),
                 protocol_version: pv,
                 message: None,
-                message_v2: Some(v2),
-            })
-        } else {
+                message_v2: None,
+            });
+        }
+
+        {
             let mut message: ObservableMessage = serde_json::from_str(blob)
                 .map_err(|e| format!("invalid message_blob JSON: {e}"))?;
             if !node.payload.is_empty() {
