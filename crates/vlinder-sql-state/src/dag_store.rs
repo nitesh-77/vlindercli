@@ -58,6 +58,88 @@ impl SqliteDagStore {
                  ON dag_nodes (parent_hash);
              CREATE INDEX IF NOT EXISTS idx_dag_nodes_timeline
                  ON dag_nodes (timeline_id, message_type, created_at);
+             -- Typed message tables (ADR 122). Each holds domain-specific
+             -- fields; routing and Merkle fields stay in dag_nodes.
+             CREATE TABLE IF NOT EXISTS invoke_nodes (
+                 dag_hash TEXT PRIMARY KEY REFERENCES dag_nodes(hash),
+                 harness TEXT NOT NULL,
+                 runtime TEXT NOT NULL,
+                 agent TEXT NOT NULL,
+                 message_id TEXT NOT NULL,
+                 state TEXT,
+                 diagnostics BLOB NOT NULL DEFAULT x'',
+                 payload BLOB NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS complete_nodes (
+                 dag_hash TEXT PRIMARY KEY REFERENCES dag_nodes(hash),
+                 agent TEXT NOT NULL,
+                 harness TEXT NOT NULL,
+                 message_id TEXT NOT NULL,
+                 state TEXT,
+                 diagnostics BLOB NOT NULL DEFAULT x'',
+                 payload BLOB NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS request_nodes (
+                 dag_hash TEXT PRIMARY KEY REFERENCES dag_nodes(hash),
+                 agent TEXT NOT NULL,
+                 service TEXT NOT NULL,
+                 operation TEXT NOT NULL,
+                 sequence INTEGER NOT NULL,
+                 message_id TEXT NOT NULL,
+                 state TEXT,
+                 diagnostics BLOB NOT NULL DEFAULT x'',
+                 payload BLOB NOT NULL,
+                 checkpoint TEXT
+             );
+             CREATE TABLE IF NOT EXISTS response_nodes (
+                 dag_hash TEXT PRIMARY KEY REFERENCES dag_nodes(hash),
+                 agent TEXT NOT NULL,
+                 service TEXT NOT NULL,
+                 operation TEXT NOT NULL,
+                 sequence INTEGER NOT NULL,
+                 message_id TEXT NOT NULL,
+                 correlation_id TEXT NOT NULL,
+                 state TEXT,
+                 diagnostics BLOB NOT NULL DEFAULT x'',
+                 payload BLOB NOT NULL,
+                 status_code INTEGER NOT NULL DEFAULT 200,
+                 checkpoint TEXT
+             );
+             CREATE TABLE IF NOT EXISTS delegate_nodes (
+                 dag_hash TEXT PRIMARY KEY REFERENCES dag_nodes(hash),
+                 caller TEXT NOT NULL,
+                 target TEXT NOT NULL,
+                 nonce TEXT NOT NULL,
+                 message_id TEXT NOT NULL,
+                 state TEXT,
+                 diagnostics BLOB NOT NULL DEFAULT x'',
+                 payload BLOB NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS repair_nodes (
+                 dag_hash TEXT PRIMARY KEY REFERENCES dag_nodes(hash),
+                 agent TEXT NOT NULL,
+                 harness TEXT NOT NULL,
+                 service TEXT NOT NULL,
+                 operation TEXT NOT NULL,
+                 sequence INTEGER NOT NULL,
+                 message_id TEXT NOT NULL,
+                 dag_parent TEXT NOT NULL,
+                 checkpoint TEXT NOT NULL,
+                 state TEXT,
+                 payload BLOB NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS fork_nodes (
+                 dag_hash TEXT PRIMARY KEY REFERENCES dag_nodes(hash),
+                 agent TEXT NOT NULL,
+                 branch_name TEXT NOT NULL,
+                 fork_point TEXT NOT NULL,
+                 message_id TEXT NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS promote_nodes (
+                 dag_hash TEXT PRIMARY KEY REFERENCES dag_nodes(hash),
+                 agent TEXT NOT NULL,
+                 message_id TEXT NOT NULL
+             );
              CREATE TABLE IF NOT EXISTS branches (
                  id INTEGER PRIMARY KEY AUTOINCREMENT,
                  name TEXT NOT NULL,
@@ -184,6 +266,96 @@ fn row_to_dag_node(row: &rusqlite::Row) -> Result<DagNode, rusqlite::Error> {
     }
 }
 
+/// Insert into the appropriate typed table based on message content.
+///
+/// For v2 invoke: extracts from `ObservableMessageV2::InvokeV2`.
+/// For v1 messages: extracts from `ObservableMessage` variants.
+fn insert_typed_node(conn: &Connection, node: &DagNode) -> Result<(), rusqlite::Error> {
+    use vlinder_core::domain::ObservableMessage;
+
+    let hash = node.id.as_str();
+
+    // V2 invoke path
+    if let Some(vlinder_core::domain::ObservableMessageV2::InvokeV2 { key, msg }) = &node.message_v2
+    {
+        let vlinder_core::domain::DataMessageKind::Invoke {
+            harness,
+            runtime,
+            agent,
+        } = &key.kind;
+        let diag = serde_json::to_vec(&msg.diagnostics).unwrap_or_default();
+        conn.execute(
+            "INSERT OR IGNORE INTO invoke_nodes (dag_hash, harness, runtime, agent, message_id, state, diagnostics, payload)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            rusqlite::params![hash, harness.as_str(), runtime.as_str(), agent.as_str(), msg.id.as_str(), msg.state.as_deref(), diag, &msg.payload],
+        )?;
+        return Ok(());
+    }
+
+    // V1 path: match on ObservableMessage variant
+    let Some(msg) = &node.message else {
+        return Ok(());
+    };
+
+    match msg {
+        ObservableMessage::Complete(m) => {
+            let diag = serde_json::to_vec(&m.diagnostics).unwrap_or_default();
+            conn.execute(
+                "INSERT OR IGNORE INTO complete_nodes (dag_hash, agent, harness, message_id, state, diagnostics, payload)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                rusqlite::params![hash, m.agent_id.as_str(), m.harness.as_str(), m.id.as_str(), m.state.as_deref(), diag, &m.payload],
+            )?;
+        }
+        ObservableMessage::Request(m) => {
+            let diag = serde_json::to_vec(&m.diagnostics).unwrap_or_default();
+            conn.execute(
+                "INSERT OR IGNORE INTO request_nodes (dag_hash, agent, service, operation, sequence, message_id, state, diagnostics, payload, checkpoint)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                rusqlite::params![hash, m.agent_id.as_str(), m.service.to_string(), m.operation.as_str(), m.sequence.as_u32(), m.id.as_str(), m.state.as_deref(), diag, &m.payload, m.checkpoint.as_deref()],
+            )?;
+        }
+        ObservableMessage::Response(m) => {
+            let diag = serde_json::to_vec(&m.diagnostics).unwrap_or_default();
+            conn.execute(
+                "INSERT OR IGNORE INTO response_nodes (dag_hash, agent, service, operation, sequence, message_id, correlation_id, state, diagnostics, payload, status_code, checkpoint)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                rusqlite::params![hash, m.agent_id.as_str(), m.service.to_string(), m.operation.as_str(), m.sequence.as_u32(), m.id.as_str(), m.correlation_id.as_str(), m.state.as_deref(), diag, &m.payload, m.status_code, m.checkpoint.as_deref()],
+            )?;
+        }
+        ObservableMessage::Delegate(m) => {
+            let diag = serde_json::to_vec(&m.diagnostics).unwrap_or_default();
+            conn.execute(
+                "INSERT OR IGNORE INTO delegate_nodes (dag_hash, caller, target, nonce, message_id, state, diagnostics, payload)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                rusqlite::params![hash, m.caller.as_str(), m.target.as_str(), m.nonce.as_str(), m.id.as_str(), m.state.as_deref(), diag, &m.payload],
+            )?;
+        }
+        ObservableMessage::Repair(m) => {
+            conn.execute(
+                "INSERT OR IGNORE INTO repair_nodes (dag_hash, agent, harness, service, operation, sequence, message_id, dag_parent, checkpoint, state, payload)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                rusqlite::params![hash, m.agent_name.as_str(), m.harness.as_str(), m.service.to_string(), m.operation.as_str(), m.sequence.as_u32(), m.id.as_str(), m.dag_parent.as_str(), &m.checkpoint, m.state.as_deref(), &m.payload],
+            )?;
+        }
+        ObservableMessage::Fork(m) => {
+            conn.execute(
+                "INSERT OR IGNORE INTO fork_nodes (dag_hash, agent, branch_name, fork_point, message_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![hash, m.agent_name.as_str(), &m.branch_name, m.fork_point.as_str(), m.id.as_str()],
+            )?;
+        }
+        ObservableMessage::Promote(m) => {
+            conn.execute(
+                "INSERT OR IGNORE INTO promote_nodes (dag_hash, agent, message_id)
+                 VALUES (?1, ?2, ?3)",
+                rusqlite::params![hash, m.agent_name.as_str(), m.id.as_str()],
+            )?;
+        }
+    }
+
+    Ok(())
+}
+
 /// Column list for queries that return full `DagNode`s.
 const DAG_NODE_COLUMNS: &str = "hash, parent_hash, created_at, message_blob, payload, snapshot";
 
@@ -260,7 +432,10 @@ impl DagStore for SqliteDagStore {
                 node.branch_id().as_i64(),
                 snapshot_json,
             ],
-        ).map_err(|e| format!("insert_node failed: {e}"))?;
+        ).map_err(|e| format!("insert dag_nodes failed: {e}"))?;
+
+        // Write to typed table (ADR 122).
+        insert_typed_node(&conn, node).map_err(|e| format!("insert typed node failed: {e}"))?;
 
         Ok(())
     }
