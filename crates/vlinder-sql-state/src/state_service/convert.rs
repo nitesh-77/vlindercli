@@ -12,45 +12,17 @@ use vlinder_core::domain::{
 // =============================================================================
 
 fn dag_node_to_proto(node: &DagNode) -> proto::DagNode {
-    // Extract fields from whichever message format is present (ADR 122 tech debt).
-    let (from, to, diagnostics, stderr, state, checkpoint, operation, message_blob) =
-        if let Some(ref v2) = node.message_v2 {
-            match v2 {
-                vlinder_core::domain::ObservableMessageV2::InvokeV2 { key, msg } => {
-                    let vlinder_core::domain::DataMessageKind::Invoke { harness, agent, .. } =
-                        &key.kind;
-                    let diag = serde_json::to_vec(&msg.diagnostics).unwrap_or_default();
-                    let blob = serde_json::to_string(v2).ok();
-                    (
-                        harness.as_str().to_string(),
-                        agent.to_string(),
-                        diag,
-                        Vec::<u8>::new(),
-                        msg.state.as_deref().map(str::to_string),
-                        None::<String>,
-                        None::<String>,
-                        blob,
-                    )
-                }
-            }
-        } else {
-            let msg = node
-                .message
-                .as_ref()
-                .expect("dag_node_to_proto: either message or message_v2 must be present");
-            let (f, t) = msg.sender_receiver();
-            let blob = serde_json::to_string(msg).ok();
-            (
-                f,
-                t,
-                msg.diagnostics_json(),
-                msg.stderr().to_vec(),
-                msg.state().map(str::to_string),
-                msg.checkpoint().map(str::to_string),
-                msg.operation().map(str::to_string),
-                blob,
-            )
-        };
+    let msg = node
+        .message
+        .as_ref()
+        .expect("dag_node_to_proto: message must be present");
+    let (from, to) = msg.sender_receiver();
+    let message_blob = serde_json::to_string(msg).ok();
+    let diagnostics = msg.diagnostics_json();
+    let stderr = msg.stderr().to_vec();
+    let state = msg.state().map(str::to_string);
+    let checkpoint = msg.checkpoint().map(str::to_string);
+    let operation = msg.operation().map(str::to_string);
 
     proto::DagNode {
         hash: node.id.to_string(),
@@ -75,7 +47,7 @@ fn dag_node_to_proto(node: &DagNode) -> proto::DagNode {
 
 impl From<DagNode> for proto::DagNode {
     fn from(node: DagNode) -> Self {
-        if node.message.is_none() && node.message_v2.is_none() {
+        if node.message.is_none() {
             return proto::DagNode {
                 hash: node.id.to_string(),
                 parent_hash: node.parent_id.to_string(),
@@ -137,7 +109,6 @@ impl TryFrom<proto::DagNode> for DagNode {
                 branch: BranchId::from(node.branch_id),
                 protocol_version: pv,
                 message: None,
-                message_v2: None,
             });
         }
 
@@ -154,7 +125,6 @@ impl TryFrom<proto::DagNode> for DagNode {
                 branch: BranchId::from(node.branch_id),
                 protocol_version: pv,
                 message: None,
-                message_v2: None,
             });
         }
 
@@ -175,7 +145,6 @@ impl TryFrom<proto::DagNode> for DagNode {
                 protocol_version: pv,
                 branch: BranchId::from(node.branch_id),
                 message: Some(message),
-                message_v2: None,
             })
         }
     }
@@ -347,7 +316,6 @@ mod tests {
         };
         let node = DagNode::try_from(proto_node).unwrap();
         assert!(node.message.is_none());
-        assert!(node.message_v2.is_none());
         assert_eq!(
             node.message_type(),
             vlinder_core::domain::MessageType::Invoke

@@ -49,7 +49,6 @@ pub fn build_dag_node(
         branch: *msg.branch(),
         protocol_version: msg.protocol_version().to_string(),
         message: Some(msg.clone()),
-        message_v2: None,
     }
 }
 
@@ -61,11 +60,10 @@ pub fn build_dag_node(
 mod tests {
     use super::*;
     use crate::domain::{
-        AgentName, BranchId, CompleteMessage, DagStore, DataMessageKind, DataRoutingKey,
-        DelegateDiagnostics, DelegateMessage, HarnessType, InMemoryDagStore, InferenceBackendType,
-        InvokeDiagnostics, InvokeMessage, MessageId, MessageType, Nonce, ObservableMessageV2,
-        Operation, RequestDiagnostics, RequestMessage, ResponseMessage, RuntimeDiagnostics,
-        RuntimeType, Sequence, ServiceBackend, SessionId, SubmissionId,
+        AgentName, BranchId, CompleteMessage, DagStore, DelegateDiagnostics, DelegateMessage,
+        HarnessType, InMemoryDagStore, InferenceBackendType, MessageType, Nonce, Operation,
+        RequestDiagnostics, RequestMessage, ResponseMessage, RuntimeDiagnostics, Sequence,
+        ServiceBackend, SessionId, SubmissionId,
     };
 
     fn session() -> SessionId {
@@ -253,26 +251,6 @@ mod tests {
     fn dag_node_accessors_on_invoke() {
         let session = session();
         let sub = submission();
-        let key = DataRoutingKey {
-            session: session.clone(),
-            branch: BranchId::from(1),
-            submission: sub.clone(),
-            kind: DataMessageKind::Invoke {
-                harness: HarnessType::Cli,
-                runtime: RuntimeType::Container,
-                agent: AgentName::new("myagent"),
-            },
-        };
-        let msg = InvokeMessage {
-            id: MessageId::new(),
-            dag_id: DagNodeId::root(),
-            state: Some("state-xyz".to_string()),
-            diagnostics: InvokeDiagnostics {
-                harness_version: "0.1.0".to_string(),
-            },
-            dag_parent: DagNodeId::root(),
-            payload: b"test-payload".to_vec(),
-        };
 
         let node = DagNode {
             id: DagNodeId::from("test-hash".to_string()),
@@ -285,28 +263,21 @@ mod tests {
             branch: BranchId::from(1),
             protocol_version: "v1".to_string(),
             message: None,
-            message_v2: Some(ObservableMessageV2::InvokeV2 {
-                key: key.clone(),
-                msg,
-            }),
         };
 
         assert_eq!(node.message_type(), MessageType::Invoke);
         assert_eq!(*node.session_id(), session);
         assert_eq!(*node.submission_id(), sub);
         assert_eq!(*node.branch_id(), BranchId::from(1));
-        assert_eq!(node.payload(), b"test-payload");
-        if let Some(ObservableMessageV2::InvokeV2 { msg, .. }) = &node.message_v2 {
-            assert_eq!(msg.state.as_deref(), Some("state-xyz"));
-        } else {
-            panic!("expected InvokeV2");
-        }
+        // message: None for typed-table invoke rows — payload returns empty
+        assert_eq!(node.payload(), b"");
         assert_eq!(node.protocol_version(), "v1");
     }
 
     #[test]
-    #[should_panic(expected = "either message or message_v2 must be Some")]
-    fn dag_node_panics_when_both_none() {
+    fn dag_node_message_none_returns_empty_payload() {
+        // A DagNode can have `message: None` for typed-table rows (invoke).
+        // This is not an error — payload() simply returns empty.
         let node = DagNode {
             id: DagNodeId::from("empty".to_string()),
             parent_id: DagNodeId::root(),
@@ -318,10 +289,8 @@ mod tests {
             branch: BranchId::from(1),
             protocol_version: "v1".to_string(),
             message: None,
-            message_v2: None,
         };
-        // Accessors that still use message_ref() should panic
-        let _ = node.payload();
+        assert_eq!(node.payload(), b"");
     }
 
     // --- Integration: ObservableMessage → DagNode → store round-trip ---

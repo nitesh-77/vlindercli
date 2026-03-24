@@ -109,36 +109,11 @@ pub struct DagNode {
     pub submission: super::SubmissionId,
     pub branch: super::BranchId,
     pub protocol_version: String,
-    /// Legacy message format. Exactly one of `message` / `message_v2` is `Some`.
+    /// Legacy message format. `None` for typed-table rows (invoke).
     pub message: Option<super::ObservableMessage>,
-    /// V2 message format (ADR 121). Exactly one of `message` / `message_v2` is `Some`.
-    pub message_v2: Option<super::ObservableMessageV2>,
-}
-
-/// Unified reference to whichever message format a `DagNode` holds.
-///
-/// Eliminates repeated `if let Some(v2) ... else msg()` in every accessor.
-/// New v2 variants are added here once; all accessors get them for free.
-enum MessageRef<'a> {
-    V1(&'a super::ObservableMessage),
-    V2(
-        &'a super::routing_key::DataRoutingKey,
-        &'a super::message::invoke::InvokeMessage,
-    ),
 }
 
 impl DagNode {
-    fn message_ref(&self) -> MessageRef<'_> {
-        match &self.message_v2 {
-            Some(super::ObservableMessageV2::InvokeV2 { key, msg }) => MessageRef::V2(key, msg),
-            _ => MessageRef::V1(
-                self.message
-                    .as_ref()
-                    .expect("DagNode: either message or message_v2 must be Some"),
-            ),
-        }
-    }
-
     pub fn message_type(&self) -> MessageType {
         self.msg_type
     }
@@ -149,10 +124,7 @@ impl DagNode {
         &self.submission
     }
     pub fn payload(&self) -> &[u8] {
-        match self.message_ref() {
-            MessageRef::V1(m) => m.payload(),
-            MessageRef::V2(_, msg) => &msg.payload,
-        }
+        self.message.as_ref().map_or(&[], |m| m.payload())
     }
     pub fn protocol_version(&self) -> &str {
         &self.protocol_version
@@ -161,10 +133,7 @@ impl DagNode {
         &self.branch
     }
     pub fn message_state(&self) -> Option<&str> {
-        match self.message_ref() {
-            MessageRef::V1(m) => m.state(),
-            MessageRef::V2(_, msg) => msg.state.as_deref(),
-        }
+        self.message.as_ref().and_then(|m| m.state())
     }
 }
 
@@ -389,7 +358,7 @@ impl DagStore for InMemoryDagStore {
         created_at: DateTime<Utc>,
         state: &Snapshot,
         key: &super::DataRoutingKey,
-        msg: &super::InvokeMessage,
+        _msg: &super::InvokeMessage,
     ) -> Result<(), String> {
         let node = DagNode {
             id: dag_id.clone(),
@@ -402,10 +371,6 @@ impl DagStore for InMemoryDagStore {
             branch: key.branch,
             protocol_version: "v1".to_string(),
             message: None,
-            message_v2: Some(super::ObservableMessageV2::InvokeV2 {
-                key: key.clone(),
-                msg: msg.clone(),
-            }),
         };
         self.insert_node(&node)
     }
@@ -499,28 +464,17 @@ impl DagStore for InMemoryDagStore {
                     .iter()
                     .find(|n| n.message_type() == MessageType::Invoke);
                 let agent_name = if let Some(n) = invoke_node {
-                    match n.message_ref() {
-                        MessageRef::V2(key, _) => {
-                            let super::DataMessageKind::Invoke { agent, .. } = &key.kind;
-                            agent.to_string()
-                        }
-                        MessageRef::V1(m) => {
-                            let (_from, to) = m.sender_receiver();
-                            to
-                        }
-                    }
+                    n.message
+                        .as_ref()
+                        .map(|m| m.sender_receiver().1)
+                        .unwrap_or_default()
                 } else {
                     // No invoke node — extract agent from the first Complete
                     nodes
                         .iter()
                         .find(|n| n.message_type() == MessageType::Complete)
-                        .and_then(|n| match n.message_ref() {
-                            MessageRef::V1(m) => {
-                                let (from, _to) = m.sender_receiver();
-                                Some(from)
-                            }
-                            MessageRef::V2(..) => None,
-                        })
+                        .and_then(|n| n.message.as_ref())
+                        .map(|m| m.sender_receiver().0)
                         .unwrap_or_default()
                 };
                 let started_at = nodes.first().map(|n| n.created_at).unwrap_or_default();

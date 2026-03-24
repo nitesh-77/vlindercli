@@ -259,7 +259,6 @@ fn row_to_dag_node(row: &rusqlite::Row) -> Result<DagNode, rusqlite::Error> {
             branch,
             protocol_version,
             message: None,
-            message_v2: None,
         });
     }
 
@@ -285,38 +284,18 @@ fn row_to_dag_node(row: &rusqlite::Row) -> Result<DagNode, rusqlite::Error> {
             branch,
             protocol_version,
             message: Some(message),
-            message_v2: None,
         })
     }
 }
 
 /// Insert into the appropriate typed table based on message content.
 ///
-/// For v2 invoke: extracts from `ObservableMessageV2::InvokeV2`.
 /// For v1 messages: extracts from `ObservableMessage` variants.
 fn insert_typed_node(conn: &Connection, node: &DagNode) -> Result<(), rusqlite::Error> {
     use vlinder_core::domain::ObservableMessage;
 
     let hash = node.id.as_str();
 
-    // V2 invoke path
-    if let Some(vlinder_core::domain::ObservableMessageV2::InvokeV2 { key, msg }) = &node.message_v2
-    {
-        let vlinder_core::domain::DataMessageKind::Invoke {
-            harness,
-            runtime,
-            agent,
-        } = &key.kind;
-        let diag = serde_json::to_vec(&msg.diagnostics).unwrap_or_default();
-        conn.execute(
-            "INSERT OR IGNORE INTO invoke_nodes (dag_hash, harness, runtime, agent, message_id, state, diagnostics, payload)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            rusqlite::params![hash, harness.as_str(), runtime.as_str(), agent.as_str(), msg.id.as_str(), msg.state.as_deref(), diag, &msg.payload],
-        )?;
-        return Ok(());
-    }
-
-    // V1 path: match on ObservableMessage variant
     let Some(msg) = &node.message else {
         return Ok(());
     };
@@ -388,48 +367,18 @@ impl DagStore for SqliteDagStore {
     fn insert_node(&self, node: &DagNode) -> Result<(), String> {
         let conn = self.conn.lock().expect("db connection lock poisoned");
 
-        // Extract fields from whichever message format is present (ADR 122 tech debt).
-        let (from, to, diagnostics_json, stderr, state, checkpoint, operation, message_blob) =
-            if let Some(ref v2) = node.message_v2 {
-                match v2 {
-                    vlinder_core::domain::ObservableMessageV2::InvokeV2 { key, msg } => {
-                        let vlinder_core::domain::DataMessageKind::Invoke {
-                            harness, agent, ..
-                        } = &key.kind;
-                        let diag = serde_json::to_vec(&msg.diagnostics).unwrap_or_default();
-                        let blob = serde_json::to_string(v2)
-                            .map_err(|e| format!("serialize message_blob failed: {e}"))?;
-                        (
-                            harness.as_str().to_string(),
-                            agent.to_string(),
-                            diag,
-                            Vec::<u8>::new(),
-                            msg.state.as_deref().map(str::to_string),
-                            None::<String>,
-                            None::<String>,
-                            blob,
-                        )
-                    }
-                }
-            } else {
-                let msg = node
-                    .message
-                    .as_ref()
-                    .expect("insert_node: either message or message_v2 must be present");
-                let (f, t) = msg.sender_receiver();
-                let blob = serde_json::to_string(msg)
-                    .map_err(|e| format!("serialize message_blob failed: {e}"))?;
-                (
-                    f,
-                    t,
-                    msg.diagnostics_json(),
-                    msg.stderr().to_vec(),
-                    msg.state().map(str::to_string),
-                    msg.checkpoint().map(str::to_string),
-                    msg.operation().map(str::to_string),
-                    blob,
-                )
-            };
+        let msg = node
+            .message
+            .as_ref()
+            .expect("insert_node: message must be present");
+        let (from, to) = msg.sender_receiver();
+        let message_blob = serde_json::to_string(msg)
+            .map_err(|e| format!("serialize message_blob failed: {e}"))?;
+        let diagnostics_json = msg.diagnostics_json();
+        let stderr = msg.stderr().to_vec();
+        let state = msg.state().map(str::to_string);
+        let checkpoint = msg.checkpoint().map(str::to_string);
+        let operation = msg.operation().map(str::to_string);
 
         let snapshot_json = serde_json::to_string(&node.state)
             .map_err(|e| format!("serialize snapshot failed: {e}"))?;
