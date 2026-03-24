@@ -221,16 +221,20 @@ fn row_to_session(row: &rusqlite::Row) -> Result<Session, rusqlite::Error> {
 
 /// Construct a `DagNode` from a `SQLite` row.
 ///
-/// Expects columns in order: `hash`, `parent_hash`, `created_at`, `message_blob`.
-/// The `message_blob` column contains the JSON-serialized `ObservableMessage`.
+/// Expects columns in order: `hash`, `parent_hash`, `message_type`, `created_at`,
+/// `message_blob`, `payload`, `snapshot`.
 fn row_to_dag_node(row: &rusqlite::Row) -> Result<DagNode, rusqlite::Error> {
-    let created_at_str: String = row.get(2)?;
+    let msg_type_str: String = row.get(2)?;
+    let msg_type = msg_type_str
+        .parse::<MessageType>()
+        .unwrap_or(MessageType::Complete);
+    let created_at_str: String = row.get(3)?;
     let created_at = DateTime::parse_from_rfc3339(&created_at_str)
         .map(|dt| dt.with_timezone(&Utc))
         .unwrap_or_default();
-    let blob: String = row.get(3)?;
-    let payload: Vec<u8> = row.get(4)?;
-    let snapshot_json: String = row.get(5)?;
+    let blob: String = row.get(4)?;
+    let payload: Vec<u8> = row.get(5)?;
+    let snapshot_json: String = row.get(6)?;
     let state: vlinder_core::domain::Snapshot = serde_json::from_str(&snapshot_json)
         .unwrap_or_else(|_| vlinder_core::domain::Snapshot::empty());
 
@@ -241,13 +245,14 @@ fn row_to_dag_node(row: &rusqlite::Row) -> Result<DagNode, rusqlite::Error> {
             parent_id: DagNodeId::from(row.get::<_, String>(1)?),
             created_at,
             state,
+            msg_type,
             message: None,
             message_v2: Some(v2),
         })
     } else {
         let mut message: ObservableMessage = serde_json::from_str(&blob).map_err(|e| {
             rusqlite::Error::FromSqlConversionFailure(
-                3,
+                4,
                 rusqlite::types::Type::Text,
                 format!("invalid message_blob JSON: {e}").into(),
             )
@@ -260,6 +265,7 @@ fn row_to_dag_node(row: &rusqlite::Row) -> Result<DagNode, rusqlite::Error> {
             parent_id: DagNodeId::from(row.get::<_, String>(1)?),
             created_at,
             state,
+            msg_type,
             message: Some(message),
             message_v2: None,
         })
@@ -357,7 +363,8 @@ fn insert_typed_node(conn: &Connection, node: &DagNode) -> Result<(), rusqlite::
 }
 
 /// Column list for queries that return full `DagNode`s.
-const DAG_NODE_COLUMNS: &str = "hash, parent_hash, created_at, message_blob, payload, snapshot";
+const DAG_NODE_COLUMNS: &str =
+    "hash, parent_hash, message_type, created_at, message_blob, payload, snapshot";
 
 impl DagStore for SqliteDagStore {
     fn insert_node(&self, node: &DagNode) -> Result<(), String> {

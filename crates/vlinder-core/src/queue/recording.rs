@@ -140,6 +140,7 @@ impl RecordingQueue {
             parent_id,
             created_at: Utc::now(),
             state,
+            msg_type: MessageType::Invoke,
             message: None,
             message_v2: Some(ObservableMessageV2::InvokeV2 {
                 key: key.clone(),

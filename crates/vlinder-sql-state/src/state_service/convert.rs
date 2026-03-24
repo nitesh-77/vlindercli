@@ -97,6 +97,11 @@ impl TryFrom<proto::DagNode> for DagNode {
             .parse()
             .map_err(|e| format!("invalid created_at: {e}"))?;
 
+        let msg_type = node
+            .message_type
+            .parse::<vlinder_core::domain::MessageType>()
+            .unwrap_or(vlinder_core::domain::MessageType::Complete);
+
         let blob = node
             .message_blob
             .as_ref()
@@ -109,6 +114,7 @@ impl TryFrom<proto::DagNode> for DagNode {
                 parent_id: DagNodeId::from(node.parent_hash),
                 created_at,
                 state: vlinder_core::domain::Snapshot::empty(),
+                msg_type,
                 message: None,
                 message_v2: Some(v2),
             })
@@ -123,6 +129,7 @@ impl TryFrom<proto::DagNode> for DagNode {
                 parent_id: DagNodeId::from(node.parent_hash),
                 created_at,
                 state: vlinder_core::domain::Snapshot::empty(),
+                msg_type,
                 message: Some(message),
                 message_v2: None,
             })

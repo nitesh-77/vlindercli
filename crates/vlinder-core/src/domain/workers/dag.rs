@@ -43,6 +43,7 @@ pub fn build_dag_node(
         parent_id: parent_id.clone(),
         created_at: Utc::now(),
         state,
+        msg_type: msg.message_type(),
         message: Some(msg.clone()),
         message_v2: None,
     }
@@ -274,6 +275,7 @@ mod tests {
             parent_id: DagNodeId::root(),
             created_at: chrono::Utc::now(),
             state: Snapshot::empty(),
+            msg_type: MessageType::Invoke,
             message: None,
             message_v2: Some(ObservableMessageV2::InvokeV2 {
                 key: key.clone(),
@@ -298,11 +300,12 @@ mod tests {
             parent_id: DagNodeId::root(),
             created_at: chrono::Utc::now(),
             state: Snapshot::empty(),
+            msg_type: MessageType::Invoke,
             message: None,
             message_v2: None,
         };
-        // Any accessor should panic
-        let _ = node.message_type();
+        // Accessors that still use message_ref() should panic
+        let _ = node.session_id();
     }
 
     // --- Integration: ObservableMessage → DagNode → store round-trip ---
