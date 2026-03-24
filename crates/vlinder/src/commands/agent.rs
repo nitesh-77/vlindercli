@@ -295,7 +295,20 @@ fn resolve_branch_tip(
 
     // Read state from the tip node
     let initial_state = if let Ok(Some(node)) = store.get_node(&tip_hash) {
-        let state = node.message_state().unwrap_or("");
+        let state = if node.message_type() == vlinder_core::domain::MessageType::Invoke {
+            store
+                .get_invoke_node(&node.id)
+                .ok()
+                .flatten()
+                .and_then(|(_, msg)| msg.state)
+                .unwrap_or_default()
+        } else {
+            node.message
+                .as_ref()
+                .and_then(|m| m.state())
+                .unwrap_or("")
+                .to_string()
+        };
         if state.is_empty() {
             None
         } else {
@@ -304,7 +317,7 @@ fn resolve_branch_tip(
                 branch_name,
                 &state[..8.min(state.len())]
             );
-            Some(state.to_string())
+            Some(state.clone())
         }
     } else {
         None

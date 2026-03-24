@@ -296,7 +296,11 @@ mod tests {
         assert_eq!(*node.submission_id(), sub);
         assert_eq!(*node.branch_id(), BranchId::from(1));
         assert_eq!(node.payload(), b"test-payload");
-        assert_eq!(node.message_state(), Some("state-xyz"));
+        if let Some(ObservableMessageV2::InvokeV2 { msg, .. }) = &node.message_v2 {
+            assert_eq!(msg.state.as_deref(), Some("state-xyz"));
+        } else {
+            panic!("expected InvokeV2");
+        }
         assert_eq!(node.protocol_version(), "v1");
     }
 

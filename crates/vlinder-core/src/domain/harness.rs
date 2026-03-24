@@ -195,7 +195,8 @@ impl CoreHarness {
         let submission = SubmissionId::new();
         let last_state = last_complete_node
             .as_ref()
-            .and_then(|n| n.message_state().map(std::string::ToString::to_string))
+            .and_then(|n| n.message.as_ref())
+            .and_then(|m| m.state().map(std::string::ToString::to_string))
             .or_else(|| initial_state.map(std::string::ToString::to_string));
 
         let job_id =
