@@ -125,7 +125,10 @@ impl Sidecar {
                     harness,
                     runtime: _,
                     agent,
-                } = &key.kind;
+                } = &key.kind
+                else {
+                    continue;
+                };
                 tracing::info!(
                     event = "dispatch.started",
                     sha = %key.submission,

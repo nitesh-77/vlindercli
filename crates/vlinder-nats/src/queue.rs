@@ -872,7 +872,10 @@ fn invoke_subject(key: &DataRoutingKey) -> String {
         harness,
         runtime,
         agent,
-    } = &key.kind;
+    } = &key.kind
+    else {
+        panic!("invoke_subject called with non-Invoke key");
+    };
     format!(
         "{INVOKE_PREFIX}.{}.{}.{}.{INVOKE_KIND}.{harness}.{runtime}.{agent}",
         key.session, key.branch, key.submission

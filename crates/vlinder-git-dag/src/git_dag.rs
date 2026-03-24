@@ -868,7 +868,11 @@ impl DagWorker for GitDagWorker {
             harness,
             runtime,
             agent,
-        } = &key.kind;
+        } = &key.kind
+        else {
+            tracing::error!("on_invoke called with non-Invoke key");
+            return;
+        };
 
         let result = (|| -> Result<(), String> {
             let session_id = key.session.as_str();

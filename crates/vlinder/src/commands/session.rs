@@ -145,7 +145,10 @@ fn get(session_id_or_name: &str) {
             {
                 if let Ok(Some((key, _msg))) = store.get_invoke_node(&node.id) {
                     let vlinder_core::domain::DataMessageKind::Invoke { harness, agent, .. } =
-                        &key.kind;
+                        &key.kind
+                    else {
+                        continue;
+                    };
                     (harness.as_str().to_string(), agent.to_string(), None, None)
                 } else {
                     continue;
@@ -344,7 +347,9 @@ fn find_agent_name(store: &dyn DagStore, session_id: &SessionId) -> Option<Strin
         .find(|n| n.message_type() == MessageType::Invoke)
         .and_then(|n| {
             if let Ok(Some((key, _))) = store.get_invoke_node(&n.id) {
-                let vlinder_core::domain::DataMessageKind::Invoke { agent, .. } = &key.kind;
+                let vlinder_core::domain::DataMessageKind::Invoke { agent, .. } = &key.kind else {
+                    return None;
+                };
                 Some(agent.to_string())
             } else {
                 n.message.as_ref().map(|m| m.sender_receiver().1)

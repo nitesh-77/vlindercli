@@ -43,7 +43,10 @@ fn get(submission_id: &str) {
             if node.message_type() == vlinder_core::domain::MessageType::Invoke {
                 if let Ok(Some((key, msg))) = store.get_invoke_node(&node.id) {
                     let vlinder_core::domain::DataMessageKind::Invoke { harness, agent, .. } =
-                        &key.kind;
+                        &key.kind
+                    else {
+                        continue;
+                    };
                     (
                         harness.as_str().to_string(),
                         agent.to_string(),

@@ -66,7 +66,9 @@ impl MessageQueue for InMemoryQueue {
             .map_err(|e| QueueError::ReceiveFailed(format!("lock poisoned: {e}")))?;
 
         for (key, queue) in data.iter_mut() {
-            let DataMessageKind::Invoke { agent: ref a, .. } = key.kind;
+            let DataMessageKind::Invoke { agent: a, .. } = &key.kind else {
+                continue;
+            };
             if a == agent {
                 if let Some(ObservableMessageV2::InvokeV2 { msg, .. }) = queue.pop_front() {
                     let key = key.clone();

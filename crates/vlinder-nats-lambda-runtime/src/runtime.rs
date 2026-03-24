@@ -182,11 +182,9 @@ impl LambdaRuntime {
                 let _ = ack();
                 let function_name = format!("vlinder-{name}");
 
-                let DataMessageKind::Invoke {
-                    harness,
-                    runtime: _,
-                    agent,
-                } = &key.kind;
+                let DataMessageKind::Invoke { harness, agent, .. } = &key.kind else {
+                    continue;
+                };
 
                 let json_payload = serde_json::json!({ "key": key, "msg": invoke });
                 let json_bytes =

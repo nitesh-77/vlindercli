@@ -250,12 +250,11 @@ fn handle_invocation(
     let started_at = Instant::now();
 
     // Extract routing from key
-    let agent_name = match &key.kind {
-        vlinder_core::domain::DataMessageKind::Invoke { agent, .. } => agent.as_str().to_string(),
+    let vlinder_core::domain::DataMessageKind::Invoke { agent, harness, .. } = &key.kind else {
+        return Err("expected Invoke".into());
     };
-    let harness = match &key.kind {
-        vlinder_core::domain::DataMessageKind::Invoke { harness, .. } => *harness,
-    };
+    let agent_name = agent.as_str().to_string();
+    let harness = *harness;
 
     // Look up agent for provider host table and initial state.
     let agent = registry

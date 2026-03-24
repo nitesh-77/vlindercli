@@ -143,7 +143,10 @@ fn get(session_id_or_name: &str, branch_name: &str) {
             {
                 if let Ok(Some((key, _msg))) = store.get_invoke_node(&node.id) {
                     let vlinder_core::domain::DataMessageKind::Invoke { harness, agent, .. } =
-                        &key.kind;
+                        &key.kind
+                    else {
+                        continue;
+                    };
                     (harness.as_str().to_string(), agent.to_string(), None, None)
                 } else {
                     continue;

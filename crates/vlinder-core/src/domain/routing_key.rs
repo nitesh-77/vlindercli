@@ -313,6 +313,10 @@ pub enum DataMessageKind {
         runtime: RuntimeType,
         agent: AgentName,
     },
+    Complete {
+        agent: AgentName,
+        harness: HarnessType,
+    },
 }
 
 #[cfg(test)]

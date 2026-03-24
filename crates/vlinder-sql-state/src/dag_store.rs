@@ -430,7 +430,10 @@ impl DagStore for SqliteDagStore {
             harness,
             runtime,
             agent,
-        } = &key.kind;
+        } = &key.kind
+        else {
+            return Err("insert_invoke_node: expected Invoke key".into());
+        };
         let diagnostics_json = serde_json::to_vec(&msg.diagnostics).unwrap_or_default();
 
         conn.execute(

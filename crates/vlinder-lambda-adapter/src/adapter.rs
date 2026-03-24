@@ -119,7 +119,9 @@ mod tests {
         let json = make_invoke_json(b"hello from lambda");
         let inv = deserialize_invoke(&json).unwrap();
 
-        let DataMessageKind::Invoke { agent, runtime, .. } = &inv.key.kind;
+        let DataMessageKind::Invoke { agent, runtime, .. } = &inv.key.kind else {
+            panic!("expected Invoke");
+        };
         assert_eq!(agent.as_str(), "echo-lambda");
         assert_eq!(*runtime, RuntimeType::Lambda);
         assert_eq!(inv.msg.payload, b"hello from lambda");
@@ -185,7 +187,9 @@ mod tests {
             submission,
             kind,
         } = inv.key;
-        let DataMessageKind::Invoke { agent, harness, .. } = kind;
+        let DataMessageKind::Invoke { agent, harness, .. } = kind else {
+            panic!("expected Invoke");
+        };
 
         let complete = build_complete(
             branch,
@@ -215,7 +219,9 @@ mod tests {
             submission,
             kind,
         } = inv.key;
-        let DataMessageKind::Invoke { agent, harness, .. } = kind;
+        let DataMessageKind::Invoke { agent, harness, .. } = kind else {
+            panic!("expected Invoke");
+        };
 
         let complete = build_complete(
             branch,

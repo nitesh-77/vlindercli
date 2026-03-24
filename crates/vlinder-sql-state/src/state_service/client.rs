@@ -224,7 +224,10 @@ impl DagStore for GrpcStateClient {
             harness,
             runtime,
             agent,
-        } = &key.kind;
+        } = &key.kind
+        else {
+            return Err("insert_invoke_node: expected Invoke key".into());
+        };
 
         let node = proto::InvokeNodeProto {
             session_id: key.session.to_string(),
