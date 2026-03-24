@@ -69,6 +69,7 @@ fn dag_node_to_proto(node: &DagNode) -> proto::DagNode {
         checkpoint,
         operation,
         message_blob,
+        timeline_id: node.branch_id().as_i64(),
     }
 }
 
@@ -120,6 +121,7 @@ impl TryFrom<proto::DagNode> for DagNode {
                 state: vlinder_core::domain::Snapshot::empty(),
                 msg_type,
                 session,
+                branch: BranchId::from(node.timeline_id),
                 message: None,
                 message_v2: Some(v2),
             })
@@ -136,6 +138,7 @@ impl TryFrom<proto::DagNode> for DagNode {
                 state: vlinder_core::domain::Snapshot::empty(),
                 msg_type,
                 session,
+                branch: BranchId::from(node.timeline_id),
                 message: Some(message),
                 message_v2: None,
             })

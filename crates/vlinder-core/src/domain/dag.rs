@@ -106,6 +106,7 @@ pub struct DagNode {
     pub state: Snapshot,
     pub msg_type: MessageType,
     pub session: super::SessionId,
+    pub branch: super::BranchId,
     /// Legacy message format. Exactly one of `message` / `message_v2` is `Some`.
     pub message: Option<super::ObservableMessage>,
     /// V2 message format (ADR 121). Exactly one of `message` / `message_v2` is `Some`.
@@ -161,10 +162,7 @@ impl DagNode {
         }
     }
     pub fn branch_id(&self) -> &super::BranchId {
-        match self.message_ref() {
-            MessageRef::V1(m) => m.branch(),
-            MessageRef::V2(key, _) => &key.branch,
-        }
+        &self.branch
     }
     pub fn message_state(&self) -> Option<&str> {
         match self.message_ref() {

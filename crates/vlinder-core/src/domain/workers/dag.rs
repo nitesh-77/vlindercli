@@ -45,6 +45,7 @@ pub fn build_dag_node(
         state,
         msg_type: msg.message_type(),
         session: msg.session().clone(),
+        branch: *msg.branch(),
         message: Some(msg.clone()),
         message_v2: None,
     }
@@ -278,6 +279,7 @@ mod tests {
             state: Snapshot::empty(),
             msg_type: MessageType::Invoke,
             session: session.clone(),
+            branch: BranchId::from(1),
             message: None,
             message_v2: Some(ObservableMessageV2::InvokeV2 {
                 key: key.clone(),
@@ -304,6 +306,7 @@ mod tests {
             state: Snapshot::empty(),
             msg_type: MessageType::Invoke,
             session: session(),
+            branch: BranchId::from(1),
             message: None,
             message_v2: None,
         };
