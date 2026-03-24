@@ -106,6 +106,7 @@ pub struct DagNode {
     pub state: Snapshot,
     pub msg_type: MessageType,
     pub session: super::SessionId,
+    pub submission: super::SubmissionId,
     pub branch: super::BranchId,
     /// Legacy message format. Exactly one of `message` / `message_v2` is `Some`.
     pub message: Option<super::ObservableMessage>,
@@ -144,10 +145,7 @@ impl DagNode {
         &self.session
     }
     pub fn submission_id(&self) -> &super::SubmissionId {
-        match self.message_ref() {
-            MessageRef::V1(m) => m.submission(),
-            MessageRef::V2(key, _) => &key.submission,
-        }
+        &self.submission
     }
     pub fn payload(&self) -> &[u8] {
         match self.message_ref() {

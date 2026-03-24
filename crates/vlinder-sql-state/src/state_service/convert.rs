@@ -111,6 +111,7 @@ impl TryFrom<proto::DagNode> for DagNode {
         let session = SessionId::try_from(node.session_id).unwrap_or_else(|_| {
             SessionId::try_from("00000000-0000-4000-8000-000000000000".to_string()).unwrap()
         });
+        let submission = vlinder_core::domain::SubmissionId::from(node.submission_id);
 
         // Try v2 format first, fall back to legacy (ADR 122 tech debt).
         if let Ok(v2) = serde_json::from_str::<vlinder_core::domain::ObservableMessageV2>(blob) {
@@ -121,6 +122,7 @@ impl TryFrom<proto::DagNode> for DagNode {
                 state: vlinder_core::domain::Snapshot::empty(),
                 msg_type,
                 session,
+                submission: submission.clone(),
                 branch: BranchId::from(node.branch_id),
                 message: None,
                 message_v2: Some(v2),
@@ -138,6 +140,7 @@ impl TryFrom<proto::DagNode> for DagNode {
                 state: vlinder_core::domain::Snapshot::empty(),
                 msg_type,
                 session,
+                submission,
                 branch: BranchId::from(node.branch_id),
                 message: Some(message),
                 message_v2: None,
