@@ -216,7 +216,12 @@ fn render_session(
             .rev()
             .find(|n| n.message_type() == MessageType::Invoke)
         {
-            let payload = String::from_utf8_lossy(last_invoke.payload());
+            let payload = store
+                .get_invoke_node(&last_invoke.id)
+                .ok()
+                .flatten()
+                .map(|(_, msg)| String::from_utf8_lossy(&msg.payload).to_string())
+                .unwrap_or_default();
             let _ = writeln!(
                 messages,
                 "<div class=\"open-indicator\">Pending: {}</div>",
@@ -228,7 +233,12 @@ fn render_session(
     for node in &nodes {
         match node.message_type() {
             MessageType::Invoke => {
-                let payload = String::from_utf8_lossy(node.payload());
+                let payload = store
+                    .get_invoke_node(&node.id)
+                    .ok()
+                    .flatten()
+                    .map(|(_, msg)| String::from_utf8_lossy(&msg.payload).to_string())
+                    .unwrap_or_default();
                 let ts = node.created_at.format("%Y-%m-%d %H:%M:%S").to_string();
                 let _ = writeln!(
                     messages,
@@ -241,7 +251,11 @@ fn render_session(
                 );
             }
             MessageType::Complete => {
-                let payload = String::from_utf8_lossy(node.payload());
+                let payload = node
+                    .message
+                    .as_ref()
+                    .map(|m| String::from_utf8_lossy(m.payload()).to_string())
+                    .unwrap_or_default();
                 let ts = node.created_at.format("%Y-%m-%d %H:%M:%S").to_string();
                 let _ = writeln!(
                     messages,
