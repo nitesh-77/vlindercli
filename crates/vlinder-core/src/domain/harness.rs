@@ -172,16 +172,21 @@ impl CoreHarness {
             .store
             .latest_node_on_branch(timeline, Some(MessageType::Invoke))
             .unwrap_or(None);
-        let last_invoke_payload = last_invoke_node
-            .as_ref()
-            .map(|n| String::from_utf8_lossy(n.payload()).to_string());
+        let last_invoke_payload = last_invoke_node.as_ref().and_then(|n| {
+            self.store
+                .get_invoke_node(&n.id)
+                .ok()
+                .flatten()
+                .map(|(_, msg)| String::from_utf8_lossy(&msg.payload).to_string())
+        });
         let last_complete_node = self
             .store
             .latest_node_on_branch(timeline, Some(MessageType::Complete))
             .unwrap_or(None);
         let last_complete_payload = last_complete_node
             .as_ref()
-            .map(|n| String::from_utf8_lossy(n.payload()).to_string());
+            .and_then(|n| n.message.as_ref())
+            .map(|m| String::from_utf8_lossy(m.payload()).to_string());
         let enriched_payload = build_payload(
             last_invoke_payload.as_deref(),
             last_complete_payload.as_deref(),
