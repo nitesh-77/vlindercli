@@ -4,18 +4,18 @@ use std::sync::Arc;
 use tonic::{Request, Response, Status};
 
 use super::proto::{
-    self, state_service_server::StateService, CreateBranchRequest, CreateBranchResponse,
-    CreateSessionRequest, CreateSessionResponse, GetBranchByIdRequest, GetBranchByNameRequest,
-    GetBranchResponse, GetBranchesForSessionRequest, GetBranchesForSessionResponse,
-    GetChildrenRequest, GetChildrenResponse, GetInvokeNodeRequest, GetInvokeNodeResponse,
-    GetNodeByPrefixRequest, GetNodeRequest, GetNodeResponse, GetNodesBySubmissionRequest,
-    GetNodesBySubmissionResponse, GetSessionByNameRequest, GetSessionNodesRequest,
-    GetSessionNodesResponse, GetSessionRequest, GetSessionResponse, InsertInvokeNodeRequest,
-    InsertInvokeNodeResponse, InsertNodeRequest, InsertNodeResponse, InvokeNodeProto,
-    LatestNodeOnBranchRequest, LatestNodeOnBranchResponse, ListSessionsRequest,
-    ListSessionsResponse, PingRequest, RenameBranchRequest, RenameBranchResponse,
-    SealBranchRequest, SealBranchResponse, SemVer, UpdateSessionDefaultBranchRequest,
-    UpdateSessionDefaultBranchResponse,
+    self, state_service_server::StateService, CompleteNodeProto, CreateBranchRequest,
+    CreateBranchResponse, CreateSessionRequest, CreateSessionResponse, GetBranchByIdRequest,
+    GetBranchByNameRequest, GetBranchResponse, GetBranchesForSessionRequest,
+    GetBranchesForSessionResponse, GetChildrenRequest, GetChildrenResponse, GetCompleteNodeRequest,
+    GetCompleteNodeResponse, GetInvokeNodeRequest, GetInvokeNodeResponse, GetNodeByPrefixRequest,
+    GetNodeRequest, GetNodeResponse, GetNodesBySubmissionRequest, GetNodesBySubmissionResponse,
+    GetSessionByNameRequest, GetSessionNodesRequest, GetSessionNodesResponse, GetSessionRequest,
+    GetSessionResponse, InsertInvokeNodeRequest, InsertInvokeNodeResponse, InsertNodeRequest,
+    InsertNodeResponse, InvokeNodeProto, LatestNodeOnBranchRequest, LatestNodeOnBranchResponse,
+    ListSessionsRequest, ListSessionsResponse, PingRequest, RenameBranchRequest,
+    RenameBranchResponse, SealBranchRequest, SealBranchResponse, SemVer,
+    UpdateSessionDefaultBranchRequest, UpdateSessionDefaultBranchResponse,
 };
 use vlinder_core::domain::{DagNodeId, DagStore, MessageType, SessionId};
 
@@ -333,6 +333,28 @@ impl StateService for StateServiceServer {
         });
 
         Ok(Response::new(GetInvokeNodeResponse { node }))
+    }
+
+    async fn get_complete_node(
+        &self,
+        request: Request<GetCompleteNodeRequest>,
+    ) -> Result<Response<GetCompleteNodeResponse>, Status> {
+        let req = request.into_inner();
+        let dag_hash = vlinder_core::domain::DagNodeId::from(req.dag_hash);
+        let result = self
+            .store
+            .get_complete_node(&dag_hash)
+            .map_err(Status::internal)?;
+
+        let node = result.map(|msg| CompleteNodeProto {
+            message_id: msg.id.to_string(),
+            state: msg.state,
+            diagnostics: serde_json::to_vec(&msg.diagnostics).unwrap_or_default(),
+            payload: msg.payload,
+            dag_hash: msg.dag_id.to_string(),
+        });
+
+        Ok(Response::new(GetCompleteNodeResponse { node }))
     }
 
     async fn insert_invoke_node(

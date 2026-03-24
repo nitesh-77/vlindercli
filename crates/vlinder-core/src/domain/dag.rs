@@ -274,6 +274,15 @@ pub trait DagStore: Send + Sync {
         Ok(None) // Default no-op for non-SQL implementations
     }
 
+    /// Retrieve typed complete data by DAG node hash.
+    fn get_complete_node(
+        &self,
+        dag_hash: &super::DagNodeId,
+    ) -> Result<Option<super::CompleteMessageV2>, String> {
+        let _ = dag_hash;
+        Ok(None)
+    }
+
     /// Get all branches for a session.
     fn get_branches_for_session(
         &self,

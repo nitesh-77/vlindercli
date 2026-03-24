@@ -782,6 +782,47 @@ impl DagStore for SqliteDagStore {
         Ok(result)
     }
 
+    fn get_complete_node(
+        &self,
+        dag_hash: &DagNodeId,
+    ) -> Result<Option<vlinder_core::domain::CompleteMessageV2>, String> {
+        let conn = self.conn.lock().expect("db connection lock poisoned");
+        let mut stmt = conn
+            .prepare(
+                "SELECT c.agent, c.harness, c.message_id, c.state, c.diagnostics, c.payload
+                 FROM complete_nodes c
+                 WHERE c.dag_hash = ?1",
+            )
+            .map_err(|e| format!("get_complete_node prepare failed: {e}"))?;
+
+        let result = stmt
+            .query_row(rusqlite::params![dag_hash.as_str()], |row| {
+                let _agent_str: String = row.get(0)?;
+                let _harness_str: String = row.get(1)?;
+                let message_id: String = row.get(2)?;
+                let state: Option<String> = row.get(3)?;
+                let diagnostics_blob: Vec<u8> = row.get(4)?;
+                let payload: Vec<u8> = row.get(5)?;
+
+                let diagnostics: vlinder_core::domain::RuntimeDiagnostics =
+                    serde_json::from_slice(&diagnostics_blob).unwrap_or_else(|_| {
+                        vlinder_core::domain::RuntimeDiagnostics::placeholder(0)
+                    });
+
+                Ok(vlinder_core::domain::CompleteMessageV2 {
+                    id: vlinder_core::domain::MessageId::from(message_id),
+                    dag_id: dag_hash.clone(),
+                    state,
+                    diagnostics,
+                    payload,
+                })
+            })
+            .optional()
+            .map_err(|e| format!("get_complete_node query failed: {e}"))?;
+
+        Ok(result)
+    }
+
     fn get_branches_for_session(&self, session_id: &SessionId) -> Result<Vec<Branch>, String> {
         let conn = self.conn.lock().expect("db connection lock poisoned");
         let mut stmt = conn
