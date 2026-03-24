@@ -39,7 +39,7 @@ fn get(submission_id: &str) {
     }
 
     for node in &nodes {
-        let (from, to, operation, checkpoint, state) =
+        let (from, to, operation, checkpoint, state, payload) =
             if node.message_type() == vlinder_core::domain::MessageType::Invoke {
                 if let Ok(Some((key, msg))) = store.get_invoke_node(&node.id) {
                     let vlinder_core::domain::DataMessageKind::Invoke { harness, agent, .. } =
@@ -50,6 +50,7 @@ fn get(submission_id: &str) {
                         None::<String>,
                         None::<String>,
                         msg.state.clone(),
+                        msg.payload,
                     )
                 } else {
                     continue;
@@ -63,6 +64,7 @@ fn get(submission_id: &str) {
                     msg.operation().map(str::to_string),
                     msg.checkpoint().map(str::to_string),
                     msg.state().map(str::to_string),
+                    msg.payload().to_vec(),
                 )
             };
         println!("Hash:       {}", node.id);
@@ -81,8 +83,7 @@ fn get(submission_id: &str) {
             println!("State:      {state}");
         }
         println!("Created:    {}", node.created_at);
-        let payload = node.payload();
-        match std::str::from_utf8(payload) {
+        match std::str::from_utf8(&payload) {
             Ok(text) if !text.is_empty() => println!("Payload:    {text}"),
             _ if !payload.is_empty() => {
                 println!("Payload:    <{} bytes binary>", payload.len());
