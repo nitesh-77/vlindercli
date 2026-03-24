@@ -47,6 +47,7 @@ pub fn build_dag_node(
         session: msg.session().clone(),
         submission: msg.submission().clone(),
         branch: *msg.branch(),
+        protocol_version: msg.protocol_version().to_string(),
         message: Some(msg.clone()),
         message_v2: None,
     }
@@ -282,6 +283,7 @@ mod tests {
             session: session.clone(),
             submission: sub.clone(),
             branch: BranchId::from(1),
+            protocol_version: "v1".to_string(),
             message: None,
             message_v2: Some(ObservableMessageV2::InvokeV2 {
                 key: key.clone(),
@@ -310,6 +312,7 @@ mod tests {
             session: session(),
             submission: submission(),
             branch: BranchId::from(1),
+            protocol_version: "v1".to_string(),
             message: None,
             message_v2: None,
         };

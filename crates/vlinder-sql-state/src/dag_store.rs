@@ -242,6 +242,7 @@ fn row_to_dag_node(row: &rusqlite::Row) -> Result<DagNode, rusqlite::Error> {
     });
     let branch = vlinder_core::domain::BranchId::from(row.get::<_, i64>(8)?);
     let submission = vlinder_core::domain::SubmissionId::from(row.get::<_, String>(9)?);
+    let protocol_version: String = row.get(10)?;
 
     // Try v2 format first, fall back to legacy ObservableMessage (ADR 122 tech debt).
     if let Ok(v2) = serde_json::from_str::<vlinder_core::domain::ObservableMessageV2>(&blob) {
@@ -254,6 +255,7 @@ fn row_to_dag_node(row: &rusqlite::Row) -> Result<DagNode, rusqlite::Error> {
             session,
             submission,
             branch,
+            protocol_version,
             message: None,
             message_v2: Some(v2),
         })
@@ -277,6 +279,7 @@ fn row_to_dag_node(row: &rusqlite::Row) -> Result<DagNode, rusqlite::Error> {
             session,
             submission,
             branch,
+            protocol_version,
             message: Some(message),
             message_v2: None,
         })
@@ -375,7 +378,7 @@ fn insert_typed_node(conn: &Connection, node: &DagNode) -> Result<(), rusqlite::
 
 /// Column list for queries that return full `DagNode`s.
 const DAG_NODE_COLUMNS: &str =
-    "hash, parent_hash, message_type, created_at, message_blob, payload, snapshot, session_id, branch_id, submission_id";
+    "hash, parent_hash, message_type, created_at, message_blob, payload, snapshot, session_id, branch_id, submission_id, protocol_version";
 
 impl DagStore for SqliteDagStore {
     fn insert_node(&self, node: &DagNode) -> Result<(), String> {

@@ -144,6 +144,7 @@ impl RecordingQueue {
             session: key.session.clone(),
             submission: key.submission.clone(),
             branch: key.branch,
+            protocol_version: "v1".to_string(),
             message: None,
             message_v2: Some(ObservableMessageV2::InvokeV2 {
                 key: key.clone(),
