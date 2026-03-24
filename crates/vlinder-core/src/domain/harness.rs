@@ -210,6 +210,7 @@ impl CoreHarness {
 
         let msg = InvokeMessage {
             id: MessageId::new(),
+            dag_id: DagNodeId::root(),
             state: last_state,
             diagnostics: InvokeDiagnostics {
                 harness_version: env!("CARGO_PKG_VERSION").to_string(),

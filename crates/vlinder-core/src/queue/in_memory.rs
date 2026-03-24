@@ -355,6 +355,7 @@ mod tests {
         };
         let msg = InvokeMessage {
             id: MessageId::from("msg-invoke-1".to_string()),
+            dag_id: DagNodeId::root(),
             state: None,
             diagnostics: InvokeDiagnostics {
                 harness_version: String::new(),
@@ -402,6 +403,7 @@ mod tests {
         };
         let msg = InvokeMessage {
             id: MessageId::from("msg-invoke-2".to_string()),
+            dag_id: DagNodeId::root(),
             state: None,
             diagnostics: InvokeDiagnostics {
                 harness_version: String::new(),
@@ -703,6 +705,7 @@ mod tests {
     fn test_invoke() -> InvokeMessage {
         InvokeMessage {
             id: crate::domain::MessageId::from("msg-1".to_string()),
+            dag_id: crate::domain::DagNodeId::root(),
             state: Some("state-abc".to_string()),
             diagnostics: InvokeDiagnostics {
                 harness_version: "0.1.0".to_string(),
@@ -746,6 +749,7 @@ mod tests {
         let key = test_data_routing_key();
         let msg1 = InvokeMessage {
             id: crate::domain::MessageId::from("msg-first".to_string()),
+            dag_id: crate::domain::DagNodeId::root(),
             state: None,
             diagnostics: InvokeDiagnostics {
                 harness_version: String::new(),
@@ -755,6 +759,7 @@ mod tests {
         };
         let msg2 = InvokeMessage {
             id: crate::domain::MessageId::from("msg-second".to_string()),
+            dag_id: crate::domain::DagNodeId::root(),
             state: None,
             diagnostics: InvokeDiagnostics {
                 harness_version: String::new(),

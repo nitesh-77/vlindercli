@@ -28,6 +28,10 @@ mod base64_serde {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct InvokeMessage {
     pub id: MessageId,
+    /// Content-addressed DAG node ID. Computed by the recording queue
+    /// before publish; empty on initial construction.
+    #[serde(default = "DagNodeId::root")]
+    pub dag_id: DagNodeId,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub state: Option<String>,
     pub diagnostics: InvokeDiagnostics,
@@ -44,6 +48,7 @@ mod tests {
     fn invoke_message_json_round_trip() {
         let msg = InvokeMessage {
             id: MessageId::from("msg-1".to_string()),
+            dag_id: DagNodeId::root(),
             state: Some("abc123".to_string()),
             diagnostics: InvokeDiagnostics {
                 harness_version: "0.1.0".to_string(),
@@ -62,6 +67,7 @@ mod tests {
     fn invoke_message_payload_is_base64() {
         let msg = InvokeMessage {
             id: MessageId::from("msg-1".to_string()),
+            dag_id: DagNodeId::root(),
             state: None,
             diagnostics: InvokeDiagnostics {
                 harness_version: "0.1.0".to_string(),
@@ -81,6 +87,7 @@ mod tests {
     fn invoke_message_omits_none_state() {
         let msg = InvokeMessage {
             id: MessageId::from("msg-1".to_string()),
+            dag_id: DagNodeId::root(),
             state: None,
             diagnostics: InvokeDiagnostics {
                 harness_version: "0.1.0".to_string(),

@@ -108,6 +108,7 @@ pub fn make_invoke(
     };
     let msg = InvokeMessage {
         id: MessageId::new(),
+        dag_id: DagNodeId::root(),
         state,
         diagnostics: InvokeDiagnostics {
             harness_version: "0.1.0".to_string(),

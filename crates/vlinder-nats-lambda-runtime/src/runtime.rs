@@ -564,6 +564,7 @@ mod tests {
         };
         let msg = InvokeMessage {
             id: MessageId::new(),
+            dag_id: DagNodeId::root(),
             state: None,
             diagnostics: InvokeDiagnostics {
                 harness_version: "test".to_string(),
@@ -624,6 +625,7 @@ mod tests {
         };
         let msg = InvokeMessage {
             id: MessageId::new(),
+            dag_id: DagNodeId::root(),
             state: None,
             diagnostics: InvokeDiagnostics {
                 harness_version: "test".to_string(),

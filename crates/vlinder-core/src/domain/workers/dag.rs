@@ -260,6 +260,7 @@ mod tests {
         };
         let msg = InvokeMessage {
             id: MessageId::new(),
+            dag_id: DagNodeId::root(),
             state: Some("state-xyz".to_string()),
             diagnostics: InvokeDiagnostics {
                 harness_version: "0.1.0".to_string(),

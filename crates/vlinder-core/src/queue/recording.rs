@@ -84,8 +84,8 @@ impl RecordingQueue {
         }
     }
 
-    /// Record a DAG node for an invoke message.
-    fn record_invoke(&self, key: &DataRoutingKey, msg: &InvokeMessage) {
+    /// Record a DAG node for an invoke message. Returns the computed `DagNodeId`.
+    fn record_invoke(&self, key: &DataRoutingKey, msg: &InvokeMessage) -> DagNodeId {
         let branch_id = key.branch;
 
         let dag_parent_override = if msg.dag_parent.is_empty() {
@@ -150,6 +150,8 @@ impl RecordingQueue {
         if let Err(e) = self.store.insert_node(&node) {
             tracing::warn!(error = %id, "Failed to record DAG node (outbox): {e}");
         }
+
+        id
     }
 }
 
@@ -158,8 +160,9 @@ impl MessageQueue for RecordingQueue {
     // Send methods — record DAG node, then forward
     // -------------------------------------------------------------------------
 
-    fn send_invoke(&self, key: DataRoutingKey, msg: InvokeMessage) -> Result<(), QueueError> {
-        self.record_invoke(&key, &msg);
+    fn send_invoke(&self, key: DataRoutingKey, mut msg: InvokeMessage) -> Result<(), QueueError> {
+        let dag_id = self.record_invoke(&key, &msg);
+        msg.dag_id = dag_id;
         self.inner.send_invoke(key, msg)
     }
 
@@ -413,6 +416,7 @@ mod tests {
         };
         let msg = InvokeMessage {
             id: MessageId::new(),
+            dag_id: DagNodeId::root(),
             state: None,
             diagnostics: InvokeDiagnostics {
                 harness_version: "0.1.0".to_string(),
