@@ -651,6 +651,99 @@ impl DagStore for SqliteDagStore {
         Ok(nodes)
     }
 
+    fn get_invoke_node(
+        &self,
+        dag_hash: &DagNodeId,
+    ) -> Result<
+        Option<(
+            vlinder_core::domain::DataRoutingKey,
+            vlinder_core::domain::InvokeMessage,
+        )>,
+        String,
+    > {
+        let conn = self.conn.lock().expect("db connection lock poisoned");
+        let mut stmt = conn
+            .prepare(
+                "SELECT i.harness, i.runtime, i.agent, i.message_id, i.state, i.diagnostics, i.payload,
+                        d.session_id, d.submission_id, d.timeline_id, d.parent_hash
+                 FROM invoke_nodes i
+                 JOIN dag_nodes d ON d.hash = i.dag_hash
+                 WHERE i.dag_hash = ?1",
+            )
+            .map_err(|e| format!("get_invoke_node prepare failed: {e}"))?;
+
+        let result = stmt
+            .query_row(rusqlite::params![dag_hash.as_str()], |row| {
+                let harness_str: String = row.get(0)?;
+                let runtime_str: String = row.get(1)?;
+                let agent_str: String = row.get(2)?;
+                let message_id: String = row.get(3)?;
+                let state: Option<String> = row.get(4)?;
+                let diagnostics_blob: Vec<u8> = row.get(5)?;
+                let payload: Vec<u8> = row.get(6)?;
+                let session_id: String = row.get(7)?;
+                let submission_id: String = row.get(8)?;
+                let branch: i64 = row.get(9)?;
+                let parent_hash: String = row.get(10)?;
+
+                let harness: vlinder_core::domain::HarnessType =
+                    harness_str.parse().map_err(|e: String| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            0,
+                            rusqlite::types::Type::Text,
+                            e.into(),
+                        )
+                    })?;
+                let runtime: vlinder_core::domain::RuntimeType =
+                    runtime_str.parse().map_err(|e: String| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            1,
+                            rusqlite::types::Type::Text,
+                            e.into(),
+                        )
+                    })?;
+
+                let key = vlinder_core::domain::DataRoutingKey {
+                    session: SessionId::try_from(session_id).map_err(|e| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            7,
+                            rusqlite::types::Type::Text,
+                            e.into(),
+                        )
+                    })?,
+                    branch: BranchId::from(branch),
+                    submission: vlinder_core::domain::SubmissionId::from(submission_id),
+                    kind: vlinder_core::domain::DataMessageKind::Invoke {
+                        harness,
+                        runtime,
+                        agent: vlinder_core::domain::AgentName::new(agent_str),
+                    },
+                };
+
+                let diagnostics: vlinder_core::domain::InvokeDiagnostics =
+                    serde_json::from_slice(&diagnostics_blob).unwrap_or_else(|_| {
+                        vlinder_core::domain::InvokeDiagnostics {
+                            harness_version: String::new(),
+                        }
+                    });
+
+                let msg = vlinder_core::domain::InvokeMessage {
+                    id: vlinder_core::domain::MessageId::from(message_id),
+                    dag_id: dag_hash.clone(),
+                    state,
+                    diagnostics,
+                    dag_parent: DagNodeId::from(parent_hash),
+                    payload,
+                };
+
+                Ok((key, msg))
+            })
+            .optional()
+            .map_err(|e| format!("get_invoke_node query failed: {e}"))?;
+
+        Ok(result)
+    }
+
     fn get_branches_for_session(&self, session_id: &SessionId) -> Result<Vec<Branch>, String> {
         let conn = self.conn.lock().expect("db connection lock poisoned");
         let mut stmt = conn

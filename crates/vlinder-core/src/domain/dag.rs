@@ -289,6 +289,18 @@ pub trait DagStore: Send + Sync {
     /// Get all nodes for a submission (a single turn), ordered by `created_at`.
     fn get_nodes_by_submission(&self, submission_id: &str) -> Result<Vec<DagNode>, String>;
 
+    /// Retrieve typed invoke data by DAG node hash.
+    ///
+    /// Returns the routing key and invoke message from the `invoke_nodes` table.
+    /// Returns `None` if the hash doesn't exist or isn't an invoke node.
+    fn get_invoke_node(
+        &self,
+        dag_hash: &super::DagNodeId,
+    ) -> Result<Option<(super::DataRoutingKey, super::InvokeMessage)>, String> {
+        let _ = dag_hash;
+        Ok(None) // Default no-op for non-SQL implementations
+    }
+
     /// Get all branches for a session.
     fn get_branches_for_session(
         &self,
