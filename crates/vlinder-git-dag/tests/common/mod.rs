@@ -10,8 +10,8 @@ use chrono::{DateTime, Utc};
 
 use vlinder_core::domain::{
     AgentName, BranchId, CompleteMessage, DagNodeId, DataMessageKind, DataRoutingKey, HarnessType,
-    InvokeDiagnostics, InvokeMessage, MessageId, ObservableMessage, ObservableMessageV2,
-    RuntimeDiagnostics, RuntimeType, SessionId, SubmissionId,
+    InvokeDiagnostics, InvokeMessage, MessageId, ObservableMessage, RuntimeDiagnostics,
+    RuntimeType, SessionId, SubmissionId,
 };
 use vlinder_git_dag::GitDagWorker;
 
@@ -95,7 +95,7 @@ pub fn make_invoke(
     payload: &[u8],
     state: Option<String>,
     epoch_secs: i64,
-) -> (ObservableMessageV2, DateTime<Utc>) {
+) -> (DataRoutingKey, InvokeMessage, DateTime<Utc>) {
     let key = DataRoutingKey {
         session: SessionId::try_from(session.to_string()).unwrap(),
         branch: BranchId::from(1),
@@ -116,7 +116,7 @@ pub fn make_invoke(
         payload: payload.to_vec(),
     };
     let created_at = DateTime::from_timestamp(epoch_secs, 0).unwrap();
-    (ObservableMessageV2::InvokeV2 { key, msg }, created_at)
+    (key, msg, created_at)
 }
 
 /// Create a complete message with the given payload and state.

@@ -26,14 +26,14 @@ fn checkout_shows_trailers_and_state() {
     let mut worker = test_conversations_worker(&vlinder_dir);
 
     // Write invoke (no state) + complete (with state)
-    let (invoke, t1) = make_invoke(
+    let (key, invoke, t1) = make_invoke(
         "d4761d76-dee4-4ebf-9df4-43b52efa4f78",
         "sub-1",
         b"question",
         None,
         1000,
     );
-    worker.on_observable_message_v2(&invoke, t1);
+    worker.on_invoke(&key, &invoke, t1);
 
     let (complete, t2) = make_complete(
         "d4761d76-dee4-4ebf-9df4-43b52efa4f78",
@@ -92,14 +92,14 @@ fn promote_moves_main_and_labels_old() {
     let mut worker = test_conversations_worker(&vlinder_dir);
 
     // Write invoke + complete
-    let (invoke, t1) = make_invoke(
+    let (key, invoke, t1) = make_invoke(
         "d4761d76-dee4-4ebf-9df4-43b52efa4f78",
         "sub-1",
         b"q",
         None,
         1000,
     );
-    worker.on_observable_message_v2(&invoke, t1);
+    worker.on_invoke(&key, &invoke, t1);
     let (complete, t2) = make_complete(
         "d4761d76-dee4-4ebf-9df4-43b52efa4f78",
         "sub-1",
@@ -158,14 +158,14 @@ fn fork_creates_independent_branch() {
     let mut worker = test_conversations_worker(&vlinder_dir);
 
     // Write invoke + complete on main
-    let (invoke, t1) = make_invoke(
+    let (key, invoke, t1) = make_invoke(
         "d4761d76-dee4-4ebf-9df4-43b52efa4f78",
         "sub-1",
         b"question",
         None,
         1000,
     );
-    worker.on_observable_message_v2(&invoke, t1);
+    worker.on_invoke(&key, &invoke, t1);
     let (complete, t2) = make_complete(
         "d4761d76-dee4-4ebf-9df4-43b52efa4f78",
         "sub-1",
@@ -236,14 +236,14 @@ fn checkout_then_promote_full_workflow() {
     let mut worker = test_conversations_worker(&vlinder_dir);
 
     // Build a multi-turn conversation: invoke1 → complete1 → invoke2 → complete2
-    let (invoke1, t1) = make_invoke(
+    let (key1, invoke1, t1) = make_invoke(
         "d4761d76-dee4-4ebf-9df4-43b52efa4f78",
         "sub-1",
         b"turn-1-question",
         None,
         1000,
     );
-    worker.on_observable_message_v2(&invoke1, t1);
+    worker.on_invoke(&key1, &invoke1, t1);
 
     let (complete1, t2) = make_complete(
         "d4761d76-dee4-4ebf-9df4-43b52efa4f78",
@@ -254,14 +254,14 @@ fn checkout_then_promote_full_workflow() {
     );
     worker.on_observable_message(&complete1, t2);
 
-    let (invoke2, t3) = make_invoke(
+    let (key2, invoke2, t3) = make_invoke(
         "d4761d76-dee4-4ebf-9df4-43b52efa4f78",
         "sub-2",
         b"turn-2-question",
         Some("state-after-turn-1".to_string()),
         1002,
     );
-    worker.on_observable_message_v2(&invoke2, t3);
+    worker.on_invoke(&key2, &invoke2, t3);
 
     let (complete2, t4) = make_complete(
         "d4761d76-dee4-4ebf-9df4-43b52efa4f78",

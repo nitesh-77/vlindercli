@@ -234,10 +234,11 @@ pub trait DagWorker: Send {
     /// Persist a single observable message (legacy path).
     fn on_observable_message(&mut self, msg: &super::ObservableMessage, created_at: DateTime<Utc>);
 
-    /// Persist a v2 observable message (data-plane path, ADR 121).
-    fn on_observable_message_v2(
+    /// Persist an invoke message (data-plane path, ADR 121).
+    fn on_invoke(
         &mut self,
-        _msg: &super::ObservableMessageV2,
+        _key: &super::DataRoutingKey,
+        _msg: &super::InvokeMessage,
         _created_at: DateTime<Utc>,
     ) {
         // Default no-op — implementations opt in.

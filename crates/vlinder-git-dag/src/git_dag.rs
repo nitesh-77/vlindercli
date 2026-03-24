@@ -49,8 +49,8 @@ use git2::{FileMode, Oid, Repository, RepositoryInitOptions, Signature, TreeBuil
 
 use vlinder_core::domain::workers::dag::build_dag_node;
 use vlinder_core::domain::{
-    hash_dag_node, DagNodeId, DagWorker, DataMessageKind, MessageType, ObservableMessage,
-    ObservableMessageV2, Registry, Snapshot,
+    hash_dag_node, DagNodeId, DagWorker, DataMessageKind, DataRoutingKey, InvokeMessage,
+    MessageType, ObservableMessage, Registry, Snapshot,
 };
 
 /// DAG worker that writes commits to a git repository.
@@ -858,107 +858,105 @@ impl DagWorker for GitDagWorker {
         }
     }
 
-    fn on_observable_message_v2(&mut self, msg: &ObservableMessageV2, created_at: DateTime<Utc>) {
+    fn on_invoke(
+        &mut self,
+        key: &DataRoutingKey,
+        invoke: &InvokeMessage,
+        created_at: DateTime<Utc>,
+    ) {
+        let DataMessageKind::Invoke {
+            harness,
+            runtime,
+            agent,
+        } = &key.kind;
+
         let result = (|| -> Result<(), String> {
-            match msg {
-                ObservableMessageV2::InvokeV2 { key, msg: invoke } => {
-                    let DataMessageKind::Invoke {
-                        harness,
-                        runtime,
-                        agent,
-                    } = &key.kind;
+            let session_id = key.session.as_str();
+            let agent_name = agent.as_str();
+            let from = harness.as_str();
+            let to = agent_name;
+            let msg_type = "invoke";
 
-                    let session_id = key.session.as_str();
-                    let agent_name = agent.as_str();
-                    let from = harness.as_str();
-                    let to = agent_name;
-                    let msg_type = "invoke";
-
-                    // Resolve canonical parent from HEAD
-                    let parent_commit_oid = self.head_commit();
-                    let canonical_parent =
-                        match parent_commit_oid {
-                            Some(oid) => {
-                                let commit = self
-                                    .repo
-                                    .find_commit(oid)
-                                    .map_err(|e| format!("find commit failed: {e}"))?;
-                                let tree = commit
-                                    .tree()
-                                    .map_err(|e| format!("tree lookup failed: {e}"))?;
-                                DagNodeId::from(self.session_canonical_hash_from_tree(
-                                    &tree, agent_name, session_id,
-                                ))
-                            }
-                            None => DagNodeId::root(),
-                        };
-
-                    // Build message subtree inline
-                    let mut tb = self
+            // Resolve canonical parent from HEAD
+            let parent_commit_oid = self.head_commit();
+            let canonical_parent = match parent_commit_oid {
+                Some(oid) => {
+                    let commit = self
                         .repo
-                        .treebuilder(None)
-                        .map_err(|e| format!("treebuilder failed: {e}"))?;
-
-                    let created_at_str =
-                        created_at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-
-                    self.insert_field(&mut tb, "session_id", session_id)?;
-                    self.insert_field(&mut tb, "submission_id", key.submission.as_str())?;
-                    self.insert_field(&mut tb, "protocol_version", "v1")?;
-                    self.insert_field(&mut tb, "created_at", &created_at_str)?;
-
-                    let payload_oid = self.write_blob(&invoke.payload)?;
-                    tb.insert("payload", payload_oid, FileMode::Blob.into())
-                        .map_err(|e| format!("insert payload failed: {e}"))?;
-
-                    self.insert_field(&mut tb, "type", "invoke")?;
-                    self.insert_field(&mut tb, "harness", from)?;
-                    self.insert_field(&mut tb, "runtime", runtime.as_str())?;
-                    self.insert_field(&mut tb, "agent_id", agent_name)?;
-                    if let Some(ref state) = invoke.state {
-                        self.insert_field(&mut tb, "state", state)?;
-                    }
-                    self.insert_diagnostics_toml(&mut tb, &invoke.diagnostics)?;
-
-                    // Compute canonical hash
-                    let diagnostics_json =
-                        serde_json::to_vec(&invoke.diagnostics).unwrap_or_default();
-                    let canonical_hash = hash_dag_node(
-                        &invoke.payload,
-                        &canonical_parent,
-                        &MessageType::Invoke,
-                        &diagnostics_json,
-                        &key.session,
-                    );
-                    self.insert_field(&mut tb, "hash", canonical_hash.as_str())?;
-
-                    let msg_tree_oid = tb
-                        .write()
-                        .map_err(|e| format!("write message subtree failed: {e}"))?;
-
-                    // Nest under agent/session, commit
-                    self.nest_and_commit(
-                        msg_tree_oid,
-                        agent_name,
-                        session_id,
-                        from,
-                        to,
-                        msg_type,
-                        "main",
-                        parent_commit_oid,
-                        created_at,
-                        key.submission.as_str(),
-                        invoke.state.as_deref(),
-                        None, // invoke has no checkpoint
-                        "v1",
-                        None, // invoke is not a fork
+                        .find_commit(oid)
+                        .map_err(|e| format!("find commit failed: {e}"))?;
+                    let tree = commit
+                        .tree()
+                        .map_err(|e| format!("tree lookup failed: {e}"))?;
+                    DagNodeId::from(
+                        self.session_canonical_hash_from_tree(&tree, agent_name, session_id),
                     )
                 }
+                None => DagNodeId::root(),
+            };
+
+            // Build message subtree inline
+            let mut tb = self
+                .repo
+                .treebuilder(None)
+                .map_err(|e| format!("treebuilder failed: {e}"))?;
+
+            let created_at_str = created_at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+
+            self.insert_field(&mut tb, "session_id", session_id)?;
+            self.insert_field(&mut tb, "submission_id", key.submission.as_str())?;
+            self.insert_field(&mut tb, "protocol_version", "v1")?;
+            self.insert_field(&mut tb, "created_at", &created_at_str)?;
+
+            let payload_oid = self.write_blob(&invoke.payload)?;
+            tb.insert("payload", payload_oid, FileMode::Blob.into())
+                .map_err(|e| format!("insert payload failed: {e}"))?;
+
+            self.insert_field(&mut tb, "type", "invoke")?;
+            self.insert_field(&mut tb, "harness", from)?;
+            self.insert_field(&mut tb, "runtime", runtime.as_str())?;
+            self.insert_field(&mut tb, "agent_id", agent_name)?;
+            if let Some(ref state) = invoke.state {
+                self.insert_field(&mut tb, "state", state)?;
             }
+            self.insert_diagnostics_toml(&mut tb, &invoke.diagnostics)?;
+
+            // Compute canonical hash
+            let diagnostics_json = serde_json::to_vec(&invoke.diagnostics).unwrap_or_default();
+            let canonical_hash = hash_dag_node(
+                &invoke.payload,
+                &canonical_parent,
+                &MessageType::Invoke,
+                &diagnostics_json,
+                &key.session,
+            );
+            self.insert_field(&mut tb, "hash", canonical_hash.as_str())?;
+
+            let msg_tree_oid = tb
+                .write()
+                .map_err(|e| format!("write message subtree failed: {e}"))?;
+
+            // Nest under agent/session, commit
+            self.nest_and_commit(
+                msg_tree_oid,
+                agent_name,
+                session_id,
+                from,
+                to,
+                msg_type,
+                "main",
+                parent_commit_oid,
+                created_at,
+                key.submission.as_str(),
+                invoke.state.as_deref(),
+                None, // invoke has no checkpoint
+                "v1",
+                None, // invoke is not a fork
+            )
         })();
 
         if let Err(e) = result {
-            tracing::error!(error = %e, "Failed to write git commit for data message");
+            tracing::error!(error = %e, "Failed to write git commit for invoke");
         }
     }
 }
@@ -2018,7 +2016,10 @@ mod tests {
         DataMessageKind, DataRoutingKey, InvokeDiagnostics, InvokeMessage, MessageId,
     };
 
-    fn test_data_invoke(payload: &[u8], epoch_secs: i64) -> (ObservableMessageV2, DateTime<Utc>) {
+    fn test_data_invoke(
+        payload: &[u8],
+        epoch_secs: i64,
+    ) -> (DataRoutingKey, InvokeMessage, DateTime<Utc>) {
         let key = DataRoutingKey {
             session: SessionId::try_from(SESSION.to_string()).unwrap(),
             branch: BranchId::from(1),
@@ -2039,15 +2040,15 @@ mod tests {
             payload: payload.to_vec(),
         };
         let created_at = DateTime::from_timestamp(epoch_secs, 0).unwrap();
-        (ObservableMessageV2::InvokeV2 { key, msg }, created_at)
+        (key, msg, created_at)
     }
 
     #[test]
     fn data_invoke_creates_commit() {
         let (mut worker, tmp) = test_worker();
-        let (msg, ts) = test_data_invoke(b"hello", 1000);
+        let (key, msg, ts) = test_data_invoke(b"hello", 1000);
 
-        worker.on_observable_message_v2(&msg, ts);
+        worker.on_invoke(&key, &msg, ts);
 
         let count = git(tmp.path(), &["rev-list", "--count", "main"]).unwrap();
         assert_eq!(count, "2"); // initial + invoke
@@ -2056,9 +2057,9 @@ mod tests {
     #[test]
     fn data_invoke_commit_message_has_trailers() {
         let (mut worker, tmp) = test_worker();
-        let (msg, ts) = test_data_invoke(b"question", 1000);
+        let (key, msg, ts) = test_data_invoke(b"question", 1000);
 
-        worker.on_observable_message_v2(&msg, ts);
+        worker.on_invoke(&key, &msg, ts);
 
         let log = git(tmp.path(), &["log", "-1", "--format=%B", "main"]).unwrap();
         assert!(log.contains("invoke: cli"), "should have invoke type line");
@@ -2076,9 +2077,9 @@ mod tests {
     #[test]
     fn data_invoke_directory_has_per_field_files() {
         let (mut worker, tmp) = test_worker();
-        let (msg, ts) = test_data_invoke(b"payload data", 1000);
+        let (key, msg, ts) = test_data_invoke(b"payload data", 1000);
 
-        worker.on_observable_message_v2(&msg, ts);
+        worker.on_invoke(&key, &msg, ts);
 
         let show = |field: &str| -> String {
             let path = format!("main:{AGENT}/{SESSION}/001-cli-invoke/{field}");
@@ -2099,8 +2100,8 @@ mod tests {
         let (mut worker, tmp) = test_worker();
 
         // Invoke
-        let (invoke, t1) = test_data_invoke(b"question", 1000);
-        worker.on_observable_message_v2(&invoke, t1);
+        let (key, invoke, t1) = test_data_invoke(b"question", 1000);
+        worker.on_invoke(&key, &invoke, t1);
 
         // Complete
         let (complete, t2) = test_complete(b"answer", 1001);

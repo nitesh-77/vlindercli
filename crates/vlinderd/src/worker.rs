@@ -578,11 +578,7 @@ fn run_dag_git_worker(config: &Config, shutdown: &AtomicBool) {
                     if let Ok(invoke_msg) =
                         serde_json::from_slice::<vlinder_core::domain::InvokeMessage>(&payload)
                     {
-                        let v2 = vlinder_core::domain::ObservableMessageV2::InvokeV2 {
-                            key,
-                            msg: invoke_msg,
-                        };
-                        git_worker.on_observable_message_v2(&v2, created_at);
+                        git_worker.on_invoke(&key, &invoke_msg, created_at);
                     } else {
                         tracing::warn!(
                             subject = subject.as_str(),
