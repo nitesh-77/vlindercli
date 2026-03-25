@@ -4,7 +4,8 @@ use crate::domain::{
     Acknowledgement, AgentName, CompleteMessage, DataMessageKind, DataRoutingKey, DelegateMessage,
     DelegateReplyMessage, ForkMessage, HarnessType, InvokeMessage, MessageQueue, ObservableMessage,
     ObservableMessageV2, Operation, QueueError, RepairMessage, RequestMessage, RequestMessageV2,
-    ResponseMessage, RoutingKey, RoutingKind, ServiceBackend, SubmissionId,
+    ResponseMessage, ResponseMessageV2, RoutingKey, RoutingKind, Sequence, ServiceBackend,
+    SubmissionId,
 };
 #[cfg(test)]
 use crate::domain::{
@@ -174,6 +175,59 @@ impl MessageQueue for InMemoryQueue {
             .or_default()
             .push_back(ObservableMessage::Request(msg));
         Ok(())
+    }
+
+    fn send_response_v2(
+        &self,
+        key: DataRoutingKey,
+        msg: ResponseMessageV2,
+    ) -> Result<(), QueueError> {
+        let v2 = ObservableMessageV2::ResponseV2 {
+            key: key.clone(),
+            msg,
+        };
+        let mut data = self
+            .data_queues
+            .lock()
+            .map_err(|e| QueueError::SendFailed(format!("lock poisoned: {e}")))?;
+        data.entry(key).or_default().push_back(v2);
+        Ok(())
+    }
+
+    fn receive_response_v2(
+        &self,
+        submission: &SubmissionId,
+        service: ServiceBackend,
+        operation: Operation,
+        sequence: Sequence,
+    ) -> Result<(DataRoutingKey, ResponseMessageV2, Acknowledgement), QueueError> {
+        let mut data = self
+            .data_queues
+            .lock()
+            .map_err(|e| QueueError::ReceiveFailed(format!("lock poisoned: {e}")))?;
+
+        for (key, queue) in data.iter_mut() {
+            if key.submission != *submission {
+                continue;
+            }
+            let DataMessageKind::Response {
+                service: s,
+                operation: o,
+                sequence: sq,
+                ..
+            } = &key.kind
+            else {
+                continue;
+            };
+            if *s == service && *o == operation && *sq == sequence {
+                if let Some(ObservableMessageV2::ResponseV2 { msg, .. }) = queue.pop_front() {
+                    let key = key.clone();
+                    return Ok((key, msg, Box::new(|| Ok(()))));
+                }
+            }
+        }
+
+        Err(QueueError::Timeout)
     }
 
     fn send_response(&self, msg: ResponseMessage) -> Result<(), QueueError> {

@@ -22,9 +22,9 @@ use vlinder_core::domain::{
     Acknowledgement, AgentName, BranchId, CompleteMessage, DagNodeId, DataMessageKind,
     DataRoutingKey, DelegateDiagnostics, DelegateMessage, DelegateReplyMessage, HarnessType,
     InvokeMessage, MessageId, MessageQueue, Nonce, Operation, QueueError, RepairMessage,
-    RequestDiagnostics, RequestMessage, RequestMessageV2, ResponseMessage, RoutingKey, RoutingKind,
-    RuntimeDiagnostics, RuntimeType, Sequence, ServiceBackend, ServiceDiagnostics, ServiceType,
-    SessionId, SubmissionId,
+    RequestDiagnostics, RequestMessage, RequestMessageV2, ResponseMessage, ResponseMessageV2,
+    RoutingKey, RoutingKind, RuntimeDiagnostics, RuntimeType, Sequence, ServiceBackend,
+    ServiceDiagnostics, ServiceType, SessionId, SubmissionId,
 };
 
 /// NATS queue with `JetStream` durability.
@@ -417,6 +417,74 @@ impl MessageQueue for NatsQueue {
                 .map_err(|e| QueueError::SendFailed(e.to_string()))?;
 
             Ok(())
+        })
+    }
+
+    fn send_response_v2(
+        &self,
+        key: DataRoutingKey,
+        msg: ResponseMessageV2,
+    ) -> Result<(), QueueError> {
+        let DataMessageKind::Response {
+            agent,
+            service,
+            operation,
+            sequence,
+        } = &key.kind
+        else {
+            return Err(QueueError::SendFailed(
+                "send_response_v2: expected Response key".into(),
+            ));
+        };
+        let subject = response_subject(
+            &key.session,
+            key.branch,
+            &key.submission,
+            agent,
+            *service,
+            *operation,
+            *sequence,
+        );
+        let payload = serde_json::to_vec(&msg)
+            .map_err(|e| QueueError::SendFailed(format!("serialize response: {e}")))?;
+
+        self.inner.runtime.block_on(async {
+            let mut headers = async_nats::HeaderMap::new();
+            headers.insert("Nats-Msg-Id", msg.id.as_str());
+
+            self.inner
+                .jetstream
+                .publish_with_headers(subject, headers, payload.into())
+                .await
+                .map_err(|e| QueueError::SendFailed(e.to_string()))?
+                .await
+                .map_err(|e| QueueError::SendFailed(e.to_string()))?;
+
+            Ok(())
+        })
+    }
+
+    fn receive_response_v2(
+        &self,
+        submission: &SubmissionId,
+        service: ServiceBackend,
+        operation: Operation,
+        sequence: Sequence,
+    ) -> Result<(DataRoutingKey, ResponseMessageV2, Acknowledgement), QueueError> {
+        let filter = response_filter(submission, service, operation, sequence);
+
+        self.inner.runtime.block_on(async {
+            let (js_msg, ack_fn) = self.fetch_one(&filter).await?;
+
+            let subject = js_msg.subject.as_str();
+            let key = response_parse_subject(subject).ok_or_else(|| {
+                QueueError::ReceiveFailed(format!("invalid response subject: {subject}"))
+            })?;
+
+            let msg: ResponseMessageV2 = serde_json::from_slice(&js_msg.payload)
+                .map_err(|e| QueueError::ReceiveFailed(format!("deserialize response: {e}")))?;
+
+            Ok((key, msg, ack_fn))
         })
     }
 
@@ -1070,6 +1138,83 @@ fn request_filter(service: ServiceBackend, operation: Operation) -> String {
         service.service_type(),
         service.backend_str(),
         operation.as_str(),
+    )
+}
+
+// ============================================================================
+// Response subject format (ADR 121)
+//
+// vlinder.data.v1.{session}.{branch}.{sub}.response.{agent}.{svc_type}.{backend}.{op}.{seq}
+// ============================================================================
+
+const RESPONSE_PREFIX: &str = "vlinder.data.v1";
+const RESPONSE_KIND: &str = "response";
+const RESPONSE_SEGMENT_COUNT: usize = 12;
+
+/// Build a NATS subject for a data-plane response message.
+fn response_subject(
+    session: &SessionId,
+    branch: BranchId,
+    submission: &SubmissionId,
+    agent: &AgentName,
+    service: ServiceBackend,
+    operation: Operation,
+    sequence: Sequence,
+) -> String {
+    format!(
+        "{RESPONSE_PREFIX}.{session}.{branch}.{submission}.{RESPONSE_KIND}.{agent}.{}.{}.{}.{}",
+        service.service_type(),
+        service.backend_str(),
+        operation.as_str(),
+        sequence.as_u32(),
+    )
+}
+
+/// Parse a NATS subject back into a `DataRoutingKey` for response.
+///
+/// Subject: `vlinder.data.v1.{session}.{branch}.{sub}.response.{agent}.{svc_type}.{backend}.{op}.{seq}`
+/// Index:    0       1    2   3         4        5     6        7       8          9         10   11
+pub fn response_parse_subject(subject: &str) -> Option<DataRoutingKey> {
+    use vlinder_core::domain::DataMessageKind;
+    let s: Vec<&str> = subject.split('.').collect();
+    if s.len() != RESPONSE_SEGMENT_COUNT {
+        return None;
+    }
+    if s[0] != "vlinder" || s[1] != "data" || s[2] != "v1" || s[6] != RESPONSE_KIND {
+        return None;
+    }
+
+    let service = ServiceBackend::from_parts(ServiceType::from_str(s[8]).ok()?, s[9])?;
+    let operation: Operation = s[10].parse().ok()?;
+    let sequence = Sequence::from(s[11].parse::<u32>().ok()?);
+
+    Some(DataRoutingKey {
+        session: SessionId::try_from(s[3].to_string()).ok()?,
+        branch: BranchId::from(s[4].parse::<i64>().unwrap_or(0)),
+        submission: SubmissionId::from(s[5].to_string()),
+        kind: DataMessageKind::Response {
+            agent: AgentName::new(s[7]),
+            service,
+            operation,
+            sequence,
+        },
+    })
+}
+
+/// NATS wildcard filter for receiving response messages for a specific submission+service+operation.
+fn response_filter(
+    submission: &SubmissionId,
+    service: ServiceBackend,
+    operation: Operation,
+    sequence: Sequence,
+) -> String {
+    format!(
+        "{RESPONSE_PREFIX}.*.*.{}.{RESPONSE_KIND}.*.{}.{}.{}.{}",
+        submission.as_str(),
+        service.service_type(),
+        service.backend_str(),
+        operation.as_str(),
+        sequence.as_u32(),
     )
 }
 

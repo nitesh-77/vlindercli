@@ -337,6 +337,12 @@ pub enum DataMessageKind {
         operation: Operation,
         sequence: Sequence,
     },
+    Response {
+        agent: AgentName,
+        service: ServiceBackend,
+        operation: Operation,
+        sequence: Sequence,
+    },
 }
 
 #[cfg(test)]

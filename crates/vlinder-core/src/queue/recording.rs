@@ -376,6 +376,14 @@ impl MessageQueue for RecordingQueue {
         self.inner.send_request_v2(key, msg)
     }
 
+    fn send_response_v2(
+        &self,
+        key: DataRoutingKey,
+        msg: crate::domain::ResponseMessageV2,
+    ) -> Result<(), QueueError> {
+        self.inner.send_response_v2(key, msg)
+    }
+
     fn send_delegate(&self, msg: DelegateMessage) -> Result<(), QueueError> {
         self.record(&msg.clone().into());
         self.inner.send_delegate(msg)
@@ -430,6 +438,24 @@ impl MessageQueue for RecordingQueue {
         QueueError,
     > {
         self.inner.receive_request_v2(service, operation)
+    }
+
+    fn receive_response_v2(
+        &self,
+        submission: &SubmissionId,
+        service: crate::domain::ServiceBackend,
+        operation: crate::domain::Operation,
+        sequence: crate::domain::Sequence,
+    ) -> Result<
+        (
+            DataRoutingKey,
+            crate::domain::ResponseMessageV2,
+            Acknowledgement,
+        ),
+        QueueError,
+    > {
+        self.inner
+            .receive_response_v2(submission, service, operation, sequence)
     }
 
     // -------------------------------------------------------------------------
