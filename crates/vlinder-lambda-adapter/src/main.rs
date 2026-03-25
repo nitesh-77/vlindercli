@@ -320,7 +320,7 @@ fn handle_invocation(
     };
 
     queue
-        .send_complete_v2(complete_key, complete_v2)
+        .send_complete(complete_key, complete_v2)
         .map_err(|e| format!("failed to send complete to NATS: {e}"))?;
 
     tracing::info!(

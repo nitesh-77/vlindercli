@@ -269,11 +269,7 @@ impl MessageQueue for NatsQueue {
         })
     }
 
-    fn send_complete_v2(
-        &self,
-        key: DataRoutingKey,
-        msg: CompleteMessage,
-    ) -> Result<(), QueueError> {
+    fn send_complete(&self, key: DataRoutingKey, msg: CompleteMessage) -> Result<(), QueueError> {
         let DataMessageKind::Complete { agent, harness } = &key.kind else {
             return Err(QueueError::SendFailed(
                 "send_complete_v2: expected Complete key".into(),
@@ -299,7 +295,7 @@ impl MessageQueue for NatsQueue {
         })
     }
 
-    fn receive_complete_v2(
+    fn receive_complete(
         &self,
         submission: &SubmissionId,
         harness: HarnessType,

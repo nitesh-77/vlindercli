@@ -80,11 +80,7 @@ impl MessageQueue for InMemoryQueue {
         Err(QueueError::Timeout)
     }
 
-    fn send_complete_v2(
-        &self,
-        key: DataRoutingKey,
-        msg: CompleteMessage,
-    ) -> Result<(), QueueError> {
+    fn send_complete(&self, key: DataRoutingKey, msg: CompleteMessage) -> Result<(), QueueError> {
         let v2 = ObservableMessageV2::CompleteV2 {
             key: key.clone(),
             msg,
@@ -97,7 +93,7 @@ impl MessageQueue for InMemoryQueue {
         Ok(())
     }
 
-    fn receive_complete_v2(
+    fn receive_complete(
         &self,
         submission: &SubmissionId,
         _harness: HarnessType,

@@ -546,7 +546,7 @@ fn send_reply(
             diagnostics: complete.diagnostics,
             payload: complete.payload,
         };
-        queue.send_complete_v2(key, v2)
+        queue.send_complete(key, v2)
     };
     if let Err(e) = result {
         tracing::error!(error = %e, "Failed to send reply");

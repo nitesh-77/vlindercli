@@ -232,14 +232,10 @@ impl MessageQueue for RecordingQueue {
         self.inner.send_response(msg)
     }
 
-    fn send_complete_v2(
-        &self,
-        key: DataRoutingKey,
-        msg: CompleteMessage,
-    ) -> Result<(), QueueError> {
+    fn send_complete(&self, key: DataRoutingKey, msg: CompleteMessage) -> Result<(), QueueError> {
         // Record to typed table before forwarding
         self.record_complete_v2(&key, &msg);
-        self.inner.send_complete_v2(key, msg)
+        self.inner.send_complete(key, msg)
     }
 
     fn send_delegate(&self, msg: DelegateMessage) -> Result<(), QueueError> {
@@ -275,12 +271,12 @@ impl MessageQueue for RecordingQueue {
         self.inner.receive_response(request)
     }
 
-    fn receive_complete_v2(
+    fn receive_complete(
         &self,
         submission: &SubmissionId,
         harness: crate::domain::HarnessType,
     ) -> Result<(DataRoutingKey, CompleteMessage, Acknowledgement), QueueError> {
-        self.inner.receive_complete_v2(submission, harness)
+        self.inner.receive_complete(submission, harness)
     }
 
     // -------------------------------------------------------------------------
@@ -600,7 +596,7 @@ mod tests {
         let (key, msg) = test_complete_v2();
         let sid = key.session.clone();
 
-        queue.send_complete_v2(key, msg).unwrap();
+        queue.send_complete(key, msg).unwrap();
 
         let nodes = store.get_session_nodes(&sid).unwrap();
         assert_eq!(nodes.len(), 1);

@@ -56,18 +56,14 @@ pub trait MessageQueue {
     // -------------------------------------------------------------------------
 
     /// Send a complete on the data plane (ADR 121).
-    fn send_complete_v2(
-        &self,
-        _key: DataRoutingKey,
-        _msg: CompleteMessage,
-    ) -> Result<(), QueueError> {
+    fn send_complete(&self, _key: DataRoutingKey, _msg: CompleteMessage) -> Result<(), QueueError> {
         Err(QueueError::SendFailed(
             "send_complete_v2 not implemented".into(),
         ))
     }
 
     /// Receive a complete from the data plane (ADR 121).
-    fn receive_complete_v2(
+    fn receive_complete(
         &self,
         _submission: &SubmissionId,
         _harness: HarnessType,
@@ -196,7 +192,7 @@ pub trait MessageQueue {
         send_and_wait(
             || self.send_repair(msg),
             || {
-                self.receive_complete_v2(&submission, harness)
+                self.receive_complete(&submission, harness)
                     .map(|(_key, msg, ack)| (msg, ack))
             },
         )

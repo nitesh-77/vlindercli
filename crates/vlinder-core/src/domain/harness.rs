@@ -278,7 +278,7 @@ impl Harness for CoreHarness {
             .map_err(|e| format!("queue error: {e}"))?;
 
         let result = loop {
-            match self.queue.receive_complete_v2(&submission, harness) {
+            match self.queue.receive_complete(&submission, harness) {
                 Ok((_key, v2, ack)) => {
                     let _ = ack();
                     break String::from_utf8_lossy(&v2.payload).to_string();

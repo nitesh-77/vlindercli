@@ -222,7 +222,7 @@ impl LambdaRuntime {
                             diagnostics: RuntimeDiagnostics::placeholder(0),
                             payload: format!("[error] Lambda invoke failed: {e}").into_bytes(),
                         };
-                        let _ = self.queue.send_complete_v2(complete_key, complete_v2);
+                        let _ = self.queue.send_complete(complete_key, complete_v2);
                     }
                 }
             }
@@ -643,7 +643,7 @@ mod tests {
         runtime.tick();
 
         let (_key, complete, ack) = queue
-            .receive_complete_v2(&submission, HarnessType::Grpc)
+            .receive_complete(&submission, HarnessType::Grpc)
             .expect("should receive error complete from daemon");
         ack().unwrap();
         let payload_str = String::from_utf8_lossy(&complete.payload);
