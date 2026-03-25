@@ -272,7 +272,7 @@ impl MessageQueue for NatsQueue {
     fn send_complete(&self, key: DataRoutingKey, msg: CompleteMessage) -> Result<(), QueueError> {
         let DataMessageKind::Complete { agent, harness } = &key.kind else {
             return Err(QueueError::SendFailed(
-                "send_complete_v2: expected Complete key".into(),
+                "send_complete: expected Complete key".into(),
             ));
         };
         let subject = complete_subject(&key.session, key.branch, &key.submission, agent, *harness);

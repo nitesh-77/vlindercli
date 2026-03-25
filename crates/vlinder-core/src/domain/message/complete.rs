@@ -90,7 +90,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn complete_v2_json_round_trip() {
+    fn complete_json_round_trip() {
         let msg = CompleteMessage {
             id: MessageId::from("msg-1".to_string()),
             dag_id: DagNodeId::root(),
@@ -104,7 +104,7 @@ mod tests {
     }
 
     #[test]
-    fn complete_v2_payload_is_base64() {
+    fn complete_payload_is_base64() {
         let msg = CompleteMessage {
             id: MessageId::from("msg-1".to_string()),
             dag_id: DagNodeId::root(),
@@ -119,7 +119,7 @@ mod tests {
     }
 
     #[test]
-    fn complete_v2_omits_none_state() {
+    fn complete_omits_none_state() {
         let msg = CompleteMessage {
             id: MessageId::from("msg-1".to_string()),
             dag_id: DagNodeId::root(),

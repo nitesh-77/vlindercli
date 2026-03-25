@@ -529,7 +529,7 @@ fn send_reply(
         // Delegate reply — still v1 path
         queue.send_delegate_reply(complete, key)
     } else {
-        // Normal complete — v2 data plane
+        // Normal complete — data plane
         let key = DataRoutingKey {
             session: complete.session.clone(),
             branch: complete.branch,
@@ -539,14 +539,14 @@ fn send_reply(
                 harness: complete.harness,
             },
         };
-        let v2 = CompleteMessage {
+        let msg = CompleteMessage {
             id: complete.id,
             dag_id: DagNodeId::root(),
             state: complete.state,
             diagnostics: complete.diagnostics,
             payload: complete.payload,
         };
-        queue.send_complete(key, v2)
+        queue.send_complete(key, msg)
     };
     if let Err(e) = result {
         tracing::error!(error = %e, "Failed to send reply");

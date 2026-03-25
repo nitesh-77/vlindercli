@@ -583,7 +583,7 @@ fn run_dag_git_worker(config: &Config, shutdown: &AtomicBool) {
                     } else {
                         tracing::warn!(
                             subject = subject.as_str(),
-                            "DAG git: failed to deserialize CompleteMessageV2"
+                            "DAG git: failed to deserialize CompleteMessage"
                         );
                     }
                 } else if let Some(key) = invoke_parse_subject(&subject) {

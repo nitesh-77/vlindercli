@@ -145,8 +145,8 @@ impl RecordingQueue {
         id
     }
 
-    /// Record a DAG node for a v2 complete message (data-plane path).
-    fn record_complete_v2(&self, key: &DataRoutingKey, msg: &CompleteMessage) {
+    /// Record a DAG node for a complete message (data-plane path).
+    fn record_complete(&self, key: &DataRoutingKey, msg: &CompleteMessage) {
         let branch_id = key.branch;
 
         let parent_node = self
@@ -183,7 +183,7 @@ impl RecordingQueue {
         };
 
         let crate::domain::DataMessageKind::Complete { agent, harness } = &key.kind else {
-            tracing::error!("record_complete_v2 called with non-Complete key");
+            tracing::error!("record_complete called with non-Complete key");
             return;
         };
 
@@ -234,7 +234,7 @@ impl MessageQueue for RecordingQueue {
 
     fn send_complete(&self, key: DataRoutingKey, msg: CompleteMessage) -> Result<(), QueueError> {
         // Record to typed table before forwarding
-        self.record_complete_v2(&key, &msg);
+        self.record_complete(&key, &msg);
         self.inner.send_complete(key, msg)
     }
 
@@ -505,7 +505,7 @@ mod tests {
         )
     }
 
-    fn test_complete_v2() -> (DataRoutingKey, CompleteMessage) {
+    fn test_complete() -> (DataRoutingKey, CompleteMessage) {
         let key = DataRoutingKey {
             session: test_session(),
             branch: BranchId::from(1),
@@ -589,11 +589,11 @@ mod tests {
     }
 
     #[test]
-    fn send_complete_v2_records_dag_node() {
+    fn send_complete_records_dag_node() {
         let store = test_store();
         let queue = test_queue(Arc::clone(&store));
 
-        let (key, msg) = test_complete_v2();
+        let (key, msg) = test_complete();
         let sid = key.session.clone();
 
         queue.send_complete(key, msg).unwrap();

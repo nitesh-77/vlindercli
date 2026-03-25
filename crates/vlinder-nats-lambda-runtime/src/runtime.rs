@@ -215,14 +215,14 @@ impl LambdaRuntime {
                                 harness: *harness,
                             },
                         };
-                        let complete_v2 = CompleteMessage {
+                        let complete = CompleteMessage {
                             id: MessageId::new(),
                             dag_id: DagNodeId::root(),
                             state: None,
                             diagnostics: RuntimeDiagnostics::placeholder(0),
                             payload: format!("[error] Lambda invoke failed: {e}").into_bytes(),
                         };
-                        let _ = self.queue.send_complete(complete_key, complete_v2);
+                        let _ = self.queue.send_complete(complete_key, complete);
                     }
                 }
             }
