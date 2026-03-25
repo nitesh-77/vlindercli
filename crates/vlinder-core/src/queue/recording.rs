@@ -13,8 +13,8 @@ use chrono::Utc;
 
 use crate::domain::workers::dag::build_dag_node;
 use crate::domain::{
-    hash_dag_node, Acknowledgement, CompleteMessage, CompleteMessageV2, DagNodeId, DagStore,
-    DataRoutingKey, DelegateMessage, ForkMessage, Instance, InvokeMessage, MessageQueue,
+    hash_dag_node, Acknowledgement, CompleteMessageV2, DagNodeId, DagStore, DataRoutingKey,
+    DelegateMessage, DelegateReplyMessage, ForkMessage, Instance, InvokeMessage, MessageQueue,
     MessageType, ObservableMessage, PromoteMessage, QueueError, RepairMessage, RequestMessage,
     ResponseMessage, Snapshot, StateHash, SubmissionId,
 };
@@ -249,7 +249,7 @@ impl MessageQueue for RecordingQueue {
 
     fn send_delegate_reply(
         &self,
-        msg: CompleteMessage,
+        msg: DelegateReplyMessage,
         reply_key: &crate::domain::RoutingKey,
     ) -> Result<(), QueueError> {
         self.record(&msg.clone().into());
@@ -297,7 +297,7 @@ impl MessageQueue for RecordingQueue {
     fn receive_delegate_reply(
         &self,
         reply_key: &crate::domain::RoutingKey,
-    ) -> Result<(CompleteMessage, Acknowledgement), QueueError> {
+    ) -> Result<(DelegateReplyMessage, Acknowledgement), QueueError> {
         self.inner.receive_delegate_reply(reply_key)
     }
 

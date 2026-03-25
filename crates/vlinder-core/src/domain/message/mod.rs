@@ -39,7 +39,7 @@ pub mod response;
 pub mod session_start;
 
 // Re-export everything at the module level for backwards compatibility.
-pub use complete::{CompleteMessage, CompleteMessageV2};
+pub use complete::{CompleteMessageV2, DelegateReplyMessage};
 pub use delegate::DelegateMessage;
 pub use fork::ForkMessage;
 pub use identity::{
@@ -159,7 +159,7 @@ mod tests {
         let submission = test_submission();
         let session = SessionId::new();
         let agent_id = test_agent_id();
-        let msg = CompleteMessage::new(
+        let msg = DelegateReplyMessage::new(
             BranchId::from(1),
             submission.clone(),
             session.clone(),
@@ -211,7 +211,7 @@ mod tests {
 
     #[test]
     fn observable_message_from_complete() {
-        let complete = CompleteMessage::new(
+        let complete = DelegateReplyMessage::new(
             BranchId::from(1),
             test_submission(),
             SessionId::new(),
@@ -257,7 +257,7 @@ mod tests {
     fn observable_message_common_accessors() {
         let submission = test_submission();
         let session = SessionId::new();
-        let complete = CompleteMessage::new(
+        let complete = DelegateReplyMessage::new(
             BranchId::from(1),
             submission.clone(),
             session.clone(),
@@ -344,7 +344,7 @@ mod tests {
 
     #[test]
     fn complete_routing_key() {
-        let msg = CompleteMessage::new(
+        let msg = DelegateReplyMessage::new(
             BranchId::from(1),
             test_submission(),
             SessionId::new(),

@@ -61,7 +61,7 @@ pub use diagnostics::{
     RuntimeDiagnostics, RuntimeInfo, ServiceDiagnostics, ServiceMetrics,
 };
 pub use message::{
-    BranchId, CompleteMessage, CompleteMessageV2, DagNodeId, DelegateMessage, ExpectsReply,
+    BranchId, CompleteMessageV2, DagNodeId, DelegateMessage, DelegateReplyMessage, ExpectsReply,
     ForkMessage, HarnessType, Instance, InvokeMessage, MessageDetails, MessageId,
     ObservableMessage, ObservableMessageHeaders, ObservableMessageV2, PromoteMessage,
     RepairMessage, RequestMessage, ResponseMessage, Sequence, SequenceCounter, SessionId,

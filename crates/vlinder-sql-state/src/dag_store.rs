@@ -1064,8 +1064,8 @@ mod tests {
     use super::*;
     use vlinder_core::domain::workers::dag::build_dag_node;
     use vlinder_core::domain::{
-        AgentName, BranchId, CompleteMessage, DelegateDiagnostics, DelegateMessage, HarnessType,
-        InferenceBackendType, Nonce, Operation, RequestDiagnostics, RequestMessage,
+        AgentName, BranchId, DelegateDiagnostics, DelegateMessage, DelegateReplyMessage,
+        HarnessType, InferenceBackendType, Nonce, Operation, RequestDiagnostics, RequestMessage,
         RuntimeDiagnostics, Sequence, ServiceBackend, Snapshot, SubmissionId,
     };
 
@@ -1083,7 +1083,7 @@ mod tests {
     }
 
     fn make_invoke(payload: &[u8], state: Option<String>) -> ObservableMessage {
-        CompleteMessage::new(
+        DelegateReplyMessage::new(
             BranchId::from(1),
             sub(),
             sess(),
@@ -1118,7 +1118,7 @@ mod tests {
     }
 
     fn make_complete(payload: &[u8], state: Option<String>) -> ObservableMessage {
-        CompleteMessage::new(
+        DelegateReplyMessage::new(
             BranchId::from(1),
             sub(),
             sess(),
@@ -1259,7 +1259,7 @@ mod tests {
         let sess2 =
             SessionId::try_from("e2660cff-33d6-4428-acca-2d297dcc1cad".to_string()).unwrap();
 
-        let msg_a: ObservableMessage = CompleteMessage::new(
+        let msg_a: ObservableMessage = DelegateReplyMessage::new(
             BranchId::from(1),
             sub(),
             sess1.clone(),
@@ -1272,7 +1272,7 @@ mod tests {
         .into();
         let node_a = build_dag_node(&msg_a, &DagNodeId::root(), &Snapshot::empty());
 
-        let msg_b: ObservableMessage = CompleteMessage::new(
+        let msg_b: ObservableMessage = DelegateReplyMessage::new(
             BranchId::from(1),
             sub(),
             sess2.clone(),

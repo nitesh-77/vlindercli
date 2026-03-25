@@ -1,8 +1,8 @@
 //! In-memory queue implementation.
 
 use crate::domain::{
-    Acknowledgement, AgentName, CompleteMessage, CompleteMessageV2, DataMessageKind,
-    DataRoutingKey, DelegateMessage, ForkMessage, HarnessType, InvokeMessage, MessageQueue,
+    Acknowledgement, AgentName, CompleteMessageV2, DataMessageKind, DataRoutingKey,
+    DelegateMessage, DelegateReplyMessage, ForkMessage, HarnessType, InvokeMessage, MessageQueue,
     ObservableMessage, ObservableMessageV2, Operation, QueueError, RepairMessage, RequestMessage,
     ResponseMessage, RoutingKey, RoutingKind, ServiceBackend, SubmissionId,
 };
@@ -235,7 +235,7 @@ impl MessageQueue for InMemoryQueue {
 
     fn send_delegate_reply(
         &self,
-        msg: CompleteMessage,
+        msg: DelegateReplyMessage,
         reply_key: &RoutingKey,
     ) -> Result<(), QueueError> {
         let mut typed = self.typed_queues.lock().unwrap();
@@ -249,7 +249,7 @@ impl MessageQueue for InMemoryQueue {
     fn receive_delegate_reply(
         &self,
         reply_key: &RoutingKey,
-    ) -> Result<(CompleteMessage, Acknowledgement), QueueError> {
+    ) -> Result<(DelegateReplyMessage, Acknowledgement), QueueError> {
         let mut typed = self.typed_queues.lock().unwrap();
 
         if let Some(queue) = typed.get_mut(reply_key) {
@@ -632,7 +632,7 @@ mod tests {
             },
         };
 
-        let complete = CompleteMessage::new(
+        let complete = DelegateReplyMessage::new(
             BranchId::from(1),
             test_submission(),
             SessionId::new(),
@@ -675,7 +675,7 @@ mod tests {
             },
         };
 
-        let complete = CompleteMessage::new(
+        let complete = DelegateReplyMessage::new(
             BranchId::from(1),
             test_submission(),
             SessionId::new(),

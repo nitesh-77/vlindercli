@@ -10,7 +10,7 @@ use super::super::diagnostics::{
 };
 use super::super::operation::Operation;
 use super::super::routing_key::{Nonce, RoutingKey, RoutingKind, ServiceBackend};
-use super::complete::CompleteMessage;
+use super::complete::DelegateReplyMessage;
 use super::delegate::DelegateMessage;
 use super::fork::ForkMessage;
 use super::identity::{BranchId, DagNodeId, MessageId, Sequence, SessionId, SubmissionId};
@@ -27,7 +27,7 @@ use super::response::ResponseMessage;
 pub enum ObservableMessage {
     Request(RequestMessage),
     Response(ResponseMessage),
-    Complete(CompleteMessage),
+    Complete(DelegateReplyMessage),
     Delegate(DelegateMessage),
     Repair(RepairMessage),
     Fork(ForkMessage),
@@ -158,7 +158,7 @@ impl ObservableMessageHeaders {
             (
                 RoutingKind::Complete { agent, harness },
                 MessageDetails::Complete { diagnostics },
-            ) => ObservableMessage::Complete(CompleteMessage {
+            ) => ObservableMessage::Complete(DelegateReplyMessage {
                 id,
                 protocol_version,
                 branch,
@@ -433,8 +433,8 @@ impl From<ResponseMessage> for ObservableMessage {
     }
 }
 
-impl From<CompleteMessage> for ObservableMessage {
-    fn from(msg: CompleteMessage) -> Self {
+impl From<DelegateReplyMessage> for ObservableMessage {
+    fn from(msg: DelegateReplyMessage) -> Self {
         ObservableMessage::Complete(msg)
     }
 }

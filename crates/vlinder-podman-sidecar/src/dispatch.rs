@@ -12,11 +12,11 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use vlinder_core::domain::{
-    AgentName, BranchId, CompleteMessage, CompleteMessageV2, ContainerId, DagNodeId,
-    DataMessageKind, DataRoutingKey, HarnessType, HealthWindow, HttpMethod, ImageDigest, ImageRef,
-    MessageQueue, ProviderHost, ProviderRoute, Registry, RepairMessage, RequestDiagnostics,
-    RequestMessage, ResponseMessage, RoutingKey, RuntimeDiagnostics, SequenceCounter, SessionId,
-    SubmissionId,
+    AgentName, BranchId, CompleteMessageV2, ContainerId, DagNodeId, DataMessageKind,
+    DataRoutingKey, DelegateReplyMessage, HarnessType, HealthWindow, HttpMethod, ImageDigest,
+    ImageRef, MessageQueue, ProviderHost, ProviderRoute, Registry, RepairMessage,
+    RequestDiagnostics, RequestMessage, ResponseMessage, RoutingKey, RuntimeDiagnostics,
+    SequenceCounter, SessionId, SubmissionId,
 };
 
 use vlinder_provider_server::handler::InvokeHandler;
@@ -165,7 +165,7 @@ pub fn handle_invoke(
                     ctx.image_digest.as_ref(),
                 );
                 trace.log("Sending complete");
-                let complete = CompleteMessage::new(
+                let complete = DelegateReplyMessage::new(
                     branch,
                     submission,
                     session,
@@ -190,7 +190,7 @@ pub fn handle_invoke(
                 reason = %err_body,
                 "Agent container returned an error"
             );
-            let complete = CompleteMessage::new(
+            let complete = DelegateReplyMessage::new(
                 branch,
                 submission,
                 session,
@@ -206,7 +206,7 @@ pub fn handle_invoke(
         Err(e) => {
             let msg = format!("Request to agent failed: {e}");
             tracing::warn!(event = "container.unreachable", error = %msg);
-            let complete = CompleteMessage::new(
+            let complete = DelegateReplyMessage::new(
                 branch,
                 submission,
                 session,
@@ -296,7 +296,7 @@ pub fn handle_service_response(
         Err(e) => {
             let msg = format!("Callback to agent failed: {e}");
             trace.log(&msg);
-            let complete = CompleteMessage::new(
+            let complete = DelegateReplyMessage::new(
                 session.branch,
                 session.submission,
                 session.session,
@@ -435,7 +435,7 @@ fn handle_action(
                 payload.len(),
                 started_at.elapsed().as_millis()
             ));
-            let complete = CompleteMessage::new(
+            let complete = DelegateReplyMessage::new(
                 branch,
                 submission,
                 session,
@@ -522,7 +522,7 @@ fn handle_action(
 /// Route a `CompleteMessage` to the correct destination.
 fn send_reply(
     queue: &Arc<dyn MessageQueue + Send + Sync>,
-    complete: CompleteMessage,
+    complete: DelegateReplyMessage,
     reply_key: Option<&RoutingKey>,
 ) {
     let result = if let Some(key) = reply_key {

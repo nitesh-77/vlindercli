@@ -1132,11 +1132,12 @@ mod tests {
     use super::*;
     use std::process::Command;
     use vlinder_core::domain::{
-        Agent, AgentName, BranchId, CompleteMessage, ContainerId, DagNodeId, DelegateDiagnostics,
-        DelegateMessage, HarnessType, InMemoryRegistry, InMemorySecretStore, InferenceBackendType,
-        Nonce, ObservableMessage, Operation, RequestDiagnostics, RequestMessage, ResponseMessage,
-        RuntimeDiagnostics, RuntimeInfo, RuntimeType, SecretStore, Sequence, ServiceBackend,
-        ServiceDiagnostics, ServiceMetrics, ServiceType, SessionId, Snapshot, SubmissionId,
+        Agent, AgentName, BranchId, ContainerId, DagNodeId, DelegateDiagnostics, DelegateMessage,
+        DelegateReplyMessage, HarnessType, InMemoryRegistry, InMemorySecretStore,
+        InferenceBackendType, Nonce, ObservableMessage, Operation, RequestDiagnostics,
+        RequestMessage, ResponseMessage, RuntimeDiagnostics, RuntimeInfo, RuntimeType, SecretStore,
+        Sequence, ServiceBackend, ServiceDiagnostics, ServiceMetrics, ServiceType, SessionId,
+        Snapshot, SubmissionId,
     };
 
     fn test_agent_id() -> AgentName {
@@ -1144,7 +1145,7 @@ mod tests {
     }
 
     fn test_invoke(payload: &[u8], epoch_secs: i64) -> (ObservableMessage, DateTime<Utc>) {
-        let msg = CompleteMessage::new(
+        let msg = DelegateReplyMessage::new(
             BranchId::from(1),
             SubmissionId::from("sub-1".to_string()),
             SessionId::try_from(SESSION.to_string()).unwrap(),
@@ -1217,7 +1218,7 @@ mod tests {
     }
 
     fn test_complete(payload: &[u8], epoch_secs: i64) -> (ObservableMessage, DateTime<Utc>) {
-        let msg = CompleteMessage::new(
+        let msg = DelegateReplyMessage::new(
             BranchId::from(1),
             SubmissionId::from("sub-1".to_string()),
             SessionId::try_from(SESSION.to_string()).unwrap(),
@@ -1375,7 +1376,7 @@ mod tests {
         let (invoke, ts1) = test_invoke(b"question", 1000);
         worker.on_observable_message(&invoke, ts1);
 
-        let complete = CompleteMessage::new(
+        let complete = DelegateReplyMessage::new(
             BranchId::from(1),
             SubmissionId::from("sub-1".to_string()),
             SessionId::try_from(SESSION.to_string()).unwrap(),
@@ -1515,7 +1516,7 @@ mod tests {
     #[test]
     fn complete_directory_has_harness_and_stderr() {
         let (mut worker, tmp) = test_worker();
-        let msg_inner = CompleteMessage::new(
+        let msg_inner = DelegateReplyMessage::new(
             BranchId::from(1),
             SubmissionId::from("sub-1".to_string()),
             SessionId::try_from(SESSION.to_string()).unwrap(),
@@ -1575,7 +1576,7 @@ mod tests {
     #[test]
     fn state_file_present_when_state_set() {
         let (mut worker, tmp) = test_worker();
-        let complete = CompleteMessage::new(
+        let complete = DelegateReplyMessage::new(
             BranchId::from(1),
             SubmissionId::from("sub-1".to_string()),
             SessionId::try_from(SESSION.to_string()).unwrap(),
@@ -1740,7 +1741,7 @@ mod tests {
         epoch_secs: i64,
         session: &str,
     ) -> (ObservableMessage, DateTime<Utc>) {
-        let msg = CompleteMessage::new(
+        let msg = DelegateReplyMessage::new(
             BranchId::from(1),
             SubmissionId::from("sub-1".to_string()),
             SessionId::try_from(session.to_string()).unwrap(),

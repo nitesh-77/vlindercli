@@ -381,7 +381,7 @@ mod tests {
     use vlinder_core::domain::session::Session;
     use vlinder_core::domain::workers::dag::build_dag_node;
     use vlinder_core::domain::{
-        AgentName, BranchId, CompleteMessage, DagNodeId, HarnessType, InMemoryDagStore,
+        AgentName, BranchId, DagNodeId, DelegateReplyMessage, HarnessType, InMemoryDagStore,
         ObservableMessage, RuntimeDiagnostics, Snapshot, SubmissionId,
     };
 
@@ -390,7 +390,7 @@ mod tests {
     }
 
     fn make_invoke_msg(payload: &[u8], agent: &str, session: SessionId) -> ObservableMessage {
-        CompleteMessage::new(
+        DelegateReplyMessage::new(
             BranchId::from(1),
             SubmissionId::from("sub-1".to_string()),
             session,
@@ -404,7 +404,7 @@ mod tests {
     }
 
     fn make_complete_msg(payload: &[u8], agent: &str, session: SessionId) -> ObservableMessage {
-        CompleteMessage::new(
+        DelegateReplyMessage::new(
             BranchId::from(1),
             SubmissionId::from("sub-1".to_string()),
             session,

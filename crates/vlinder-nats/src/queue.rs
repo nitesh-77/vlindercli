@@ -19,8 +19,8 @@ use tokio::runtime::Runtime;
 use std::str::FromStr;
 
 use vlinder_core::domain::{
-    Acknowledgement, AgentName, BranchId, CompleteMessage, CompleteMessageV2, DagNodeId,
-    DataMessageKind, DataRoutingKey, DelegateDiagnostics, DelegateMessage, HarnessType,
+    Acknowledgement, AgentName, BranchId, CompleteMessageV2, DagNodeId, DataMessageKind,
+    DataRoutingKey, DelegateDiagnostics, DelegateMessage, DelegateReplyMessage, HarnessType,
     InvokeMessage, MessageId, MessageQueue, Nonce, Operation, QueueError, RepairMessage,
     RequestDiagnostics, RequestMessage, ResponseMessage, RoutingKey, RoutingKind,
     RuntimeDiagnostics, RuntimeType, Sequence, ServiceBackend, ServiceDiagnostics, ServiceType,
@@ -605,7 +605,7 @@ impl MessageQueue for NatsQueue {
 
     fn send_delegate_reply(
         &self,
-        msg: CompleteMessage,
+        msg: DelegateReplyMessage,
         reply_key: &RoutingKey,
     ) -> Result<(), QueueError> {
         let subject = routing_key_to_subject(reply_key);
@@ -641,7 +641,7 @@ impl MessageQueue for NatsQueue {
     fn receive_delegate_reply(
         &self,
         reply_key: &RoutingKey,
-    ) -> Result<(CompleteMessage, Acknowledgement), QueueError> {
+    ) -> Result<(DelegateReplyMessage, Acknowledgement), QueueError> {
         let filter = routing_key_to_subject(reply_key);
 
         self.inner.runtime.block_on(async {
@@ -657,7 +657,7 @@ impl MessageQueue for NatsQueue {
                 .and_then(|s| serde_json::from_str(&s).ok())
                 .unwrap_or_else(|| RuntimeDiagnostics::placeholder(0));
 
-            let msg = CompleteMessage {
+            let msg = DelegateReplyMessage {
                 id: MessageId::from(get_header(headers, "msg-id")?),
                 protocol_version: get_header(headers, "protocol-version").unwrap_or_default(),
                 branch: get_header(headers, "branch-id")
@@ -1117,7 +1117,7 @@ pub fn response_to_nats_headers(msg: &ResponseMessage) -> HashMap<String, String
 }
 
 /// Serialize a `CompleteMessage` into NATS headers (sans payload).
-pub fn complete_to_nats_headers(msg: &CompleteMessage) -> HashMap<String, String> {
+pub fn complete_to_nats_headers(msg: &DelegateReplyMessage) -> HashMap<String, String> {
     let mut h = HashMap::new();
     h.insert("msg-id".to_string(), msg.id.as_str().to_string());
     h.insert("protocol-version".to_string(), msg.protocol_version.clone());
@@ -2167,7 +2167,7 @@ mod tests {
     fn complete_headers_round_trip() {
         use vlinder_core::domain::ObservableMessage;
 
-        let original = CompleteMessage::new(
+        let original = DelegateReplyMessage::new(
             timeline(),
             submission(),
             SessionId::try_from("d4761d76-dee4-4ebf-9df4-43b52efa4f78".to_string()).unwrap(),

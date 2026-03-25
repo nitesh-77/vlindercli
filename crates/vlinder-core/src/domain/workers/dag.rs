@@ -60,7 +60,7 @@ pub fn build_dag_node(
 mod tests {
     use super::*;
     use crate::domain::{
-        AgentName, BranchId, CompleteMessage, DagStore, DelegateDiagnostics, DelegateMessage,
+        AgentName, BranchId, DagStore, DelegateDiagnostics, DelegateMessage, DelegateReplyMessage,
         HarnessType, InMemoryDagStore, InferenceBackendType, MessageType, Nonce, Operation,
         RequestDiagnostics, RequestMessage, ResponseMessage, RuntimeDiagnostics, Sequence,
         ServiceBackend, SessionId, SubmissionId,
@@ -77,7 +77,7 @@ mod tests {
     }
 
     fn test_invoke(payload: &[u8]) -> ObservableMessage {
-        CompleteMessage::new(
+        DelegateReplyMessage::new(
             BranchId::from(1),
             submission(),
             session(),
@@ -133,7 +133,7 @@ mod tests {
     }
 
     fn test_complete(payload: &[u8], state: Option<String>) -> ObservableMessage {
-        CompleteMessage::new(
+        DelegateReplyMessage::new(
             BranchId::from(1),
             submission(),
             session(),
@@ -353,7 +353,7 @@ mod tests {
         // Different session
         let sess2 =
             SessionId::try_from("e2660cff-33d6-4428-acca-2d297dcc1cad".to_string()).unwrap();
-        let msg2: ObservableMessage = CompleteMessage::new(
+        let msg2: ObservableMessage = DelegateReplyMessage::new(
             BranchId::from(1),
             submission_alt(),
             sess2.clone(),

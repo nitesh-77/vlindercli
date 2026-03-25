@@ -10,9 +10,9 @@
 //! `AckFn` acknowledges successful processing.
 
 use super::{
-    AgentName, CompleteMessage, CompleteMessageV2, DataRoutingKey, DelegateMessage, ForkMessage,
-    HarnessType, InvokeMessage, Operation, PromoteMessage, RepairMessage, RequestMessage,
-    ResourceId, ResponseMessage, RoutingKey, ServiceBackend, SubmissionId,
+    AgentName, CompleteMessageV2, DataRoutingKey, DelegateMessage, DelegateReplyMessage,
+    ForkMessage, HarnessType, InvokeMessage, Operation, PromoteMessage, RepairMessage,
+    RequestMessage, ResourceId, ResponseMessage, RoutingKey, ServiceBackend, SubmissionId,
 };
 use std::fmt;
 
@@ -117,7 +117,7 @@ pub trait MessageQueue {
     /// when the same caller delegates to the same target multiple times.
     fn send_delegate_reply(
         &self,
-        msg: CompleteMessage,
+        msg: DelegateReplyMessage,
         reply_key: &RoutingKey,
     ) -> Result<(), QueueError>;
 
@@ -127,7 +127,7 @@ pub trait MessageQueue {
     fn receive_delegate_reply(
         &self,
         reply_key: &RoutingKey,
-    ) -> Result<(CompleteMessage, Acknowledgement), QueueError>;
+    ) -> Result<(DelegateReplyMessage, Acknowledgement), QueueError>;
 
     // -------------------------------------------------------------------------
     // Repair methods (ADR 113)

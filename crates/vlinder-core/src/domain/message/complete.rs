@@ -11,7 +11,7 @@ use super::PROTOCOL_VERSION;
 ///
 /// Signals that a submission has finished.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct CompleteMessage {
+pub struct DelegateReplyMessage {
     pub id: MessageId,
     pub protocol_version: String,
     pub branch: BranchId,
@@ -29,7 +29,7 @@ pub struct CompleteMessage {
     pub diagnostics: RuntimeDiagnostics,
 }
 
-impl CompleteMessage {
+impl DelegateReplyMessage {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         branch: BranchId,
