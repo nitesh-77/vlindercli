@@ -205,6 +205,64 @@ impl RecordingQueue {
             tracing::warn!(error = %id, "Failed to record complete node: {e}");
         }
     }
+
+    /// Record a DAG node for a v2 complete message (data-plane path).
+    fn record_complete_v2(&self, key: &DataRoutingKey, msg: &CompleteMessageV2) {
+        let branch_id = key.branch;
+
+        let parent_node = self
+            .store
+            .latest_node_on_branch(branch_id, None)
+            .unwrap_or_else(|e| {
+                tracing::warn!(error = %e, branch = branch_id.as_i64(), "Failed to query latest node on branch");
+                None
+            });
+
+        let parent_id = parent_node
+            .as_ref()
+            .map_or_else(DagNodeId::root, |n| n.id.clone());
+        let parent_state = parent_node
+            .as_ref()
+            .map(|n| &n.state)
+            .cloned()
+            .unwrap_or_else(Snapshot::empty);
+
+        let diagnostics_json = serde_json::to_vec(&msg.diagnostics).unwrap_or_default();
+        let id = hash_dag_node(
+            &msg.payload,
+            &parent_id,
+            &MessageType::Complete,
+            &diagnostics_json,
+            &key.session,
+        );
+
+        let state = match &msg.state {
+            Some(s) if !s.is_empty() => {
+                parent_state.with_state(Instance::from("kv"), StateHash::from(s.clone()))
+            }
+            _ => parent_state,
+        };
+
+        let crate::domain::DataMessageKind::Complete { agent, harness } = &key.kind else {
+            tracing::error!("record_complete_v2 called with non-Complete key");
+            return;
+        };
+
+        if let Err(e) = self.store.insert_complete_node(
+            &id,
+            &parent_id,
+            Utc::now(),
+            &state,
+            &key.session,
+            &key.submission,
+            key.branch,
+            agent,
+            *harness,
+            msg,
+        ) {
+            tracing::warn!(error = %id, "Failed to record complete node: {e}");
+        }
+    }
 }
 
 impl MessageQueue for RecordingQueue {
@@ -240,6 +298,16 @@ impl MessageQueue for RecordingQueue {
         self.inner.send_complete(msg)
     }
 
+    fn send_complete_v2(
+        &self,
+        key: DataRoutingKey,
+        msg: CompleteMessageV2,
+    ) -> Result<(), QueueError> {
+        // Record to typed table before forwarding
+        self.record_complete_v2(&key, &msg);
+        self.inner.send_complete_v2(key, msg)
+    }
+
     fn send_delegate(&self, msg: DelegateMessage) -> Result<(), QueueError> {
         self.record(&msg.clone().into());
         self.inner.send_delegate(msg)
@@ -271,6 +339,14 @@ impl MessageQueue for RecordingQueue {
         request: &RequestMessage,
     ) -> Result<(ResponseMessage, Acknowledgement), QueueError> {
         self.inner.receive_response(request)
+    }
+
+    fn receive_complete_v2(
+        &self,
+        submission: &SubmissionId,
+        harness: crate::domain::HarnessType,
+    ) -> Result<(DataRoutingKey, CompleteMessageV2, Acknowledgement), QueueError> {
+        self.inner.receive_complete_v2(submission, harness)
     }
 
     fn receive_complete(

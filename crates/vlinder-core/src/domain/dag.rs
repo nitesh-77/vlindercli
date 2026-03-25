@@ -202,6 +202,16 @@ pub trait DagWorker: Send {
     ) {
         // Default no-op — implementations opt in.
     }
+
+    /// Persist a complete message (data-plane path, ADR 121).
+    fn on_complete(
+        &mut self,
+        _key: &super::DataRoutingKey,
+        _msg: &super::CompleteMessageV2,
+        _created_at: DateTime<Utc>,
+    ) {
+        // Default no-op — implementations opt in.
+    }
 }
 
 /// Persistence layer for DAG nodes.

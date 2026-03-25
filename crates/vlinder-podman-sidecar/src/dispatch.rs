@@ -12,10 +12,11 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use vlinder_core::domain::{
-    AgentName, BranchId, CompleteMessage, ContainerId, HarnessType, HealthWindow, HttpMethod,
-    ImageDigest, ImageRef, MessageQueue, ProviderHost, ProviderRoute, Registry, RepairMessage,
-    RequestDiagnostics, RequestMessage, ResponseMessage, RoutingKey, RuntimeDiagnostics,
-    SequenceCounter, SessionId, SubmissionId,
+    AgentName, BranchId, CompleteMessage, CompleteMessageV2, ContainerId, DagNodeId,
+    DataMessageKind, DataRoutingKey, HarnessType, HealthWindow, HttpMethod, ImageDigest, ImageRef,
+    MessageQueue, ProviderHost, ProviderRoute, Registry, RepairMessage, RequestDiagnostics,
+    RequestMessage, ResponseMessage, RoutingKey, RuntimeDiagnostics, SequenceCounter, SessionId,
+    SubmissionId,
 };
 
 use vlinder_provider_server::handler::InvokeHandler;
@@ -525,9 +526,27 @@ fn send_reply(
     reply_key: Option<&RoutingKey>,
 ) {
     let result = if let Some(key) = reply_key {
+        // Delegate reply — still v1 path
         queue.send_delegate_reply(complete, key)
     } else {
-        queue.send_complete(complete)
+        // Normal complete — v2 data plane
+        let key = DataRoutingKey {
+            session: complete.session.clone(),
+            branch: complete.branch,
+            submission: complete.submission.clone(),
+            kind: DataMessageKind::Complete {
+                agent: complete.agent_id.clone(),
+                harness: complete.harness,
+            },
+        };
+        let v2 = CompleteMessageV2 {
+            id: complete.id,
+            dag_id: DagNodeId::root(),
+            state: complete.state,
+            diagnostics: complete.diagnostics,
+            payload: complete.payload,
+        };
+        queue.send_complete_v2(key, v2)
     };
     if let Err(e) = result {
         tracing::error!(error = %e, "Failed to send reply");

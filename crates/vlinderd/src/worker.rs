@@ -499,7 +499,8 @@ fn run_dag_git_worker(config: &Config, shutdown: &AtomicBool) {
     use vlinder_core::domain::DagWorker;
     use vlinder_git_dag::GitDagWorker;
     use vlinder_nats::{
-        from_nats_headers, invoke_parse_subject, subject_to_routing_key, NatsQueue,
+        complete_parse_subject, from_nats_headers, invoke_parse_subject, subject_to_routing_key,
+        NatsQueue,
     };
 
     let nats = NatsQueue::connect(&config.queue.nats_config()).expect("Failed to connect to NATS");
@@ -574,7 +575,18 @@ fn run_dag_git_worker(config: &Config, shutdown: &AtomicBool) {
 
                 // Try data-plane subject first, fall back to legacy pipeline.
                 let created_at = chrono::Utc::now();
-                if let Some(key) = invoke_parse_subject(&subject) {
+                if let Some(key) = complete_parse_subject(&subject) {
+                    if let Ok(complete_msg) =
+                        serde_json::from_slice::<vlinder_core::domain::CompleteMessageV2>(&payload)
+                    {
+                        git_worker.on_complete(&key, &complete_msg, created_at);
+                    } else {
+                        tracing::warn!(
+                            subject = subject.as_str(),
+                            "DAG git: failed to deserialize CompleteMessageV2"
+                        );
+                    }
+                } else if let Some(key) = invoke_parse_subject(&subject) {
                     if let Ok(invoke_msg) =
                         serde_json::from_slice::<vlinder_core::domain::InvokeMessage>(&payload)
                     {

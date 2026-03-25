@@ -963,6 +963,102 @@ impl DagWorker for GitDagWorker {
             tracing::error!(error = %e, "Failed to write git commit for invoke");
         }
     }
+
+    fn on_complete(
+        &mut self,
+        key: &DataRoutingKey,
+        complete: &vlinder_core::domain::CompleteMessageV2,
+        created_at: DateTime<Utc>,
+    ) {
+        let DataMessageKind::Complete { agent, harness } = &key.kind else {
+            tracing::error!("on_complete called with non-Complete key");
+            return;
+        };
+
+        let result = (|| -> Result<(), String> {
+            let session_id = key.session.as_str();
+            let agent_name = agent.as_str();
+            let from = agent_name;
+            let to = harness.as_str();
+            let msg_type = "complete";
+
+            let parent_commit_oid = self.head_commit();
+            let canonical_parent = match parent_commit_oid {
+                Some(oid) => {
+                    let commit = self
+                        .repo
+                        .find_commit(oid)
+                        .map_err(|e| format!("find commit failed: {e}"))?;
+                    let tree = commit
+                        .tree()
+                        .map_err(|e| format!("tree lookup failed: {e}"))?;
+                    DagNodeId::from(
+                        self.session_canonical_hash_from_tree(&tree, agent_name, session_id),
+                    )
+                }
+                None => DagNodeId::root(),
+            };
+
+            let mut tb = self
+                .repo
+                .treebuilder(None)
+                .map_err(|e| format!("treebuilder failed: {e}"))?;
+
+            let created_at_str = created_at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+
+            self.insert_field(&mut tb, "session_id", session_id)?;
+            self.insert_field(&mut tb, "submission_id", key.submission.as_str())?;
+            self.insert_field(&mut tb, "protocol_version", "v1")?;
+            self.insert_field(&mut tb, "created_at", &created_at_str)?;
+
+            let payload_oid = self.write_blob(&complete.payload)?;
+            tb.insert("payload", payload_oid, FileMode::Blob.into())
+                .map_err(|e| format!("insert payload failed: {e}"))?;
+
+            self.insert_field(&mut tb, "type", "complete")?;
+            self.insert_field(&mut tb, "harness", to)?;
+            self.insert_field(&mut tb, "agent_id", agent_name)?;
+            if let Some(ref state) = complete.state {
+                self.insert_field(&mut tb, "state", state)?;
+            }
+            self.insert_diagnostics_toml(&mut tb, &complete.diagnostics)?;
+
+            let diagnostics_json = serde_json::to_vec(&complete.diagnostics).unwrap_or_default();
+            let canonical_hash = hash_dag_node(
+                &complete.payload,
+                &canonical_parent,
+                &MessageType::Complete,
+                &diagnostics_json,
+                &key.session,
+            );
+            self.insert_field(&mut tb, "hash", canonical_hash.as_str())?;
+
+            let msg_tree_oid = tb
+                .write()
+                .map_err(|e| format!("write message subtree failed: {e}"))?;
+
+            self.nest_and_commit(
+                msg_tree_oid,
+                agent_name,
+                session_id,
+                from,
+                to,
+                msg_type,
+                "main",
+                parent_commit_oid,
+                created_at,
+                key.submission.as_str(),
+                complete.state.as_deref(),
+                None,
+                "v1",
+                None,
+            )
+        })();
+
+        if let Err(e) = result {
+            tracing::error!(error = %e, "Failed to write git commit for complete");
+        }
+    }
 }
 
 /// Extract (from, to, `type_str`) from an `ObservableMessage` for commit metadata.
