@@ -279,7 +279,7 @@ impl DagStore for GrpcStateClient {
         branch: vlinder_core::domain::BranchId,
         agent: &vlinder_core::domain::AgentName,
         harness: vlinder_core::domain::HarnessType,
-        msg: &vlinder_core::domain::CompleteMessageV2,
+        msg: &vlinder_core::domain::CompleteMessage,
     ) -> Result<(), String> {
         let snapshot_json =
             serde_json::to_string(state).map_err(|e| format!("serialize snapshot: {e}"))?;
@@ -317,7 +317,7 @@ impl DagStore for GrpcStateClient {
     fn get_complete_node(
         &self,
         dag_hash: &DagNodeId,
-    ) -> Result<Option<vlinder_core::domain::CompleteMessageV2>, String> {
+    ) -> Result<Option<vlinder_core::domain::CompleteMessage>, String> {
         let request = proto::GetCompleteNodeRequest {
             dag_hash: dag_hash.to_string(),
         };
@@ -334,7 +334,7 @@ impl DagStore for GrpcStateClient {
                     serde_json::from_slice(&n.diagnostics).unwrap_or_else(|_| {
                         vlinder_core::domain::RuntimeDiagnostics::placeholder(0)
                     });
-                Ok(Some(vlinder_core::domain::CompleteMessageV2 {
+                Ok(Some(vlinder_core::domain::CompleteMessage {
                     id: vlinder_core::domain::MessageId::from(n.message_id),
                     dag_id: vlinder_core::domain::DagNodeId::from(n.dag_hash),
                     state: n.state,

@@ -13,7 +13,7 @@ use chrono::Utc;
 
 use crate::domain::workers::dag::build_dag_node;
 use crate::domain::{
-    hash_dag_node, Acknowledgement, CompleteMessageV2, DagNodeId, DagStore, DataRoutingKey,
+    hash_dag_node, Acknowledgement, CompleteMessage, DagNodeId, DagStore, DataRoutingKey,
     DelegateMessage, DelegateReplyMessage, ForkMessage, Instance, InvokeMessage, MessageQueue,
     MessageType, ObservableMessage, PromoteMessage, QueueError, RepairMessage, RequestMessage,
     ResponseMessage, Snapshot, StateHash, SubmissionId,
@@ -146,7 +146,7 @@ impl RecordingQueue {
     }
 
     /// Record a DAG node for a v2 complete message (data-plane path).
-    fn record_complete_v2(&self, key: &DataRoutingKey, msg: &CompleteMessageV2) {
+    fn record_complete_v2(&self, key: &DataRoutingKey, msg: &CompleteMessage) {
         let branch_id = key.branch;
 
         let parent_node = self
@@ -235,7 +235,7 @@ impl MessageQueue for RecordingQueue {
     fn send_complete_v2(
         &self,
         key: DataRoutingKey,
-        msg: CompleteMessageV2,
+        msg: CompleteMessage,
     ) -> Result<(), QueueError> {
         // Record to typed table before forwarding
         self.record_complete_v2(&key, &msg);
@@ -279,7 +279,7 @@ impl MessageQueue for RecordingQueue {
         &self,
         submission: &SubmissionId,
         harness: crate::domain::HarnessType,
-    ) -> Result<(DataRoutingKey, CompleteMessageV2, Acknowledgement), QueueError> {
+    ) -> Result<(DataRoutingKey, CompleteMessage, Acknowledgement), QueueError> {
         self.inner.receive_complete_v2(submission, harness)
     }
 
@@ -509,7 +509,7 @@ mod tests {
         )
     }
 
-    fn test_complete_v2() -> (DataRoutingKey, CompleteMessageV2) {
+    fn test_complete_v2() -> (DataRoutingKey, CompleteMessage) {
         let key = DataRoutingKey {
             session: test_session(),
             branch: BranchId::from(1),
@@ -519,7 +519,7 @@ mod tests {
                 harness: HarnessType::Cli,
             },
         };
-        let msg = CompleteMessageV2 {
+        let msg = CompleteMessage {
             id: crate::domain::MessageId::new(),
             dag_id: crate::domain::DagNodeId::root(),
             state: None,

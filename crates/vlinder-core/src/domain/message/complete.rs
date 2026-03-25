@@ -75,7 +75,7 @@ impl DelegateReplyMessage {
 /// and protocol version. This struct carries the domain data that goes in the
 /// NATS payload.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct CompleteMessageV2 {
+pub struct CompleteMessage {
     pub id: MessageId,
     pub dag_id: DagNodeId,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -91,7 +91,7 @@ mod tests {
 
     #[test]
     fn complete_v2_json_round_trip() {
-        let msg = CompleteMessageV2 {
+        let msg = CompleteMessage {
             id: MessageId::from("msg-1".to_string()),
             dag_id: DagNodeId::root(),
             state: Some("state-abc".to_string()),
@@ -99,13 +99,13 @@ mod tests {
             payload: b"hello world".to_vec(),
         };
         let json = serde_json::to_string(&msg).unwrap();
-        let back: CompleteMessageV2 = serde_json::from_str(&json).unwrap();
+        let back: CompleteMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(back, msg);
     }
 
     #[test]
     fn complete_v2_payload_is_base64() {
-        let msg = CompleteMessageV2 {
+        let msg = CompleteMessage {
             id: MessageId::from("msg-1".to_string()),
             dag_id: DagNodeId::root(),
             state: None,
@@ -120,7 +120,7 @@ mod tests {
 
     #[test]
     fn complete_v2_omits_none_state() {
-        let msg = CompleteMessageV2 {
+        let msg = CompleteMessage {
             id: MessageId::from("msg-1".to_string()),
             dag_id: DagNodeId::root(),
             state: None,

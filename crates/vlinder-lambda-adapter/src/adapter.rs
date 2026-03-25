@@ -149,7 +149,7 @@ mod tests {
     fn complete_v2_carries_output_and_state() {
         let diag = build_lambda_diagnostics("fn", "us-east-1", 100);
 
-        let complete = vlinder_core::domain::CompleteMessageV2 {
+        let complete = vlinder_core::domain::CompleteMessage {
             id: MessageId::new(),
             dag_id: DagNodeId::root(),
             state: Some("final-state-hash".to_string()),
@@ -165,7 +165,7 @@ mod tests {
     fn complete_v2_with_no_state() {
         let diag = build_lambda_diagnostics("fn", "us-east-1", 50);
 
-        let complete = vlinder_core::domain::CompleteMessageV2 {
+        let complete = vlinder_core::domain::CompleteMessage {
             id: MessageId::new(),
             dag_id: DagNodeId::root(),
             state: None,

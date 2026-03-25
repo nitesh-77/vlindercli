@@ -577,7 +577,7 @@ fn run_dag_git_worker(config: &Config, shutdown: &AtomicBool) {
                 let created_at = chrono::Utc::now();
                 if let Some(key) = complete_parse_subject(&subject) {
                     if let Ok(complete_msg) =
-                        serde_json::from_slice::<vlinder_core::domain::CompleteMessageV2>(&payload)
+                        serde_json::from_slice::<vlinder_core::domain::CompleteMessage>(&payload)
                     {
                         git_worker.on_complete(&key, &complete_msg, created_at);
                     } else {

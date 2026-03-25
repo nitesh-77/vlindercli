@@ -207,7 +207,7 @@ pub trait DagWorker: Send {
     fn on_complete(
         &mut self,
         _key: &super::DataRoutingKey,
-        _msg: &super::CompleteMessageV2,
+        _msg: &super::CompleteMessage,
         _created_at: DateTime<Utc>,
     ) {
         // Default no-op — implementations opt in.
@@ -246,7 +246,7 @@ pub trait DagStore: Send + Sync {
         branch: super::BranchId,
         agent: &super::AgentName,
         harness: super::HarnessType,
-        msg: &super::CompleteMessageV2,
+        msg: &super::CompleteMessage,
     ) -> Result<(), String> {
         let _ = (
             dag_id, parent_id, created_at, state, session, submission, branch, agent, harness, msg,
@@ -309,7 +309,7 @@ pub trait DagStore: Send + Sync {
     fn get_complete_node(
         &self,
         dag_hash: &super::DagNodeId,
-    ) -> Result<Option<super::CompleteMessageV2>, String> {
+    ) -> Result<Option<super::CompleteMessage>, String> {
         let _ = dag_hash;
         Ok(None)
     }
@@ -426,7 +426,7 @@ impl DagStore for InMemoryDagStore {
         branch: super::BranchId,
         _agent: &super::AgentName,
         _harness: super::HarnessType,
-        _msg: &super::CompleteMessageV2,
+        _msg: &super::CompleteMessage,
     ) -> Result<(), String> {
         let node = DagNode {
             id: dag_id.clone(),
@@ -446,11 +446,11 @@ impl DagStore for InMemoryDagStore {
     fn get_complete_node(
         &self,
         dag_hash: &super::DagNodeId,
-    ) -> Result<Option<super::CompleteMessageV2>, String> {
+    ) -> Result<Option<super::CompleteMessage>, String> {
         let nodes = self.nodes.lock().unwrap();
         Ok(nodes.iter().find(|n| n.id == *dag_hash).and_then(|n| {
             if let Some(super::ObservableMessage::Complete(m)) = &n.message {
-                Some(super::CompleteMessageV2 {
+                Some(super::CompleteMessage {
                     id: m.id.clone(),
                     dag_id: n.id.clone(),
                     state: m.state.clone(),

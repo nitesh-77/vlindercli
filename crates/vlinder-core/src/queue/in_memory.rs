@@ -1,10 +1,10 @@
 //! In-memory queue implementation.
 
 use crate::domain::{
-    Acknowledgement, AgentName, CompleteMessageV2, DataMessageKind, DataRoutingKey,
-    DelegateMessage, DelegateReplyMessage, ForkMessage, HarnessType, InvokeMessage, MessageQueue,
-    ObservableMessage, ObservableMessageV2, Operation, QueueError, RepairMessage, RequestMessage,
-    ResponseMessage, RoutingKey, RoutingKind, ServiceBackend, SubmissionId,
+    Acknowledgement, AgentName, CompleteMessage, DataMessageKind, DataRoutingKey, DelegateMessage,
+    DelegateReplyMessage, ForkMessage, HarnessType, InvokeMessage, MessageQueue, ObservableMessage,
+    ObservableMessageV2, Operation, QueueError, RepairMessage, RequestMessage, ResponseMessage,
+    RoutingKey, RoutingKind, ServiceBackend, SubmissionId,
 };
 #[cfg(test)]
 use crate::domain::{
@@ -83,7 +83,7 @@ impl MessageQueue for InMemoryQueue {
     fn send_complete_v2(
         &self,
         key: DataRoutingKey,
-        msg: CompleteMessageV2,
+        msg: CompleteMessage,
     ) -> Result<(), QueueError> {
         let v2 = ObservableMessageV2::CompleteV2 {
             key: key.clone(),
@@ -101,7 +101,7 @@ impl MessageQueue for InMemoryQueue {
         &self,
         submission: &SubmissionId,
         _harness: HarnessType,
-    ) -> Result<(DataRoutingKey, CompleteMessageV2, Acknowledgement), QueueError> {
+    ) -> Result<(DataRoutingKey, CompleteMessage, Acknowledgement), QueueError> {
         let mut data = self
             .data_queues
             .lock()

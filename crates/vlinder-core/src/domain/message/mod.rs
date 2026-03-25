@@ -39,7 +39,7 @@ pub mod response;
 pub mod session_start;
 
 // Re-export everything at the module level for backwards compatibility.
-pub use complete::{CompleteMessageV2, DelegateReplyMessage};
+pub use complete::{CompleteMessage, DelegateReplyMessage};
 pub use delegate::DelegateMessage;
 pub use fork::ForkMessage;
 pub use identity::{

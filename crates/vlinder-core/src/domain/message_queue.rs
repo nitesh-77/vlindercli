@@ -10,9 +10,9 @@
 //! `AckFn` acknowledges successful processing.
 
 use super::{
-    AgentName, CompleteMessageV2, DataRoutingKey, DelegateMessage, DelegateReplyMessage,
-    ForkMessage, HarnessType, InvokeMessage, Operation, PromoteMessage, RepairMessage,
-    RequestMessage, ResourceId, ResponseMessage, RoutingKey, ServiceBackend, SubmissionId,
+    AgentName, CompleteMessage, DataRoutingKey, DelegateMessage, DelegateReplyMessage, ForkMessage,
+    HarnessType, InvokeMessage, Operation, PromoteMessage, RepairMessage, RequestMessage,
+    ResourceId, ResponseMessage, RoutingKey, ServiceBackend, SubmissionId,
 };
 use std::fmt;
 
@@ -59,7 +59,7 @@ pub trait MessageQueue {
     fn send_complete_v2(
         &self,
         _key: DataRoutingKey,
-        _msg: CompleteMessageV2,
+        _msg: CompleteMessage,
     ) -> Result<(), QueueError> {
         Err(QueueError::SendFailed(
             "send_complete_v2 not implemented".into(),
@@ -71,7 +71,7 @@ pub trait MessageQueue {
         &self,
         _submission: &SubmissionId,
         _harness: HarnessType,
-    ) -> Result<(DataRoutingKey, CompleteMessageV2, Acknowledgement), QueueError> {
+    ) -> Result<(DataRoutingKey, CompleteMessage, Acknowledgement), QueueError> {
         Err(QueueError::Timeout)
     }
 
@@ -190,7 +190,7 @@ pub trait MessageQueue {
     /// Send a repair and block until the agent completes.
     ///
     /// Used by the harness to replay a failed service call (ADR 113).
-    fn repair_agent(&self, msg: RepairMessage) -> Result<CompleteMessageV2, QueueError> {
+    fn repair_agent(&self, msg: RepairMessage) -> Result<CompleteMessage, QueueError> {
         let submission = msg.submission.clone();
         let harness = msg.harness;
         send_and_wait(

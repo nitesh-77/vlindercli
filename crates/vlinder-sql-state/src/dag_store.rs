@@ -492,7 +492,7 @@ impl DagStore for SqliteDagStore {
         branch: BranchId,
         agent: &vlinder_core::domain::AgentName,
         harness: vlinder_core::domain::HarnessType,
-        msg: &vlinder_core::domain::CompleteMessageV2,
+        msg: &vlinder_core::domain::CompleteMessage,
     ) -> Result<(), String> {
         let conn = self.conn.lock().expect("db connection lock poisoned");
         let snapshot_json =
@@ -850,7 +850,7 @@ impl DagStore for SqliteDagStore {
     fn get_complete_node(
         &self,
         dag_hash: &DagNodeId,
-    ) -> Result<Option<vlinder_core::domain::CompleteMessageV2>, String> {
+    ) -> Result<Option<vlinder_core::domain::CompleteMessage>, String> {
         let conn = self.conn.lock().expect("db connection lock poisoned");
         let mut stmt = conn
             .prepare(
@@ -874,7 +874,7 @@ impl DagStore for SqliteDagStore {
                         vlinder_core::domain::RuntimeDiagnostics::placeholder(0)
                     });
 
-                Ok(vlinder_core::domain::CompleteMessageV2 {
+                Ok(vlinder_core::domain::CompleteMessage {
                     id: vlinder_core::domain::MessageId::from(message_id),
                     dag_id: dag_hash.clone(),
                     state,

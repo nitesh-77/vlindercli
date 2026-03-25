@@ -311,7 +311,7 @@ fn handle_invocation(
             harness,
         },
     };
-    let complete_v2 = vlinder_core::domain::CompleteMessageV2 {
+    let complete_v2 = vlinder_core::domain::CompleteMessage {
         id: vlinder_core::domain::MessageId::new(),
         dag_id: vlinder_core::domain::DagNodeId::root(),
         state: final_state,

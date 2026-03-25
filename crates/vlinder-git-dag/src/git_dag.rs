@@ -967,7 +967,7 @@ impl DagWorker for GitDagWorker {
     fn on_complete(
         &mut self,
         key: &DataRoutingKey,
-        complete: &vlinder_core::domain::CompleteMessageV2,
+        complete: &vlinder_core::domain::CompleteMessage,
         created_at: DateTime<Utc>,
     ) {
         let DataMessageKind::Complete { agent, harness } = &key.kind else {

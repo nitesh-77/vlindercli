@@ -19,7 +19,7 @@ use tokio::runtime::Runtime;
 use std::str::FromStr;
 
 use vlinder_core::domain::{
-    Acknowledgement, AgentName, BranchId, CompleteMessageV2, DagNodeId, DataMessageKind,
+    Acknowledgement, AgentName, BranchId, CompleteMessage, DagNodeId, DataMessageKind,
     DataRoutingKey, DelegateDiagnostics, DelegateMessage, DelegateReplyMessage, HarnessType,
     InvokeMessage, MessageId, MessageQueue, Nonce, Operation, QueueError, RepairMessage,
     RequestDiagnostics, RequestMessage, ResponseMessage, RoutingKey, RoutingKind,
@@ -272,7 +272,7 @@ impl MessageQueue for NatsQueue {
     fn send_complete_v2(
         &self,
         key: DataRoutingKey,
-        msg: CompleteMessageV2,
+        msg: CompleteMessage,
     ) -> Result<(), QueueError> {
         let DataMessageKind::Complete { agent, harness } = &key.kind else {
             return Err(QueueError::SendFailed(
@@ -303,7 +303,7 @@ impl MessageQueue for NatsQueue {
         &self,
         submission: &SubmissionId,
         harness: HarnessType,
-    ) -> Result<(DataRoutingKey, CompleteMessageV2, Acknowledgement), QueueError> {
+    ) -> Result<(DataRoutingKey, CompleteMessage, Acknowledgement), QueueError> {
         let filter = complete_filter(submission, harness);
 
         self.inner.runtime.block_on(async {
@@ -314,7 +314,7 @@ impl MessageQueue for NatsQueue {
                 QueueError::ReceiveFailed(format!("invalid complete subject: {subject}"))
             })?;
 
-            let msg: CompleteMessageV2 = serde_json::from_slice(&js_msg.payload)
+            let msg: CompleteMessage = serde_json::from_slice(&js_msg.payload)
                 .map_err(|e| QueueError::ReceiveFailed(format!("deserialize complete: {e}")))?;
 
             Ok((key, msg, ack_fn))

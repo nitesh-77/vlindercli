@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use vlinder_core::domain::{
-    Agent, AgentName, CompleteMessageV2, DagNodeId, DataMessageKind, DataRoutingKey, MessageId,
+    Agent, AgentName, CompleteMessage, DagNodeId, DataMessageKind, DataRoutingKey, MessageId,
     MessageQueue, Registry, ResourceId, Runtime, RuntimeDiagnostics, RuntimeType,
 };
 
@@ -215,7 +215,7 @@ impl LambdaRuntime {
                                 harness: *harness,
                             },
                         };
-                        let complete_v2 = CompleteMessageV2 {
+                        let complete_v2 = CompleteMessage {
                             id: MessageId::new(),
                             dag_id: DagNodeId::root(),
                             state: None,

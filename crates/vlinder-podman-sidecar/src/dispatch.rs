@@ -12,11 +12,11 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use vlinder_core::domain::{
-    AgentName, BranchId, CompleteMessageV2, ContainerId, DagNodeId, DataMessageKind,
-    DataRoutingKey, DelegateReplyMessage, HarnessType, HealthWindow, HttpMethod, ImageDigest,
-    ImageRef, MessageQueue, ProviderHost, ProviderRoute, Registry, RepairMessage,
-    RequestDiagnostics, RequestMessage, ResponseMessage, RoutingKey, RuntimeDiagnostics,
-    SequenceCounter, SessionId, SubmissionId,
+    AgentName, BranchId, CompleteMessage, ContainerId, DagNodeId, DataMessageKind, DataRoutingKey,
+    DelegateReplyMessage, HarnessType, HealthWindow, HttpMethod, ImageDigest, ImageRef,
+    MessageQueue, ProviderHost, ProviderRoute, Registry, RepairMessage, RequestDiagnostics,
+    RequestMessage, ResponseMessage, RoutingKey, RuntimeDiagnostics, SequenceCounter, SessionId,
+    SubmissionId,
 };
 
 use vlinder_provider_server::handler::InvokeHandler;
@@ -539,7 +539,7 @@ fn send_reply(
                 harness: complete.harness,
             },
         };
-        let v2 = CompleteMessageV2 {
+        let v2 = CompleteMessage {
             id: complete.id,
             dag_id: DagNodeId::root(),
             state: complete.state,

@@ -453,7 +453,7 @@ impl StateService for StateServiceServer {
             serde_json::from_slice(&req.diagnostics)
                 .unwrap_or_else(|_| vlinder_core::domain::RuntimeDiagnostics::placeholder(0));
 
-        let msg = vlinder_core::domain::CompleteMessageV2 {
+        let msg = vlinder_core::domain::CompleteMessage {
             id: vlinder_core::domain::MessageId::from(req.message_id),
             dag_id: dag_id.clone(),
             state: req.state,
