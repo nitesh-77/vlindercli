@@ -10,12 +10,13 @@ use super::proto::{
     GetBranchesForSessionResponse, GetChildrenRequest, GetChildrenResponse, GetCompleteNodeRequest,
     GetCompleteNodeResponse, GetInvokeNodeRequest, GetInvokeNodeResponse, GetNodeByPrefixRequest,
     GetNodeRequest, GetNodeResponse, GetNodesBySubmissionRequest, GetNodesBySubmissionResponse,
-    GetSessionByNameRequest, GetSessionNodesRequest, GetSessionNodesResponse, GetSessionRequest,
-    GetSessionResponse, InsertCompleteNodeRequest, InsertCompleteNodeResponse,
-    InsertInvokeNodeRequest, InsertInvokeNodeResponse, InsertNodeRequest, InsertNodeResponse,
-    InvokeNodeProto, LatestNodeOnBranchRequest, LatestNodeOnBranchResponse, ListSessionsRequest,
-    ListSessionsResponse, PingRequest, RenameBranchRequest, RenameBranchResponse,
-    SealBranchRequest, SealBranchResponse, SemVer, UpdateSessionDefaultBranchRequest,
+    GetRequestNodeRequest, GetRequestNodeResponse, GetSessionByNameRequest, GetSessionNodesRequest,
+    GetSessionNodesResponse, GetSessionRequest, GetSessionResponse, InsertCompleteNodeRequest,
+    InsertCompleteNodeResponse, InsertInvokeNodeRequest, InsertInvokeNodeResponse,
+    InsertNodeRequest, InsertNodeResponse, InvokeNodeProto, LatestNodeOnBranchRequest,
+    LatestNodeOnBranchResponse, ListSessionsRequest, ListSessionsResponse, PingRequest,
+    RenameBranchRequest, RenameBranchResponse, RequestNodeProto, SealBranchRequest,
+    SealBranchResponse, SemVer, UpdateSessionDefaultBranchRequest,
     UpdateSessionDefaultBranchResponse,
 };
 use vlinder_core::domain::{DagNodeId, DagStore, MessageType, SessionId};
@@ -359,6 +360,29 @@ impl StateService for StateServiceServer {
         });
 
         Ok(Response::new(GetCompleteNodeResponse { node }))
+    }
+
+    async fn get_request_node(
+        &self,
+        request: Request<GetRequestNodeRequest>,
+    ) -> Result<Response<GetRequestNodeResponse>, Status> {
+        let req = request.into_inner();
+        let dag_hash = vlinder_core::domain::DagNodeId::from(req.dag_hash);
+        let result = self
+            .store
+            .get_request_node(&dag_hash)
+            .map_err(Status::internal)?;
+
+        let node = result.map(|msg| RequestNodeProto {
+            message_id: msg.id.to_string(),
+            state: msg.state,
+            diagnostics: serde_json::to_vec(&msg.diagnostics).unwrap_or_default(),
+            payload: msg.payload,
+            dag_hash: msg.dag_id.to_string(),
+            checkpoint: msg.checkpoint,
+        });
+
+        Ok(Response::new(GetRequestNodeResponse { node }))
     }
 
     async fn insert_invoke_node(

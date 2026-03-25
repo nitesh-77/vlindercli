@@ -346,6 +346,44 @@ impl DagStore for GrpcStateClient {
         }
     }
 
+    fn get_request_node(
+        &self,
+        dag_hash: &DagNodeId,
+    ) -> Result<Option<vlinder_core::domain::RequestMessageV2>, String> {
+        let request = proto::GetRequestNodeRequest {
+            dag_hash: dag_hash.to_string(),
+        };
+
+        let mut client = self.client.clone();
+        let response = self
+            .runtime
+            .block_on(async { client.get_request_node(request).await })
+            .map_err(|e| e.to_string())?;
+
+        match response.into_inner().node {
+            Some(n) => {
+                let diagnostics: vlinder_core::domain::RequestDiagnostics =
+                    serde_json::from_slice(&n.diagnostics).unwrap_or_else(|_| {
+                        vlinder_core::domain::RequestDiagnostics {
+                            sequence: 0,
+                            endpoint: String::new(),
+                            request_bytes: 0,
+                            received_at_ms: 0,
+                        }
+                    });
+                Ok(Some(vlinder_core::domain::RequestMessageV2 {
+                    id: vlinder_core::domain::MessageId::from(n.message_id),
+                    dag_id: vlinder_core::domain::DagNodeId::from(n.dag_hash),
+                    state: n.state,
+                    diagnostics,
+                    payload: n.payload,
+                    checkpoint: n.checkpoint,
+                }))
+            }
+            None => Ok(None),
+        }
+    }
+
     fn get_invoke_node(
         &self,
         dag_hash: &DagNodeId,

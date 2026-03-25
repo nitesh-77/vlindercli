@@ -888,6 +888,52 @@ impl DagStore for SqliteDagStore {
         Ok(result)
     }
 
+    fn get_request_node(
+        &self,
+        dag_hash: &DagNodeId,
+    ) -> Result<Option<vlinder_core::domain::RequestMessageV2>, String> {
+        let conn = self.conn.lock().expect("db connection lock poisoned");
+        let mut stmt = conn
+            .prepare(
+                "SELECT r.message_id, r.state, r.diagnostics, r.payload, r.checkpoint
+                 FROM request_nodes r
+                 WHERE r.dag_hash = ?1",
+            )
+            .map_err(|e| format!("get_request_node prepare failed: {e}"))?;
+
+        let result = stmt
+            .query_row(rusqlite::params![dag_hash.as_str()], |row| {
+                let message_id: String = row.get(0)?;
+                let state: Option<String> = row.get(1)?;
+                let diagnostics_blob: Vec<u8> = row.get(2)?;
+                let payload: Vec<u8> = row.get(3)?;
+                let checkpoint: Option<String> = row.get(4)?;
+
+                let diagnostics: vlinder_core::domain::RequestDiagnostics =
+                    serde_json::from_slice(&diagnostics_blob).unwrap_or_else(|_| {
+                        vlinder_core::domain::RequestDiagnostics {
+                            sequence: 0,
+                            endpoint: String::new(),
+                            request_bytes: 0,
+                            received_at_ms: 0,
+                        }
+                    });
+
+                Ok(vlinder_core::domain::RequestMessageV2 {
+                    id: vlinder_core::domain::MessageId::from(message_id),
+                    dag_id: dag_hash.clone(),
+                    state,
+                    diagnostics,
+                    payload,
+                    checkpoint,
+                })
+            })
+            .optional()
+            .map_err(|e| format!("get_request_node query failed: {e}"))?;
+
+        Ok(result)
+    }
+
     fn get_branches_for_session(&self, session_id: &SessionId) -> Result<Vec<Branch>, String> {
         let conn = self.conn.lock().expect("db connection lock poisoned");
         let mut stmt = conn
