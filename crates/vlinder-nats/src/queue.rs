@@ -19,11 +19,12 @@ use tokio::runtime::Runtime;
 use std::str::FromStr;
 
 use vlinder_core::domain::{
-    Acknowledgement, AgentName, BranchId, CompleteMessage, DagNodeId, DataRoutingKey,
-    DelegateDiagnostics, DelegateMessage, HarnessType, InvokeMessage, MessageId, MessageQueue,
-    Nonce, Operation, QueueError, RepairMessage, RequestDiagnostics, RequestMessage,
-    ResponseMessage, RoutingKey, RoutingKind, RuntimeDiagnostics, RuntimeType, Sequence,
-    ServiceBackend, ServiceDiagnostics, ServiceType, SessionId, SubmissionId,
+    Acknowledgement, AgentName, BranchId, CompleteMessage, CompleteMessageV2, DagNodeId,
+    DataMessageKind, DataRoutingKey, DelegateDiagnostics, DelegateMessage, HarnessType,
+    InvokeMessage, MessageId, MessageQueue, Nonce, Operation, QueueError, RepairMessage,
+    RequestDiagnostics, RequestMessage, ResponseMessage, RoutingKey, RoutingKind,
+    RuntimeDiagnostics, RuntimeType, Sequence, ServiceBackend, ServiceDiagnostics, ServiceType,
+    SessionId, SubmissionId,
 };
 
 /// NATS queue with `JetStream` durability.
@@ -263,6 +264,58 @@ impl MessageQueue for NatsQueue {
 
             let msg: InvokeMessage = serde_json::from_slice(&js_msg.payload)
                 .map_err(|e| QueueError::ReceiveFailed(format!("deserialize invoke: {e}")))?;
+
+            Ok((key, msg, ack_fn))
+        })
+    }
+
+    fn send_complete_v2(
+        &self,
+        key: DataRoutingKey,
+        msg: CompleteMessageV2,
+    ) -> Result<(), QueueError> {
+        let DataMessageKind::Complete { agent, harness } = &key.kind else {
+            return Err(QueueError::SendFailed(
+                "send_complete_v2: expected Complete key".into(),
+            ));
+        };
+        let subject = complete_subject(&key.session, key.branch, &key.submission, agent, *harness);
+        let payload = serde_json::to_vec(&msg)
+            .map_err(|e| QueueError::SendFailed(format!("serialize complete: {e}")))?;
+
+        self.inner.runtime.block_on(async {
+            let mut headers = async_nats::HeaderMap::new();
+            headers.insert("Nats-Msg-Id", msg.id.as_str());
+
+            self.inner
+                .jetstream
+                .publish_with_headers(subject, headers, payload.into())
+                .await
+                .map_err(|e| QueueError::SendFailed(e.to_string()))?
+                .await
+                .map_err(|e| QueueError::SendFailed(e.to_string()))?;
+
+            Ok(())
+        })
+    }
+
+    fn receive_complete_v2(
+        &self,
+        submission: &SubmissionId,
+        harness: HarnessType,
+    ) -> Result<(DataRoutingKey, CompleteMessageV2, Acknowledgement), QueueError> {
+        let filter = complete_filter(submission, harness);
+
+        self.inner.runtime.block_on(async {
+            let (js_msg, ack_fn) = self.fetch_one(&filter).await?;
+
+            let subject = js_msg.subject.as_str();
+            let key = complete_parse_subject(subject).ok_or_else(|| {
+                QueueError::ReceiveFailed(format!("invalid complete subject: {subject}"))
+            })?;
+
+            let msg: CompleteMessageV2 = serde_json::from_slice(&js_msg.payload)
+                .map_err(|e| QueueError::ReceiveFailed(format!("deserialize complete: {e}")))?;
 
             Ok((key, msg, ack_fn))
         })
@@ -908,6 +961,58 @@ pub fn invoke_parse_subject(subject: &str) -> Option<DataRoutingKey> {
 /// NATS wildcard filter for receiving invoke messages for a specific agent.
 fn invoke_filter(agent: &AgentName) -> String {
     format!("{INVOKE_PREFIX}.*.*.*.{INVOKE_KIND}.*.*.{}", agent.as_str())
+}
+
+// ============================================================================
+// Complete subject format (ADR 121)
+//
+// vlinder.data.v1.{session}.{branch}.{sub}.complete.{agent}.{harness}
+// ============================================================================
+
+const COMPLETE_PREFIX: &str = "vlinder.data.v1";
+const COMPLETE_KIND: &str = "complete";
+const COMPLETE_SEGMENT_COUNT: usize = 9;
+
+/// Build a NATS subject for a complete message.
+fn complete_subject(
+    session: &SessionId,
+    branch: BranchId,
+    submission: &SubmissionId,
+    agent: &AgentName,
+    harness: HarnessType,
+) -> String {
+    format!("{COMPLETE_PREFIX}.{session}.{branch}.{submission}.{COMPLETE_KIND}.{agent}.{harness}",)
+}
+
+/// Parse a NATS subject back into a `DataRoutingKey` for complete.
+pub fn complete_parse_subject(subject: &str) -> Option<DataRoutingKey> {
+    use vlinder_core::domain::DataMessageKind;
+    let s: Vec<&str> = subject.split('.').collect();
+    if s.len() != COMPLETE_SEGMENT_COUNT {
+        return None;
+    }
+    if s[0] != "vlinder" || s[1] != "data" || s[2] != "v1" || s[6] != COMPLETE_KIND {
+        return None;
+    }
+
+    Some(DataRoutingKey {
+        session: SessionId::try_from(s[3].to_string()).ok()?,
+        branch: BranchId::from(s[4].parse::<i64>().unwrap_or(0)),
+        submission: SubmissionId::from(s[5].to_string()),
+        kind: DataMessageKind::Complete {
+            agent: AgentName::new(s[7]),
+            harness: HarnessType::from_str(s[8]).ok()?,
+        },
+    })
+}
+
+/// NATS wildcard filter for receiving complete messages for a specific submission.
+fn complete_filter(submission: &SubmissionId, harness: HarnessType) -> String {
+    format!(
+        "{COMPLETE_PREFIX}.*.*.{}.{COMPLETE_KIND}.*.{}",
+        submission.as_str(),
+        harness.as_str()
+    )
 }
 
 /// Serialize a routing key to a NATS subject string (ADR 096 §8).
