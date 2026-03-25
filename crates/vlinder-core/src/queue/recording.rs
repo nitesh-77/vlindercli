@@ -202,6 +202,69 @@ impl RecordingQueue {
             tracing::warn!(error = %id, "Failed to record complete node: {e}");
         }
     }
+    /// Record a DAG node for a request message.
+    fn record_request(&self, msg: &RequestMessage) {
+        let branch_id = msg.branch;
+
+        let parent_node = self
+            .store
+            .latest_node_on_branch(branch_id, None)
+            .unwrap_or_else(|e| {
+                tracing::warn!(error = %e, branch = branch_id.as_i64(), "Failed to query latest node on branch");
+                None
+            });
+
+        let parent_id = parent_node
+            .as_ref()
+            .map_or_else(DagNodeId::root, |n| n.id.clone());
+        let parent_state = parent_node
+            .as_ref()
+            .map(|n| &n.state)
+            .cloned()
+            .unwrap_or_else(Snapshot::empty);
+
+        let diagnostics_json = serde_json::to_vec(&msg.diagnostics).unwrap_or_default();
+        let id = hash_dag_node(
+            &msg.payload,
+            &parent_id,
+            &MessageType::Request,
+            &diagnostics_json,
+            &msg.session,
+        );
+
+        let state = match &msg.state {
+            Some(s) if !s.is_empty() => {
+                parent_state.with_state(Instance::from("kv"), StateHash::from(s.clone()))
+            }
+            _ => parent_state,
+        };
+
+        let v2 = crate::domain::RequestMessageV2 {
+            id: msg.id.clone(),
+            dag_id: id.clone(),
+            state: msg.state.clone(),
+            diagnostics: msg.diagnostics.clone(),
+            payload: msg.payload.clone(),
+            checkpoint: msg.checkpoint.clone(),
+        };
+
+        if let Err(e) = self.store.insert_request_node(
+            &id,
+            &parent_id,
+            Utc::now(),
+            &state,
+            &msg.session,
+            &msg.submission,
+            msg.branch,
+            &msg.agent_id,
+            msg.service,
+            msg.operation,
+            msg.sequence,
+            &v2,
+        ) {
+            tracing::warn!(error = %id, "Failed to record request node: {e}");
+        }
+    }
 }
 
 impl MessageQueue for RecordingQueue {
@@ -223,7 +286,7 @@ impl MessageQueue for RecordingQueue {
     }
 
     fn send_request(&self, msg: RequestMessage) -> Result<(), QueueError> {
-        self.record(&msg.clone().into());
+        self.record_request(&msg);
         self.inner.send_request(msg)
     }
 
