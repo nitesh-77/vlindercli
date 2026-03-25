@@ -7,8 +7,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use vlinder_core::domain::{
-    Agent, AgentName, CompleteMessage, DataMessageKind, MessageQueue, Registry, ResourceId,
-    Runtime, RuntimeDiagnostics, RuntimeType,
+    Agent, AgentName, CompleteMessageV2, DagNodeId, DataMessageKind, DataRoutingKey, MessageId,
+    MessageQueue, Registry, ResourceId, Runtime, RuntimeDiagnostics, RuntimeType,
 };
 
 use crate::config::LambdaRuntimeConfig;
@@ -206,17 +206,23 @@ impl LambdaRuntime {
                             error = %e,
                             "Lambda invocation failed"
                         );
-                        let complete = CompleteMessage::new(
-                            key.branch,
-                            key.submission.clone(),
-                            key.session.clone(),
-                            agent.clone(),
-                            *harness,
-                            format!("[error] Lambda invoke failed: {e}").into_bytes(),
-                            None,
-                            RuntimeDiagnostics::placeholder(0),
-                        );
-                        let _ = self.queue.send_complete(complete);
+                        let complete_key = DataRoutingKey {
+                            session: key.session.clone(),
+                            branch: key.branch,
+                            submission: key.submission.clone(),
+                            kind: DataMessageKind::Complete {
+                                agent: agent.clone(),
+                                harness: *harness,
+                            },
+                        };
+                        let complete_v2 = CompleteMessageV2 {
+                            id: MessageId::new(),
+                            dag_id: DagNodeId::root(),
+                            state: None,
+                            diagnostics: RuntimeDiagnostics::placeholder(0),
+                            payload: format!("[error] Lambda invoke failed: {e}").into_bytes(),
+                        };
+                        let _ = self.queue.send_complete_v2(complete_key, complete_v2);
                     }
                 }
             }
@@ -636,8 +642,8 @@ mod tests {
         // Tick — invoke_function fails, so daemon sends error complete.
         runtime.tick();
 
-        let (complete, ack) = queue
-            .receive_complete(&submission, HarnessType::Grpc)
+        let (_key, complete, ack) = queue
+            .receive_complete_v2(&submission, HarnessType::Grpc)
             .expect("should receive error complete from daemon");
         ack().unwrap();
         let payload_str = String::from_utf8_lossy(&complete.payload);

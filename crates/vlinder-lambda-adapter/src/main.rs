@@ -30,7 +30,7 @@ use vlinder_provider_server::handler::InvokeHandler;
 use vlinder_provider_server::hosts::build_hosts;
 use vlinder_provider_server::provider_server::ProviderServer;
 
-use adapter::{build_complete, build_error_body, build_lambda_diagnostics, deserialize_invoke};
+use adapter::{build_error_body, build_lambda_diagnostics, deserialize_invoke};
 use config::AdapterConfig;
 
 fn main() {
@@ -302,19 +302,25 @@ fn handle_invocation(
         .unwrap_or_else(|_| "unknown".to_string());
 
     let diagnostics = build_lambda_diagnostics(&config.agent, &region, duration_ms);
-    let complete = build_complete(
-        key.branch,
-        key.submission.clone(),
-        key.session.clone(),
-        vlinder_core::domain::AgentName::new(&agent_name),
-        harness,
-        output.clone(),
-        final_state,
+    let complete_key = vlinder_core::domain::DataRoutingKey {
+        session: key.session.clone(),
+        branch: key.branch,
+        submission: key.submission.clone(),
+        kind: vlinder_core::domain::DataMessageKind::Complete {
+            agent: vlinder_core::domain::AgentName::new(&agent_name),
+            harness,
+        },
+    };
+    let complete_v2 = vlinder_core::domain::CompleteMessageV2 {
+        id: vlinder_core::domain::MessageId::new(),
+        dag_id: vlinder_core::domain::DagNodeId::root(),
+        state: final_state,
         diagnostics,
-    );
+        payload: output.clone(),
+    };
 
     queue
-        .send_complete(complete)
+        .send_complete_v2(complete_key, complete_v2)
         .map_err(|e| format!("failed to send complete to NATS: {e}"))?;
 
     tracing::info!(

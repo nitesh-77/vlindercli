@@ -4,10 +4,7 @@
 //! and constructing complete messages. The main module wires these to
 //! the Lambda Runtime API and real HTTP.
 
-use vlinder_core::domain::{
-    AgentName, BranchId, CompleteMessage, DataRoutingKey, HarnessType, InvokeMessage,
-    RuntimeDiagnostics, RuntimeInfo, SessionId, SubmissionId,
-};
+use vlinder_core::domain::{DataRoutingKey, InvokeMessage, RuntimeDiagnostics, RuntimeInfo};
 
 /// Lambda invocation payload — routing key + message, serialized together.
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -39,33 +36,6 @@ pub fn build_lambda_diagnostics(
         duration_ms,
         health: None,
     }
-}
-
-/// Build the complete message from an invocation result.
-///
-/// Combines the invoke context, agent output, final state, and diagnostics
-/// into a `CompleteMessage` ready to send to NATS.
-#[allow(clippy::too_many_arguments)]
-pub fn build_complete(
-    branch: BranchId,
-    submission: SubmissionId,
-    session: SessionId,
-    agent_id: AgentName,
-    harness: HarnessType,
-    output: Vec<u8>,
-    final_state: Option<String>,
-    diagnostics: RuntimeDiagnostics,
-) -> CompleteMessage {
-    CompleteMessage::new(
-        branch,
-        submission,
-        session,
-        agent_id,
-        harness,
-        output,
-        final_state,
-        diagnostics,
-    )
 }
 
 /// Build the Lambda Runtime API error body.
@@ -176,63 +146,32 @@ mod tests {
     }
 
     #[test]
-    fn build_complete_carries_output_and_state() {
-        let json = make_invoke_json(b"input");
-        let inv = deserialize_invoke(&json).unwrap();
+    fn complete_v2_carries_output_and_state() {
         let diag = build_lambda_diagnostics("fn", "us-east-1", 100);
 
-        let DataRoutingKey {
-            session,
-            branch,
-            submission,
-            kind,
-        } = inv.key;
-        let DataMessageKind::Invoke { agent, harness, .. } = kind else {
-            panic!("expected Invoke");
+        let complete = vlinder_core::domain::CompleteMessageV2 {
+            id: MessageId::new(),
+            dag_id: DagNodeId::root(),
+            state: Some("final-state-hash".to_string()),
+            diagnostics: diag,
+            payload: b"output bytes".to_vec(),
         };
-
-        let complete = build_complete(
-            branch,
-            submission,
-            session,
-            agent,
-            harness,
-            b"output bytes".to_vec(),
-            Some("final-state-hash".to_string()),
-            diag,
-        );
 
         assert_eq!(complete.payload, b"output bytes");
         assert_eq!(complete.state, Some("final-state-hash".to_string()));
-        assert_eq!(complete.agent_id.as_str(), "echo-lambda");
     }
 
     #[test]
-    fn build_complete_with_no_state() {
-        let json = make_invoke_json(b"input");
-        let inv = deserialize_invoke(&json).unwrap();
+    fn complete_v2_with_no_state() {
         let diag = build_lambda_diagnostics("fn", "us-east-1", 50);
 
-        let DataRoutingKey {
-            session,
-            branch,
-            submission,
-            kind,
-        } = inv.key;
-        let DataMessageKind::Invoke { agent, harness, .. } = kind else {
-            panic!("expected Invoke");
+        let complete = vlinder_core::domain::CompleteMessageV2 {
+            id: MessageId::new(),
+            dag_id: DagNodeId::root(),
+            state: None,
+            diagnostics: diag,
+            payload: b"out".to_vec(),
         };
-
-        let complete = build_complete(
-            branch,
-            submission,
-            session,
-            agent,
-            harness,
-            b"out".to_vec(),
-            None,
-            diag,
-        );
 
         assert!(complete.state.is_none());
     }
