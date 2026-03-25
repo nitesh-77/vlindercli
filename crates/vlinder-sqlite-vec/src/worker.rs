@@ -8,8 +8,10 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use vlinder_core::domain::Registry;
+#[cfg(test)]
+use vlinder_core::domain::RequestMessage;
 use vlinder_core::domain::{
-    MessageQueue, Operation, RequestMessage, ResponseMessage, ServiceBackend, ServiceDiagnostics,
+    MessageQueue, Operation, ResponseMessage, ServiceBackend, ServiceDiagnostics,
 };
 
 use crate::storage::SqliteVectorStorage;
@@ -83,7 +85,8 @@ impl SqliteVecWorker {
         match self.queue.receive_request(self.service, Operation::Store) {
             Ok((request, ack)) => {
                 let start = std::time::Instant::now();
-                let response_payload = self.handle_store(&request);
+                let response_payload =
+                    self.handle_store(request.agent_id.as_str(), &request.payload);
                 let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
                 let diag = ServiceDiagnostics::storage(
                     self.service.service_type(),
@@ -110,7 +113,8 @@ impl SqliteVecWorker {
         match self.queue.receive_request(self.service, Operation::Search) {
             Ok((request, ack)) => {
                 let start = std::time::Instant::now();
-                let response_payload = self.handle_search(&request);
+                let response_payload =
+                    self.handle_search(request.agent_id.as_str(), &request.payload);
                 let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
                 let diag = ServiceDiagnostics::storage(
                     self.service.service_type(),
@@ -137,7 +141,8 @@ impl SqliteVecWorker {
         match self.queue.receive_request(self.service, Operation::Delete) {
             Ok((request, ack)) => {
                 let start = std::time::Instant::now();
-                let response_payload = self.handle_delete(&request);
+                let response_payload =
+                    self.handle_delete(request.agent_id.as_str(), &request.payload);
                 let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
                 let diag = ServiceDiagnostics::storage(
                     self.service.service_type(),
@@ -160,13 +165,13 @@ impl SqliteVecWorker {
         }
     }
 
-    fn handle_store(&self, request: &RequestMessage) -> Vec<u8> {
-        let req: SqliteVecStoreRequest = match serde_json::from_slice(request.payload.as_slice()) {
+    fn handle_store(&self, agent_id: &str, payload: &[u8]) -> Vec<u8> {
+        let req: SqliteVecStoreRequest = match serde_json::from_slice(payload) {
             Ok(r) => r,
             Err(e) => return format!("[error] invalid request: {e}").into_bytes(),
         };
 
-        let store = match self.get_or_open(request.agent_id.as_str()) {
+        let store = match self.get_or_open(agent_id) {
             Ok(s) => s,
             Err(e) => return format!("[error] {e}").into_bytes(),
         };
@@ -177,13 +182,13 @@ impl SqliteVecWorker {
         }
     }
 
-    fn handle_search(&self, request: &RequestMessage) -> Vec<u8> {
-        let req: SqliteVecSearchRequest = match serde_json::from_slice(request.payload.as_slice()) {
+    fn handle_search(&self, agent_id: &str, payload: &[u8]) -> Vec<u8> {
+        let req: SqliteVecSearchRequest = match serde_json::from_slice(payload) {
             Ok(r) => r,
             Err(e) => return format!("[error] invalid request: {e}").into_bytes(),
         };
 
-        let store = match self.get_or_open(request.agent_id.as_str()) {
+        let store = match self.get_or_open(agent_id) {
             Ok(s) => s,
             Err(e) => return format!("[error] {e}").into_bytes(),
         };
@@ -209,13 +214,13 @@ impl SqliteVecWorker {
         }
     }
 
-    fn handle_delete(&self, request: &RequestMessage) -> Vec<u8> {
-        let req: SqliteVecDeleteRequest = match serde_json::from_slice(request.payload.as_slice()) {
+    fn handle_delete(&self, agent_id: &str, payload: &[u8]) -> Vec<u8> {
+        let req: SqliteVecDeleteRequest = match serde_json::from_slice(payload) {
             Ok(r) => r,
             Err(e) => return format!("[error] invalid request: {e}").into_bytes(),
         };
 
-        let store = match self.get_or_open(request.agent_id.as_str()) {
+        let store = match self.get_or_open(agent_id) {
             Ok(s) => s,
             Err(e) => return format!("[error] {e}").into_bytes(),
         };
