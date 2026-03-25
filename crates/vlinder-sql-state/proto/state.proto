@@ -38,6 +38,7 @@ service StateService {
   rpc GetInvokeNode(GetInvokeNodeRequest) returns (GetInvokeNodeResponse);
   rpc GetCompleteNode(GetCompleteNodeRequest) returns (GetCompleteNodeResponse);
   rpc GetRequestNode(GetRequestNodeRequest) returns (GetRequestNodeResponse);
+  rpc InsertRequestNode(InsertRequestNodeRequest) returns (InsertRequestNodeResponse);
 
   // Branch head query
   rpc LatestNodeOnBranch(LatestNodeOnBranchRequest) returns (LatestNodeOnBranchResponse);
@@ -290,4 +291,27 @@ message RequestNodeProto {
   bytes payload = 4;
   string dag_hash = 5;
   optional string checkpoint = 6;
+}
+
+message InsertRequestNodeRequest {
+  string dag_hash = 1;
+  string parent_hash = 2;
+  string created_at = 3;
+  string snapshot = 4;
+  string session_id = 5;
+  string submission_id = 6;
+  int64 branch_id = 7;
+  string agent = 8;
+  string service = 9;
+  string operation = 10;
+  uint32 sequence = 11;
+  string message_id = 12;
+  optional string state = 13;
+  bytes diagnostics = 14;
+  bytes payload = 15;
+  optional string checkpoint = 16;
+}
+message InsertRequestNodeResponse {
+  bool success = 1;
+  optional string error = 2;
 }

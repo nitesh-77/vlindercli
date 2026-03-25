@@ -13,10 +13,10 @@ use super::proto::{
     GetRequestNodeRequest, GetRequestNodeResponse, GetSessionByNameRequest, GetSessionNodesRequest,
     GetSessionNodesResponse, GetSessionRequest, GetSessionResponse, InsertCompleteNodeRequest,
     InsertCompleteNodeResponse, InsertInvokeNodeRequest, InsertInvokeNodeResponse,
-    InsertNodeRequest, InsertNodeResponse, InvokeNodeProto, LatestNodeOnBranchRequest,
-    LatestNodeOnBranchResponse, ListSessionsRequest, ListSessionsResponse, PingRequest,
-    RenameBranchRequest, RenameBranchResponse, RequestNodeProto, SealBranchRequest,
-    SealBranchResponse, SemVer, UpdateSessionDefaultBranchRequest,
+    InsertNodeRequest, InsertNodeResponse, InsertRequestNodeRequest, InsertRequestNodeResponse,
+    InvokeNodeProto, LatestNodeOnBranchRequest, LatestNodeOnBranchResponse, ListSessionsRequest,
+    ListSessionsResponse, PingRequest, RenameBranchRequest, RenameBranchResponse, RequestNodeProto,
+    SealBranchRequest, SealBranchResponse, SemVer, UpdateSessionDefaultBranchRequest,
     UpdateSessionDefaultBranchResponse,
 };
 use vlinder_core::domain::{DagNodeId, DagStore, MessageType, SessionId};
@@ -502,6 +502,75 @@ impl StateService for StateServiceServer {
                 error: None,
             })),
             Err(e) => Ok(Response::new(InsertCompleteNodeResponse {
+                success: false,
+                error: Some(e),
+            })),
+        }
+    }
+
+    async fn insert_request_node(
+        &self,
+        request: Request<InsertRequestNodeRequest>,
+    ) -> Result<Response<InsertRequestNodeResponse>, Status> {
+        let req = request.into_inner();
+
+        let dag_id = vlinder_core::domain::DagNodeId::from(req.dag_hash);
+        let parent_id = vlinder_core::domain::DagNodeId::from(req.parent_hash);
+        let created_at: chrono::DateTime<chrono::Utc> = req
+            .created_at
+            .parse()
+            .map_err(|e| Status::invalid_argument(format!("invalid created_at: {e}")))?;
+        let snapshot: vlinder_core::domain::Snapshot = serde_json::from_str(&req.snapshot)
+            .map_err(|e| Status::invalid_argument(format!("invalid snapshot: {e}")))?;
+        let session = vlinder_core::domain::SessionId::try_from(req.session_id)
+            .map_err(Status::invalid_argument)?;
+        let submission = vlinder_core::domain::SubmissionId::from(req.submission_id);
+        let branch = vlinder_core::domain::BranchId::from(req.branch_id);
+        let agent = vlinder_core::domain::AgentName::new(req.agent);
+        let service: vlinder_core::domain::ServiceBackend =
+            req.service.parse().map_err(Status::invalid_argument)?;
+        let operation: vlinder_core::domain::Operation =
+            req.operation.parse().map_err(Status::invalid_argument)?;
+        let sequence = vlinder_core::domain::Sequence::from(req.sequence);
+
+        let diagnostics: vlinder_core::domain::RequestDiagnostics =
+            serde_json::from_slice(&req.diagnostics).unwrap_or_else(|_| {
+                vlinder_core::domain::RequestDiagnostics {
+                    sequence: 0,
+                    endpoint: String::new(),
+                    request_bytes: 0,
+                    received_at_ms: 0,
+                }
+            });
+
+        let msg = vlinder_core::domain::RequestMessageV2 {
+            id: vlinder_core::domain::MessageId::from(req.message_id),
+            dag_id: dag_id.clone(),
+            state: req.state,
+            diagnostics,
+            payload: req.payload,
+            checkpoint: req.checkpoint,
+        };
+
+        match self.store.insert_request_node(
+            &dag_id,
+            &parent_id,
+            created_at,
+            &snapshot,
+            &session,
+            &submission,
+            branch,
+            &agent,
+            service,
+            operation,
+            sequence,
+            &msg,
+        ) {
+            Ok(()) => Ok(Response::new(InsertRequestNodeResponse {
+                success: true,
+                error: None,
+            })),
+            Err(e) => Ok(Response::new(InsertRequestNodeResponse {
                 success: false,
                 error: Some(e),
             })),

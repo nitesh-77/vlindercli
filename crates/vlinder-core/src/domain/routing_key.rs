@@ -144,6 +144,20 @@ impl ServiceBackend {
     }
 }
 
+impl std::str::FromStr for ServiceBackend {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let (svc, backend) = s
+            .split_once('.')
+            .ok_or_else(|| format!("invalid ServiceBackend: {s}"))?;
+        let service_type: ServiceType =
+            svc.parse().map_err(|_| format!("unknown service: {svc}"))?;
+        Self::from_parts(service_type, backend)
+            .ok_or_else(|| format!("unknown backend '{backend}' for service '{svc}'"))
+    }
+}
+
 impl std::fmt::Display for ServiceBackend {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}.{}", self.service_type(), self.backend_str())
