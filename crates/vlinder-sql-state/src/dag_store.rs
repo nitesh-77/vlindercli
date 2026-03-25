@@ -613,6 +613,78 @@ impl DagStore for SqliteDagStore {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn insert_response_node(
+        &self,
+        dag_id: &DagNodeId,
+        parent_id: &DagNodeId,
+        created_at: chrono::DateTime<chrono::Utc>,
+        state: &vlinder_core::domain::Snapshot,
+        session: &SessionId,
+        submission: &vlinder_core::domain::SubmissionId,
+        branch: BranchId,
+        agent: &vlinder_core::domain::AgentName,
+        service: vlinder_core::domain::ServiceBackend,
+        operation: vlinder_core::domain::Operation,
+        sequence: vlinder_core::domain::Sequence,
+        msg: &vlinder_core::domain::ResponseMessageV2,
+    ) -> Result<(), String> {
+        let conn = self.conn.lock().expect("db connection lock poisoned");
+        let snapshot_json =
+            serde_json::to_string(state).map_err(|e| format!("serialize snapshot failed: {e}"))?;
+        let diagnostics_json = serde_json::to_vec(&msg.diagnostics).unwrap_or_default();
+        let service_str = service.to_string();
+        let op_str = operation.as_str();
+
+        conn.execute(
+            "INSERT OR IGNORE INTO dag_nodes (hash, parent_hash, message_type, sender, receiver, session_id, submission_id, payload, diagnostics, stderr, created_at, state, protocol_version, checkpoint, operation, message_blob, branch_id, snapshot)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+            rusqlite::params![
+                dag_id.as_str(),
+                parent_id.as_str(),
+                "response",
+                &service_str,
+                agent.to_string(),
+                session.as_str(),
+                submission.as_str(),
+                &msg.payload,
+                &diagnostics_json,
+                Vec::<u8>::new(),
+                created_at.to_rfc3339(),
+                msg.state.as_deref(),
+                "v1",
+                msg.checkpoint.as_deref(),
+                op_str,
+                "",
+                branch.as_i64(),
+                &snapshot_json,
+            ],
+        )
+        .map_err(|e| format!("insert dag_nodes failed: {e}"))?;
+
+        conn.execute(
+            "INSERT OR IGNORE INTO response_nodes (dag_hash, agent, service, operation, sequence, message_id, correlation_id, state, diagnostics, payload, status_code, checkpoint)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            rusqlite::params![
+                dag_id.as_str(),
+                agent.as_str(),
+                &service_str,
+                op_str,
+                sequence.as_u32(),
+                msg.id.as_str(),
+                msg.correlation_id.as_str(),
+                msg.state.as_deref(),
+                &diagnostics_json,
+                &msg.payload,
+                msg.status_code,
+                msg.checkpoint.as_deref(),
+            ],
+        )
+        .map_err(|e| format!("insert response_nodes failed: {e}"))?;
+
+        Ok(())
+    }
+
     fn get_node(&self, hash: &DagNodeId) -> Result<Option<DagNode>, String> {
         let conn = self.conn.lock().expect("db connection lock poisoned");
         let sql = format!("SELECT {DAG_NODE_COLUMNS} FROM dag_nodes WHERE hash = ?1");

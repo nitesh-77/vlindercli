@@ -477,6 +477,60 @@ impl DagStore for GrpcStateClient {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn insert_response_node(
+        &self,
+        dag_id: &DagNodeId,
+        parent_id: &DagNodeId,
+        created_at: chrono::DateTime<chrono::Utc>,
+        state: &vlinder_core::domain::Snapshot,
+        session: &vlinder_core::domain::SessionId,
+        submission: &vlinder_core::domain::SubmissionId,
+        branch: vlinder_core::domain::BranchId,
+        agent: &vlinder_core::domain::AgentName,
+        service: vlinder_core::domain::ServiceBackend,
+        operation: vlinder_core::domain::Operation,
+        sequence: vlinder_core::domain::Sequence,
+        msg: &vlinder_core::domain::ResponseMessageV2,
+    ) -> Result<(), String> {
+        let snapshot_json =
+            serde_json::to_string(state).map_err(|e| format!("serialize snapshot: {e}"))?;
+
+        let request = proto::InsertResponseNodeRequest {
+            dag_hash: dag_id.to_string(),
+            parent_hash: parent_id.to_string(),
+            created_at: created_at.to_rfc3339(),
+            snapshot: snapshot_json,
+            session_id: session.as_str().to_string(),
+            submission_id: submission.as_str().to_string(),
+            branch_id: branch.as_i64(),
+            agent: agent.to_string(),
+            service: service.to_string(),
+            operation: operation.as_str().to_string(),
+            sequence: sequence.as_u32(),
+            message_id: msg.id.to_string(),
+            correlation_id: msg.correlation_id.to_string(),
+            state: msg.state.clone(),
+            diagnostics: serde_json::to_vec(&msg.diagnostics).unwrap_or_default(),
+            payload: msg.payload.clone(),
+            status_code: u32::from(msg.status_code),
+            checkpoint: msg.checkpoint.clone(),
+        };
+
+        let mut client = self.client.clone();
+        let response = self
+            .runtime
+            .block_on(async { client.insert_response_node(request).await })
+            .map_err(|e| e.to_string())?;
+
+        let resp = response.into_inner();
+        if resp.success {
+            Ok(())
+        } else {
+            Err(resp.error.unwrap_or_else(|| "unknown error".to_string()))
+        }
+    }
+
     fn get_invoke_node(
         &self,
         dag_hash: &DagNodeId,

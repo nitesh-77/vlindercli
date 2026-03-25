@@ -278,6 +278,30 @@ pub trait DagStore: Send + Sync {
         Err("insert_request_node not implemented".to_string())
     }
 
+    /// Insert a typed response node. Writes to `dag_nodes` + `response_nodes`.
+    #[allow(clippy::too_many_arguments)]
+    fn insert_response_node(
+        &self,
+        dag_id: &super::DagNodeId,
+        parent_id: &super::DagNodeId,
+        created_at: DateTime<Utc>,
+        state: &Snapshot,
+        session: &super::SessionId,
+        submission: &super::SubmissionId,
+        branch: super::BranchId,
+        agent: &super::AgentName,
+        service: super::ServiceBackend,
+        operation: super::Operation,
+        sequence: super::Sequence,
+        msg: &super::ResponseMessageV2,
+    ) -> Result<(), String> {
+        let _ = (
+            dag_id, parent_id, created_at, state, session, submission, branch, agent, service,
+            operation, sequence, msg,
+        );
+        Err("insert_response_node not implemented".to_string())
+    }
+
     /// Retrieve a node by its content-addressed ID.
     fn get_node(&self, id: &super::DagNodeId) -> Result<Option<DagNode>, String>;
 
