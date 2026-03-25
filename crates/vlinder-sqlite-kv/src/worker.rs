@@ -14,8 +14,10 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use vlinder_core::domain::Registry;
+#[cfg(test)]
+use vlinder_core::domain::RequestMessage;
 use vlinder_core::domain::{
-    MessageQueue, Operation, RequestMessage, ResponseMessage, ServiceBackend, ServiceDiagnostics,
+    MessageQueue, Operation, ResponseMessage, ServiceBackend, ServiceDiagnostics,
 };
 
 use crate::state_store::{hash_snapshot, hash_state_commit, hash_value, SqliteStateStore};
@@ -170,7 +172,12 @@ impl KvWorker {
         match self.queue.receive_request(self.service, Operation::Get) {
             Ok((request, ack)) => {
                 let start = std::time::Instant::now();
-                let response_payload = self.handle_get(&request);
+                let response_payload = self.handle_get(
+                    request.agent_id.as_str(),
+                    request.session.as_str(),
+                    &request.payload,
+                    request.state.as_deref(),
+                );
                 let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
                 let diag = ServiceDiagnostics::storage(
                     self.service.service_type(),
@@ -197,7 +204,12 @@ impl KvWorker {
         match self.queue.receive_request(self.service, Operation::Put) {
             Ok((request, ack)) => {
                 let start = std::time::Instant::now();
-                let (response_payload, new_state) = self.handle_put(&request);
+                let (response_payload, new_state) = self.handle_put(
+                    request.agent_id.as_str(),
+                    request.session.as_str(),
+                    &request.payload,
+                    request.state.as_deref(),
+                );
                 let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
                 let diag = ServiceDiagnostics::storage(
                     self.service.service_type(),
@@ -225,7 +237,12 @@ impl KvWorker {
         match self.queue.receive_request(self.service, Operation::List) {
             Ok((request, ack)) => {
                 let start = std::time::Instant::now();
-                let response_payload = self.handle_list(&request);
+                let response_payload = self.handle_list(
+                    request.agent_id.as_str(),
+                    request.session.as_str(),
+                    &request.payload,
+                    request.state.as_deref(),
+                );
                 let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
                 let diag = ServiceDiagnostics::storage(
                     self.service.service_type(),
@@ -252,7 +269,11 @@ impl KvWorker {
         match self.queue.receive_request(self.service, Operation::Delete) {
             Ok((request, ack)) => {
                 let start = std::time::Instant::now();
-                let response_payload = self.handle_delete(&request);
+                let response_payload = self.handle_delete(
+                    request.agent_id.as_str(),
+                    request.session.as_str(),
+                    &request.payload,
+                );
                 let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
                 let diag = ServiceDiagnostics::storage(
                     self.service.service_type(),
@@ -275,22 +296,23 @@ impl KvWorker {
         }
     }
 
-    fn handle_get(&self, request: &RequestMessage) -> Vec<u8> {
-        let req: KvGetRequest = match serde_json::from_slice(request.payload.as_slice()) {
+    fn handle_get(
+        &self,
+        agent_id: &str,
+        session_id: &str,
+        payload: &[u8],
+        state: Option<&str>,
+    ) -> Vec<u8> {
+        let req: KvGetRequest = match serde_json::from_slice(payload) {
             Ok(r) => r,
             Err(e) => return format!("[error] invalid request: {e}").into_bytes(),
         };
 
         // Versioned get (ADR 055): resolve through state commit -> snapshot -> value
         // State comes from the envelope, not the payload.
-        if let Some(ref state_hash) = request.state {
+        if let Some(state_hash) = state {
             if !state_hash.is_empty() {
-                return match self.versioned_get(
-                    request.agent_id.as_str(),
-                    request.session.as_str(),
-                    state_hash,
-                    &req.path,
-                ) {
+                return match self.versioned_get(agent_id, session_id, state_hash, &req.path) {
                     Ok(Some(content)) => content,
                     Ok(None) => Vec::new(),
                     Err(e) => format!("[error] {e}").into_bytes(),
@@ -299,7 +321,7 @@ impl KvWorker {
         }
 
         // Unversioned fallback
-        let store = match self.get_or_open(request.agent_id.as_str(), request.session.as_str()) {
+        let store = match self.get_or_open(agent_id, session_id) {
             Ok(s) => s,
             Err(e) => return format!("[error] {e}").into_bytes(),
         };
@@ -312,13 +334,19 @@ impl KvWorker {
     }
 
     /// Returns `(response_payload, new_state_option)`.
-    fn handle_put(&self, request: &RequestMessage) -> (Vec<u8>, Option<String>) {
-        let req: KvPutRequest = match serde_json::from_slice(request.payload.as_slice()) {
+    fn handle_put(
+        &self,
+        agent_id: &str,
+        session_id: &str,
+        payload: &[u8],
+        state: Option<&str>,
+    ) -> (Vec<u8>, Option<String>) {
+        let req: KvPutRequest = match serde_json::from_slice(payload) {
             Ok(r) => r,
             Err(e) => return (format!("[error] invalid request: {e}").into_bytes(), None),
         };
 
-        let store = match self.get_or_open(request.agent_id.as_str(), request.session.as_str()) {
+        let store = match self.get_or_open(agent_id, session_id) {
             Ok(s) => s,
             Err(e) => return (format!("[error] {e}").into_bytes(), None),
         };
@@ -332,14 +360,9 @@ impl KvWorker {
         }
 
         // Versioned put (ADR 055): state comes from the envelope
-        if let Some(ref parent_state) = request.state {
-            return match self.versioned_put(
-                request.agent_id.as_str(),
-                request.session.as_str(),
-                parent_state,
-                &req.path,
-                content,
-            ) {
+        if let Some(parent_state) = state {
+            return match self.versioned_put(agent_id, session_id, parent_state, &req.path, content)
+            {
                 Ok(new_state) => {
                     let response = serde_json::json!({"state": new_state});
                     (
@@ -355,21 +378,22 @@ impl KvWorker {
         (b"ok".to_vec(), None)
     }
 
-    fn handle_list(&self, request: &RequestMessage) -> Vec<u8> {
-        let req: KvListRequest = match serde_json::from_slice(request.payload.as_slice()) {
+    fn handle_list(
+        &self,
+        agent_id: &str,
+        session_id: &str,
+        payload: &[u8],
+        state: Option<&str>,
+    ) -> Vec<u8> {
+        let req: KvListRequest = match serde_json::from_slice(payload) {
             Ok(r) => r,
             Err(e) => return format!("[error] invalid request: {e}").into_bytes(),
         };
 
         // Versioned list: resolve paths from the state snapshot
-        if let Some(ref state_hash) = request.state {
+        if let Some(state_hash) = state {
             if !state_hash.is_empty() {
-                return match self.versioned_list(
-                    request.agent_id.as_str(),
-                    request.session.as_str(),
-                    state_hash,
-                    &req.path,
-                ) {
+                return match self.versioned_list(agent_id, session_id, state_hash, &req.path) {
                     Ok(files) => serde_json::to_string(&files).map_or_else(
                         |e| format!("[error] {e}").into_bytes(),
                         std::string::String::into_bytes,
@@ -380,7 +404,7 @@ impl KvWorker {
         }
 
         // Unversioned fallback
-        let store = match self.get_or_open(request.agent_id.as_str(), request.session.as_str()) {
+        let store = match self.get_or_open(agent_id, session_id) {
             Ok(s) => s,
             Err(e) => return format!("[error] {e}").into_bytes(),
         };
@@ -394,13 +418,13 @@ impl KvWorker {
         }
     }
 
-    fn handle_delete(&self, request: &RequestMessage) -> Vec<u8> {
-        let req: KvDeleteRequest = match serde_json::from_slice(request.payload.as_slice()) {
+    fn handle_delete(&self, agent_id: &str, session_id: &str, payload: &[u8]) -> Vec<u8> {
+        let req: KvDeleteRequest = match serde_json::from_slice(payload) {
             Ok(r) => r,
             Err(e) => return format!("[error] invalid request: {e}").into_bytes(),
         };
 
-        let store = match self.get_or_open(request.agent_id.as_str(), request.session.as_str()) {
+        let store = match self.get_or_open(agent_id, session_id) {
             Ok(s) => s,
             Err(e) => return format!("[error] {e}").into_bytes(),
         };
