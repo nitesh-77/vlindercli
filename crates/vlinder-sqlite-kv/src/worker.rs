@@ -17,12 +17,50 @@ use vlinder_core::domain::Registry;
 #[cfg(test)]
 use vlinder_core::domain::RequestMessage;
 use vlinder_core::domain::{
-    MessageQueue, Operation, ResponseMessage, ServiceBackend, ServiceDiagnostics,
+    DagNodeId, DataMessageKind, DataRoutingKey, MessageId, MessageQueue, Operation,
+    ResponseMessage, ResponseMessageV2, ServiceBackend, ServiceDiagnostics,
 };
 
 use crate::state_store::{hash_snapshot, hash_state_commit, hash_value, SqliteStateStore};
 use crate::storage::SqliteObjectStorage;
 use crate::types::{KvDeleteRequest, KvGetRequest, KvListRequest, KvPutRequest};
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+/// Extract agent name and session ID from a data-plane routing key.
+fn extract_agent_session(key: &DataRoutingKey) -> (&str, &str) {
+    let agent = match &key.kind {
+        DataMessageKind::Request { agent, .. } => agent.as_str(),
+        _ => "",
+    };
+    (agent, key.session.as_str())
+}
+
+/// Build a Response routing key from a Request routing key.
+fn response_key_from_request(req_key: &DataRoutingKey) -> DataRoutingKey {
+    let DataMessageKind::Request {
+        agent,
+        service,
+        operation,
+        sequence,
+    } = &req_key.kind
+    else {
+        panic!("response_key_from_request called with non-Request key");
+    };
+    DataRoutingKey {
+        session: req_key.session.clone(),
+        branch: req_key.branch,
+        submission: req_key.submission.clone(),
+        kind: DataMessageKind::Response {
+            agent: agent.clone(),
+            service: *service,
+            operation: *operation,
+            sequence: *sequence,
+        },
+    }
+}
 
 // ============================================================================
 // Worker
@@ -153,16 +191,17 @@ impl KvWorker {
 
     /// Process one message if available. Returns true if processed.
     pub fn tick(&self) -> bool {
-        if self.try_get() {
+        // Try v2 data-plane first, fall back to v1
+        if self.try_get_v2() || self.try_get() {
             return true;
         }
-        if self.try_put() {
+        if self.try_put_v2() || self.try_put() {
             return true;
         }
-        if self.try_list() {
+        if self.try_list_v2() || self.try_list() {
             return true;
         }
-        if self.try_delete() {
+        if self.try_delete_v2() || self.try_delete() {
             return true;
         }
         false
@@ -193,6 +232,40 @@ impl KvWorker {
                 );
                 response.state.clone_from(&request.state);
                 let _ = self.queue.send_response(response);
+                let _ = ack();
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
+    fn try_get_v2(&self) -> bool {
+        match self.queue.receive_request_v2(self.service, Operation::Get) {
+            Ok((key, msg, ack)) => {
+                let (agent, session) = extract_agent_session(&key);
+                let start = std::time::Instant::now();
+                let response_payload =
+                    self.handle_get(agent, session, &msg.payload, msg.state.as_deref());
+                let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
+                let diag = ServiceDiagnostics::storage(
+                    self.service.service_type(),
+                    self.service.backend_str(),
+                    Operation::Get,
+                    response_payload.len() as u64,
+                    duration_ms,
+                );
+                let response_key = response_key_from_request(&key);
+                let response = ResponseMessageV2 {
+                    id: MessageId::new(),
+                    dag_id: DagNodeId::root(),
+                    correlation_id: msg.id,
+                    state: msg.state,
+                    diagnostics: diag,
+                    payload: response_payload,
+                    status_code: 200,
+                    checkpoint: msg.checkpoint,
+                };
+                let _ = self.queue.send_response_v2(response_key, response);
                 let _ = ack();
                 true
             }
@@ -233,6 +306,40 @@ impl KvWorker {
         }
     }
 
+    fn try_put_v2(&self) -> bool {
+        match self.queue.receive_request_v2(self.service, Operation::Put) {
+            Ok((key, msg, ack)) => {
+                let (agent, session) = extract_agent_session(&key);
+                let start = std::time::Instant::now();
+                let (response_payload, new_state) =
+                    self.handle_put(agent, session, &msg.payload, msg.state.as_deref());
+                let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
+                let diag = ServiceDiagnostics::storage(
+                    self.service.service_type(),
+                    self.service.backend_str(),
+                    Operation::Put,
+                    response_payload.len() as u64,
+                    duration_ms,
+                );
+                let response_key = response_key_from_request(&key);
+                let response = ResponseMessageV2 {
+                    id: MessageId::new(),
+                    dag_id: DagNodeId::root(),
+                    correlation_id: msg.id,
+                    state: new_state.or(msg.state),
+                    diagnostics: diag,
+                    payload: response_payload,
+                    status_code: 200,
+                    checkpoint: msg.checkpoint,
+                };
+                let _ = self.queue.send_response_v2(response_key, response);
+                let _ = ack();
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
     fn try_list(&self) -> bool {
         match self.queue.receive_request(self.service, Operation::List) {
             Ok((request, ack)) => {
@@ -265,6 +372,40 @@ impl KvWorker {
         }
     }
 
+    fn try_list_v2(&self) -> bool {
+        match self.queue.receive_request_v2(self.service, Operation::List) {
+            Ok((key, msg, ack)) => {
+                let (agent, session) = extract_agent_session(&key);
+                let start = std::time::Instant::now();
+                let response_payload =
+                    self.handle_list(agent, session, &msg.payload, msg.state.as_deref());
+                let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
+                let diag = ServiceDiagnostics::storage(
+                    self.service.service_type(),
+                    self.service.backend_str(),
+                    Operation::List,
+                    response_payload.len() as u64,
+                    duration_ms,
+                );
+                let response_key = response_key_from_request(&key);
+                let response = ResponseMessageV2 {
+                    id: MessageId::new(),
+                    dag_id: DagNodeId::root(),
+                    correlation_id: msg.id,
+                    state: msg.state,
+                    diagnostics: diag,
+                    payload: response_payload,
+                    status_code: 200,
+                    checkpoint: msg.checkpoint,
+                };
+                let _ = self.queue.send_response_v2(response_key, response);
+                let _ = ack();
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
     fn try_delete(&self) -> bool {
         match self.queue.receive_request(self.service, Operation::Delete) {
             Ok((request, ack)) => {
@@ -289,6 +430,42 @@ impl KvWorker {
                 );
                 response.state.clone_from(&request.state);
                 let _ = self.queue.send_response(response);
+                let _ = ack();
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
+    fn try_delete_v2(&self) -> bool {
+        match self
+            .queue
+            .receive_request_v2(self.service, Operation::Delete)
+        {
+            Ok((key, msg, ack)) => {
+                let (agent, session) = extract_agent_session(&key);
+                let start = std::time::Instant::now();
+                let response_payload = self.handle_delete(agent, session, &msg.payload);
+                let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
+                let diag = ServiceDiagnostics::storage(
+                    self.service.service_type(),
+                    self.service.backend_str(),
+                    Operation::Delete,
+                    response_payload.len() as u64,
+                    duration_ms,
+                );
+                let response_key = response_key_from_request(&key);
+                let response = ResponseMessageV2 {
+                    id: MessageId::new(),
+                    dag_id: DagNodeId::root(),
+                    correlation_id: msg.id,
+                    state: msg.state,
+                    diagnostics: diag,
+                    payload: response_payload,
+                    status_code: 200,
+                    checkpoint: msg.checkpoint,
+                };
+                let _ = self.queue.send_response_v2(response_key, response);
                 let _ = ack();
                 true
             }
