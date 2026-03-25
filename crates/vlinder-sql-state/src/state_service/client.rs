@@ -384,6 +384,47 @@ impl DagStore for GrpcStateClient {
         }
     }
 
+    fn get_response_node(
+        &self,
+        dag_hash: &DagNodeId,
+    ) -> Result<Option<vlinder_core::domain::ResponseMessageV2>, String> {
+        let request = proto::GetResponseNodeRequest {
+            dag_hash: dag_hash.to_string(),
+        };
+
+        let mut client = self.client.clone();
+        let response = self
+            .runtime
+            .block_on(async { client.get_response_node(request).await })
+            .map_err(|e| e.to_string())?;
+
+        match response.into_inner().node {
+            Some(n) => {
+                let diagnostics: vlinder_core::domain::ServiceDiagnostics =
+                    serde_json::from_slice(&n.diagnostics).unwrap_or_else(|_| {
+                        vlinder_core::domain::ServiceDiagnostics::storage(
+                            vlinder_core::domain::ServiceType::Kv,
+                            "unknown",
+                            vlinder_core::domain::Operation::Get,
+                            0,
+                            0,
+                        )
+                    });
+                Ok(Some(vlinder_core::domain::ResponseMessageV2 {
+                    id: vlinder_core::domain::MessageId::from(n.message_id),
+                    dag_id: vlinder_core::domain::DagNodeId::from(n.dag_hash),
+                    correlation_id: vlinder_core::domain::MessageId::from(n.correlation_id),
+                    state: n.state,
+                    diagnostics,
+                    payload: n.payload,
+                    status_code: u16::try_from(n.status_code).unwrap_or(200),
+                    checkpoint: n.checkpoint,
+                }))
+            }
+            None => Ok(None),
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn insert_request_node(
         &self,

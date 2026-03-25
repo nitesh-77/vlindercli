@@ -1004,6 +1004,57 @@ impl DagStore for SqliteDagStore {
         Ok(result)
     }
 
+    fn get_response_node(
+        &self,
+        dag_hash: &DagNodeId,
+    ) -> Result<Option<vlinder_core::domain::ResponseMessageV2>, String> {
+        let conn = self.conn.lock().expect("db connection lock poisoned");
+        let mut stmt = conn
+            .prepare(
+                "SELECT r.message_id, r.correlation_id, r.state, r.diagnostics, r.payload, r.status_code, r.checkpoint
+                 FROM response_nodes r
+                 WHERE r.dag_hash = ?1",
+            )
+            .map_err(|e| format!("get_response_node prepare failed: {e}"))?;
+
+        let result = stmt
+            .query_row(rusqlite::params![dag_hash.as_str()], |row| {
+                let message_id: String = row.get(0)?;
+                let correlation_id: String = row.get(1)?;
+                let state: Option<String> = row.get(2)?;
+                let diagnostics_blob: Vec<u8> = row.get(3)?;
+                let payload: Vec<u8> = row.get(4)?;
+                let status_code: u16 = row.get(5)?;
+                let checkpoint: Option<String> = row.get(6)?;
+
+                let diagnostics: vlinder_core::domain::ServiceDiagnostics =
+                    serde_json::from_slice(&diagnostics_blob).unwrap_or_else(|_| {
+                        vlinder_core::domain::ServiceDiagnostics::storage(
+                            vlinder_core::domain::ServiceType::Kv,
+                            "unknown",
+                            vlinder_core::domain::Operation::Get,
+                            0,
+                            0,
+                        )
+                    });
+
+                Ok(vlinder_core::domain::ResponseMessageV2 {
+                    id: vlinder_core::domain::MessageId::from(message_id),
+                    dag_id: dag_hash.clone(),
+                    correlation_id: vlinder_core::domain::MessageId::from(correlation_id),
+                    state,
+                    diagnostics,
+                    payload,
+                    status_code,
+                    checkpoint,
+                })
+            })
+            .optional()
+            .map_err(|e| format!("get_response_node query failed: {e}"))?;
+
+        Ok(result)
+    }
+
     fn get_branches_for_session(&self, session_id: &SessionId) -> Result<Vec<Branch>, String> {
         let conn = self.conn.lock().expect("db connection lock poisoned");
         let mut stmt = conn

@@ -38,6 +38,7 @@ service StateService {
   rpc GetInvokeNode(GetInvokeNodeRequest) returns (GetInvokeNodeResponse);
   rpc GetCompleteNode(GetCompleteNodeRequest) returns (GetCompleteNodeResponse);
   rpc GetRequestNode(GetRequestNodeRequest) returns (GetRequestNodeResponse);
+  rpc GetResponseNode(GetResponseNodeRequest) returns (GetResponseNodeResponse);
   rpc InsertRequestNode(InsertRequestNodeRequest) returns (InsertRequestNodeResponse);
 
   // Branch head query
@@ -314,4 +315,20 @@ message InsertRequestNodeRequest {
 message InsertRequestNodeResponse {
   bool success = 1;
   optional string error = 2;
+}
+
+message GetResponseNodeRequest { string dag_hash = 1; }
+message GetResponseNodeResponse {
+  optional ResponseNodeProto node = 1;
+}
+
+message ResponseNodeProto {
+  string message_id = 1;
+  string correlation_id = 2;
+  optional string state = 3;
+  bytes diagnostics = 4;
+  bytes payload = 5;
+  uint32 status_code = 6;
+  string dag_hash = 7;
+  optional string checkpoint = 8;
 }

@@ -10,14 +10,15 @@ use super::proto::{
     GetBranchesForSessionResponse, GetChildrenRequest, GetChildrenResponse, GetCompleteNodeRequest,
     GetCompleteNodeResponse, GetInvokeNodeRequest, GetInvokeNodeResponse, GetNodeByPrefixRequest,
     GetNodeRequest, GetNodeResponse, GetNodesBySubmissionRequest, GetNodesBySubmissionResponse,
-    GetRequestNodeRequest, GetRequestNodeResponse, GetSessionByNameRequest, GetSessionNodesRequest,
-    GetSessionNodesResponse, GetSessionRequest, GetSessionResponse, InsertCompleteNodeRequest,
-    InsertCompleteNodeResponse, InsertInvokeNodeRequest, InsertInvokeNodeResponse,
-    InsertNodeRequest, InsertNodeResponse, InsertRequestNodeRequest, InsertRequestNodeResponse,
-    InvokeNodeProto, LatestNodeOnBranchRequest, LatestNodeOnBranchResponse, ListSessionsRequest,
+    GetRequestNodeRequest, GetRequestNodeResponse, GetResponseNodeRequest, GetResponseNodeResponse,
+    GetSessionByNameRequest, GetSessionNodesRequest, GetSessionNodesResponse, GetSessionRequest,
+    GetSessionResponse, InsertCompleteNodeRequest, InsertCompleteNodeResponse,
+    InsertInvokeNodeRequest, InsertInvokeNodeResponse, InsertNodeRequest, InsertNodeResponse,
+    InsertRequestNodeRequest, InsertRequestNodeResponse, InvokeNodeProto,
+    LatestNodeOnBranchRequest, LatestNodeOnBranchResponse, ListSessionsRequest,
     ListSessionsResponse, PingRequest, RenameBranchRequest, RenameBranchResponse, RequestNodeProto,
-    SealBranchRequest, SealBranchResponse, SemVer, UpdateSessionDefaultBranchRequest,
-    UpdateSessionDefaultBranchResponse,
+    ResponseNodeProto, SealBranchRequest, SealBranchResponse, SemVer,
+    UpdateSessionDefaultBranchRequest, UpdateSessionDefaultBranchResponse,
 };
 use vlinder_core::domain::{DagNodeId, DagStore, MessageType, SessionId};
 
@@ -383,6 +384,31 @@ impl StateService for StateServiceServer {
         });
 
         Ok(Response::new(GetRequestNodeResponse { node }))
+    }
+
+    async fn get_response_node(
+        &self,
+        request: Request<GetResponseNodeRequest>,
+    ) -> Result<Response<GetResponseNodeResponse>, Status> {
+        let req = request.into_inner();
+        let dag_hash = vlinder_core::domain::DagNodeId::from(req.dag_hash);
+        let result = self
+            .store
+            .get_response_node(&dag_hash)
+            .map_err(Status::internal)?;
+
+        let node = result.map(|msg| ResponseNodeProto {
+            message_id: msg.id.to_string(),
+            correlation_id: msg.correlation_id.to_string(),
+            state: msg.state,
+            diagnostics: serde_json::to_vec(&msg.diagnostics).unwrap_or_default(),
+            payload: msg.payload,
+            status_code: u32::from(msg.status_code),
+            dag_hash: msg.dag_id.to_string(),
+            checkpoint: msg.checkpoint,
+        });
+
+        Ok(Response::new(GetResponseNodeResponse { node }))
     }
 
     async fn insert_invoke_node(

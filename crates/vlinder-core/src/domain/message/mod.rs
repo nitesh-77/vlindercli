@@ -52,7 +52,7 @@ pub use observable_v2::ObservableMessageV2;
 pub use promote::PromoteMessage;
 pub use repair::RepairMessage;
 pub use request::{RequestMessage, RequestMessageV2};
-pub use response::ResponseMessage;
+pub use response::{ResponseMessage, ResponseMessageV2};
 pub use session_start::SessionStartMessage;
 
 /// Protocol version stamped on every message at construction time.

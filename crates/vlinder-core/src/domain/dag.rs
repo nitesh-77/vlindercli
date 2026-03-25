@@ -347,6 +347,15 @@ pub trait DagStore: Send + Sync {
         Ok(None)
     }
 
+    /// Retrieve typed response data by DAG node hash.
+    fn get_response_node(
+        &self,
+        dag_hash: &super::DagNodeId,
+    ) -> Result<Option<super::ResponseMessageV2>, String> {
+        let _ = dag_hash;
+        Ok(None)
+    }
+
     /// Get all branches for a session.
     fn get_branches_for_session(
         &self,
