@@ -12,7 +12,7 @@ server = ["dep:rusqlite", "tonic/server", "tonic/router"]
 [dependencies]
 vlinder-core = { path = "../vlinder-core" }
 rusqlite = { version = "0.32", features = ["bundled"], optional = true }
-tonic = { version = "0.12", default-features = false, features = ["channel", "codegen", "prost", "transport"] }
+tonic = { version = "0.12", default-features = false, features = ["channel", "codegen", "prost", "transport", "tls", "tls-roots"] }
 prost = "0.13"
 tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
 chrono = { version = "0.4", features = ["serde"] }
