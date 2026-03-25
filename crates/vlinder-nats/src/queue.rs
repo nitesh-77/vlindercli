@@ -397,37 +397,6 @@ impl MessageQueue for NatsQueue {
         })
     }
 
-    fn send_complete(&self, msg: CompleteMessage) -> Result<(), QueueError> {
-        let subject = routing_key_to_subject(&msg.routing_key());
-
-        self.inner.runtime.block_on(async {
-            let mut headers = async_nats::HeaderMap::new();
-            headers.insert("msg-id", msg.id.as_str());
-            headers.insert("protocol-version", msg.protocol_version.as_str());
-            headers.insert("branch-id", msg.branch.to_string());
-            headers.insert("submission-id", msg.submission.as_str());
-            headers.insert("session-id", msg.session.as_str());
-            headers.insert("agent-id", msg.agent_id.as_str());
-            headers.insert("harness", msg.harness.as_str());
-            if let Some(ref state) = msg.state {
-                headers.insert("state", state.as_str());
-            }
-            if let Ok(diag_json) = serde_json::to_string(&msg.diagnostics) {
-                headers.insert("diagnostics", diag_json.as_str());
-            }
-
-            self.inner
-                .jetstream
-                .publish_with_headers(subject, headers, msg.payload.into())
-                .await
-                .map_err(|e| QueueError::SendFailed(e.to_string()))?
-                .await
-                .map_err(|e| QueueError::SendFailed(e.to_string()))?;
-
-            Ok(())
-        })
-    }
-
     fn receive_request(
         &self,
         service: ServiceBackend,
@@ -553,49 +522,6 @@ impl MessageQueue for NatsQueue {
                 diagnostics,
                 status_code,
                 checkpoint: get_header(headers, "checkpoint").ok(),
-            };
-
-            Ok((msg, ack_fn))
-        })
-    }
-
-    fn receive_complete(
-        &self,
-        submission: &SubmissionId,
-        harness: HarnessType,
-    ) -> Result<(CompleteMessage, Acknowledgement), QueueError> {
-        // Build filter: vlinder.{session}.{branch}.{submission}.complete.{agent}.{harness}
-        let filter = format!("vlinder.*.*.{}.complete.*.{}", submission, harness.as_str());
-
-        self.inner.runtime.block_on(async {
-            let (js_msg, ack_fn) = self.fetch_one(&filter).await?;
-
-            let headers = js_msg
-                .headers
-                .as_ref()
-                .ok_or_else(|| QueueError::ReceiveFailed("missing headers".to_string()))?;
-
-            let diagnostics = get_header(headers, "diagnostics")
-                .ok()
-                .and_then(|s| serde_json::from_str(&s).ok())
-                .unwrap_or_else(|| RuntimeDiagnostics::placeholder(0));
-
-            let msg = CompleteMessage {
-                id: MessageId::from(get_header(headers, "msg-id")?),
-                protocol_version: get_header(headers, "protocol-version").unwrap_or_default(),
-                branch: get_header(headers, "branch-id")
-                    .ok()
-                    .and_then(|s| s.parse::<i64>().ok())
-                    .map_or(BranchId::from(1), BranchId::from),
-                submission: SubmissionId::from(get_header(headers, "submission-id")?),
-                session: SessionId::try_from(get_header(headers, "session-id")?)
-                    .map_err(QueueError::ReceiveFailed)?,
-                agent_id: AgentName::new(get_header(headers, "agent-id")?),
-                harness: HarnessType::from_str(&get_header(headers, "harness")?)
-                    .map_err(|_| QueueError::ReceiveFailed("unknown harness type".to_string()))?,
-                payload: js_msg.payload.to_vec(),
-                state: get_header(headers, "state").ok(),
-                diagnostics,
             };
 
             Ok((msg, ack_fn))

@@ -145,67 +145,6 @@ impl RecordingQueue {
         id
     }
 
-    /// Record a DAG node for a complete message.
-    fn record_complete(&self, msg: &CompleteMessage) {
-        let branch_id = msg.branch;
-
-        let parent_node = self
-            .store
-            .latest_node_on_branch(branch_id, None)
-            .unwrap_or_else(|e| {
-                tracing::warn!(error = %e, branch = branch_id.as_i64(), "Failed to query latest node on branch");
-                None
-            });
-
-        let parent_id = parent_node
-            .as_ref()
-            .map_or_else(DagNodeId::root, |n| n.id.clone());
-        let parent_state = parent_node
-            .as_ref()
-            .map(|n| &n.state)
-            .cloned()
-            .unwrap_or_else(Snapshot::empty);
-
-        let diagnostics_json = serde_json::to_vec(&msg.diagnostics).unwrap_or_default();
-        let id = hash_dag_node(
-            &msg.payload,
-            &parent_id,
-            &MessageType::Complete,
-            &diagnostics_json,
-            &msg.session,
-        );
-
-        let state = match &msg.state {
-            Some(s) if !s.is_empty() => {
-                parent_state.with_state(Instance::from("kv"), StateHash::from(s.clone()))
-            }
-            _ => parent_state,
-        };
-
-        let complete_v2 = CompleteMessageV2 {
-            id: msg.id.clone(),
-            dag_id: id.clone(),
-            state: msg.state.clone(),
-            diagnostics: msg.diagnostics.clone(),
-            payload: msg.payload.clone(),
-        };
-
-        if let Err(e) = self.store.insert_complete_node(
-            &id,
-            &parent_id,
-            Utc::now(),
-            &state,
-            &msg.session,
-            &msg.submission,
-            msg.branch,
-            &msg.agent_id,
-            msg.harness,
-            &complete_v2,
-        ) {
-            tracing::warn!(error = %id, "Failed to record complete node: {e}");
-        }
-    }
-
     /// Record a DAG node for a v2 complete message (data-plane path).
     fn record_complete_v2(&self, key: &DataRoutingKey, msg: &CompleteMessageV2) {
         let branch_id = key.branch;
@@ -293,11 +232,6 @@ impl MessageQueue for RecordingQueue {
         self.inner.send_response(msg)
     }
 
-    fn send_complete(&self, msg: CompleteMessage) -> Result<(), QueueError> {
-        self.record_complete(&msg);
-        self.inner.send_complete(msg)
-    }
-
     fn send_complete_v2(
         &self,
         key: DataRoutingKey,
@@ -347,14 +281,6 @@ impl MessageQueue for RecordingQueue {
         harness: crate::domain::HarnessType,
     ) -> Result<(DataRoutingKey, CompleteMessageV2, Acknowledgement), QueueError> {
         self.inner.receive_complete_v2(submission, harness)
-    }
-
-    fn receive_complete(
-        &self,
-        submission: &SubmissionId,
-        harness: crate::domain::HarnessType,
-    ) -> Result<(CompleteMessage, Acknowledgement), QueueError> {
-        self.inner.receive_complete(submission, harness)
     }
 
     // -------------------------------------------------------------------------
@@ -583,17 +509,24 @@ mod tests {
         )
     }
 
-    fn test_complete() -> CompleteMessage {
-        CompleteMessage::new(
-            BranchId::from(1),
-            test_submission(),
-            test_session(),
-            test_agent_id(),
-            HarnessType::Cli,
-            b"done".to_vec(),
-            None,
-            RuntimeDiagnostics::placeholder(0),
-        )
+    fn test_complete_v2() -> (DataRoutingKey, CompleteMessageV2) {
+        let key = DataRoutingKey {
+            session: test_session(),
+            branch: BranchId::from(1),
+            submission: test_submission(),
+            kind: crate::domain::DataMessageKind::Complete {
+                agent: test_agent_id(),
+                harness: HarnessType::Cli,
+            },
+        };
+        let msg = CompleteMessageV2 {
+            id: crate::domain::MessageId::new(),
+            dag_id: crate::domain::DagNodeId::root(),
+            state: None,
+            diagnostics: RuntimeDiagnostics::placeholder(0),
+            payload: b"done".to_vec(),
+        };
+        (key, msg)
     }
 
     fn test_delegate() -> DelegateMessage {
@@ -660,14 +593,14 @@ mod tests {
     }
 
     #[test]
-    fn send_complete_records_dag_node() {
+    fn send_complete_v2_records_dag_node() {
         let store = test_store();
         let queue = test_queue(Arc::clone(&store));
 
-        let msg = test_complete();
-        let sid = msg.session.clone();
+        let (key, msg) = test_complete_v2();
+        let sid = key.session.clone();
 
-        queue.send_complete(msg).unwrap();
+        queue.send_complete_v2(key, msg).unwrap();
 
         let nodes = store.get_session_nodes(&sid).unwrap();
         assert_eq!(nodes.len(), 1);

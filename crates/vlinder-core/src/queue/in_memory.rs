@@ -143,16 +143,6 @@ impl MessageQueue for InMemoryQueue {
         Ok(())
     }
 
-    fn send_complete(&self, msg: CompleteMessage) -> Result<(), QueueError> {
-        let key = msg.routing_key();
-        let mut typed = self.typed_queues.lock().unwrap();
-        typed
-            .entry(key)
-            .or_default()
-            .push_back(ObservableMessage::Complete(msg));
-        Ok(())
-    }
-
     fn receive_request(
         &self,
         service: ServiceBackend,
@@ -199,34 +189,6 @@ impl MessageQueue for InMemoryQueue {
         if let Some(queue) = typed.get_mut(&reply_key) {
             if let Some(ObservableMessage::Response(_)) = queue.front() {
                 if let Some(ObservableMessage::Response(msg)) = queue.pop_front() {
-                    return Ok((msg, Box::new(|| Ok(()))));
-                }
-            }
-        }
-
-        Err(QueueError::Timeout)
-    }
-
-    fn receive_complete(
-        &self,
-        submission: &SubmissionId,
-        harness: HarnessType,
-    ) -> Result<(CompleteMessage, Acknowledgement), QueueError> {
-        let mut typed = self.typed_queues.lock().unwrap();
-
-        for (key, queue) in typed.iter_mut() {
-            let matches = match key {
-                RoutingKey {
-                    submission: ref sub,
-                    kind: RoutingKind::Complete { harness: h, .. },
-                    ..
-                } => sub == submission && *h == harness,
-                _ => false,
-            };
-            if matches {
-                if let Some(ObservableMessage::Complete(msg)) = queue.front() {
-                    let msg = msg.clone();
-                    queue.pop_front();
                     return Ok((msg, Box::new(|| Ok(()))));
                 }
             }

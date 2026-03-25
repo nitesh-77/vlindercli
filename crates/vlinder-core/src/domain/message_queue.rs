@@ -51,11 +51,6 @@ pub trait MessageQueue {
     /// Implementation determines routing from message dimensions.
     fn send_response(&self, msg: ResponseMessage) -> Result<(), QueueError>;
 
-    /// Send a `CompleteMessage` (Runtime → Harness).
-    ///
-    /// Implementation determines routing from message dimensions.
-    fn send_complete(&self, msg: CompleteMessage) -> Result<(), QueueError>;
-
     // -------------------------------------------------------------------------
     // Complete (ADR 121 — data plane)
     // -------------------------------------------------------------------------
@@ -102,15 +97,6 @@ pub trait MessageQueue {
         &self,
         request: &RequestMessage,
     ) -> Result<(ResponseMessage, Acknowledgement), QueueError>;
-
-    /// Receive a `CompleteMessage` for a specific submission.
-    ///
-    /// Each invocation polls its own submission-scoped consumer (ADR 052).
-    fn receive_complete(
-        &self,
-        submission: &SubmissionId,
-        harness: HarnessType,
-    ) -> Result<(CompleteMessage, Acknowledgement), QueueError>;
 
     // -------------------------------------------------------------------------
     // Delegation methods (ADR 056, ADR 096 §7)
@@ -204,13 +190,15 @@ pub trait MessageQueue {
     /// Send a repair and block until the agent completes.
     ///
     /// Used by the harness to replay a failed service call (ADR 113).
-    /// Reply type is `CompleteMessage`, same as invoke.
-    fn repair_agent(&self, msg: RepairMessage) -> Result<CompleteMessage, QueueError> {
+    fn repair_agent(&self, msg: RepairMessage) -> Result<CompleteMessageV2, QueueError> {
         let submission = msg.submission.clone();
         let harness = msg.harness;
         send_and_wait(
             || self.send_repair(msg),
-            || self.receive_complete(&submission, harness),
+            || {
+                self.receive_complete_v2(&submission, harness)
+                    .map(|(_key, msg, ack)| (msg, ack))
+            },
         )
     }
 }

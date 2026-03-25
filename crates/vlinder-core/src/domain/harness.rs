@@ -278,16 +278,10 @@ impl Harness for CoreHarness {
             .map_err(|e| format!("queue error: {e}"))?;
 
         let result = loop {
-            // Try v2 first (data plane)
-            if let Ok((_key, v2, ack)) = self.queue.receive_complete_v2(&submission, harness) {
-                let _ = ack();
-                break String::from_utf8_lossy(&v2.payload).to_string();
-            }
-            // Fall back to v1
-            match self.queue.receive_complete(&submission, harness) {
-                Ok((reply, ack)) => {
+            match self.queue.receive_complete_v2(&submission, harness) {
+                Ok((_key, v2, ack)) => {
                     let _ = ack();
-                    break String::from_utf8_lossy(&reply.payload).to_string();
+                    break String::from_utf8_lossy(&v2.payload).to_string();
                 }
                 Err(crate::domain::QueueError::Timeout) => {
                     std::thread::sleep(std::time::Duration::from_millis(1));
