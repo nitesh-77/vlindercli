@@ -24,7 +24,7 @@ pub use queue::NatsQueue;
 #[cfg(feature = "queue")]
 pub use queue::{
     complete_parse_subject, complete_to_nats_headers, delegate_to_nats_headers, from_nats_headers,
-    invoke_parse_subject, request_to_nats_headers, response_to_nats_headers,
+    invoke_parse_subject, request_parse_subject, request_to_nats_headers, response_to_nats_headers,
     subject_to_routing_key,
 };
 #[cfg(feature = "secret-store")]

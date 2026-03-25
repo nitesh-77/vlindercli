@@ -331,6 +331,12 @@ pub enum DataMessageKind {
         agent: AgentName,
         harness: HarnessType,
     },
+    Request {
+        agent: AgentName,
+        service: ServiceBackend,
+        operation: Operation,
+        sequence: Sequence,
+    },
 }
 
 #[cfg(test)]

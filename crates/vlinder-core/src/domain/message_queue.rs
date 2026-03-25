@@ -12,7 +12,7 @@
 use super::{
     AgentName, CompleteMessage, DataRoutingKey, DelegateMessage, DelegateReplyMessage, ForkMessage,
     HarnessType, InvokeMessage, Operation, PromoteMessage, RepairMessage, RequestMessage,
-    ResourceId, ResponseMessage, RoutingKey, ServiceBackend, SubmissionId,
+    RequestMessageV2, ResourceId, ResponseMessage, RoutingKey, ServiceBackend, SubmissionId,
 };
 use std::fmt;
 
@@ -68,6 +68,30 @@ pub trait MessageQueue {
         _submission: &SubmissionId,
         _harness: HarnessType,
     ) -> Result<(DataRoutingKey, CompleteMessage, Acknowledgement), QueueError> {
+        Err(QueueError::Timeout)
+    }
+
+    // -------------------------------------------------------------------------
+    // Request (ADR 121 — data plane)
+    // -------------------------------------------------------------------------
+
+    /// Send a request on the data plane (ADR 121).
+    fn send_request_v2(
+        &self,
+        _key: DataRoutingKey,
+        _msg: RequestMessageV2,
+    ) -> Result<(), QueueError> {
+        Err(QueueError::SendFailed(
+            "send_request_v2 not implemented".into(),
+        ))
+    }
+
+    /// Receive a request from the data plane (ADR 121).
+    fn receive_request_v2(
+        &self,
+        _service: ServiceBackend,
+        _operation: Operation,
+    ) -> Result<(DataRoutingKey, RequestMessageV2, Acknowledgement), QueueError> {
         Err(QueueError::Timeout)
     }
 

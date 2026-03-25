@@ -367,6 +367,15 @@ impl MessageQueue for RecordingQueue {
         self.inner.send_complete(key, msg)
     }
 
+    fn send_request_v2(
+        &self,
+        key: DataRoutingKey,
+        msg: crate::domain::RequestMessageV2,
+    ) -> Result<(), QueueError> {
+        // TODO: record_request_v2 when recording queue switches to data-plane path
+        self.inner.send_request_v2(key, msg)
+    }
+
     fn send_delegate(&self, msg: DelegateMessage) -> Result<(), QueueError> {
         self.record(&msg.clone().into());
         self.inner.send_delegate(msg)
@@ -406,6 +415,21 @@ impl MessageQueue for RecordingQueue {
         harness: crate::domain::HarnessType,
     ) -> Result<(DataRoutingKey, CompleteMessage, Acknowledgement), QueueError> {
         self.inner.receive_complete(submission, harness)
+    }
+
+    fn receive_request_v2(
+        &self,
+        service: crate::domain::ServiceBackend,
+        operation: crate::domain::Operation,
+    ) -> Result<
+        (
+            DataRoutingKey,
+            crate::domain::RequestMessageV2,
+            Acknowledgement,
+        ),
+        QueueError,
+    > {
+        self.inner.receive_request_v2(service, operation)
     }
 
     // -------------------------------------------------------------------------

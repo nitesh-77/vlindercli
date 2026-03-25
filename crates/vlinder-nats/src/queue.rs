@@ -22,7 +22,7 @@ use vlinder_core::domain::{
     Acknowledgement, AgentName, BranchId, CompleteMessage, DagNodeId, DataMessageKind,
     DataRoutingKey, DelegateDiagnostics, DelegateMessage, DelegateReplyMessage, HarnessType,
     InvokeMessage, MessageId, MessageQueue, Nonce, Operation, QueueError, RepairMessage,
-    RequestDiagnostics, RequestMessage, ResponseMessage, RoutingKey, RoutingKind,
+    RequestDiagnostics, RequestMessage, RequestMessageV2, ResponseMessage, RoutingKey, RoutingKind,
     RuntimeDiagnostics, RuntimeType, Sequence, ServiceBackend, ServiceDiagnostics, ServiceType,
     SessionId, SubmissionId,
 };
@@ -312,6 +312,72 @@ impl MessageQueue for NatsQueue {
 
             let msg: CompleteMessage = serde_json::from_slice(&js_msg.payload)
                 .map_err(|e| QueueError::ReceiveFailed(format!("deserialize complete: {e}")))?;
+
+            Ok((key, msg, ack_fn))
+        })
+    }
+
+    fn send_request_v2(
+        &self,
+        key: DataRoutingKey,
+        msg: RequestMessageV2,
+    ) -> Result<(), QueueError> {
+        let DataMessageKind::Request {
+            agent,
+            service,
+            operation,
+            sequence,
+        } = &key.kind
+        else {
+            return Err(QueueError::SendFailed(
+                "send_request_v2: expected Request key".into(),
+            ));
+        };
+        let subject = request_subject(
+            &key.session,
+            key.branch,
+            &key.submission,
+            agent,
+            *service,
+            *operation,
+            *sequence,
+        );
+        let payload = serde_json::to_vec(&msg)
+            .map_err(|e| QueueError::SendFailed(format!("serialize request: {e}")))?;
+
+        self.inner.runtime.block_on(async {
+            let mut headers = async_nats::HeaderMap::new();
+            headers.insert("Nats-Msg-Id", msg.id.as_str());
+
+            self.inner
+                .jetstream
+                .publish_with_headers(subject, headers, payload.into())
+                .await
+                .map_err(|e| QueueError::SendFailed(e.to_string()))?
+                .await
+                .map_err(|e| QueueError::SendFailed(e.to_string()))?;
+
+            Ok(())
+        })
+    }
+
+    fn receive_request_v2(
+        &self,
+        service: ServiceBackend,
+        operation: Operation,
+    ) -> Result<(DataRoutingKey, RequestMessageV2, Acknowledgement), QueueError> {
+        let filter = request_filter(service, operation);
+
+        self.inner.runtime.block_on(async {
+            let (js_msg, ack_fn) = self.fetch_one(&filter).await?;
+
+            let subject = js_msg.subject.as_str();
+            let key = request_parse_subject(subject).ok_or_else(|| {
+                QueueError::ReceiveFailed(format!("invalid request subject: {subject}"))
+            })?;
+
+            let msg: RequestMessageV2 = serde_json::from_slice(&js_msg.payload)
+                .map_err(|e| QueueError::ReceiveFailed(format!("deserialize request: {e}")))?;
 
             Ok((key, msg, ack_fn))
         })
@@ -934,6 +1000,76 @@ fn complete_filter(submission: &SubmissionId, harness: HarnessType) -> String {
         "{COMPLETE_PREFIX}.*.*.{}.{COMPLETE_KIND}.*.{}",
         submission.as_str(),
         harness.as_str()
+    )
+}
+
+// ============================================================================
+// Request subject format (ADR 121)
+//
+// vlinder.data.v1.{session}.{branch}.{sub}.request.{agent}.{service}.{backend}.{op}.{seq}
+// ============================================================================
+
+const REQUEST_PREFIX: &str = "vlinder.data.v1";
+const REQUEST_KIND: &str = "request";
+const REQUEST_SEGMENT_COUNT: usize = 12;
+
+/// Build a NATS subject for a data-plane request message.
+fn request_subject(
+    session: &SessionId,
+    branch: BranchId,
+    submission: &SubmissionId,
+    agent: &AgentName,
+    service: ServiceBackend,
+    operation: Operation,
+    sequence: Sequence,
+) -> String {
+    format!(
+        "{REQUEST_PREFIX}.{session}.{branch}.{submission}.{REQUEST_KIND}.{agent}.{}.{}.{}.{}",
+        service.service_type(),
+        service.backend_str(),
+        operation.as_str(),
+        sequence.as_u32(),
+    )
+}
+
+/// Parse a NATS subject back into a `DataRoutingKey` for request.
+///
+/// Subject: `vlinder.data.v1.{session}.{branch}.{sub}.request.{agent}.{svc_type}.{backend}.{op}.{seq}`
+/// Index:    0       1    2   3         4        5     6       7       8          9         10   11
+pub fn request_parse_subject(subject: &str) -> Option<DataRoutingKey> {
+    use vlinder_core::domain::DataMessageKind;
+    let s: Vec<&str> = subject.split('.').collect();
+    if s.len() != REQUEST_SEGMENT_COUNT {
+        return None;
+    }
+    if s[0] != "vlinder" || s[1] != "data" || s[2] != "v1" || s[6] != REQUEST_KIND {
+        return None;
+    }
+
+    let service = ServiceBackend::from_parts(ServiceType::from_str(s[8]).ok()?, s[9])?;
+    let operation: Operation = s[10].parse().ok()?;
+    let sequence = Sequence::from(s[11].parse::<u32>().ok()?);
+
+    Some(DataRoutingKey {
+        session: SessionId::try_from(s[3].to_string()).ok()?,
+        branch: BranchId::from(s[4].parse::<i64>().unwrap_or(0)),
+        submission: SubmissionId::from(s[5].to_string()),
+        kind: DataMessageKind::Request {
+            agent: AgentName::new(s[7]),
+            service,
+            operation,
+            sequence,
+        },
+    })
+}
+
+/// NATS wildcard filter for receiving request messages for a service+operation.
+fn request_filter(service: ServiceBackend, operation: Operation) -> String {
+    format!(
+        "{REQUEST_PREFIX}.*.*.*.{REQUEST_KIND}.*.{}.{}.{}.>",
+        service.service_type(),
+        service.backend_str(),
+        operation.as_str(),
     )
 }
 

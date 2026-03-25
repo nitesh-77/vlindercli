@@ -319,9 +319,7 @@ impl StateService for StateServiceServer {
                     runtime.as_str().to_string(),
                     agent.to_string(),
                 ),
-                vlinder_core::domain::DataMessageKind::Complete { .. } => {
-                    unreachable!("get_invoke_node returned non-Invoke key")
-                }
+                _ => unreachable!("get_invoke_node returned non-Invoke key"),
             };
             InvokeNodeProto {
                 session_id: key.session.to_string(),

@@ -3,6 +3,7 @@
 use super::super::routing_key::DataRoutingKey;
 use super::complete::CompleteMessage;
 use super::invoke::InvokeMessage;
+use super::request::RequestMessageV2;
 
 /// Observable message with routing and payload cleanly separated.
 ///
@@ -17,5 +18,9 @@ pub enum ObservableMessageV2 {
     CompleteV2 {
         key: DataRoutingKey,
         msg: CompleteMessage,
+    },
+    RequestV2 {
+        key: DataRoutingKey,
+        msg: RequestMessageV2,
     },
 }
