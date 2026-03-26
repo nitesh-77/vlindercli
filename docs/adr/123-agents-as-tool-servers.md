@@ -99,6 +99,38 @@ This means:
 - Stripe calls are observable — see exactly when charges were made
 - Replay is safe — the platform mocks any external provider during replay
 
+### 8. Services are agents, agents are services
+
+The distinction between "agent" and "service" collapses. The KV store is an agent that exposes `get`, `put`, `list`, `delete` tools. Ollama is an agent that exposes `run`, `chat`, `generate` tools. A user-authored todoapp is an agent that exposes `add`, `list`, `done` tools.
+
+The platform doesn't know the difference. Everything is registered in the catalog with a tool definition, everything receives calls from the harness, everything returns results.
+
+This means:
+- One registration model (not agents + services)
+- One routing mechanism (not data-plane + service-plane)
+- One recording format in the DAG
+
+### 9. One message pair: call / result
+
+If every interaction is a tool call, the fundamental message pair is:
+
+- **Call**: "I want to invoke this tool with these args"
+- **Result**: "Here's what came back"
+
+The current six message types collapse:
+
+| Current | In the tool model |
+|---|---|
+| Invoke (harness → agent) | Call (harness → agent's root tool) |
+| Complete (agent → harness) | Result (agent → harness) |
+| Request (agent → service) | Call (agent → service tool) |
+| Response (service → agent) | Result (service → agent) |
+| Delegate (agent → agent) | Call (agent → another agent's tool) |
+| DelegateReply (agent → agent) | Result (agent → agent) |
+| HITL (agent → human) | Call (agent → human approval tool) |
+
+The `DataMessageKind` becomes `Call { caller, target, tool, sequence }` and `Result { caller, target, tool, sequence }`. The target type (agent, service, human) is just metadata on the tool definition, not a routing distinction.
+
 ## Open Questions
 
 ### Granularity guidance
