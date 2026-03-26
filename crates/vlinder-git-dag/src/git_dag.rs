@@ -1059,6 +1059,223 @@ impl DagWorker for GitDagWorker {
             tracing::error!(error = %e, "Failed to write git commit for complete");
         }
     }
+
+    fn on_request(
+        &mut self,
+        key: &DataRoutingKey,
+        request: &vlinder_core::domain::RequestMessageV2,
+        created_at: DateTime<Utc>,
+    ) {
+        let DataMessageKind::Request {
+            agent,
+            service,
+            operation,
+            sequence,
+        } = &key.kind
+        else {
+            tracing::error!("on_request called with non-Request key");
+            return;
+        };
+
+        let result = (|| -> Result<(), String> {
+            let session_id = key.session.as_str();
+            let agent_name = agent.as_str();
+            let from = agent_name;
+            let to = &format!("{}.{}", service.service_type(), service.backend_str());
+            let msg_type = "request";
+
+            let parent_commit_oid = self.head_commit();
+            let canonical_parent = match parent_commit_oid {
+                Some(oid) => {
+                    let commit = self
+                        .repo
+                        .find_commit(oid)
+                        .map_err(|e| format!("find commit failed: {e}"))?;
+                    let tree = commit
+                        .tree()
+                        .map_err(|e| format!("tree lookup failed: {e}"))?;
+                    DagNodeId::from(
+                        self.session_canonical_hash_from_tree(&tree, agent_name, session_id),
+                    )
+                }
+                None => DagNodeId::root(),
+            };
+
+            let mut tb = self
+                .repo
+                .treebuilder(None)
+                .map_err(|e| format!("treebuilder failed: {e}"))?;
+
+            let created_at_str = created_at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+
+            self.insert_field(&mut tb, "session_id", session_id)?;
+            self.insert_field(&mut tb, "submission_id", key.submission.as_str())?;
+            self.insert_field(&mut tb, "protocol_version", "v1")?;
+            self.insert_field(&mut tb, "created_at", &created_at_str)?;
+
+            let payload_oid = self.write_blob(&request.payload)?;
+            tb.insert("payload", payload_oid, FileMode::Blob.into())
+                .map_err(|e| format!("insert payload failed: {e}"))?;
+
+            self.insert_field(&mut tb, "type", "request")?;
+            self.insert_field(&mut tb, "agent_id", agent_name)?;
+            self.insert_field(&mut tb, "service", service.service_type().as_str())?;
+            self.insert_field(&mut tb, "backend", service.backend_str())?;
+            self.insert_field(&mut tb, "operation", operation.as_str())?;
+            self.insert_field(&mut tb, "sequence", &sequence.as_u32().to_string())?;
+            if let Some(ref state) = request.state {
+                self.insert_field(&mut tb, "state", state)?;
+            }
+            if let Some(ref checkpoint) = request.checkpoint {
+                self.insert_field(&mut tb, "checkpoint", checkpoint)?;
+            }
+            self.insert_diagnostics_toml(&mut tb, &request.diagnostics)?;
+
+            let diagnostics_json = serde_json::to_vec(&request.diagnostics).unwrap_or_default();
+            let canonical_hash = hash_dag_node(
+                &request.payload,
+                &canonical_parent,
+                &MessageType::Request,
+                &diagnostics_json,
+                &key.session,
+            );
+            self.insert_field(&mut tb, "hash", canonical_hash.as_str())?;
+
+            let msg_tree_oid = tb
+                .write()
+                .map_err(|e| format!("write message subtree failed: {e}"))?;
+
+            self.nest_and_commit(
+                msg_tree_oid,
+                agent_name,
+                session_id,
+                from,
+                to,
+                msg_type,
+                "main",
+                parent_commit_oid,
+                created_at,
+                key.submission.as_str(),
+                request.state.as_deref(),
+                request.checkpoint.as_deref(),
+                "v1",
+                None,
+            )
+        })();
+
+        if let Err(e) = result {
+            tracing::error!(error = %e, "Failed to write git commit for request");
+        }
+    }
+
+    fn on_response(
+        &mut self,
+        key: &DataRoutingKey,
+        response: &vlinder_core::domain::ResponseMessageV2,
+        created_at: DateTime<Utc>,
+    ) {
+        let DataMessageKind::Response {
+            agent,
+            service,
+            operation,
+            sequence,
+        } = &key.kind
+        else {
+            tracing::error!("on_response called with non-Response key");
+            return;
+        };
+
+        let result = (|| -> Result<(), String> {
+            let session_id = key.session.as_str();
+            let agent_name = agent.as_str();
+            let from = &format!("{}.{}", service.service_type(), service.backend_str());
+            let to = agent_name;
+            let msg_type = "response";
+
+            let parent_commit_oid = self.head_commit();
+            let canonical_parent = match parent_commit_oid {
+                Some(oid) => {
+                    let commit = self
+                        .repo
+                        .find_commit(oid)
+                        .map_err(|e| format!("find commit failed: {e}"))?;
+                    let tree = commit
+                        .tree()
+                        .map_err(|e| format!("tree lookup failed: {e}"))?;
+                    DagNodeId::from(
+                        self.session_canonical_hash_from_tree(&tree, agent_name, session_id),
+                    )
+                }
+                None => DagNodeId::root(),
+            };
+
+            let mut tb = self
+                .repo
+                .treebuilder(None)
+                .map_err(|e| format!("treebuilder failed: {e}"))?;
+
+            let created_at_str = created_at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+
+            self.insert_field(&mut tb, "session_id", session_id)?;
+            self.insert_field(&mut tb, "submission_id", key.submission.as_str())?;
+            self.insert_field(&mut tb, "protocol_version", "v1")?;
+            self.insert_field(&mut tb, "created_at", &created_at_str)?;
+
+            let payload_oid = self.write_blob(&response.payload)?;
+            tb.insert("payload", payload_oid, FileMode::Blob.into())
+                .map_err(|e| format!("insert payload failed: {e}"))?;
+
+            self.insert_field(&mut tb, "type", "response")?;
+            self.insert_field(&mut tb, "agent_id", agent_name)?;
+            self.insert_field(&mut tb, "service", service.service_type().as_str())?;
+            self.insert_field(&mut tb, "backend", service.backend_str())?;
+            self.insert_field(&mut tb, "operation", operation.as_str())?;
+            self.insert_field(&mut tb, "sequence", &sequence.as_u32().to_string())?;
+            self.insert_field(&mut tb, "correlation_id", response.correlation_id.as_str())?;
+            if let Some(ref state) = response.state {
+                self.insert_field(&mut tb, "state", state)?;
+            }
+            if let Some(ref checkpoint) = response.checkpoint {
+                self.insert_field(&mut tb, "checkpoint", checkpoint)?;
+            }
+            self.insert_diagnostics_toml(&mut tb, &response.diagnostics)?;
+
+            let diagnostics_json = serde_json::to_vec(&response.diagnostics).unwrap_or_default();
+            let canonical_hash = hash_dag_node(
+                &response.payload,
+                &canonical_parent,
+                &MessageType::Response,
+                &diagnostics_json,
+                &key.session,
+            );
+            self.insert_field(&mut tb, "hash", canonical_hash.as_str())?;
+
+            let msg_tree_oid = tb
+                .write()
+                .map_err(|e| format!("write message subtree failed: {e}"))?;
+
+            self.nest_and_commit(
+                msg_tree_oid,
+                agent_name,
+                session_id,
+                from,
+                to,
+                msg_type,
+                "main",
+                parent_commit_oid,
+                created_at,
+                key.submission.as_str(),
+                response.state.as_deref(),
+                response.checkpoint.as_deref(),
+                "v1",
+                None,
+            )
+        })();
+
+        if let Err(e) = result {
+            tracing::error!(error = %e, "Failed to write git commit for response");
+        }
+    }
 }
 
 /// Extract (from, to, `type_str`) from an `ObservableMessage` for commit metadata.

@@ -203,6 +203,24 @@ pub trait DagWorker: Send {
         // Default no-op — implementations opt in.
     }
 
+    /// Persist a request message (data-plane path, ADR 121).
+    fn on_request(
+        &mut self,
+        _key: &super::DataRoutingKey,
+        _msg: &super::RequestMessageV2,
+        _created_at: DateTime<Utc>,
+    ) {
+    }
+
+    /// Persist a response message (data-plane path, ADR 121).
+    fn on_response(
+        &mut self,
+        _key: &super::DataRoutingKey,
+        _msg: &super::ResponseMessageV2,
+        _created_at: DateTime<Utc>,
+    ) {
+    }
+
     /// Persist a complete message (data-plane path, ADR 121).
     fn on_complete(
         &mut self,
