@@ -12,8 +12,8 @@
 use super::{
     AgentName, CompleteMessage, DataMessageKind, DataRoutingKey, DelegateMessage,
     DelegateReplyMessage, ForkMessage, HarnessType, InvokeMessage, Operation, PromoteMessage,
-    RepairMessage, RequestMessage, RequestMessageV2, ResourceId, ResponseMessage,
-    ResponseMessageV2, RoutingKey, Sequence, ServiceBackend, SubmissionId,
+    RepairMessage, RequestMessageV2, ResourceId, ResponseMessageV2, RoutingKey, Sequence,
+    ServiceBackend, SubmissionId,
 };
 use std::fmt;
 
@@ -41,16 +41,6 @@ pub trait MessageQueue {
         &self,
         agent: &AgentName,
     ) -> Result<(DataRoutingKey, InvokeMessage, Acknowledgement), QueueError>;
-
-    /// Send a `RequestMessage` (Runtime → Service).
-    ///
-    /// Implementation determines routing from message dimensions.
-    fn send_request(&self, msg: RequestMessage) -> Result<(), QueueError>;
-
-    /// Send a `ResponseMessage` (Service → Runtime).
-    ///
-    /// Implementation determines routing from message dimensions.
-    fn send_response(&self, msg: ResponseMessage) -> Result<(), QueueError>;
 
     // -------------------------------------------------------------------------
     // Complete (ADR 121 — data plane)
@@ -121,29 +111,6 @@ pub trait MessageQueue {
     ) -> Result<(DataRoutingKey, ResponseMessageV2, Acknowledgement), QueueError> {
         Err(QueueError::Timeout)
     }
-
-    // -------------------------------------------------------------------------
-    // Typed receive methods (ADR 044)
-    // -------------------------------------------------------------------------
-
-    /// Receive a `RequestMessage` for a service-backend/operation pair.
-    ///
-    /// Used by workers to receive typed service requests.
-    /// Returns the typed message with all dimensions intact.
-    fn receive_request(
-        &self,
-        service: ServiceBackend,
-        operation: Operation,
-    ) -> Result<(RequestMessage, Acknowledgement), QueueError>;
-
-    /// Receive a `ResponseMessage` for the given request.
-    ///
-    /// The queue builds the filter pattern from the request's dimensions.
-    /// Returns the typed message with all dimensions intact.
-    fn receive_response(
-        &self,
-        request: &RequestMessage,
-    ) -> Result<(ResponseMessage, Acknowledgement), QueueError>;
 
     // -------------------------------------------------------------------------
     // Delegation methods (ADR 056, ADR 096 §7)
@@ -225,15 +192,6 @@ pub trait MessageQueue {
 
     /// Send a service request and block until the response arrives.
     ///
-    /// Used by agents (via sidecar provider server) for service calls.
-    fn call_service(&self, msg: RequestMessage) -> Result<ResponseMessage, QueueError> {
-        let msg_for_recv = msg.clone();
-        send_and_wait(
-            || self.send_request(msg),
-            || self.receive_response(&msg_for_recv),
-        )
-    }
-
     /// Send a service request on the data plane and block until the response arrives.
     ///
     /// Data-plane variant of `call_service`. Routing key carries session/branch/submission/

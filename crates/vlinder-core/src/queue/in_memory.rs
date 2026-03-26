@@ -3,14 +3,11 @@
 use crate::domain::{
     Acknowledgement, AgentName, CompleteMessage, DataMessageKind, DataRoutingKey, DelegateMessage,
     DelegateReplyMessage, ForkMessage, HarnessType, InvokeMessage, MessageQueue, ObservableMessage,
-    ObservableMessageV2, Operation, QueueError, RepairMessage, RequestMessage, RequestMessageV2,
-    ResponseMessage, ResponseMessageV2, RoutingKey, RoutingKind, Sequence, ServiceBackend,
-    SubmissionId,
+    ObservableMessageV2, Operation, QueueError, RepairMessage, RequestMessageV2, ResponseMessageV2,
+    RoutingKey, RoutingKind, Sequence, ServiceBackend, SubmissionId,
 };
 #[cfg(test)]
-use crate::domain::{
-    DelegateDiagnostics, InvokeDiagnostics, RequestDiagnostics, RuntimeDiagnostics,
-};
+use crate::domain::{DelegateDiagnostics, InvokeDiagnostics, RuntimeDiagnostics};
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
@@ -167,16 +164,6 @@ impl MessageQueue for InMemoryQueue {
         Err(QueueError::Timeout)
     }
 
-    fn send_request(&self, msg: RequestMessage) -> Result<(), QueueError> {
-        let key = msg.routing_key();
-        let mut typed = self.typed_queues.lock().unwrap();
-        typed
-            .entry(key)
-            .or_default()
-            .push_back(ObservableMessage::Request(msg));
-        Ok(())
-    }
-
     fn send_response_v2(
         &self,
         key: DataRoutingKey,
@@ -223,70 +210,6 @@ impl MessageQueue for InMemoryQueue {
                 if let Some(ObservableMessageV2::ResponseV2 { msg, .. }) = queue.pop_front() {
                     let key = key.clone();
                     return Ok((key, msg, Box::new(|| Ok(()))));
-                }
-            }
-        }
-
-        Err(QueueError::Timeout)
-    }
-
-    fn send_response(&self, msg: ResponseMessage) -> Result<(), QueueError> {
-        let key = msg.routing_key();
-        let mut typed = self.typed_queues.lock().unwrap();
-        typed
-            .entry(key)
-            .or_default()
-            .push_back(ObservableMessage::Response(msg));
-        Ok(())
-    }
-
-    fn receive_request(
-        &self,
-        service: ServiceBackend,
-        operation: Operation,
-    ) -> Result<(RequestMessage, Acknowledgement), QueueError> {
-        let mut typed = self.typed_queues.lock().unwrap();
-
-        for (key, queue) in typed.iter_mut() {
-            let matches = match key {
-                RoutingKey {
-                    kind:
-                        RoutingKind::Request {
-                            service: svc,
-                            operation: op,
-                            ..
-                        },
-                    ..
-                } => *svc == service && *op == operation,
-                _ => false,
-            };
-            if matches {
-                if let Some(ObservableMessage::Request(msg)) = queue.front() {
-                    let msg = msg.clone();
-                    queue.pop_front();
-                    return Ok((msg, Box::new(|| Ok(()))));
-                }
-            }
-        }
-
-        Err(QueueError::Timeout)
-    }
-
-    fn receive_response(
-        &self,
-        request: &RequestMessage,
-    ) -> Result<(ResponseMessage, Acknowledgement), QueueError> {
-        // Exact lookup via reply_key (ADR 096 §6).
-        let reply_key = request
-            .routing_key()
-            .reply_key(None)
-            .expect("Request routing key always produces a Response reply key");
-        let mut typed = self.typed_queues.lock().unwrap();
-
-        if let Some(queue) = typed.get_mut(&reply_key) {
-            if let Some(ObservableMessage::Response(_)) = queue.front() {
-                if let Some(ObservableMessage::Response(msg)) = queue.pop_front() {
-                    return Ok((msg, Box::new(|| Ok(()))));
                 }
             }
         }
@@ -425,11 +348,8 @@ impl MessageQueue for InMemoryQueue {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{BranchId, DagNodeId, MessageId, Sequence, SessionId, SubmissionId};
-    use crate::domain::{
-        InferenceBackendType, Nonce, ObjectStorageType, Operation, RoutingKind, RuntimeType,
-        VectorStorageType,
-    };
+    use crate::domain::{BranchId, DagNodeId, MessageId, SessionId, SubmissionId};
+    use crate::domain::{Nonce, RoutingKind, RuntimeType};
 
     fn test_agent_id() -> AgentName {
         AgentName::new("echo-agent")
@@ -526,128 +446,6 @@ mod tests {
             recv_key.kind,
             DataMessageKind::Invoke { ref agent, harness: HarnessType::Web, .. } if *agent == agent_id
         ));
-    }
-
-    #[test]
-    fn receive_request_returns_typed_message() {
-        let queue = InMemoryQueue::new();
-
-        let request = RequestMessage::new(
-            BranchId::from(1),
-            test_submission(),
-            SessionId::new(),
-            test_agent_id(),
-            ServiceBackend::Kv(ObjectStorageType::Sqlite),
-            Operation::Get,
-            Sequence::first(),
-            b"key".to_vec(),
-            None,
-            RequestDiagnostics {
-                sequence: 0,
-                endpoint: String::new(),
-                request_bytes: 0,
-                received_at_ms: 0,
-            },
-        );
-        let original_id = request.id.clone();
-
-        queue.send_request(request).unwrap();
-
-        // Receive by service/backend/operation
-        let (received, ack) = queue
-            .receive_request(
-                ServiceBackend::Kv(ObjectStorageType::Sqlite),
-                Operation::Get,
-            )
-            .unwrap();
-
-        assert_eq!(received.id, original_id);
-        assert_eq!(
-            received.service,
-            ServiceBackend::Kv(ObjectStorageType::Sqlite)
-        );
-        assert_eq!(received.operation, Operation::Get);
-        assert_eq!(received.payload.as_slice(), b"key");
-
-        ack().unwrap();
-    }
-
-    #[test]
-    fn receive_request_preserves_all_dimensions() {
-        let queue = InMemoryQueue::new();
-
-        let submission = test_submission();
-        let agent_id = test_agent_id();
-
-        let request = RequestMessage::new(
-            BranchId::from(1),
-            submission.clone(),
-            SessionId::new(),
-            agent_id.clone(),
-            ServiceBackend::Vec(VectorStorageType::SqliteVec),
-            Operation::Search,
-            Sequence::from(3),
-            b"query".to_vec(),
-            None,
-            RequestDiagnostics {
-                sequence: 0,
-                endpoint: String::new(),
-                request_bytes: 0,
-                received_at_ms: 0,
-            },
-        );
-
-        queue.send_request(request).unwrap();
-
-        let (received, _) = queue
-            .receive_request(
-                ServiceBackend::Vec(VectorStorageType::SqliteVec),
-                Operation::Search,
-            )
-            .unwrap();
-
-        // All dimensions preserved for reply construction
-        assert_eq!(received.submission, submission);
-        assert_eq!(received.agent_id, agent_id);
-        assert_eq!(received.sequence, Sequence::from(3));
-    }
-
-    #[test]
-    fn receive_request_matches_infer_run() {
-        let queue = InMemoryQueue::new();
-
-        let request = RequestMessage::new(
-            BranchId::from(1),
-            test_submission(),
-            SessionId::new(),
-            test_agent_id(),
-            ServiceBackend::Infer(InferenceBackendType::Ollama),
-            Operation::Run,
-            Sequence::first(),
-            b"prompt".to_vec(),
-            None,
-            RequestDiagnostics {
-                sequence: 0,
-                endpoint: String::new(),
-                request_bytes: 0,
-                received_at_ms: 0,
-            },
-        );
-
-        queue.send_request(request).unwrap();
-
-        let (received, _) = queue
-            .receive_request(
-                ServiceBackend::Infer(InferenceBackendType::Ollama),
-                Operation::Run,
-            )
-            .unwrap();
-
-        assert_eq!(
-            received.service,
-            ServiceBackend::Infer(InferenceBackendType::Ollama)
-        );
-        assert_eq!(received.operation, Operation::Run);
     }
 
     // ========================================================================

@@ -7,8 +7,8 @@ use std::time::Instant;
 use async_openai::types::chat::{CreateChatCompletionRequest, CreateChatCompletionResponse};
 use vlinder_core::domain::{
     DagNodeId, DataMessageKind, DataRoutingKey, InferenceBackendType, MessageId, MessageQueue,
-    Operation, RequestMessageV2, ResponseMessage, ResponseMessageV2, ServiceBackend,
-    ServiceDiagnostics, ServiceMetrics, ServiceType,
+    Operation, RequestMessageV2, ResponseMessageV2, ServiceBackend, ServiceDiagnostics,
+    ServiceMetrics, ServiceType,
 };
 
 /// Handler result: the raw HTTP response + extracted metrics.
@@ -58,7 +58,6 @@ impl OpenRouterWorker {
 
     /// Process one message if available. Returns true if a message was processed.
     pub fn tick(&self) -> bool {
-        // Try v2 data-plane first
         if let Ok((key, msg, ack)) = self.queue.receive_request_v2(
             ServiceBackend::Infer(InferenceBackendType::OpenRouter),
             Operation::Run,
@@ -67,44 +66,7 @@ impl OpenRouterWorker {
             return true;
         }
 
-        // Fall back to v1
-        match self.queue.receive_request(
-            ServiceBackend::Infer(InferenceBackendType::OpenRouter),
-            Operation::Run,
-        ) {
-            Ok((request, ack)) => {
-                let start = Instant::now();
-
-                let (http_response, metrics) = self.handle(request.payload.as_slice());
-
-                let status_code = http_response.status().as_u16();
-                let wire = vlinder_core::domain::wire::WireResponse {
-                    inner: http_response,
-                };
-                let response_payload = serde_json::to_vec(&wire).unwrap_or_default();
-
-                let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
-
-                let diag = ServiceDiagnostics {
-                    service: ServiceType::Infer,
-                    backend: "openrouter".to_string(),
-                    duration_ms,
-                    metrics,
-                };
-
-                let mut response = ResponseMessage::from_request_with_diagnostics(
-                    &request,
-                    response_payload,
-                    diag,
-                );
-                response.state.clone_from(&request.state);
-                response.status_code = status_code;
-                let _ = self.queue.send_response(response);
-                let _ = ack();
-                true
-            }
-            Err(_) => false,
-        }
+        false
     }
 
     fn process_v2(
@@ -241,8 +203,8 @@ fn openai_error_json(message: &str, error_type: &str) -> Vec<u8> {
 mod tests {
     use super::*;
     use vlinder_core::domain::{
-        AgentName, BranchId, InferenceBackendType, RequestDiagnostics, RequestMessage, Sequence,
-        ServiceBackend, SessionId, SubmissionId,
+        AgentName, BranchId, InferenceBackendType, RequestDiagnostics, RequestMessageV2,
+        ResponseMessageV2, Sequence, ServiceBackend, SessionId, SubmissionId,
     };
     use vlinder_core::queue::InMemoryQueue;
 
@@ -255,30 +217,45 @@ mod tests {
         }
     }
 
+    fn test_submission() -> SubmissionId {
+        SubmissionId::from("sub-test".to_string())
+    }
+
     fn send_request(
         queue: &Arc<dyn MessageQueue + Send + Sync>,
         payload: Vec<u8>,
         state: Option<String>,
-    ) -> RequestMessage {
-        let request = RequestMessage::new(
-            BranchId::from(1),
-            SubmissionId::from("sub-test".to_string()),
-            SessionId::new(),
-            AgentName::new("test-agent"),
-            ServiceBackend::Infer(InferenceBackendType::OpenRouter),
-            Operation::Run,
-            Sequence::first(),
-            payload,
+    ) -> (SubmissionId, ServiceBackend, Operation, Sequence) {
+        let submission = test_submission();
+        let service = ServiceBackend::Infer(InferenceBackendType::OpenRouter);
+        let operation = Operation::Run;
+        let sequence = Sequence::first();
+        let key = DataRoutingKey {
+            session: SessionId::new(),
+            branch: BranchId::from(1),
+            submission: submission.clone(),
+            kind: DataMessageKind::Request {
+                agent: AgentName::new("test-agent"),
+                service,
+                operation,
+                sequence,
+            },
+        };
+        let msg = RequestMessageV2 {
+            id: MessageId::new(),
+            dag_id: DagNodeId::root(),
             state,
-            test_request_diag(),
-        );
-        queue.send_request(request.clone()).unwrap();
-        request
+            diagnostics: test_request_diag(),
+            payload,
+            checkpoint: None,
+        };
+        queue.send_request_v2(key, msg).unwrap();
+        (submission, service, operation, sequence)
     }
 
     /// Unwrap the `WireResponse` envelope from a response payload, returning
     /// the HTTP status and body for assertions.
-    fn unwrap_wire(response: &ResponseMessage) -> (u16, Vec<u8>) {
+    fn unwrap_wire(response: &ResponseMessageV2) -> (u16, Vec<u8>) {
         if let Ok(wire) =
             serde_json::from_slice::<vlinder_core::domain::wire::WireResponse>(&response.payload)
         {
@@ -297,10 +274,10 @@ mod tests {
             "test-key".to_string(),
         );
 
-        let request = send_request(&queue, b"not json".to_vec(), None);
+        let (sub, svc, op, seq) = send_request(&queue, b"not json".to_vec(), None);
         assert!(worker.tick());
 
-        let (response, ack) = queue.receive_response(&request).unwrap();
+        let (_key, response, ack) = queue.receive_response_v2(&sub, svc, op, seq).unwrap();
         let (status, body) = unwrap_wire(&response);
         assert_eq!(status, 400);
         let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
@@ -322,14 +299,14 @@ mod tests {
             "model": "anthropic/claude-sonnet-4",
             "messages": [{"role": "user", "content": "hello"}]
         });
-        let request = send_request(
+        let (sub, svc, op, seq) = send_request(
             &queue,
             serde_json::to_vec(&body).unwrap(),
             Some("xyz".to_string()),
         );
         assert!(worker.tick());
 
-        let (response, ack) = queue.receive_response(&request).unwrap();
+        let (_key, response, ack) = queue.receive_response_v2(&sub, svc, op, seq).unwrap();
         assert_eq!(
             response.state,
             Some("xyz".to_string()),
@@ -351,10 +328,10 @@ mod tests {
             "model": "anthropic/claude-sonnet-4",
             "messages": [{"role": "user", "content": "hello"}]
         });
-        let request = send_request(&queue, serde_json::to_vec(&body).unwrap(), None);
+        let (sub, svc, op, seq) = send_request(&queue, serde_json::to_vec(&body).unwrap(), None);
         assert!(worker.tick());
 
-        let (response, ack) = queue.receive_response(&request).unwrap();
+        let (_key, response, ack) = queue.receive_response_v2(&sub, svc, op, seq).unwrap();
         let (status, body) = unwrap_wire(&response);
         assert_eq!(status, 500);
         let body: serde_json::Value = serde_json::from_slice(&body).unwrap();

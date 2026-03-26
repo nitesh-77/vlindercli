@@ -14,11 +14,9 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use vlinder_core::domain::Registry;
-#[cfg(test)]
-use vlinder_core::domain::RequestMessage;
 use vlinder_core::domain::{
     DagNodeId, DataMessageKind, DataRoutingKey, MessageId, MessageQueue, Operation,
-    ResponseMessage, ResponseMessageV2, ServiceBackend, ServiceDiagnostics,
+    ResponseMessageV2, ServiceBackend, ServiceDiagnostics,
 };
 
 use crate::state_store::{hash_snapshot, hash_state_commit, hash_value, SqliteStateStore};
@@ -191,52 +189,19 @@ impl KvWorker {
 
     /// Process one message if available. Returns true if processed.
     pub fn tick(&self) -> bool {
-        // Try v2 data-plane first, fall back to v1
-        if self.try_get_v2() || self.try_get() {
+        if self.try_get_v2() {
             return true;
         }
-        if self.try_put_v2() || self.try_put() {
+        if self.try_put_v2() {
             return true;
         }
-        if self.try_list_v2() || self.try_list() {
+        if self.try_list_v2() {
             return true;
         }
-        if self.try_delete_v2() || self.try_delete() {
+        if self.try_delete_v2() {
             return true;
         }
         false
-    }
-
-    fn try_get(&self) -> bool {
-        match self.queue.receive_request(self.service, Operation::Get) {
-            Ok((request, ack)) => {
-                let start = std::time::Instant::now();
-                let response_payload = self.handle_get(
-                    request.agent_id.as_str(),
-                    request.session.as_str(),
-                    &request.payload,
-                    request.state.as_deref(),
-                );
-                let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
-                let diag = ServiceDiagnostics::storage(
-                    self.service.service_type(),
-                    self.service.backend_str(),
-                    Operation::Get,
-                    response_payload.len() as u64,
-                    duration_ms,
-                );
-                let mut response = ResponseMessage::from_request_with_diagnostics(
-                    &request,
-                    response_payload,
-                    diag,
-                );
-                response.state.clone_from(&request.state);
-                let _ = self.queue.send_response(response);
-                let _ = ack();
-                true
-            }
-            Err(_) => false,
-        }
     }
 
     fn try_get_v2(&self) -> bool {
@@ -266,39 +231,6 @@ impl KvWorker {
                     checkpoint: msg.checkpoint,
                 };
                 let _ = self.queue.send_response_v2(response_key, response);
-                let _ = ack();
-                true
-            }
-            Err(_) => false,
-        }
-    }
-
-    fn try_put(&self) -> bool {
-        match self.queue.receive_request(self.service, Operation::Put) {
-            Ok((request, ack)) => {
-                let start = std::time::Instant::now();
-                let (response_payload, new_state) = self.handle_put(
-                    request.agent_id.as_str(),
-                    request.session.as_str(),
-                    &request.payload,
-                    request.state.as_deref(),
-                );
-                let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
-                let diag = ServiceDiagnostics::storage(
-                    self.service.service_type(),
-                    self.service.backend_str(),
-                    Operation::Put,
-                    response_payload.len() as u64,
-                    duration_ms,
-                );
-                let mut response = ResponseMessage::from_request_with_diagnostics(
-                    &request,
-                    response_payload,
-                    diag,
-                );
-                // For put: use the new state hash from versioned_put, or echo request.state
-                response.state = new_state.or_else(|| request.state.clone());
-                let _ = self.queue.send_response(response);
                 let _ = ack();
                 true
             }
@@ -340,38 +272,6 @@ impl KvWorker {
         }
     }
 
-    fn try_list(&self) -> bool {
-        match self.queue.receive_request(self.service, Operation::List) {
-            Ok((request, ack)) => {
-                let start = std::time::Instant::now();
-                let response_payload = self.handle_list(
-                    request.agent_id.as_str(),
-                    request.session.as_str(),
-                    &request.payload,
-                    request.state.as_deref(),
-                );
-                let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
-                let diag = ServiceDiagnostics::storage(
-                    self.service.service_type(),
-                    self.service.backend_str(),
-                    Operation::List,
-                    response_payload.len() as u64,
-                    duration_ms,
-                );
-                let mut response = ResponseMessage::from_request_with_diagnostics(
-                    &request,
-                    response_payload,
-                    diag,
-                );
-                response.state.clone_from(&request.state);
-                let _ = self.queue.send_response(response);
-                let _ = ack();
-                true
-            }
-            Err(_) => false,
-        }
-    }
-
     fn try_list_v2(&self) -> bool {
         match self.queue.receive_request_v2(self.service, Operation::List) {
             Ok((key, msg, ack)) => {
@@ -399,37 +299,6 @@ impl KvWorker {
                     checkpoint: msg.checkpoint,
                 };
                 let _ = self.queue.send_response_v2(response_key, response);
-                let _ = ack();
-                true
-            }
-            Err(_) => false,
-        }
-    }
-
-    fn try_delete(&self) -> bool {
-        match self.queue.receive_request(self.service, Operation::Delete) {
-            Ok((request, ack)) => {
-                let start = std::time::Instant::now();
-                let response_payload = self.handle_delete(
-                    request.agent_id.as_str(),
-                    request.session.as_str(),
-                    &request.payload,
-                );
-                let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
-                let diag = ServiceDiagnostics::storage(
-                    self.service.service_type(),
-                    self.service.backend_str(),
-                    Operation::Delete,
-                    response_payload.len() as u64,
-                    duration_ms,
-                );
-                let mut response = ResponseMessage::from_request_with_diagnostics(
-                    &request,
-                    response_payload,
-                    diag,
-                );
-                response.state.clone_from(&request.state);
-                let _ = self.queue.send_response(response);
                 let _ = ack();
                 true
             }
@@ -722,8 +591,8 @@ mod tests {
     use vlinder_core::domain::SecretStore;
     use vlinder_core::domain::{Agent, AgentName, Registry};
     use vlinder_core::domain::{
-        BranchId, ObjectStorageType, Operation, RequestDiagnostics, Sequence, ServiceBackend,
-        SessionId, SubmissionId,
+        BranchId, ObjectStorageType, Operation, RequestDiagnostics, RequestMessageV2, Sequence,
+        ServiceBackend, SessionId, SubmissionId,
     };
     use vlinder_core::queue::InMemoryQueue;
 
@@ -763,6 +632,38 @@ mod tests {
         Agent::from_toml(&manifest).unwrap()
     }
 
+    fn make_request_key(
+        session: SessionId,
+        submission: SubmissionId,
+        agent: AgentName,
+        service: ServiceBackend,
+        operation: Operation,
+        sequence: Sequence,
+    ) -> DataRoutingKey {
+        DataRoutingKey {
+            session,
+            branch: BranchId::from(1),
+            submission,
+            kind: DataMessageKind::Request {
+                agent,
+                service,
+                operation,
+                sequence,
+            },
+        }
+    }
+
+    fn make_request_msg(payload: Vec<u8>, state: Option<String>) -> RequestMessageV2 {
+        RequestMessageV2 {
+            id: MessageId::new(),
+            dag_id: DagNodeId::root(),
+            state,
+            diagnostics: test_request_diag(),
+            payload,
+            checkpoint: None,
+        }
+    }
+
     #[test]
     fn handles_put_and_get() {
         let dir = tempfile::tempdir().unwrap();
@@ -782,49 +683,49 @@ mod tests {
         );
 
         let session = SessionId::new();
+        let submission = test_submission();
+        let service = ServiceBackend::Kv(ObjectStorageType::Sqlite);
 
         // Put request — no base64, plain string
         let put_payload = serde_json::json!({
             "path": "/hello.txt",
             "content": "hello world"
         });
-        let put_request = RequestMessage::new(
-            BranchId::from(1),
-            test_submission(),
+        let put_key = make_request_key(
             session.clone(),
+            submission.clone(),
             test_agent_id(),
-            ServiceBackend::Kv(ObjectStorageType::Sqlite),
+            service,
             Operation::Put,
             Sequence::first(),
-            serde_json::to_vec(&put_payload).unwrap(),
-            None,
-            test_request_diag(),
         );
+        let put_msg = make_request_msg(serde_json::to_vec(&put_payload).unwrap(), None);
 
-        queue.send_request(put_request.clone()).unwrap();
+        queue.send_request_v2(put_key, put_msg).unwrap();
         assert!(handler.tick());
-        let (response, ack) = queue.receive_response(&put_request).unwrap();
+        let (_key, response, ack) = queue
+            .receive_response_v2(&submission, service, Operation::Put, Sequence::first())
+            .unwrap();
         assert_eq!(response.payload.as_slice(), b"ok");
         ack().unwrap();
 
         // Get request
         let get_payload = serde_json::json!({"path": "/hello.txt"});
-        let get_request = RequestMessage::new(
-            BranchId::from(1),
-            test_submission(),
+        let get_key = make_request_key(
             session,
+            submission.clone(),
             test_agent_id(),
-            ServiceBackend::Kv(ObjectStorageType::Sqlite),
+            service,
             Operation::Get,
             Sequence::from(2),
-            serde_json::to_vec(&get_payload).unwrap(),
-            None,
-            test_request_diag(),
         );
+        let get_msg = make_request_msg(serde_json::to_vec(&get_payload).unwrap(), None);
 
-        queue.send_request(get_request.clone()).unwrap();
+        queue.send_request_v2(get_key, get_msg).unwrap();
         assert!(handler.tick());
-        let (response, ack) = queue.receive_response(&get_request).unwrap();
+        let (_key, response, ack) = queue
+            .receive_response_v2(&submission, service, Operation::Get, Sequence::from(2))
+            .unwrap();
         assert_eq!(response.payload.as_slice(), b"hello world");
         ack().unwrap();
     }
@@ -847,28 +748,33 @@ mod tests {
             ServiceBackend::Kv(ObjectStorageType::Sqlite),
         );
 
+        let submission = test_submission();
+        let service = ServiceBackend::Kv(ObjectStorageType::Sqlite);
+
         let put_payload = serde_json::json!({
             "path": "/todos.json",
             "content": "[\"buy milk\"]"
         });
         // State comes from the envelope (empty string = root state)
-        let put_request = RequestMessage::new(
-            BranchId::from(1),
-            test_submission(),
+        let put_key = make_request_key(
             SessionId::new(),
+            submission.clone(),
             test_agent_id(),
-            ServiceBackend::Kv(ObjectStorageType::Sqlite),
+            service,
             Operation::Put,
             Sequence::first(),
+        );
+        let put_msg = make_request_msg(
             serde_json::to_vec(&put_payload).unwrap(),
             Some(String::new()), // root state via envelope
-            test_request_diag(),
         );
 
-        queue.send_request(put_request.clone()).unwrap();
+        queue.send_request_v2(put_key, put_msg).unwrap();
         assert!(handler.tick());
 
-        let (response, ack) = queue.receive_response(&put_request).unwrap();
+        let (_key, response, ack) = queue
+            .receive_response_v2(&submission, service, Operation::Put, Sequence::first())
+            .unwrap();
         ack().unwrap();
 
         // Response should be JSON with a state field
@@ -899,45 +805,48 @@ mod tests {
         );
 
         let session = SessionId::new();
+        let submission = test_submission();
+        let service = ServiceBackend::Kv(ObjectStorageType::Sqlite);
 
         // First put
         let put1 = serde_json::json!({"path": "/a.txt", "content": "aaa"});
-        let req1 = RequestMessage::new(
-            BranchId::from(1),
-            test_submission(),
+        let key1 = make_request_key(
             session.clone(),
+            submission.clone(),
             test_agent_id(),
-            ServiceBackend::Kv(ObjectStorageType::Sqlite),
+            service,
             Operation::Put,
             Sequence::first(),
-            serde_json::to_vec(&put1).unwrap(),
-            Some(String::new()),
-            test_request_diag(),
         );
-        queue.send_request(req1.clone()).unwrap();
+        let msg1 = make_request_msg(serde_json::to_vec(&put1).unwrap(), Some(String::new()));
+        queue.send_request_v2(key1, msg1).unwrap();
         handler.tick();
-        let (resp1, ack) = queue.receive_response(&req1).unwrap();
+        let (_key, resp1, ack) = queue
+            .receive_response_v2(&submission, service, Operation::Put, Sequence::first())
+            .unwrap();
         ack().unwrap();
         let state1: serde_json::Value = serde_json::from_slice(resp1.payload.as_slice()).unwrap();
         let hash1 = state1["state"].as_str().unwrap().to_string();
 
         // Second put chained from first — state via envelope
         let put2 = serde_json::json!({"path": "/b.txt", "content": "bbb"});
-        let req2 = RequestMessage::new(
-            BranchId::from(1),
-            test_submission(),
+        let key2 = make_request_key(
             session.clone(),
+            submission.clone(),
             test_agent_id(),
-            ServiceBackend::Kv(ObjectStorageType::Sqlite),
+            service,
             Operation::Put,
             Sequence::from(2),
+        );
+        let msg2 = make_request_msg(
             serde_json::to_vec(&put2).unwrap(),
             Some(hash1.clone()), // chain from previous state via envelope
-            test_request_diag(),
         );
-        queue.send_request(req2.clone()).unwrap();
+        queue.send_request_v2(key2, msg2).unwrap();
         handler.tick();
-        let (resp2, ack) = queue.receive_response(&req2).unwrap();
+        let (_key, resp2, ack) = queue
+            .receive_response_v2(&submission, service, Operation::Put, Sequence::from(2))
+            .unwrap();
         ack().unwrap();
         let state2: serde_json::Value = serde_json::from_slice(resp2.payload.as_slice()).unwrap();
         let hash2 = state2["state"].as_str().unwrap().to_string();
@@ -947,21 +856,23 @@ mod tests {
 
         // Reading /a.txt from state2 should still work (inherited from snapshot)
         let get = serde_json::json!({"path": "/a.txt"});
-        let get_req = RequestMessage::new(
-            BranchId::from(1),
-            test_submission(),
+        let get_key = make_request_key(
             session,
+            submission.clone(),
             test_agent_id(),
-            ServiceBackend::Kv(ObjectStorageType::Sqlite),
+            service,
             Operation::Get,
             Sequence::from(3),
+        );
+        let get_msg = make_request_msg(
             serde_json::to_vec(&get).unwrap(),
             Some(hash2.clone()), // state via envelope
-            test_request_diag(),
         );
-        queue.send_request(get_req.clone()).unwrap();
+        queue.send_request_v2(get_key, get_msg).unwrap();
         handler.tick();
-        let (resp, ack) = queue.receive_response(&get_req).unwrap();
+        let (_key, resp, ack) = queue
+            .receive_response_v2(&submission, service, Operation::Get, Sequence::from(3))
+            .unwrap();
         ack().unwrap();
         assert_eq!(resp.payload.as_slice(), b"aaa");
     }
@@ -984,83 +895,93 @@ mod tests {
             ServiceBackend::Kv(ObjectStorageType::Sqlite),
         );
         let session = SessionId::new();
+        let submission = test_submission();
+        let service = ServiceBackend::Kv(ObjectStorageType::Sqlite);
 
         // Put /a.txt → state1
-        let req1 = RequestMessage::new(
-            BranchId::from(1),
-            test_submission(),
+        let key1 = make_request_key(
             session.clone(),
+            submission.clone(),
             test_agent_id(),
-            ServiceBackend::Kv(ObjectStorageType::Sqlite),
+            service,
             Operation::Put,
             Sequence::first(),
+        );
+        let msg1 = make_request_msg(
             serde_json::to_vec(&serde_json::json!({"path": "/a.txt", "content": "aaa"})).unwrap(),
             Some(String::new()),
-            test_request_diag(),
         );
-        queue.send_request(req1.clone()).unwrap();
+        queue.send_request_v2(key1, msg1).unwrap();
         handler.tick();
-        let (resp1, ack) = queue.receive_response(&req1).unwrap();
+        let (_key, resp1, ack) = queue
+            .receive_response_v2(&submission, service, Operation::Put, Sequence::first())
+            .unwrap();
         ack().unwrap();
         let state1: serde_json::Value = serde_json::from_slice(resp1.payload.as_slice()).unwrap();
         let hash1 = state1["state"].as_str().unwrap().to_string();
 
         // Put /b.txt → state2
-        let req2 = RequestMessage::new(
-            BranchId::from(1),
-            test_submission(),
+        let key2 = make_request_key(
             session.clone(),
+            submission.clone(),
             test_agent_id(),
-            ServiceBackend::Kv(ObjectStorageType::Sqlite),
+            service,
             Operation::Put,
             Sequence::from(2),
+        );
+        let msg2 = make_request_msg(
             serde_json::to_vec(&serde_json::json!({"path": "/b.txt", "content": "bbb"})).unwrap(),
             Some(hash1.clone()),
-            test_request_diag(),
         );
-        queue.send_request(req2.clone()).unwrap();
+        queue.send_request_v2(key2, msg2).unwrap();
         handler.tick();
-        let (resp2, ack) = queue.receive_response(&req2).unwrap();
+        let (_key, resp2, ack) = queue
+            .receive_response_v2(&submission, service, Operation::Put, Sequence::from(2))
+            .unwrap();
         ack().unwrap();
         let state2: serde_json::Value = serde_json::from_slice(resp2.payload.as_slice()).unwrap();
         let hash2 = state2["state"].as_str().unwrap().to_string();
 
         // List from state2 — should see both files
-        let list_req2 = RequestMessage::new(
-            BranchId::from(1),
-            test_submission(),
+        let list_key2 = make_request_key(
             session.clone(),
+            submission.clone(),
             test_agent_id(),
-            ServiceBackend::Kv(ObjectStorageType::Sqlite),
+            service,
             Operation::List,
             Sequence::from(3),
+        );
+        let list_msg2 = make_request_msg(
             serde_json::to_vec(&serde_json::json!({"path": "/"})).unwrap(),
             Some(hash2),
-            test_request_diag(),
         );
-        queue.send_request(list_req2.clone()).unwrap();
+        queue.send_request_v2(list_key2, list_msg2).unwrap();
         handler.tick();
-        let (resp, ack) = queue.receive_response(&list_req2).unwrap();
+        let (_key, resp, ack) = queue
+            .receive_response_v2(&submission, service, Operation::List, Sequence::from(3))
+            .unwrap();
         ack().unwrap();
         let files: Vec<String> = serde_json::from_slice(resp.payload.as_slice()).unwrap();
         assert_eq!(files, vec!["/a.txt", "/b.txt"]);
 
         // List from state1 (time travel) — should only see /a.txt
-        let list_req1 = RequestMessage::new(
-            BranchId::from(1),
-            test_submission(),
+        let list_key1 = make_request_key(
             session.clone(),
+            submission.clone(),
             test_agent_id(),
-            ServiceBackend::Kv(ObjectStorageType::Sqlite),
+            service,
             Operation::List,
             Sequence::from(4),
+        );
+        let list_msg1 = make_request_msg(
             serde_json::to_vec(&serde_json::json!({"path": "/"})).unwrap(),
             Some(hash1),
-            test_request_diag(),
         );
-        queue.send_request(list_req1.clone()).unwrap();
+        queue.send_request_v2(list_key1, list_msg1).unwrap();
         handler.tick();
-        let (resp, ack) = queue.receive_response(&list_req1).unwrap();
+        let (_key, resp, ack) = queue
+            .receive_response_v2(&submission, service, Operation::List, Sequence::from(4))
+            .unwrap();
         ack().unwrap();
         let files: Vec<String> = serde_json::from_slice(resp.payload.as_slice()).unwrap();
         assert_eq!(files, vec!["/a.txt"]);
@@ -1084,42 +1005,46 @@ mod tests {
             ServiceBackend::Kv(ObjectStorageType::Sqlite),
         );
 
+        let submission = test_submission();
+        let service = ServiceBackend::Kv(ObjectStorageType::Sqlite);
+
         // Put a file first (unversioned)
         let put_payload = serde_json::json!({"path": "/hello.txt", "content": "hello"});
-        let put_request = RequestMessage::new(
-            BranchId::from(1),
-            test_submission(),
+        let put_key = make_request_key(
             SessionId::new(),
+            submission.clone(),
             test_agent_id(),
-            ServiceBackend::Kv(ObjectStorageType::Sqlite),
+            service,
             Operation::Put,
             Sequence::first(),
-            serde_json::to_vec(&put_payload).unwrap(),
-            None,
-            test_request_diag(),
         );
-        queue.send_request(put_request.clone()).unwrap();
+        let put_msg = make_request_msg(serde_json::to_vec(&put_payload).unwrap(), None);
+        queue.send_request_v2(put_key, put_msg).unwrap();
         handler.tick();
-        let (_resp, ack) = queue.receive_response(&put_request).unwrap();
+        let (_key, _resp, ack) = queue
+            .receive_response_v2(&submission, service, Operation::Put, Sequence::first())
+            .unwrap();
         ack().unwrap();
 
         // Get with state in envelope — should echo it back
         let get_payload = serde_json::json!({"path": "/hello.txt"});
-        let get_request = RequestMessage::new(
-            BranchId::from(1),
-            test_submission(),
+        let get_key = make_request_key(
             SessionId::new(),
+            submission.clone(),
             test_agent_id(),
-            ServiceBackend::Kv(ObjectStorageType::Sqlite),
+            service,
             Operation::Get,
             Sequence::from(2),
+        );
+        let get_msg = make_request_msg(
             serde_json::to_vec(&get_payload).unwrap(),
             Some("hash123".to_string()),
-            test_request_diag(),
         );
-        queue.send_request(get_request.clone()).unwrap();
+        queue.send_request_v2(get_key, get_msg).unwrap();
         handler.tick();
-        let (response, ack) = queue.receive_response(&get_request).unwrap();
+        let (_key, response, ack) = queue
+            .receive_response_v2(&submission, service, Operation::Get, Sequence::from(2))
+            .unwrap();
         ack().unwrap();
 
         assert_eq!(

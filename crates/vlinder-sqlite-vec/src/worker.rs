@@ -8,11 +8,9 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use vlinder_core::domain::Registry;
-#[cfg(test)]
-use vlinder_core::domain::RequestMessage;
 use vlinder_core::domain::{
     DagNodeId, DataMessageKind, DataRoutingKey, MessageId, MessageQueue, Operation,
-    ResponseMessage, ResponseMessageV2, ServiceBackend, ServiceDiagnostics,
+    ResponseMessageV2, ServiceBackend, ServiceDiagnostics,
 };
 
 use crate::storage::SqliteVectorStorage;
@@ -104,100 +102,16 @@ impl SqliteVecWorker {
 
     /// Process one message if available. Returns true if processed.
     pub fn tick(&self) -> bool {
-        if self.try_store_v2() || self.try_store() {
+        if self.try_store_v2() {
             return true;
         }
-        if self.try_search_v2() || self.try_search() {
+        if self.try_search_v2() {
             return true;
         }
-        if self.try_delete_v2() || self.try_delete() {
+        if self.try_delete_v2() {
             return true;
         }
         false
-    }
-
-    fn try_store(&self) -> bool {
-        match self.queue.receive_request(self.service, Operation::Store) {
-            Ok((request, ack)) => {
-                let start = std::time::Instant::now();
-                let response_payload =
-                    self.handle_store(request.agent_id.as_str(), &request.payload);
-                let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
-                let diag = ServiceDiagnostics::storage(
-                    self.service.service_type(),
-                    self.service.backend_str(),
-                    Operation::Store,
-                    response_payload.len() as u64,
-                    duration_ms,
-                );
-                let mut response = ResponseMessage::from_request_with_diagnostics(
-                    &request,
-                    response_payload,
-                    diag,
-                );
-                response.state.clone_from(&request.state);
-                let _ = self.queue.send_response(response);
-                let _ = ack();
-                true
-            }
-            Err(_) => false,
-        }
-    }
-
-    fn try_search(&self) -> bool {
-        match self.queue.receive_request(self.service, Operation::Search) {
-            Ok((request, ack)) => {
-                let start = std::time::Instant::now();
-                let response_payload =
-                    self.handle_search(request.agent_id.as_str(), &request.payload);
-                let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
-                let diag = ServiceDiagnostics::storage(
-                    self.service.service_type(),
-                    self.service.backend_str(),
-                    Operation::Search,
-                    response_payload.len() as u64,
-                    duration_ms,
-                );
-                let mut response = ResponseMessage::from_request_with_diagnostics(
-                    &request,
-                    response_payload,
-                    diag,
-                );
-                response.state.clone_from(&request.state);
-                let _ = self.queue.send_response(response);
-                let _ = ack();
-                true
-            }
-            Err(_) => false,
-        }
-    }
-
-    fn try_delete(&self) -> bool {
-        match self.queue.receive_request(self.service, Operation::Delete) {
-            Ok((request, ack)) => {
-                let start = std::time::Instant::now();
-                let response_payload =
-                    self.handle_delete(request.agent_id.as_str(), &request.payload);
-                let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
-                let diag = ServiceDiagnostics::storage(
-                    self.service.service_type(),
-                    self.service.backend_str(),
-                    Operation::Delete,
-                    response_payload.len() as u64,
-                    duration_ms,
-                );
-                let mut response = ResponseMessage::from_request_with_diagnostics(
-                    &request,
-                    response_payload,
-                    diag,
-                );
-                response.state.clone_from(&request.state);
-                let _ = self.queue.send_response(response);
-                let _ = ack();
-                true
-            }
-            Err(_) => false,
-        }
     }
 
     fn try_store_v2(&self) -> bool {
@@ -384,8 +298,8 @@ mod tests {
     use vlinder_core::domain::SecretStore;
     use vlinder_core::domain::{Agent, AgentName, Registry};
     use vlinder_core::domain::{
-        BranchId, Operation, RequestDiagnostics, Sequence, ServiceBackend, SessionId, SubmissionId,
-        VectorStorageType,
+        BranchId, Operation, RequestDiagnostics, RequestMessageV2, Sequence, ServiceBackend,
+        SessionId, SubmissionId, VectorStorageType,
     };
     use vlinder_core::queue::InMemoryQueue;
 
@@ -425,6 +339,37 @@ mod tests {
         Agent::from_toml(&manifest).unwrap()
     }
 
+    fn make_request_key(
+        submission: SubmissionId,
+        agent: AgentName,
+        service: ServiceBackend,
+        operation: Operation,
+        sequence: Sequence,
+    ) -> DataRoutingKey {
+        DataRoutingKey {
+            session: SessionId::new(),
+            branch: BranchId::from(1),
+            submission,
+            kind: DataMessageKind::Request {
+                agent,
+                service,
+                operation,
+                sequence,
+            },
+        }
+    }
+
+    fn make_request_msg(payload: Vec<u8>, state: Option<String>) -> RequestMessageV2 {
+        RequestMessageV2 {
+            id: MessageId::new(),
+            dag_id: DagNodeId::root(),
+            state,
+            diagnostics: test_request_diag(),
+            payload,
+            checkpoint: None,
+        }
+    }
+
     #[test]
     fn vector_search_response_echoes_state() {
         let dir = tempfile::tempdir().unwrap();
@@ -443,27 +388,31 @@ mod tests {
             ServiceBackend::Vec(VectorStorageType::SqliteVec),
         );
 
+        let submission = test_submission();
+        let service = ServiceBackend::Vec(VectorStorageType::SqliteVec);
+
         let embedding: Vec<f32> = (0_i16..768).map(|i| f32::from(i) * 0.001).collect();
         let store_payload = serde_json::json!({
             "key": "doc1",
             "vector": embedding,
             "metadata": "test"
         });
-        let store_request = RequestMessage::new(
-            BranchId::from(1),
-            test_submission(),
-            SessionId::new(),
+        let store_key = make_request_key(
+            submission.clone(),
             test_agent_id(),
-            ServiceBackend::Vec(VectorStorageType::SqliteVec),
+            service,
             Operation::Store,
             Sequence::first(),
+        );
+        let store_msg = make_request_msg(
             serde_json::to_vec(&store_payload).unwrap(),
             Some("state-vec".to_string()),
-            test_request_diag(),
         );
-        queue.send_request(store_request.clone()).unwrap();
+        queue.send_request_v2(store_key, store_msg).unwrap();
         handler.tick();
-        let (store_resp, ack) = queue.receive_response(&store_request).unwrap();
+        let (_key, store_resp, ack) = queue
+            .receive_response_v2(&submission, service, Operation::Store, Sequence::first())
+            .unwrap();
         ack().unwrap();
         assert_eq!(
             store_resp.state,
@@ -475,21 +424,22 @@ mod tests {
             "vector": embedding,
             "limit": 1
         });
-        let search_request = RequestMessage::new(
-            BranchId::from(1),
-            test_submission(),
-            SessionId::new(),
+        let search_key = make_request_key(
+            submission.clone(),
             test_agent_id(),
-            ServiceBackend::Vec(VectorStorageType::SqliteVec),
+            service,
             Operation::Search,
             Sequence::from(2),
+        );
+        let search_msg = make_request_msg(
             serde_json::to_vec(&search_payload).unwrap(),
             Some("state-vec2".to_string()),
-            test_request_diag(),
         );
-        queue.send_request(search_request.clone()).unwrap();
+        queue.send_request_v2(search_key, search_msg).unwrap();
         handler.tick();
-        let (search_resp, ack) = queue.receive_response(&search_request).unwrap();
+        let (_key, search_resp, ack) = queue
+            .receive_response_v2(&submission, service, Operation::Search, Sequence::from(2))
+            .unwrap();
         ack().unwrap();
         assert_eq!(
             search_resp.state,
@@ -516,28 +466,29 @@ mod tests {
             ServiceBackend::Vec(VectorStorageType::SqliteVec),
         );
 
+        let submission = test_submission();
+        let service = ServiceBackend::Vec(VectorStorageType::SqliteVec);
+
         let embedding: Vec<f32> = (0_i16..768).map(|i| f32::from(i) * 0.001).collect();
         let store_payload = serde_json::json!({
             "key": "doc1",
             "vector": embedding,
             "metadata": "test document"
         });
-        let store_request = RequestMessage::new(
-            BranchId::from(1),
-            test_submission(),
-            SessionId::new(),
+        let store_key = make_request_key(
+            submission.clone(),
             test_agent_id(),
-            ServiceBackend::Vec(VectorStorageType::SqliteVec),
+            service,
             Operation::Store,
             Sequence::first(),
-            serde_json::to_vec(&store_payload).unwrap(),
-            None,
-            test_request_diag(),
         );
+        let store_msg = make_request_msg(serde_json::to_vec(&store_payload).unwrap(), None);
 
-        queue.send_request(store_request.clone()).unwrap();
+        queue.send_request_v2(store_key, store_msg).unwrap();
         assert!(handler.tick());
-        let (response, ack) = queue.receive_response(&store_request).unwrap();
+        let (_key, response, ack) = queue
+            .receive_response_v2(&submission, service, Operation::Store, Sequence::first())
+            .unwrap();
         assert_eq!(response.payload.as_slice(), b"ok");
         ack().unwrap();
 
@@ -545,22 +496,20 @@ mod tests {
             "vector": embedding,
             "limit": 1
         });
-        let search_request = RequestMessage::new(
-            BranchId::from(1),
-            test_submission(),
-            SessionId::new(),
+        let search_key = make_request_key(
+            submission.clone(),
             test_agent_id(),
-            ServiceBackend::Vec(VectorStorageType::SqliteVec),
+            service,
             Operation::Search,
             Sequence::from(2),
-            serde_json::to_vec(&search_payload).unwrap(),
-            None,
-            test_request_diag(),
         );
+        let search_msg = make_request_msg(serde_json::to_vec(&search_payload).unwrap(), None);
 
-        queue.send_request(search_request.clone()).unwrap();
+        queue.send_request_v2(search_key, search_msg).unwrap();
         assert!(handler.tick());
-        let (response, ack) = queue.receive_response(&search_request).unwrap();
+        let (_key, response, ack) = queue
+            .receive_response_v2(&submission, service, Operation::Search, Sequence::from(2))
+            .unwrap();
         let results: Vec<serde_json::Value> =
             serde_json::from_slice(response.payload.as_slice()).unwrap();
         assert_eq!(results.len(), 1);

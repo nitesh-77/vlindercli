@@ -8,8 +8,8 @@ use std::time::Instant;
 use async_openai::types::chat::{CreateChatCompletionRequest, CreateChatCompletionResponse};
 use vlinder_core::domain::{
     DagNodeId, DataMessageKind, DataRoutingKey, EmbeddingBackendType, InferenceBackendType,
-    MessageId, MessageQueue, Operation, RequestMessage, RequestMessageV2, ResponseMessage,
-    ResponseMessageV2, ServiceBackend, ServiceDiagnostics, ServiceMetrics, ServiceType,
+    MessageId, MessageQueue, Operation, RequestMessageV2, ResponseMessageV2, ServiceBackend,
+    ServiceDiagnostics, ServiceMetrics, ServiceType,
 };
 
 use crate::types::{
@@ -58,7 +58,6 @@ impl OllamaWorker {
     /// Process one message if available. Polls inference and embed queues.
     /// Returns true if a message was processed.
     pub fn tick(&self) -> bool {
-        // Try v2 data-plane first, fall back to v1.
         for op in [Operation::Run, Operation::Chat, Operation::Generate] {
             if let Ok((key, msg, ack)) = self
                 .queue
@@ -67,16 +66,8 @@ impl OllamaWorker {
                 self.process_v2(&key, msg, ack, op);
                 return true;
             }
-            if let Ok((request, ack)) = self
-                .queue
-                .receive_request(ServiceBackend::Infer(InferenceBackendType::Ollama), op)
-            {
-                self.process(&request, ack, op);
-                return true;
-            }
         }
 
-        // Poll for embed requests — v2 first.
         if let Ok((key, msg, ack)) = self.queue.receive_request_v2(
             ServiceBackend::Embed(EmbeddingBackendType::Ollama),
             Operation::Run,
@@ -84,54 +75,8 @@ impl OllamaWorker {
             self.process_embed_v2(&key, msg, ack);
             return true;
         }
-        if let Ok((request, ack)) = self.queue.receive_request(
-            ServiceBackend::Embed(EmbeddingBackendType::Ollama),
-            Operation::Run,
-        ) {
-            self.process_embed(&request, ack);
-            return true;
-        }
 
         false
-    }
-
-    fn process(
-        &self,
-        request: &RequestMessage,
-        ack: Box<dyn FnOnce() -> Result<(), vlinder_core::domain::QueueError> + Send>,
-        operation: Operation,
-    ) {
-        let start = Instant::now();
-        let payload = request.payload.as_slice();
-
-        let (http_response, metrics) = match operation {
-            Operation::Run => self.handle_openai(payload),
-            Operation::Chat => self.handle_chat(payload),
-            Operation::Generate => self.handle_generate(payload),
-            _ => error_result(400, "unsupported operation"),
-        };
-
-        let status_code = http_response.status().as_u16();
-        let wire = vlinder_core::domain::wire::WireResponse {
-            inner: http_response,
-        };
-        let response_payload = serde_json::to_vec(&wire).unwrap_or_default();
-
-        let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
-
-        let diag = ServiceDiagnostics {
-            service: ServiceType::Infer,
-            backend: "ollama".to_string(),
-            duration_ms,
-            metrics,
-        };
-
-        let mut response =
-            ResponseMessage::from_request_with_diagnostics(request, response_payload, diag);
-        response.state.clone_from(&request.state);
-        response.status_code = status_code;
-        let _ = self.queue.send_response(response);
-        let _ = ack();
     }
 
     fn process_v2(
@@ -315,39 +260,6 @@ impl OllamaWorker {
 
     // ---- Embed: /api/embed ----
 
-    fn process_embed(
-        &self,
-        request: &RequestMessage,
-        ack: Box<dyn FnOnce() -> Result<(), vlinder_core::domain::QueueError> + Send>,
-    ) {
-        let start = Instant::now();
-        let payload = request.payload.as_slice();
-
-        let (http_response, metrics) = self.handle_embed(payload);
-
-        let status_code = http_response.status().as_u16();
-        let wire = vlinder_core::domain::wire::WireResponse {
-            inner: http_response,
-        };
-        let response_payload = serde_json::to_vec(&wire).unwrap_or_default();
-
-        let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
-
-        let diag = ServiceDiagnostics {
-            service: ServiceType::Embed,
-            backend: "ollama".to_string(),
-            duration_ms,
-            metrics,
-        };
-
-        let mut response =
-            ResponseMessage::from_request_with_diagnostics(request, response_payload, diag);
-        response.state.clone_from(&request.state);
-        response.status_code = status_code;
-        let _ = self.queue.send_response(response);
-        let _ = ack();
-    }
-
     fn handle_embed(&self, payload: &[u8]) -> HandlerResult {
         let req: OllamaEmbedRequest = match serde_json::from_slice(payload) {
             Ok(r) => r,
@@ -445,7 +357,7 @@ mod tests {
     use super::*;
     use vlinder_core::domain::{
         AgentName, BranchId, EmbeddingBackendType, InferenceBackendType, RequestDiagnostics,
-        Sequence, ServiceBackend, SessionId, SubmissionId,
+        RequestMessageV2, Sequence, ServiceBackend, SessionId, SubmissionId,
     };
     use vlinder_core::queue::InMemoryQueue;
 
@@ -458,47 +370,74 @@ mod tests {
         }
     }
 
+    fn test_submission() -> SubmissionId {
+        SubmissionId::from("sub-test".to_string())
+    }
+
+    /// Send an infer request via v2 API and return (service, operation, sequence)
+    /// needed to receive the response.
     fn send_infer_request(
         queue: &Arc<dyn MessageQueue + Send + Sync>,
         operation: Operation,
         payload: Vec<u8>,
         state: Option<String>,
-    ) -> RequestMessage {
-        let request = RequestMessage::new(
-            BranchId::from(1),
-            SubmissionId::from("sub-test".to_string()),
-            SessionId::new(),
-            AgentName::new("test-agent"),
-            ServiceBackend::Infer(InferenceBackendType::Ollama),
-            operation,
-            Sequence::first(),
-            payload,
+    ) -> (SubmissionId, ServiceBackend, Operation, Sequence) {
+        let submission = test_submission();
+        let service = ServiceBackend::Infer(InferenceBackendType::Ollama);
+        let sequence = Sequence::first();
+        let key = DataRoutingKey {
+            session: SessionId::new(),
+            branch: BranchId::from(1),
+            submission: submission.clone(),
+            kind: DataMessageKind::Request {
+                agent: AgentName::new("test-agent"),
+                service,
+                operation,
+                sequence,
+            },
+        };
+        let msg = RequestMessageV2 {
+            id: MessageId::new(),
+            dag_id: DagNodeId::root(),
             state,
-            test_request_diag(),
-        );
-        queue.send_request(request.clone()).unwrap();
-        request
+            diagnostics: test_request_diag(),
+            payload,
+            checkpoint: None,
+        };
+        queue.send_request_v2(key, msg).unwrap();
+        (submission, service, operation, sequence)
     }
 
     fn send_embed_request(
         queue: &Arc<dyn MessageQueue + Send + Sync>,
         payload: Vec<u8>,
         state: Option<String>,
-    ) -> RequestMessage {
-        let request = RequestMessage::new(
-            BranchId::from(1),
-            SubmissionId::from("sub-test".to_string()),
-            SessionId::new(),
-            AgentName::new("test-agent"),
-            ServiceBackend::Embed(EmbeddingBackendType::Ollama),
-            Operation::Run,
-            Sequence::first(),
-            payload,
+    ) -> (SubmissionId, ServiceBackend, Operation, Sequence) {
+        let submission = test_submission();
+        let service = ServiceBackend::Embed(EmbeddingBackendType::Ollama);
+        let operation = Operation::Run;
+        let sequence = Sequence::first();
+        let key = DataRoutingKey {
+            session: SessionId::new(),
+            branch: BranchId::from(1),
+            submission: submission.clone(),
+            kind: DataMessageKind::Request {
+                agent: AgentName::new("test-agent"),
+                service,
+                operation,
+                sequence,
+            },
+        };
+        let msg = RequestMessageV2 {
+            id: MessageId::new(),
+            dag_id: DagNodeId::root(),
             state,
-            test_request_diag(),
-        );
-        queue.send_request(request.clone()).unwrap();
-        request
+            diagnostics: test_request_diag(),
+            payload,
+            checkpoint: None,
+        };
+        queue.send_request_v2(key, msg).unwrap();
+        (submission, service, operation, sequence)
     }
 
     fn make_worker(queue: &Arc<dyn MessageQueue + Send + Sync>) -> OllamaWorker {
@@ -512,10 +451,11 @@ mod tests {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
         let worker = make_worker(&queue);
 
-        let request = send_infer_request(&queue, Operation::Run, b"not json".to_vec(), None);
+        let (sub, svc, op, seq) =
+            send_infer_request(&queue, Operation::Run, b"not json".to_vec(), None);
         assert!(worker.tick());
 
-        let (response, ack) = queue.receive_response(&request).unwrap();
+        let (_key, response, ack) = queue.receive_response_v2(&sub, svc, op, seq).unwrap();
         assert_eq!(response.status_code, 400);
         ack().unwrap();
     }
@@ -529,7 +469,7 @@ mod tests {
             "model": "llama3.2",
             "messages": [{"role": "user", "content": "hello"}]
         });
-        let request = send_infer_request(
+        let (sub, svc, op, seq) = send_infer_request(
             &queue,
             Operation::Run,
             serde_json::to_vec(&body).unwrap(),
@@ -537,7 +477,7 @@ mod tests {
         );
         assert!(worker.tick());
 
-        let (response, ack) = queue.receive_response(&request).unwrap();
+        let (_key, response, ack) = queue.receive_response_v2(&sub, svc, op, seq).unwrap();
         assert_eq!(response.state, Some("xyz".to_string()));
         ack().unwrap();
     }
@@ -551,7 +491,7 @@ mod tests {
             "model": "llama3.2",
             "messages": [{"role": "user", "content": "hello"}]
         });
-        let request = send_infer_request(
+        let (sub, svc, op, seq) = send_infer_request(
             &queue,
             Operation::Run,
             serde_json::to_vec(&body).unwrap(),
@@ -559,7 +499,7 @@ mod tests {
         );
         assert!(worker.tick());
 
-        let (response, ack) = queue.receive_response(&request).unwrap();
+        let (_key, response, ack) = queue.receive_response_v2(&sub, svc, op, seq).unwrap();
         assert_eq!(response.status_code, 500);
         ack().unwrap();
     }
@@ -571,10 +511,11 @@ mod tests {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
         let worker = make_worker(&queue);
 
-        let request = send_infer_request(&queue, Operation::Chat, b"not json".to_vec(), None);
+        let (sub, svc, op, seq) =
+            send_infer_request(&queue, Operation::Chat, b"not json".to_vec(), None);
         assert!(worker.tick());
 
-        let (response, ack) = queue.receive_response(&request).unwrap();
+        let (_key, response, ack) = queue.receive_response_v2(&sub, svc, op, seq).unwrap();
         assert_eq!(response.status_code, 400);
         ack().unwrap();
     }
@@ -588,7 +529,7 @@ mod tests {
             "model": "llama3.2",
             "messages": [{"role": "user", "content": "hello"}]
         });
-        let request = send_infer_request(
+        let (sub, svc, op, seq) = send_infer_request(
             &queue,
             Operation::Chat,
             serde_json::to_vec(&body).unwrap(),
@@ -596,7 +537,7 @@ mod tests {
         );
         assert!(worker.tick());
 
-        let (response, ack) = queue.receive_response(&request).unwrap();
+        let (_key, response, ack) = queue.receive_response_v2(&sub, svc, op, seq).unwrap();
         assert_eq!(response.state, Some("abc".to_string()));
         ack().unwrap();
     }
@@ -610,7 +551,7 @@ mod tests {
             "model": "llama3.2",
             "messages": [{"role": "user", "content": "hello"}]
         });
-        let request = send_infer_request(
+        let (sub, svc, op, seq) = send_infer_request(
             &queue,
             Operation::Chat,
             serde_json::to_vec(&body).unwrap(),
@@ -618,7 +559,7 @@ mod tests {
         );
         assert!(worker.tick());
 
-        let (response, ack) = queue.receive_response(&request).unwrap();
+        let (_key, response, ack) = queue.receive_response_v2(&sub, svc, op, seq).unwrap();
         assert_eq!(response.status_code, 500);
         ack().unwrap();
     }
@@ -630,10 +571,11 @@ mod tests {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
         let worker = make_worker(&queue);
 
-        let request = send_infer_request(&queue, Operation::Generate, b"not json".to_vec(), None);
+        let (sub, svc, op, seq) =
+            send_infer_request(&queue, Operation::Generate, b"not json".to_vec(), None);
         assert!(worker.tick());
 
-        let (response, ack) = queue.receive_response(&request).unwrap();
+        let (_key, response, ack) = queue.receive_response_v2(&sub, svc, op, seq).unwrap();
         assert_eq!(response.status_code, 400);
         ack().unwrap();
     }
@@ -647,7 +589,7 @@ mod tests {
             "model": "llama3.2",
             "prompt": "Why is the sky blue?"
         });
-        let request = send_infer_request(
+        let (sub, svc, op, seq) = send_infer_request(
             &queue,
             Operation::Generate,
             serde_json::to_vec(&body).unwrap(),
@@ -655,7 +597,7 @@ mod tests {
         );
         assert!(worker.tick());
 
-        let (response, ack) = queue.receive_response(&request).unwrap();
+        let (_key, response, ack) = queue.receive_response_v2(&sub, svc, op, seq).unwrap();
         assert_eq!(response.state, Some("def".to_string()));
         ack().unwrap();
     }
@@ -669,7 +611,7 @@ mod tests {
             "model": "llama3.2",
             "prompt": "Why is the sky blue?"
         });
-        let request = send_infer_request(
+        let (sub, svc, op, seq) = send_infer_request(
             &queue,
             Operation::Generate,
             serde_json::to_vec(&body).unwrap(),
@@ -677,7 +619,7 @@ mod tests {
         );
         assert!(worker.tick());
 
-        let (response, ack) = queue.receive_response(&request).unwrap();
+        let (_key, response, ack) = queue.receive_response_v2(&sub, svc, op, seq).unwrap();
         assert_eq!(response.status_code, 500);
         ack().unwrap();
     }
@@ -689,10 +631,10 @@ mod tests {
         let queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(InMemoryQueue::new());
         let worker = make_worker(&queue);
 
-        let request = send_embed_request(&queue, b"not json".to_vec(), None);
+        let (sub, svc, op, seq) = send_embed_request(&queue, b"not json".to_vec(), None);
         assert!(worker.tick());
 
-        let (response, ack) = queue.receive_response(&request).unwrap();
+        let (_key, response, ack) = queue.receive_response_v2(&sub, svc, op, seq).unwrap();
         assert_eq!(response.status_code, 400);
         ack().unwrap();
     }
@@ -706,14 +648,14 @@ mod tests {
             "model": "nomic-embed-text",
             "input": "hello world"
         });
-        let request = send_embed_request(
+        let (sub, svc, op, seq) = send_embed_request(
             &queue,
             serde_json::to_vec(&body).unwrap(),
             Some("embed-state".to_string()),
         );
         assert!(worker.tick());
 
-        let (response, ack) = queue.receive_response(&request).unwrap();
+        let (_key, response, ack) = queue.receive_response_v2(&sub, svc, op, seq).unwrap();
         assert_eq!(response.state, Some("embed-state".to_string()));
         ack().unwrap();
     }
@@ -727,10 +669,11 @@ mod tests {
             "model": "nomic-embed-text",
             "input": "hello world"
         });
-        let request = send_embed_request(&queue, serde_json::to_vec(&body).unwrap(), None);
+        let (sub, svc, op, seq) =
+            send_embed_request(&queue, serde_json::to_vec(&body).unwrap(), None);
         assert!(worker.tick());
 
-        let (response, ack) = queue.receive_response(&request).unwrap();
+        let (_key, response, ack) = queue.receive_response_v2(&sub, svc, op, seq).unwrap();
         assert_eq!(response.status_code, 500);
         ack().unwrap();
     }
