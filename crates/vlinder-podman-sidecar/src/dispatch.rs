@@ -13,10 +13,10 @@ use std::time::Instant;
 
 use vlinder_core::domain::{
     AgentName, BranchId, CompleteMessage, ContainerId, DagNodeId, DataMessageKind, DataRoutingKey,
-    DelegateReplyMessage, HarnessType, HealthWindow, HttpMethod, ImageDigest, ImageRef,
-    MessageQueue, ProviderHost, ProviderRoute, Registry, RepairMessage, RequestDiagnostics,
-    RequestMessage, ResponseMessage, RoutingKey, RuntimeDiagnostics, SequenceCounter, SessionId,
-    SubmissionId,
+    DelegateReplyMessage, HarnessType, HealthWindow, HttpMethod, ImageDigest, ImageRef, MessageId,
+    MessageQueue, Operation, ProviderHost, ProviderRoute, Registry, RepairMessage,
+    RequestDiagnostics, RequestMessageV2, ResponseMessageV2, RoutingKey, RuntimeDiagnostics,
+    Sequence, SequenceCounter, ServiceBackend, SessionId, SubmissionId,
 };
 
 use vlinder_provider_server::handler::InvokeHandler;
@@ -47,7 +47,9 @@ pub struct DurableSession {
     pub reply_key: Option<RoutingKey>,
     pub hosts: Vec<ProviderHost>,
     pub sequence: SequenceCounter,
-    pub pending_request: RequestMessage,
+    pub pending_service: ServiceBackend,
+    pub pending_operation: Operation,
+    pub pending_sequence: Sequence,
     pub started_at: Instant,
 }
 
@@ -228,7 +230,7 @@ pub fn handle_invoke(
 pub fn handle_service_response(
     ctx: &DispatchContext,
     session: DurableSession,
-    response: &ResponseMessage,
+    response: &ResponseMessageV2,
 ) -> Result<InvokeOutcome, String> {
     let mut trace = TraceLog::new();
 
@@ -352,19 +354,25 @@ pub fn handle_repair(
         .unwrap_or(u64::MAX),
     };
 
-    let mut request = RequestMessage::new(
-        repair.branch,
-        repair.submission.clone(),
-        repair.session.clone(),
-        repair.agent_name.clone(),
-        repair.service,
-        repair.operation,
-        repair.sequence,
-        repair.payload.clone(),
-        repair.state.clone(),
+    let request_key = DataRoutingKey {
+        session: repair.session.clone(),
+        branch: repair.branch,
+        submission: repair.submission.clone(),
+        kind: DataMessageKind::Request {
+            agent: repair.agent_name.clone(),
+            service: repair.service,
+            operation: repair.operation,
+            sequence: repair.sequence,
+        },
+    };
+    let request = RequestMessageV2 {
+        id: MessageId::new(),
+        dag_id: DagNodeId::root(),
+        state: repair.state.clone(),
         diagnostics,
-    );
-    request.checkpoint = Some(repair.checkpoint.clone());
+        payload: repair.payload.clone(),
+        checkpoint: Some(repair.checkpoint.clone()),
+    };
 
     trace.log(format!(
         "Repair: sending request to {} (checkpoint '{}', seq {})",
@@ -374,7 +382,7 @@ pub fn handle_repair(
     ));
 
     ctx.queue
-        .send_request(request.clone())
+        .send_request_v2(request_key, request.clone())
         .map_err(|e| format!("Failed to send repair request: {e}"))?;
 
     let sequence = SequenceCounter::new();
@@ -392,7 +400,9 @@ pub fn handle_repair(
         reply_key: None,
         hosts,
         sequence,
-        pending_request: request,
+        pending_service: repair.service,
+        pending_operation: repair.operation,
+        pending_sequence: repair.sequence,
         started_at,
     })))
 }
@@ -464,6 +474,8 @@ fn handle_action(
                 .ok_or_else(|| format!("No route for {host}:{path}"))?;
 
             let seq = sequence.next();
+            let route_service = route.service_backend;
+            let route_operation = route.operation;
             let diagnostics = RequestDiagnostics {
                 sequence: seq.as_u32(),
                 endpoint: format!("/{}", route.service_backend.service_type().as_str()),
@@ -477,29 +489,35 @@ fn handle_action(
                 .unwrap_or(u64::MAX),
             };
 
-            let mut request = RequestMessage::new(
+            let request_key = DataRoutingKey {
+                session: session.clone(),
                 branch,
-                submission.clone(),
-                session.clone(),
-                agent_id.clone(),
-                route.service_backend,
-                route.operation,
-                seq,
-                call_body,
-                None,
+                submission: submission.clone(),
+                kind: DataMessageKind::Request {
+                    agent: agent_id.clone(),
+                    service: route_service,
+                    operation: route_operation,
+                    sequence: seq,
+                },
+            };
+            let request = RequestMessageV2 {
+                id: MessageId::new(),
+                dag_id: DagNodeId::root(),
+                state: None,
                 diagnostics,
-            );
-            request.checkpoint = Some(checkpoint.to_string());
+                payload: call_body,
+                checkpoint: Some(checkpoint.to_string()),
+            };
 
             trace.log(format!(
                 "Sending request to {} (checkpoint '{}', seq {})",
-                route.service_backend.service_type().as_str(),
+                route_service.service_type().as_str(),
                 checkpoint,
                 seq.as_u32()
             ));
 
             ctx.queue
-                .send_request(request.clone())
+                .send_request_v2(request_key, request.clone())
                 .map_err(|e| format!("Failed to send request: {e}"))?;
 
             Ok(InvokeOutcome::Pending(Box::new(DurableSession {
@@ -511,7 +529,9 @@ fn handle_action(
                 reply_key: reply_key.cloned(),
                 hosts,
                 sequence,
-                pending_request: request,
+                pending_service: route_service,
+                pending_operation: route_operation,
+                pending_sequence: seq,
                 started_at,
             })))
         }
