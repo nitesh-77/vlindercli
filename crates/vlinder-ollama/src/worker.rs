@@ -7,8 +7,9 @@ use std::time::Instant;
 
 use async_openai::types::chat::{CreateChatCompletionRequest, CreateChatCompletionResponse};
 use vlinder_core::domain::{
-    EmbeddingBackendType, InferenceBackendType, MessageQueue, Operation, RequestMessage,
-    ResponseMessage, ServiceBackend, ServiceDiagnostics, ServiceMetrics, ServiceType,
+    DagNodeId, DataMessageKind, DataRoutingKey, EmbeddingBackendType, InferenceBackendType,
+    MessageId, MessageQueue, Operation, RequestMessage, RequestMessageV2, ResponseMessage,
+    ResponseMessageV2, ServiceBackend, ServiceDiagnostics, ServiceMetrics, ServiceType,
 };
 
 use crate::types::{
@@ -20,6 +21,29 @@ use crate::types::{
 /// the HTTP response captures everything. Metrics are extracted by the
 /// handler because it has the domain knowledge to parse the body.
 type HandlerResult = (http::Response<Vec<u8>>, ServiceMetrics);
+
+fn response_key_from_request(req_key: &DataRoutingKey) -> DataRoutingKey {
+    let DataMessageKind::Request {
+        agent,
+        service,
+        operation,
+        sequence,
+    } = &req_key.kind
+    else {
+        panic!("response_key_from_request called with non-Request key");
+    };
+    DataRoutingKey {
+        session: req_key.session.clone(),
+        branch: req_key.branch,
+        submission: req_key.submission.clone(),
+        kind: DataMessageKind::Response {
+            agent: agent.clone(),
+            service: *service,
+            operation: *operation,
+            sequence: *sequence,
+        },
+    }
+}
 
 pub struct OllamaWorker {
     queue: Arc<dyn MessageQueue + Send + Sync>,
@@ -34,8 +58,15 @@ impl OllamaWorker {
     /// Process one message if available. Polls inference and embed queues.
     /// Returns true if a message was processed.
     pub fn tick(&self) -> bool {
-        // Try each inference operation in turn.
+        // Try v2 data-plane first, fall back to v1.
         for op in [Operation::Run, Operation::Chat, Operation::Generate] {
+            if let Ok((key, msg, ack)) = self
+                .queue
+                .receive_request_v2(ServiceBackend::Infer(InferenceBackendType::Ollama), op)
+            {
+                self.process_v2(&key, msg, ack, op);
+                return true;
+            }
             if let Ok((request, ack)) = self
                 .queue
                 .receive_request(ServiceBackend::Infer(InferenceBackendType::Ollama), op)
@@ -45,7 +76,14 @@ impl OllamaWorker {
             }
         }
 
-        // Poll for embed requests.
+        // Poll for embed requests — v2 first.
+        if let Ok((key, msg, ack)) = self.queue.receive_request_v2(
+            ServiceBackend::Embed(EmbeddingBackendType::Ollama),
+            Operation::Run,
+        ) {
+            self.process_embed_v2(&key, msg, ack);
+            return true;
+        }
         if let Ok((request, ack)) = self.queue.receive_request(
             ServiceBackend::Embed(EmbeddingBackendType::Ollama),
             Operation::Run,
@@ -93,6 +131,89 @@ impl OllamaWorker {
         response.state.clone_from(&request.state);
         response.status_code = status_code;
         let _ = self.queue.send_response(response);
+        let _ = ack();
+    }
+
+    fn process_v2(
+        &self,
+        key: &DataRoutingKey,
+        msg: RequestMessageV2,
+        ack: Box<dyn FnOnce() -> Result<(), vlinder_core::domain::QueueError> + Send>,
+        operation: Operation,
+    ) {
+        let start = Instant::now();
+
+        let (http_response, metrics) = match operation {
+            Operation::Run => self.handle_openai(&msg.payload),
+            Operation::Chat => self.handle_chat(&msg.payload),
+            Operation::Generate => self.handle_generate(&msg.payload),
+            _ => error_result(400, "unsupported operation"),
+        };
+
+        let status_code = http_response.status().as_u16();
+        let wire = vlinder_core::domain::wire::WireResponse {
+            inner: http_response,
+        };
+        let response_payload = serde_json::to_vec(&wire).unwrap_or_default();
+        let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
+
+        let diag = ServiceDiagnostics {
+            service: ServiceType::Infer,
+            backend: "ollama".to_string(),
+            duration_ms,
+            metrics,
+        };
+
+        let response_key = response_key_from_request(key);
+        let response = ResponseMessageV2 {
+            id: MessageId::new(),
+            dag_id: DagNodeId::root(),
+            correlation_id: msg.id,
+            state: msg.state,
+            diagnostics: diag,
+            payload: response_payload,
+            status_code,
+            checkpoint: msg.checkpoint,
+        };
+        let _ = self.queue.send_response_v2(response_key, response);
+        let _ = ack();
+    }
+
+    fn process_embed_v2(
+        &self,
+        key: &DataRoutingKey,
+        msg: RequestMessageV2,
+        ack: Box<dyn FnOnce() -> Result<(), vlinder_core::domain::QueueError> + Send>,
+    ) {
+        let start = Instant::now();
+        let (http_response, metrics) = self.handle_embed(&msg.payload);
+
+        let status_code = http_response.status().as_u16();
+        let wire = vlinder_core::domain::wire::WireResponse {
+            inner: http_response,
+        };
+        let response_payload = serde_json::to_vec(&wire).unwrap_or_default();
+        let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
+
+        let diag = ServiceDiagnostics {
+            service: ServiceType::Embed,
+            backend: "ollama".to_string(),
+            duration_ms,
+            metrics,
+        };
+
+        let response_key = response_key_from_request(key);
+        let response = ResponseMessageV2 {
+            id: MessageId::new(),
+            dag_id: DagNodeId::root(),
+            correlation_id: msg.id,
+            state: msg.state,
+            diagnostics: diag,
+            payload: response_payload,
+            status_code,
+            checkpoint: msg.checkpoint,
+        };
+        let _ = self.queue.send_response_v2(response_key, response);
         let _ = ack();
     }
 

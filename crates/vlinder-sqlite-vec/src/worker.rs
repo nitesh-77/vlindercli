@@ -11,11 +11,46 @@ use vlinder_core::domain::Registry;
 #[cfg(test)]
 use vlinder_core::domain::RequestMessage;
 use vlinder_core::domain::{
-    MessageQueue, Operation, ResponseMessage, ServiceBackend, ServiceDiagnostics,
+    DagNodeId, DataMessageKind, DataRoutingKey, MessageId, MessageQueue, Operation,
+    ResponseMessage, ResponseMessageV2, ServiceBackend, ServiceDiagnostics,
 };
 
 use crate::storage::SqliteVectorStorage;
 use crate::types::{SqliteVecDeleteRequest, SqliteVecSearchRequest, SqliteVecStoreRequest};
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+fn extract_agent(key: &DataRoutingKey) -> &str {
+    match &key.kind {
+        DataMessageKind::Request { agent, .. } => agent.as_str(),
+        _ => "",
+    }
+}
+
+fn response_key_from_request(req_key: &DataRoutingKey) -> DataRoutingKey {
+    let DataMessageKind::Request {
+        agent,
+        service,
+        operation,
+        sequence,
+    } = &req_key.kind
+    else {
+        panic!("response_key_from_request called with non-Request key");
+    };
+    DataRoutingKey {
+        session: req_key.session.clone(),
+        branch: req_key.branch,
+        submission: req_key.submission.clone(),
+        kind: DataMessageKind::Response {
+            agent: agent.clone(),
+            service: *service,
+            operation: *operation,
+            sequence: *sequence,
+        },
+    }
+}
 
 // ============================================================================
 // Worker
@@ -69,13 +104,13 @@ impl SqliteVecWorker {
 
     /// Process one message if available. Returns true if processed.
     pub fn tick(&self) -> bool {
-        if self.try_store() {
+        if self.try_store_v2() || self.try_store() {
             return true;
         }
-        if self.try_search() {
+        if self.try_search_v2() || self.try_search() {
             return true;
         }
-        if self.try_delete() {
+        if self.try_delete_v2() || self.try_delete() {
             return true;
         }
         false
@@ -158,6 +193,114 @@ impl SqliteVecWorker {
                 );
                 response.state.clone_from(&request.state);
                 let _ = self.queue.send_response(response);
+                let _ = ack();
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
+    fn try_store_v2(&self) -> bool {
+        match self
+            .queue
+            .receive_request_v2(self.service, Operation::Store)
+        {
+            Ok((key, msg, ack)) => {
+                let agent = extract_agent(&key);
+                let start = std::time::Instant::now();
+                let response_payload = self.handle_store(agent, &msg.payload);
+                let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
+                let diag = ServiceDiagnostics::storage(
+                    self.service.service_type(),
+                    self.service.backend_str(),
+                    Operation::Store,
+                    response_payload.len() as u64,
+                    duration_ms,
+                );
+                let response_key = response_key_from_request(&key);
+                let response = ResponseMessageV2 {
+                    id: MessageId::new(),
+                    dag_id: DagNodeId::root(),
+                    correlation_id: msg.id,
+                    state: msg.state,
+                    diagnostics: diag,
+                    payload: response_payload,
+                    status_code: 200,
+                    checkpoint: msg.checkpoint,
+                };
+                let _ = self.queue.send_response_v2(response_key, response);
+                let _ = ack();
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
+    fn try_search_v2(&self) -> bool {
+        match self
+            .queue
+            .receive_request_v2(self.service, Operation::Search)
+        {
+            Ok((key, msg, ack)) => {
+                let agent = extract_agent(&key);
+                let start = std::time::Instant::now();
+                let response_payload = self.handle_search(agent, &msg.payload);
+                let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
+                let diag = ServiceDiagnostics::storage(
+                    self.service.service_type(),
+                    self.service.backend_str(),
+                    Operation::Search,
+                    response_payload.len() as u64,
+                    duration_ms,
+                );
+                let response_key = response_key_from_request(&key);
+                let response = ResponseMessageV2 {
+                    id: MessageId::new(),
+                    dag_id: DagNodeId::root(),
+                    correlation_id: msg.id,
+                    state: msg.state,
+                    diagnostics: diag,
+                    payload: response_payload,
+                    status_code: 200,
+                    checkpoint: msg.checkpoint,
+                };
+                let _ = self.queue.send_response_v2(response_key, response);
+                let _ = ack();
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
+    fn try_delete_v2(&self) -> bool {
+        match self
+            .queue
+            .receive_request_v2(self.service, Operation::Delete)
+        {
+            Ok((key, msg, ack)) => {
+                let agent = extract_agent(&key);
+                let start = std::time::Instant::now();
+                let response_payload = self.handle_delete(agent, &msg.payload);
+                let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
+                let diag = ServiceDiagnostics::storage(
+                    self.service.service_type(),
+                    self.service.backend_str(),
+                    Operation::Delete,
+                    response_payload.len() as u64,
+                    duration_ms,
+                );
+                let response_key = response_key_from_request(&key);
+                let response = ResponseMessageV2 {
+                    id: MessageId::new(),
+                    dag_id: DagNodeId::root(),
+                    correlation_id: msg.id,
+                    state: msg.state,
+                    diagnostics: diag,
+                    payload: response_payload,
+                    status_code: 200,
+                    checkpoint: msg.checkpoint,
+                };
+                let _ = self.queue.send_response_v2(response_key, response);
                 let _ = ack();
                 true
             }
