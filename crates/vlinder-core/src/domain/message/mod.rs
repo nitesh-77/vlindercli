@@ -51,8 +51,8 @@ pub use observable::{MessageDetails, ObservableMessage, ObservableMessageHeaders
 pub use observable_v2::ObservableMessageV2;
 pub use promote::PromoteMessage;
 pub use repair::RepairMessage;
-pub use request::{RequestMessage, RequestMessageV2};
-pub use response::{ResponseMessage, ResponseMessageV2};
+pub use request::RequestMessageV2;
+pub use response::ResponseMessageV2;
 pub use session_start::SessionStartMessage;
 
 /// Protocol version stamped on every message at construction time.
@@ -60,12 +60,8 @@ pub const PROTOCOL_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[cfg(test)]
 mod tests {
-    use super::super::diagnostics::{DelegateDiagnostics, RequestDiagnostics, RuntimeDiagnostics};
-    use super::super::operation::Operation;
-    use super::super::routing_key::{
-        AgentName, InferenceBackendType, Nonce, RoutingKey, RoutingKind, ServiceBackend,
-    };
-    use super::super::storage::ObjectStorageType;
+    use super::super::diagnostics::{DelegateDiagnostics, RuntimeDiagnostics};
+    use super::super::routing_key::{AgentName, Nonce, RoutingKey, RoutingKind};
     use super::*;
 
     fn test_submission() -> SubmissionId {
@@ -76,71 +72,7 @@ mod tests {
         AgentName::new("echo-agent")
     }
 
-    fn test_request_diag() -> RequestDiagnostics {
-        RequestDiagnostics {
-            sequence: 1,
-            endpoint: "/test".to_string(),
-            request_bytes: 0,
-            received_at_ms: 0,
-        }
-    }
-
     // --- Typed message tests ---
-
-    #[test]
-    fn request_message_creation() {
-        let submission = test_submission();
-        let session = SessionId::new();
-        let agent_id = test_agent_id();
-        let msg = RequestMessage::new(
-            BranchId::from(1),
-            submission.clone(),
-            session.clone(),
-            agent_id.clone(),
-            ServiceBackend::Kv(ObjectStorageType::Sqlite),
-            Operation::Get,
-            Sequence::first(),
-            b"key".to_vec(),
-            None,
-            test_request_diag(),
-        );
-
-        assert_eq!(msg.submission, submission);
-        assert_eq!(msg.session, session);
-        assert_eq!(msg.agent_id, agent_id);
-        assert_eq!(msg.service, ServiceBackend::Kv(ObjectStorageType::Sqlite));
-        assert_eq!(msg.operation, Operation::Get);
-        assert_eq!(msg.sequence.as_u32(), 1);
-        assert_eq!(msg.payload.as_slice(), b"key");
-    }
-
-    #[test]
-    fn response_from_request_echoes_dimensions() {
-        let request = RequestMessage::new(
-            BranchId::from(1),
-            test_submission(),
-            SessionId::new(),
-            test_agent_id(),
-            ServiceBackend::Kv(ObjectStorageType::Sqlite),
-            Operation::Get,
-            Sequence::from(3),
-            b"key".to_vec(),
-            None,
-            test_request_diag(),
-        );
-
-        let response = ResponseMessage::from_request(&request, b"value".to_vec());
-
-        assert_eq!(response.submission, request.submission);
-        assert_eq!(response.session, request.session);
-        assert_eq!(response.agent_id, request.agent_id);
-        assert_eq!(response.service, request.service);
-        assert_eq!(response.operation, request.operation);
-        assert_eq!(response.sequence, request.sequence);
-        assert_ne!(response.id, request.id);
-        assert_eq!(response.correlation_id, request.id);
-        assert_eq!(response.payload.as_slice(), b"value");
-    }
 
     #[test]
     fn complete_message_creation() {
@@ -215,71 +147,6 @@ mod tests {
     }
 
     // --- Routing key tests (ADR 096 §4) ---
-
-    #[test]
-    fn request_routing_key() {
-        let msg = RequestMessage::new(
-            BranchId::from(1),
-            test_submission(),
-            SessionId::new(),
-            test_agent_id(),
-            ServiceBackend::Kv(ObjectStorageType::Sqlite),
-            Operation::Get,
-            Sequence::first(),
-            b"key".to_vec(),
-            None,
-            test_request_diag(),
-        );
-
-        let key = msg.routing_key();
-        assert_eq!(
-            key,
-            RoutingKey {
-                session: msg.session.clone(),
-                branch: msg.branch,
-                submission: msg.submission.clone(),
-                kind: RoutingKind::Request {
-                    agent: msg.agent_id.clone(),
-                    service: msg.service,
-                    operation: msg.operation,
-                    sequence: msg.sequence,
-                },
-            }
-        );
-    }
-
-    #[test]
-    fn response_routing_key() {
-        let request = RequestMessage::new(
-            BranchId::from(1),
-            test_submission(),
-            SessionId::new(),
-            test_agent_id(),
-            ServiceBackend::Infer(InferenceBackendType::Ollama),
-            Operation::Run,
-            Sequence::from(3),
-            b"prompt".to_vec(),
-            None,
-            test_request_diag(),
-        );
-        let response = ResponseMessage::from_request(&request, b"reply".to_vec());
-
-        let key = response.routing_key();
-        assert_eq!(
-            key,
-            RoutingKey {
-                session: response.session.clone(),
-                branch: response.branch,
-                submission: response.submission.clone(),
-                kind: RoutingKind::Response {
-                    service: response.service,
-                    agent: response.agent_id.clone(),
-                    operation: response.operation,
-                    sequence: response.sequence,
-                },
-            }
-        );
-    }
 
     #[test]
     fn complete_routing_key() {
@@ -423,25 +290,5 @@ mod tests {
         assert_eq!(observable.submission(), &submission);
         assert_eq!(observable.payload(), b"test");
         assert!(matches!(observable, ObservableMessage::Delegate(_)));
-    }
-
-    #[test]
-    fn request_reply_key_matches_response_routing_key() {
-        let request = RequestMessage::new(
-            BranchId::from(1),
-            test_submission(),
-            SessionId::new(),
-            test_agent_id(),
-            ServiceBackend::Kv(ObjectStorageType::Sqlite),
-            Operation::Get,
-            Sequence::first(),
-            b"key".to_vec(),
-            None,
-            test_request_diag(),
-        );
-        let response = ResponseMessage::from_request(&request, b"value".to_vec());
-
-        let reply_key = request.routing_key().reply_key(None).unwrap();
-        assert_eq!(reply_key, response.routing_key());
     }
 }
