@@ -129,18 +129,33 @@ Repair carries `harness` and `agent` — it routes to the agent's sidecar and tr
 
 ## Implementation Strategy
 
-Strangler fig — one message type at a time, each e2e-green:
+Strangler fig — one message type at a time, each e2e-green.
 
-1. **Add payload type.** Define `FooMessageV2` with only the fields that aren't in the routing key (id, state, diagnostics, payload). No routing fields — those live in `DataRoutingKey`.
-2. **Add v2 trait methods.** `send_foo_v2(key, msg)` / `receive_foo_v2(agent)` alongside old methods. Implement in InMemoryQueue (second hashmap), NatsQueue, RecordingQueue.
-3. **Add `message_v2` to DagNode.** `Option<ObservableMessageV2>`, always `None` initially. Invariant: exactly one of `message` / `message_v2` is `Some`.
-4. **Wire receive side.** Sidecar, lambda, provider handler accept v2 types. Never fires yet — nobody sends v2.
-5. **Wire read paths.** `insert_node`, `dag_node_to_proto`, proto converter, CLI commands, git-dag consumer handle `message_v2`. The v2 branch never executes yet — `message_v2` is always `None`.
-6. **Wire NATS subject.** Single-source format: subject builder, parser, and filter derive from shared constants. Subject includes protocol version: `vlinder.data.v1.{session}.{branch}.{sub}.{kind}...`
-7. **Wire send side (the switch).** Harness constructs `DataRoutingKey` + `FooMessageV2`, calls `send_foo_v2`. Everything is already waiting. **This is the only commit that changes runtime behavior.**
-8. **Remove old.** Delete `send_foo`, `receive_foo`, `ObservableMessage::Foo` variant, `From<FooMessage>`, dead match arms, old header serialization.
+### Per-message migration steps
 
-Each step compiles and passes e2e independently. Steps 1-6 are pure additions — the old path is untouched. Step 7 is the cutover. Step 8 is cleanup.
+1. **Typed table + v2 payload type.** Create per-message SQL table (e.g. `request_nodes`). Define `FooMessage` with only payload fields (id, dag_id, state, diagnostics, payload). Routing fields live in `DataRoutingKey`. Wire `get_foo_node` / `insert_foo_node` through DagStore → SQLite → gRPC.
+2. **Recording queue.** Switch `send_foo` to write to the typed table via `record_foo` instead of the generic `ObservableMessage` blob path.
+3. **DataMessageKind + wire format.** Add variant to `DataMessageKind`. Wire NATS subject (builder, parser, filter). Add `send_foo` / `receive_foo` to MessageQueue trait. Implement in InMemoryQueue, NatsQueue, RecordingQueue.
+4. **Git DAG worker.** Add `on_foo` to `DagWorker` trait + `GitDagWorker` impl. Wire into vlinderd's DAG consumer dispatch.
+5. **Add v2 receivers.** Service workers / sidecar try v2 first, fall back to v1. Decouples handler logic from v1 types.
+6. **Switch senders.** Provider server, sidecar dispatch construct `DataRoutingKey` + v2 payload. **This is the only commit that changes runtime behavior.**
+7. **Remove v1.** Delete old trait methods, impls, `ObservableMessage` variants, `From` impls, old header serialization, dead tests. Tree-shake: remove `pub`, let the compiler find dead code, delete, repeat.
+8. **Rename.** Drop V2 suffix from types and methods. Clean up stale v2 references in variables, error strings, test names.
+
+Each step compiles and passes e2e independently. Steps 1-5 are pure additions. Step 6 is the cutover. Steps 7-8 are cleanup.
+
+### Progress
+
+| Message type | Status |
+|---|---|
+| Invoke | ✅ Complete — `InvokeMessage`, `send_invoke`/`receive_invoke` |
+| Complete | ✅ Complete — `CompleteMessage`, `send_complete`/`receive_complete` |
+| Request | ✅ Complete — `RequestMessage`, `send_request`/`receive_request` |
+| Response | ✅ Complete — `ResponseMessage`, `send_response`/`receive_response` |
+| Delegate | 🔲 Next — needs `DataMessageKind::Delegate { caller, target, nonce }` |
+| DelegateReply | 🔲 Next — needs `delegate_reply_nodes` table, `DataMessageKind::DelegateReply { caller, target, nonce }` |
+
+Note: Delegate currently omits the nonce from its NATS subject (`vlinder.{s}.{b}.{sub}.delegate.{caller}.{target}`). The v2 subject must include it (`vlinder.data.v1.{s}.{b}.{sub}.delegate.{caller}.{target}.{nonce}`) to prevent routing collisions when the same caller delegates to the same target multiple times within a submission.
 
 ### Wire format
 
@@ -148,7 +163,7 @@ The v2 wire format separates concerns cleanly:
 
 - **Subject** — routing + protocol version. Parsed without touching the payload.
 - **Headers** — NATS concerns only (`Nats-Msg-Id` for dedup). No domain data.
-- **Payload** — `serde_json::to_vec(&FooMessageV2)`. Self-contained, no header extraction needed. Diagnostics, state, and all domain metadata live here.
+- **Payload** — `serde_json::to_vec(&FooMessage)`. Self-contained, no header extraction needed. Diagnostics, state, and all domain metadata live here.
 
 This eliminates `from_nats_headers`, manual header insertion/extraction, and the risk of header size limits for structured data like diagnostics.
 
