@@ -58,18 +58,6 @@ pub use session_start::SessionStartMessage;
 /// Protocol version stamped on every message at construction time.
 pub const PROTOCOL_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// Trait for messages that expect a reply.
-///
-/// The associated type `Reply` specifies what message type is expected
-/// as a response. Terminal messages (Complete, Response) don't implement
-/// this trait because they ARE replies.
-pub trait ExpectsReply {
-    type Reply;
-
-    /// Create the reply for this message.
-    fn create_reply(&self, payload: Vec<u8>) -> Self::Reply;
-}
-
 #[cfg(test)]
 mod tests {
     use super::super::diagnostics::{DelegateDiagnostics, RequestDiagnostics, RuntimeDiagnostics};
@@ -179,33 +167,6 @@ mod tests {
     }
 
     // --- ExpectsReply trait tests ---
-
-    #[test]
-    fn request_create_reply_returns_response() {
-        let request = RequestMessage::new(
-            BranchId::from(1),
-            test_submission(),
-            SessionId::new(),
-            test_agent_id(),
-            ServiceBackend::Kv(ObjectStorageType::Sqlite),
-            Operation::Get,
-            Sequence::first(),
-            b"key".to_vec(),
-            None,
-            test_request_diag(),
-        );
-
-        let response: ResponseMessage = request.create_reply(b"value".to_vec());
-
-        assert_eq!(response.submission, request.submission);
-        assert_eq!(response.session, request.session);
-        assert_eq!(response.agent_id, request.agent_id);
-        assert_eq!(response.service, request.service);
-        assert_eq!(response.operation, request.operation);
-        assert_eq!(response.sequence, request.sequence);
-        assert_eq!(response.correlation_id, request.id);
-        assert_eq!(response.payload.as_slice(), b"value");
-    }
 
     // --- ObservableMessage tests ---
 

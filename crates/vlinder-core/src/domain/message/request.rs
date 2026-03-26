@@ -6,8 +6,7 @@ use super::super::diagnostics::RequestDiagnostics;
 use super::super::operation::Operation;
 use super::super::routing_key::{AgentName, RoutingKey, RoutingKind, ServiceBackend};
 use super::identity::{BranchId, DagNodeId, MessageId, Sequence, SessionId, SubmissionId};
-use super::response::ResponseMessage;
-use super::{ExpectsReply, PROTOCOL_VERSION};
+use super::PROTOCOL_VERSION;
 
 /// Request message: Runtime → Service
 ///
@@ -81,14 +80,6 @@ impl RequestMessage {
                 sequence: self.sequence,
             },
         }
-    }
-}
-
-impl ExpectsReply for RequestMessage {
-    type Reply = ResponseMessage;
-
-    fn create_reply(&self, payload: Vec<u8>) -> ResponseMessage {
-        ResponseMessage::from_request(self, payload)
     }
 }
 

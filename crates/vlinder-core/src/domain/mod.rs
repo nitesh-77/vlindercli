@@ -61,11 +61,11 @@ pub use diagnostics::{
     RuntimeDiagnostics, RuntimeInfo, ServiceDiagnostics, ServiceMetrics,
 };
 pub use message::{
-    BranchId, CompleteMessage, DagNodeId, DelegateMessage, DelegateReplyMessage, ExpectsReply,
-    ForkMessage, HarnessType, Instance, InvokeMessage, MessageDetails, MessageId,
-    ObservableMessage, ObservableMessageHeaders, ObservableMessageV2, PromoteMessage,
-    RepairMessage, RequestMessage, RequestMessageV2, ResponseMessage, ResponseMessageV2, Sequence,
-    SequenceCounter, SessionId, SessionStartMessage, StateHash, SubmissionId, PROTOCOL_VERSION,
+    BranchId, CompleteMessage, DagNodeId, DelegateMessage, DelegateReplyMessage, ForkMessage,
+    HarnessType, Instance, InvokeMessage, MessageDetails, MessageId, ObservableMessage,
+    ObservableMessageHeaders, ObservableMessageV2, PromoteMessage, RepairMessage, RequestMessage,
+    RequestMessageV2, ResponseMessage, ResponseMessageV2, Sequence, SequenceCounter, SessionId,
+    SessionStartMessage, StateHash, SubmissionId, PROTOCOL_VERSION,
 };
 pub use message_queue::{agent_routing_key, Acknowledgement, MessageQueue, QueueError};
 pub use routing_key::{
