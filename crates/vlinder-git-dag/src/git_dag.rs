@@ -210,37 +210,6 @@ impl GitDagWorker {
 
         // Type-specific fields + diagnostics
         match msg {
-            ObservableMessage::Request(m) => {
-                self.insert_field(&mut tb, "type", "request")?;
-                self.insert_field(&mut tb, "agent_id", m.agent_id.as_str())?;
-                self.insert_field(&mut tb, "service", m.service.service_type().as_str())?;
-                self.insert_field(&mut tb, "backend", m.service.backend_str())?;
-                self.insert_field(&mut tb, "operation", m.operation.as_str())?;
-                self.insert_field(&mut tb, "sequence", &m.sequence.as_u32().to_string())?;
-                if let Some(ref state) = m.state {
-                    self.insert_field(&mut tb, "state", state)?;
-                }
-                if let Some(ref checkpoint) = m.checkpoint {
-                    self.insert_field(&mut tb, "checkpoint", checkpoint)?;
-                }
-                self.insert_diagnostics_toml(&mut tb, &m.diagnostics)?;
-            }
-            ObservableMessage::Response(m) => {
-                self.insert_field(&mut tb, "type", "response")?;
-                self.insert_field(&mut tb, "agent_id", m.agent_id.as_str())?;
-                self.insert_field(&mut tb, "service", m.service.service_type().as_str())?;
-                self.insert_field(&mut tb, "backend", m.service.backend_str())?;
-                self.insert_field(&mut tb, "operation", m.operation.as_str())?;
-                self.insert_field(&mut tb, "sequence", &m.sequence.as_u32().to_string())?;
-                self.insert_field(&mut tb, "correlation_id", m.correlation_id.as_str())?;
-                if let Some(ref state) = m.state {
-                    self.insert_field(&mut tb, "state", state)?;
-                }
-                if let Some(ref checkpoint) = m.checkpoint {
-                    self.insert_field(&mut tb, "checkpoint", checkpoint)?;
-                }
-                self.insert_diagnostics_toml(&mut tb, &m.diagnostics)?;
-            }
             ObservableMessage::Complete(m) => {
                 self.insert_field(&mut tb, "type", "complete")?;
                 self.insert_field(&mut tb, "agent_id", m.agent_id.as_str())?;
@@ -1281,16 +1250,6 @@ impl DagWorker for GitDagWorker {
 /// Extract (from, to, `type_str`) from an `ObservableMessage` for commit metadata.
 fn message_routing(msg: &ObservableMessage) -> (String, String, &'static str) {
     match msg {
-        ObservableMessage::Request(m) => (
-            m.agent_id.to_string(),
-            format!("{}.{}", m.service.service_type(), m.service.backend_str()),
-            "request",
-        ),
-        ObservableMessage::Response(m) => (
-            format!("{}.{}", m.service.service_type(), m.service.backend_str()),
-            m.agent_id.to_string(),
-            "response",
-        ),
         ObservableMessage::Complete(m) => (
             m.agent_id.to_string(),
             m.harness.as_str().to_string(),
@@ -1312,8 +1271,6 @@ fn message_routing(msg: &ObservableMessage) -> (String, String, &'static str) {
 /// Extract the agent name for registry lookup.
 fn message_agent_name(msg: &ObservableMessage) -> String {
     match msg {
-        ObservableMessage::Request(m) => m.agent_id.to_string(),
-        ObservableMessage::Response(m) => m.agent_id.to_string(),
         ObservableMessage::Complete(m) => m.agent_id.to_string(),
         ObservableMessage::Delegate(m) => m.target.to_string(),
         ObservableMessage::Repair(m) => m.agent_name.to_string(),
@@ -1325,8 +1282,6 @@ fn message_agent_name(msg: &ObservableMessage) -> String {
 /// Extract state from the message if present.
 fn message_state(msg: &ObservableMessage) -> Option<&str> {
     match msg {
-        ObservableMessage::Request(m) => m.state.as_deref(),
-        ObservableMessage::Response(m) => m.state.as_deref(),
         ObservableMessage::Complete(m) => m.state.as_deref(),
         ObservableMessage::Delegate(m) => m.state.as_deref(),
         ObservableMessage::Repair(m) => m.state.as_deref(),
@@ -1337,8 +1292,6 @@ fn message_state(msg: &ObservableMessage) -> Option<&str> {
 /// Extract checkpoint handler name from the message (ADR 111).
 fn message_checkpoint(msg: &ObservableMessage) -> Option<&str> {
     match msg {
-        ObservableMessage::Request(m) => m.checkpoint.as_deref(),
-        ObservableMessage::Response(m) => m.checkpoint.as_deref(),
         ObservableMessage::Repair(m) => Some(m.checkpoint.as_str()),
         _ => None,
     }
@@ -1350,10 +1303,8 @@ mod tests {
     use std::process::Command;
     use vlinder_core::domain::{
         Agent, AgentName, BranchId, ContainerId, DagNodeId, DelegateDiagnostics, DelegateMessage,
-        DelegateReplyMessage, HarnessType, InMemoryRegistry, InMemorySecretStore,
-        InferenceBackendType, Nonce, ObservableMessage, Operation, RequestDiagnostics,
-        RequestMessage, ResponseMessage, RuntimeDiagnostics, RuntimeInfo, RuntimeType, SecretStore,
-        Sequence, ServiceBackend, ServiceDiagnostics, ServiceMetrics, ServiceType, SessionId,
+        DelegateReplyMessage, HarnessType, InMemoryRegistry, InMemorySecretStore, Nonce,
+        ObservableMessage, RuntimeDiagnostics, RuntimeInfo, RuntimeType, SecretStore, SessionId,
         Snapshot, SubmissionId,
     };
 
@@ -1374,64 +1325,6 @@ mod tests {
         );
         let created_at = DateTime::from_timestamp(epoch_secs, 0).unwrap();
         (ObservableMessage::Complete(msg), created_at)
-    }
-
-    fn test_request(payload: &[u8], epoch_secs: i64) -> (ObservableMessage, DateTime<Utc>) {
-        let msg = RequestMessage::new(
-            BranchId::from(1),
-            SubmissionId::from("sub-1".to_string()),
-            SessionId::try_from(SESSION.to_string()).unwrap(),
-            test_agent_id(),
-            ServiceBackend::Infer(InferenceBackendType::Ollama),
-            Operation::Run,
-            Sequence::from(1),
-            payload.to_vec(),
-            None,
-            RequestDiagnostics {
-                sequence: 1,
-                endpoint: "/infer".to_string(),
-                request_bytes: 1024,
-                received_at_ms: 1_700_000_000_000,
-            },
-        );
-        let created_at = DateTime::from_timestamp(epoch_secs, 0).unwrap();
-        (ObservableMessage::Request(msg), created_at)
-    }
-
-    fn test_response(payload: &[u8], epoch_secs: i64) -> (ObservableMessage, DateTime<Utc>) {
-        let request = RequestMessage::new(
-            BranchId::from(1),
-            SubmissionId::from("sub-1".to_string()),
-            SessionId::try_from(SESSION.to_string()).unwrap(),
-            test_agent_id(),
-            ServiceBackend::Infer(InferenceBackendType::Ollama),
-            Operation::Run,
-            Sequence::from(1),
-            b"prompt".to_vec(),
-            None,
-            RequestDiagnostics {
-                sequence: 1,
-                endpoint: "/infer".to_string(),
-                request_bytes: 0,
-                received_at_ms: 0,
-            },
-        );
-        let msg = ResponseMessage::from_request_with_diagnostics(
-            &request,
-            payload.to_vec(),
-            ServiceDiagnostics {
-                service: ServiceType::Infer,
-                backend: "ollama".to_string(),
-                duration_ms: 1800,
-                metrics: ServiceMetrics::Inference {
-                    tokens_input: 512,
-                    tokens_output: 908,
-                    model: "phi3:latest".to_string(),
-                },
-            },
-        );
-        let created_at = DateTime::from_timestamp(epoch_secs, 0).unwrap();
-        (ObservableMessage::Response(msg), created_at)
     }
 
     fn test_complete(payload: &[u8], epoch_secs: i64) -> (ObservableMessage, DateTime<Utc>) {
@@ -1689,48 +1582,6 @@ mod tests {
     }
 
     #[test]
-    fn request_directory_has_service_fields() {
-        let (mut worker, tmp) = test_worker();
-
-        // Need invoke first to get sequence 001
-        let (m1, t1) = test_invoke(b"q", 1000);
-        worker.on_observable_message(&m1, t1);
-
-        let (msg, ts) = test_request(b"prompt", 1001);
-        worker.on_observable_message(&msg, ts);
-
-        let dir = "002-support-agent-request";
-        let show = |field: &str| show_session_file(tmp.path(), dir, field);
-
-        assert_eq!(show("type").unwrap(), "request");
-        assert_eq!(show("service").unwrap(), "infer");
-        assert_eq!(show("backend").unwrap(), "ollama");
-        assert_eq!(show("operation").unwrap(), "run");
-        assert_eq!(show("sequence").unwrap(), "1");
-        assert!(show("agent_id").unwrap().contains("support-agent"));
-    }
-
-    #[test]
-    fn response_directory_has_correlation_id() {
-        let (mut worker, tmp) = test_worker();
-
-        let (m1, t1) = test_invoke(b"q", 1000);
-        worker.on_observable_message(&m1, t1);
-
-        let (msg, ts) = test_response(b"answer", 1002);
-        worker.on_observable_message(&msg, ts);
-
-        let dir = "002-infer.ollama-response";
-        let show = |field: &str| show_session_file(tmp.path(), dir, field);
-
-        assert_eq!(show("type").unwrap(), "response");
-        assert!(show("correlation_id").is_ok(), "should have correlation_id");
-        assert_eq!(show("service").unwrap(), "infer");
-        let diag = show("diagnostics.toml").unwrap();
-        assert!(diag.contains("duration_ms"), "diag: {diag}");
-    }
-
-    #[test]
     fn complete_directory_has_harness_and_stderr() {
         let (mut worker, tmp) = test_worker();
         let msg_inner = DelegateReplyMessage::new(
@@ -1837,47 +1688,6 @@ mod tests {
     // --- Accumulation and chaining tests ---
 
     #[test]
-    fn messages_accumulate_in_session_folder() {
-        let (mut worker, tmp) = test_worker();
-
-        let (m1, t1) = test_invoke(b"q", 1000);
-        worker.on_observable_message(&m1, t1);
-
-        let (m2, t2) = test_request(b"r", 1001);
-        worker.on_observable_message(&m2, t2);
-
-        let (m3, t3) = test_response(b"a", 1002);
-        worker.on_observable_message(&m3, t3);
-
-        let ls = git(
-            tmp.path(),
-            &["ls-tree", "--name-only", &format!("main:{AGENT}/{SESSION}")],
-        )
-        .unwrap();
-        assert!(ls.contains("001-support-agent-complete"), "ls: {ls}");
-        assert!(ls.contains("002-support-agent-request"), "ls: {ls}");
-        assert!(ls.contains("003-infer.ollama-response"), "ls: {ls}");
-        assert!(ls.contains("timelines"), "ls: {ls}");
-    }
-
-    #[test]
-    fn commits_chain_on_main() {
-        let (mut worker, tmp) = test_worker();
-
-        let (m1, t1) = test_invoke(b"first", 1000);
-        worker.on_observable_message(&m1, t1);
-        let commit1 = git(tmp.path(), &["rev-parse", "main"]).unwrap();
-
-        let (m2, t2) = test_request(b"second", 1001);
-        worker.on_observable_message(&m2, t2);
-        let commit2 = git(tmp.path(), &["rev-parse", "main"]).unwrap();
-
-        assert_ne!(commit1, commit2);
-        let parent = git(tmp.path(), &["log", "-1", "--format=%P", "main"]).unwrap();
-        assert_eq!(parent, commit1);
-    }
-
-    #[test]
     fn first_message_parents_initial_commit() {
         let (mut worker, tmp) = test_worker();
         let initial = git(tmp.path(), &["rev-parse", "main"]).unwrap();
@@ -1890,26 +1700,6 @@ mod tests {
             parent, initial,
             "first message should parent initial commit"
         );
-    }
-
-    #[test]
-    fn all_five_message_types_produce_commits() {
-        let (mut worker, tmp) = test_worker();
-
-        let (m1, t1) = test_invoke(b"1", 1000);
-        worker.on_observable_message(&m1, t1);
-        let (m2, t2) = test_request(b"2", 1001);
-        worker.on_observable_message(&m2, t2);
-        let (m3, t3) = test_response(b"3", 1002);
-        worker.on_observable_message(&m3, t3);
-        let (m4, t4) = test_delegate(b"4", 1003);
-        worker.on_observable_message(&m4, t4);
-        let (m5, t5) = test_complete(b"5", 1004);
-        worker.on_observable_message(&m5, t5);
-
-        // 1 initial + 5 messages = 6
-        let count = git(tmp.path(), &["rev-list", "--count", "main"]).unwrap();
-        assert_eq!(count, "6");
     }
 
     // --- Rich tree tests (ADR 070) ---
@@ -2033,62 +1823,7 @@ mod tests {
         assert!(ls2.contains("001-support-agent-complete"), "ls2: {ls2}");
     }
 
-    #[test]
-    fn stateless_worker_resumes_from_main() {
-        let tmp = tempfile::TempDir::new().unwrap();
-
-        {
-            let mut worker = GitDagWorker::open(tmp.path(), "host", None).unwrap();
-            let (m1, t1) = test_invoke(b"first", 1000);
-            worker.on_observable_message(&m1, t1);
-        }
-
-        {
-            let mut worker = GitDagWorker::open(tmp.path(), "host", None).unwrap();
-            let (m2, t2) = test_request(b"second", 1001);
-            worker.on_observable_message(&m2, t2);
-        }
-
-        // 1 initial + 2 messages = 3
-        let count = git(tmp.path(), &["rev-list", "--count", "main"]).unwrap();
-        assert_eq!(count, "3");
-
-        // Session folder has both messages
-        let ls = git(
-            tmp.path(),
-            &["ls-tree", "--name-only", &format!("main:{AGENT}/{SESSION}")],
-        )
-        .unwrap();
-        assert!(ls.contains("001-support-agent-complete"), "ls: {ls}");
-        assert!(ls.contains("002-support-agent-request"), "ls: {ls}");
-    }
-
     // --- Timeline index tests (ADR 114) ---
-
-    #[test]
-    fn timeline_main_file_tracks_messages() {
-        let (mut worker, tmp) = test_worker();
-
-        let (m1, t1) = test_invoke(b"q", 1000);
-        worker.on_observable_message(&m1, t1);
-
-        let (m2, t2) = test_request(b"r", 1001);
-        worker.on_observable_message(&m2, t2);
-
-        let timeline = git(
-            tmp.path(),
-            &["show", &format!("main:{AGENT}/{SESSION}/timelines/main")],
-        )
-        .unwrap();
-        assert!(
-            timeline.contains("001-support-agent-complete"),
-            "timeline: {timeline}"
-        );
-        assert!(
-            timeline.contains("002-support-agent-request"),
-            "timeline: {timeline}"
-        );
-    }
 
     #[test]
     fn active_file_points_to_main() {
@@ -2157,88 +1892,7 @@ mod tests {
         );
     }
 
-    #[test]
-    fn canonical_hashes_chain_across_messages() {
-        let (mut worker, tmp) = test_worker();
-
-        let (m1, t1) = test_invoke(b"first", 1000);
-        let expected1 = vlinder_core::domain::workers::dag::build_dag_node(
-            &m1,
-            &DagNodeId::root(),
-            &Snapshot::empty(),
-        );
-        worker.on_observable_message(&m1, t1);
-
-        let hash1 = show_session_file(tmp.path(), "001-support-agent-complete", "hash").unwrap();
-        assert_eq!(hash1, expected1.id.to_string());
-
-        let (m2, t2) = test_request(b"second", 1001);
-        let expected2 = vlinder_core::domain::workers::dag::build_dag_node(
-            &m2,
-            &DagNodeId::from(hash1.clone()),
-            &Snapshot::empty(),
-        );
-        worker.on_observable_message(&m2, t2);
-
-        let hash2 = show_session_file(tmp.path(), "002-support-agent-request", "hash").unwrap();
-        assert_eq!(
-            hash2,
-            expected2.id.to_string(),
-            "second hash should chain from first"
-        );
-        assert_ne!(hash1, hash2);
-    }
-
     // --- Checkpoint tests (ADR 111) ---
-
-    #[test]
-    fn request_subtree_contains_checkpoint_file() {
-        let (mut worker, tmp) = test_worker();
-        let (m1, t1) = test_invoke(b"start", 1000);
-        worker.on_observable_message(&m1, t1);
-
-        let (mut msg, ts) = test_request(b"prompt", 1001);
-        if let ObservableMessage::Request(ref mut m) = msg {
-            m.checkpoint = Some("summarize".to_string());
-        }
-        worker.on_observable_message(&msg, ts);
-
-        let checkpoint =
-            show_session_file(tmp.path(), "002-support-agent-request", "checkpoint").unwrap();
-        assert_eq!(checkpoint, "summarize");
-    }
-
-    #[test]
-    fn request_without_checkpoint_has_no_file() {
-        let (mut worker, tmp) = test_worker();
-        let (m1, t1) = test_invoke(b"start", 1000);
-        worker.on_observable_message(&m1, t1);
-
-        let (msg, ts) = test_request(b"prompt", 1001);
-        worker.on_observable_message(&msg, ts);
-
-        let result = show_session_file(tmp.path(), "002-support-agent-request", "checkpoint");
-        assert!(result.is_err(), "no checkpoint file when not set");
-    }
-
-    #[test]
-    fn checkpoint_trailer_on_commit_message() {
-        let (mut worker, tmp) = test_worker();
-        let (m1, t1) = test_invoke(b"start", 1000);
-        worker.on_observable_message(&m1, t1);
-
-        let (mut msg, ts) = test_request(b"prompt", 1001);
-        if let ObservableMessage::Request(ref mut m) = msg {
-            m.checkpoint = Some("handle_result".to_string());
-        }
-        worker.on_observable_message(&msg, ts);
-
-        let body = git(tmp.path(), &["log", "-1", "--format=%b", "main"]).unwrap();
-        assert!(
-            body.contains("Checkpoint: handle_result"),
-            "commit body should contain Checkpoint trailer, got: {body}"
-        );
-    }
 
     // ========================================================================
     // Fork message tests

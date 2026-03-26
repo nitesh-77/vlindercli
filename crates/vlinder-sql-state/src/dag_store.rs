@@ -309,22 +309,6 @@ fn insert_typed_node(conn: &Connection, node: &DagNode) -> Result<(), rusqlite::
                 rusqlite::params![hash, m.agent_id.as_str(), m.harness.as_str(), m.id.as_str(), m.state.as_deref(), diag, &m.payload],
             )?;
         }
-        ObservableMessage::Request(m) => {
-            let diag = serde_json::to_vec(&m.diagnostics).unwrap_or_default();
-            conn.execute(
-                "INSERT OR IGNORE INTO request_nodes (dag_hash, agent, service, operation, sequence, message_id, state, diagnostics, payload, checkpoint)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-                rusqlite::params![hash, m.agent_id.as_str(), m.service.to_string(), m.operation.as_str(), m.sequence.as_u32(), m.id.as_str(), m.state.as_deref(), diag, &m.payload, m.checkpoint.as_deref()],
-            )?;
-        }
-        ObservableMessage::Response(m) => {
-            let diag = serde_json::to_vec(&m.diagnostics).unwrap_or_default();
-            conn.execute(
-                "INSERT OR IGNORE INTO response_nodes (dag_hash, agent, service, operation, sequence, message_id, correlation_id, state, diagnostics, payload, status_code, checkpoint)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
-                rusqlite::params![hash, m.agent_id.as_str(), m.service.to_string(), m.operation.as_str(), m.sequence.as_u32(), m.id.as_str(), m.correlation_id.as_str(), m.state.as_deref(), diag, &m.payload, m.status_code, m.checkpoint.as_deref()],
-            )?;
-        }
         ObservableMessage::Delegate(m) => {
             let diag = serde_json::to_vec(&m.diagnostics).unwrap_or_default();
             conn.execute(
@@ -1304,8 +1288,7 @@ mod tests {
     use vlinder_core::domain::workers::dag::build_dag_node;
     use vlinder_core::domain::{
         AgentName, BranchId, DelegateDiagnostics, DelegateMessage, DelegateReplyMessage,
-        HarnessType, InferenceBackendType, Nonce, Operation, RequestDiagnostics, RequestMessage,
-        RuntimeDiagnostics, Sequence, ServiceBackend, Snapshot, SubmissionId,
+        HarnessType, Nonce, RuntimeDiagnostics, Snapshot, SubmissionId,
     };
 
     fn test_store() -> SqliteDagStore {
@@ -1331,27 +1314,6 @@ mod tests {
             payload.to_vec(),
             state,
             RuntimeDiagnostics::placeholder(0),
-        )
-        .into()
-    }
-
-    fn make_request(payload: &[u8]) -> ObservableMessage {
-        RequestMessage::new(
-            BranchId::from(1),
-            sub(),
-            sess(),
-            AgentName::new("agent-a"),
-            ServiceBackend::Infer(InferenceBackendType::Ollama),
-            Operation::Run,
-            Sequence::first(),
-            payload.to_vec(),
-            None,
-            RequestDiagnostics {
-                sequence: 1,
-                endpoint: "/infer".to_string(),
-                request_bytes: 0,
-                received_at_ms: 0,
-            },
         )
         .into()
     }
@@ -1441,26 +1403,6 @@ mod tests {
 
         let retrieved = store.get_node(&node.id).unwrap().unwrap();
         assert_eq!(retrieved.id, node.id);
-    }
-
-    #[test]
-    fn session_nodes_ordered_by_created_at() {
-        let store = test_store();
-
-        let mut node1 = test_node(b"first", &DagNodeId::root());
-        node1.created_at = chrono::TimeZone::with_ymd_and_hms(&Utc, 2025, 1, 1, 0, 0, 0).unwrap();
-
-        let mut node2 = build_dag_node(&make_request(b"second"), &node1.id, &Snapshot::empty());
-        node2.created_at = chrono::TimeZone::with_ymd_and_hms(&Utc, 2025, 1, 1, 0, 1, 0).unwrap();
-
-        // Insert out of order
-        store.insert_node(&node2).unwrap();
-        store.insert_node(&node1).unwrap();
-
-        let all = store.get_session_nodes(&sess()).unwrap();
-        assert_eq!(all.len(), 2);
-        assert_eq!(all[0].id, node1.id);
-        assert_eq!(all[1].id, node2.id);
     }
 
     #[test]
@@ -1616,33 +1558,6 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(latest.id, node2.id);
-    }
-
-    #[test]
-    fn latest_node_on_branch_filters_by_message_type() {
-        let store = test_store();
-
-        let request = make_request(b"question");
-        let node1 = build_dag_node(&request, &DagNodeId::root(), &Snapshot::empty());
-        store.insert_node(&node1).unwrap();
-
-        let complete = make_complete(b"answer", None);
-        let node2 = build_dag_node(&complete, &node1.id, &Snapshot::empty());
-        store.insert_node(&node2).unwrap();
-
-        // Filter for Request — should return node1, not node2
-        let latest_request = store
-            .latest_node_on_branch(BranchId::from(1), Some(MessageType::Request))
-            .unwrap()
-            .unwrap();
-        assert_eq!(latest_request.id, node1.id);
-
-        // Filter for Complete — should return node2
-        let latest_complete = store
-            .latest_node_on_branch(BranchId::from(1), Some(MessageType::Complete))
-            .unwrap()
-            .unwrap();
-        assert_eq!(latest_complete.id, node2.id);
     }
 
     // ========================================================================

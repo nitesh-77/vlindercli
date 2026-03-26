@@ -61,9 +61,8 @@ mod tests {
     use super::*;
     use crate::domain::{
         AgentName, BranchId, DagStore, DelegateDiagnostics, DelegateMessage, DelegateReplyMessage,
-        HarnessType, InMemoryDagStore, InferenceBackendType, MessageType, Nonce, Operation,
-        RequestDiagnostics, RequestMessage, ResponseMessage, RuntimeDiagnostics, Sequence,
-        ServiceBackend, SessionId, SubmissionId,
+        HarnessType, InMemoryDagStore, MessageType, Nonce, RuntimeDiagnostics, SessionId,
+        SubmissionId,
     };
 
     fn session() -> SessionId {
@@ -88,48 +87,6 @@ mod tests {
             RuntimeDiagnostics::placeholder(0),
         )
         .into()
-    }
-
-    fn test_request(payload: &[u8]) -> ObservableMessage {
-        RequestMessage::new(
-            BranchId::from(1),
-            submission(),
-            session(),
-            AgentName::new("myagent"),
-            ServiceBackend::Infer(InferenceBackendType::Ollama),
-            Operation::Run,
-            Sequence::first(),
-            payload.to_vec(),
-            None,
-            RequestDiagnostics {
-                sequence: 1,
-                endpoint: "/infer".to_string(),
-                request_bytes: 0,
-                received_at_ms: 0,
-            },
-        )
-        .into()
-    }
-
-    fn test_response(payload: &[u8]) -> ObservableMessage {
-        let request = RequestMessage::new(
-            BranchId::from(1),
-            submission(),
-            session(),
-            AgentName::new("myagent"),
-            ServiceBackend::Infer(InferenceBackendType::Ollama),
-            Operation::Run,
-            Sequence::first(),
-            b"prompt".to_vec(),
-            None,
-            RequestDiagnostics {
-                sequence: 1,
-                endpoint: "/infer".to_string(),
-                request_bytes: 0,
-                received_at_ms: 0,
-            },
-        );
-        ResponseMessage::from_request(&request, payload.to_vec()).into()
     }
 
     fn test_complete(payload: &[u8], state: Option<String>) -> ObservableMessage {
@@ -182,29 +139,6 @@ mod tests {
     }
 
     #[test]
-    fn build_dag_node_from_request() {
-        let msg = test_request(b"request-payload");
-        let parent = DagNodeId::from("parent-abc".to_string());
-        let node = build_dag_node(&msg, &parent, &Snapshot::empty());
-        assert_eq!(node.message_type(), MessageType::Request);
-        let (from, to) = node.message.as_ref().unwrap().sender_receiver();
-        assert_eq!(from, "myagent");
-        assert_eq!(to, "infer.ollama");
-        assert_eq!(node.parent_id, parent);
-    }
-
-    #[test]
-    fn build_dag_node_from_response() {
-        let msg = test_response(b"response-payload");
-        let root = DagNodeId::root();
-        let node = build_dag_node(&msg, &root, &Snapshot::empty());
-        assert_eq!(node.message_type(), MessageType::Response);
-        let (from, to) = node.message.as_ref().unwrap().sender_receiver();
-        assert_eq!(from, "infer.ollama");
-        assert_eq!(to, "myagent");
-    }
-
-    #[test]
     fn build_dag_node_from_delegate() {
         let msg = test_delegate(b"delegate-payload");
         let root = DagNodeId::root();
@@ -213,20 +147,6 @@ mod tests {
         let (from, to) = node.message.as_ref().unwrap().sender_receiver();
         assert_eq!(from, "coordinator");
         assert_eq!(to, "summarizer");
-    }
-
-    #[test]
-    fn build_dag_node_checkpoint_preserved_on_request() {
-        let mut msg = test_request(b"prompt");
-        if let ObservableMessage::Request(ref mut m) = msg {
-            m.checkpoint = Some("summarize".to_string());
-        }
-        let root = DagNodeId::root();
-        let node = build_dag_node(&msg, &root, &Snapshot::empty());
-        assert_eq!(
-            node.message.as_ref().unwrap().checkpoint(),
-            Some("summarize")
-        );
     }
 
     #[test]
@@ -313,32 +233,6 @@ mod tests {
         let (from, to) = nodes[0].message.as_ref().unwrap().sender_receiver();
         assert_eq!(from, "myagent");
         assert_eq!(to, "cli");
-    }
-
-    #[test]
-    fn messages_chain_in_session() {
-        let store = test_store();
-        let mut last_id = DagNodeId::root();
-
-        let msg1 = test_invoke(b"first");
-        let node1 = build_dag_node(&msg1, &last_id, &Snapshot::empty());
-        last_id = node1.id.clone();
-        store.insert_node(&node1).unwrap();
-
-        let msg2 = test_request(b"second");
-        let node2 = build_dag_node(&msg2, &last_id, &node1.state);
-        last_id = node2.id.clone();
-        store.insert_node(&node2).unwrap();
-
-        let msg3 = test_response(b"third");
-        let node3 = build_dag_node(&msg3, &last_id, &node2.state);
-        store.insert_node(&node3).unwrap();
-
-        let all = store.get_session_nodes(&session()).unwrap();
-        assert_eq!(all.len(), 3);
-        assert_eq!(all[0].parent_id, DagNodeId::root());
-        assert_eq!(all[1].parent_id, all[0].id);
-        assert_eq!(all[2].parent_id, all[1].id);
     }
 
     #[test]

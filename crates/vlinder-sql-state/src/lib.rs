@@ -539,47 +539,4 @@ mod tests {
         let html = render_index(&store);
         assert!(html.contains("No conversations yet"));
     }
-
-    #[test]
-    fn render_session_with_open_question() {
-        use vlinder_core::domain::{
-            InferenceBackendType, Operation, RequestDiagnostics, RequestMessage, Sequence,
-            ServiceBackend,
-        };
-
-        let store = InMemoryDagStore::new();
-        let sid = SessionId::try_from("e2660cff-33d6-4428-acca-2d297dcc1cad".to_string()).unwrap();
-        let msg: ObservableMessage = RequestMessage::new(
-            BranchId::from(1),
-            SubmissionId::from("sub-1".to_string()),
-            sid.clone(),
-            AgentName::new("todoapp"),
-            ServiceBackend::Infer(InferenceBackendType::Ollama),
-            Operation::Run,
-            Sequence::first(),
-            b"what next?".to_vec(),
-            None,
-            RequestDiagnostics {
-                sequence: 1,
-                endpoint: "/infer".to_string(),
-                request_bytes: 0,
-                received_at_ms: 0,
-            },
-        )
-        .into();
-        let mut node = build_dag_node(&msg, &DagNodeId::root(), &Snapshot::empty());
-        node.created_at = Utc.with_ymd_and_hms(2026, 2, 8, 14, 30, 5).unwrap();
-        store.insert_node(&node).unwrap();
-
-        let session = Session::new(sid, "todoapp", BranchId::from(1));
-        store.create_session(&session).unwrap();
-
-        let html = render_session(&store, &session).unwrap();
-        // Session is "open" because the last message is a Request (not Complete)
-        assert!(
-            !html.contains("Pending"),
-            "no Invoke to show as Pending question"
-        );
-        assert!(html.contains("todoapp"));
-    }
 }

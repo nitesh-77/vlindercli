@@ -193,28 +193,6 @@ mod tests {
     }
 
     #[test]
-    fn observable_message_from_request() {
-        let request = RequestMessage::new(
-            BranchId::from(1),
-            test_submission(),
-            SessionId::new(),
-            test_agent_id(),
-            ServiceBackend::Kv(ObjectStorageType::Sqlite),
-            Operation::Get,
-            Sequence::first(),
-            b"test".to_vec(),
-            None,
-            test_request_diag(),
-        );
-        let id = request.id.clone();
-
-        let observable: ObservableMessage = request.into();
-
-        assert_eq!(observable.id(), &id);
-        assert!(matches!(observable, ObservableMessage::Request(_)));
-    }
-
-    #[test]
     fn observable_message_common_accessors() {
         let submission = test_submission();
         let session = SessionId::new();
