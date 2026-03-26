@@ -10,10 +10,10 @@
 //! `AckFn` acknowledges successful processing.
 
 use super::{
-    AgentName, CompleteMessage, DataRoutingKey, DelegateMessage, DelegateReplyMessage, ForkMessage,
-    HarnessType, InvokeMessage, Operation, PromoteMessage, RepairMessage, RequestMessage,
-    RequestMessageV2, ResourceId, ResponseMessage, ResponseMessageV2, RoutingKey, Sequence,
-    ServiceBackend, SubmissionId,
+    AgentName, CompleteMessage, DataMessageKind, DataRoutingKey, DelegateMessage,
+    DelegateReplyMessage, ForkMessage, HarnessType, InvokeMessage, Operation, PromoteMessage,
+    RepairMessage, RequestMessage, RequestMessageV2, ResourceId, ResponseMessage,
+    ResponseMessageV2, RoutingKey, Sequence, ServiceBackend, SubmissionId,
 };
 use std::fmt;
 
@@ -231,6 +231,36 @@ pub trait MessageQueue {
         send_and_wait(
             || self.send_request(msg),
             || self.receive_response(&msg_for_recv),
+        )
+    }
+
+    /// Send a service request on the data plane and block until the response arrives.
+    ///
+    /// Data-plane variant of `call_service`. Routing key carries session/branch/submission/
+    /// service/operation/sequence; payload is `RequestMessageV2`.
+    fn call_service_v2(
+        &self,
+        key: DataRoutingKey,
+        msg: RequestMessageV2,
+    ) -> Result<ResponseMessageV2, QueueError> {
+        let DataMessageKind::Request {
+            service,
+            operation,
+            sequence,
+            ..
+        } = key.kind
+        else {
+            return Err(QueueError::SendFailed(
+                "call_service_v2 requires a Request routing key".into(),
+            ));
+        };
+        let submission = key.submission.clone();
+        send_and_wait(
+            || self.send_request_v2(key, msg),
+            || {
+                self.receive_response_v2(&submission, service, operation, sequence)
+                    .map(|(_key, msg, ack)| (msg, ack))
+            },
         )
     }
 

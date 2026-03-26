@@ -7,9 +7,9 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use vlinder_core::domain::{
-    AgentName, BranchId, DelegateDiagnostics, DelegateMessage, MessageQueue, Nonce, ProviderRoute,
-    Registry, RequestDiagnostics, RequestMessage, RoutingKey, RuntimeDiagnostics, SequenceCounter,
-    SessionId, SubmissionId,
+    AgentName, BranchId, DagNodeId, DataMessageKind, DataRoutingKey, DelegateDiagnostics,
+    DelegateMessage, MessageId, MessageQueue, Nonce, ProviderRoute, Registry, RequestDiagnostics,
+    RequestMessageV2, RoutingKey, RuntimeDiagnostics, SequenceCounter, SessionId, SubmissionId,
 };
 
 /// Handles data-plane logic for a single invoke.
@@ -75,21 +75,28 @@ impl InvokeHandler {
             received_at_ms,
         };
 
-        let mut request = RequestMessage::new(
-            self.branch,
-            self.submission.clone(),
-            self.session.clone(),
-            self.agent_id.clone(),
-            route.service_backend,
-            route.operation,
-            seq,
-            body,
-            self.state.read().unwrap().clone(),
-            diagnostics,
-        );
-        request.checkpoint = checkpoint;
+        let key = DataRoutingKey {
+            session: self.session.clone(),
+            branch: self.branch,
+            submission: self.submission.clone(),
+            kind: DataMessageKind::Request {
+                agent: self.agent_id.clone(),
+                service: route.service_backend,
+                operation: route.operation,
+                sequence: seq,
+            },
+        };
 
-        match self.queue.call_service(request) {
+        let msg = RequestMessageV2 {
+            id: MessageId::new(),
+            dag_id: DagNodeId::root(),
+            state: self.state.read().unwrap().clone(),
+            diagnostics,
+            payload: body,
+            checkpoint,
+        };
+
+        match self.queue.call_service_v2(key, msg) {
             Ok(response) => {
                 if let Some(ref new_state) = response.state {
                     *self.state.write().unwrap() = Some(new_state.clone());
