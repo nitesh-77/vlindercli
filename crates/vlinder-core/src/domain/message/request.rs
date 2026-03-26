@@ -28,7 +28,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn request_v2_json_round_trip() {
+    fn request_json_round_trip() {
         let msg = RequestMessage {
             id: MessageId::from("msg-1".to_string()),
             dag_id: DagNodeId::root(),
@@ -48,7 +48,7 @@ mod tests {
     }
 
     #[test]
-    fn request_v2_payload_is_base64() {
+    fn request_payload_is_base64() {
         let msg = RequestMessage {
             id: MessageId::from("msg-1".to_string()),
             dag_id: DagNodeId::root(),

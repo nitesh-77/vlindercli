@@ -32,7 +32,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn response_v2_json_round_trip() {
+    fn response_json_round_trip() {
         let msg = ResponseMessage {
             id: MessageId::from("msg-1".to_string()),
             dag_id: DagNodeId::root(),
@@ -55,7 +55,7 @@ mod tests {
     }
 
     #[test]
-    fn response_v2_payload_is_base64() {
+    fn response_payload_is_base64() {
         let msg = ResponseMessage {
             id: MessageId::from("msg-1".to_string()),
             dag_id: DagNodeId::root(),

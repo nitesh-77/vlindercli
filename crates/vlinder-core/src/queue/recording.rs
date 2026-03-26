@@ -202,8 +202,8 @@ impl RecordingQueue {
             tracing::warn!(error = %id, "Failed to record complete node: {e}");
         }
     }
-    /// Record a DAG node for a v2 request message (data-plane path).
-    fn record_request_v2(&self, key: &DataRoutingKey, msg: &crate::domain::RequestMessage) {
+    /// Record a DAG node for a request message (data-plane path).
+    fn record_request(&self, key: &DataRoutingKey, msg: &crate::domain::RequestMessage) {
         let branch_id = key.branch;
 
         let parent_node = self
@@ -246,7 +246,7 @@ impl RecordingQueue {
             sequence,
         } = &key.kind
         else {
-            tracing::error!("record_request_v2 called with non-Request key");
+            tracing::error!("record_request called with non-Request key");
             return;
         };
 
@@ -268,8 +268,8 @@ impl RecordingQueue {
         }
     }
 
-    /// Record a DAG node for a v2 response message (data-plane path).
-    fn record_response_v2(&self, key: &DataRoutingKey, msg: &crate::domain::ResponseMessage) {
+    /// Record a DAG node for a response message (data-plane path).
+    fn record_response(&self, key: &DataRoutingKey, msg: &crate::domain::ResponseMessage) {
         let branch_id = key.branch;
 
         let parent_node = self
@@ -312,7 +312,7 @@ impl RecordingQueue {
             sequence,
         } = &key.kind
         else {
-            tracing::error!("record_response_v2 called with non-Response key");
+            tracing::error!("record_response called with non-Response key");
             return;
         };
 
@@ -364,7 +364,7 @@ impl MessageQueue for RecordingQueue {
         key: DataRoutingKey,
         msg: crate::domain::RequestMessage,
     ) -> Result<(), QueueError> {
-        self.record_request_v2(&key, &msg);
+        self.record_request(&key, &msg);
         self.inner.send_request(key, msg)
     }
 
@@ -373,7 +373,7 @@ impl MessageQueue for RecordingQueue {
         key: DataRoutingKey,
         msg: crate::domain::ResponseMessage,
     ) -> Result<(), QueueError> {
-        self.record_response_v2(&key, &msg);
+        self.record_response(&key, &msg);
         self.inner.send_response(key, msg)
     }
 

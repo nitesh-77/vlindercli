@@ -69,7 +69,7 @@ pub trait MessageQueue {
     /// Send a request on the data plane (ADR 121).
     fn send_request(&self, _key: DataRoutingKey, _msg: RequestMessage) -> Result<(), QueueError> {
         Err(QueueError::SendFailed(
-            "send_request_v2 not implemented".into(),
+            "send_request not implemented".into(),
         ))
     }
 
@@ -89,7 +89,7 @@ pub trait MessageQueue {
     /// Send a response on the data plane (ADR 121).
     fn send_response(&self, _key: DataRoutingKey, _msg: ResponseMessage) -> Result<(), QueueError> {
         Err(QueueError::SendFailed(
-            "send_response_v2 not implemented".into(),
+            "send_response not implemented".into(),
         ))
     }
 

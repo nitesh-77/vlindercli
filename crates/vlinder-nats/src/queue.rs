@@ -326,7 +326,7 @@ impl MessageQueue for NatsQueue {
         } = &key.kind
         else {
             return Err(QueueError::SendFailed(
-                "send_request_v2: expected Request key".into(),
+                "send_request: expected Request key".into(),
             ));
         };
         let subject = request_subject(
@@ -388,7 +388,7 @@ impl MessageQueue for NatsQueue {
         } = &key.kind
         else {
             return Err(QueueError::SendFailed(
-                "send_response_v2: expected Response key".into(),
+                "send_response: expected Response key".into(),
             ));
         };
         let subject = response_subject(
