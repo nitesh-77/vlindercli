@@ -22,9 +22,9 @@ use vlinder_core::domain::{
     Acknowledgement, AgentName, BranchId, CompleteMessage, DagNodeId, DataMessageKind,
     DataRoutingKey, DelegateDiagnostics, DelegateMessage, DelegateReplyMessage, HarnessType,
     InvokeMessage, MessageId, MessageQueue, Nonce, Operation, QueueError, RepairMessage,
-    RequestDiagnostics, RequestMessage, RequestMessageV2, ResponseMessage, ResponseMessageV2,
-    RoutingKey, RoutingKind, RuntimeDiagnostics, RuntimeType, Sequence, ServiceBackend,
-    ServiceDiagnostics, ServiceType, SessionId, SubmissionId,
+    RequestDiagnostics, RequestMessageV2, ResponseMessageV2, RoutingKey, RoutingKind,
+    RuntimeDiagnostics, RuntimeType, Sequence, ServiceBackend, ServiceDiagnostics, ServiceType,
+    SessionId, SubmissionId,
 };
 
 /// NATS queue with `JetStream` durability.
@@ -1148,44 +1148,6 @@ pub fn subject_to_routing_key(subject: &str) -> Option<RoutingKey> {
     })
 }
 
-/// Serialize a `RequestMessage` into NATS headers (sans payload).
-pub fn request_to_nats_headers(msg: &RequestMessage) -> HashMap<String, String> {
-    let mut h = HashMap::new();
-    h.insert("msg-id".to_string(), msg.id.as_str().to_string());
-    h.insert("protocol-version".to_string(), msg.protocol_version.clone());
-    h.insert("session-id".to_string(), msg.session.as_str().to_string());
-    if let Some(ref state) = msg.state {
-        h.insert("state".to_string(), state.clone());
-    }
-    if let Ok(diag_json) = serde_json::to_string(&msg.diagnostics) {
-        h.insert("diagnostics".to_string(), diag_json);
-    }
-    if let Some(ref checkpoint) = msg.checkpoint {
-        h.insert("checkpoint".to_string(), checkpoint.clone());
-    }
-    h
-}
-
-/// Serialize a `ResponseMessage` into NATS headers (sans payload).
-pub fn response_to_nats_headers(msg: &ResponseMessage) -> HashMap<String, String> {
-    let mut h = HashMap::new();
-    h.insert("msg-id".to_string(), msg.id.as_str().to_string());
-    h.insert("protocol-version".to_string(), msg.protocol_version.clone());
-    h.insert("session-id".to_string(), msg.session.as_str().to_string());
-    h.insert(
-        "correlation-id".to_string(),
-        msg.correlation_id.as_str().to_string(),
-    );
-    h.insert("status-code".to_string(), msg.status_code.to_string());
-    if let Some(ref state) = msg.state {
-        h.insert("state".to_string(), state.clone());
-    }
-    if let Ok(diag_json) = serde_json::to_string(&msg.diagnostics) {
-        h.insert("diagnostics".to_string(), diag_json);
-    }
-    h
-}
-
 /// Serialize a `CompleteMessage` into NATS headers (sans payload).
 pub fn complete_to_nats_headers(msg: &DelegateReplyMessage) -> HashMap<String, String> {
     let mut h = HashMap::new();
@@ -2131,102 +2093,6 @@ mod tests {
             },
         };
         assert!(from_nats_headers(&key, &HashMap::new()).is_none());
-    }
-
-    // ========================================================================
-    // Request header round-trip
-    // ========================================================================
-
-    #[test]
-    fn request_headers_round_trip() {
-        use vlinder_core::domain::ObservableMessage;
-
-        let original = RequestMessage::new(
-            timeline(),
-            submission(),
-            SessionId::try_from("d4761d76-dee4-4ebf-9df4-43b52efa4f78".to_string()).unwrap(),
-            agent(),
-            ServiceBackend::Kv(ObjectStorageType::Sqlite),
-            Operation::Get,
-            Sequence::first(),
-            b"key-data".to_vec(),
-            Some("state-x".to_string()),
-            RequestDiagnostics {
-                sequence: 1,
-                endpoint: "/test".to_string(),
-                request_bytes: 8,
-                received_at_ms: 0,
-            },
-        );
-        let key = original.routing_key();
-        let headers = request_to_nats_headers(&original);
-
-        let recovered = from_nats_headers(&key, &headers)
-            .expect("should produce Request headers")
-            .assemble(original.payload.clone());
-
-        if let ObservableMessage::Request(m) = &recovered {
-            assert_eq!(m.id, original.id);
-            assert_eq!(m.submission, original.submission);
-            assert_eq!(m.session, original.session);
-            assert_eq!(m.agent_id, original.agent_id);
-            assert_eq!(m.service, original.service);
-            assert_eq!(m.operation, original.operation);
-            assert_eq!(m.sequence, original.sequence);
-            assert_eq!(m.payload, original.payload);
-            assert_eq!(m.state, original.state);
-        } else {
-            panic!("expected Request, got {recovered:?}");
-        }
-    }
-
-    // ========================================================================
-    // Response header round-trip
-    // ========================================================================
-
-    #[test]
-    fn response_headers_round_trip() {
-        use vlinder_core::domain::ObservableMessage;
-
-        let request = RequestMessage::new(
-            timeline(),
-            submission(),
-            SessionId::try_from("d4761d76-dee4-4ebf-9df4-43b52efa4f78".to_string()).unwrap(),
-            agent(),
-            ServiceBackend::Infer(InferenceBackendType::Ollama),
-            Operation::Run,
-            Sequence::from(3),
-            b"prompt".to_vec(),
-            None,
-            RequestDiagnostics {
-                sequence: 3,
-                endpoint: "/infer".to_string(),
-                request_bytes: 6,
-                received_at_ms: 0,
-            },
-        );
-        let original = ResponseMessage::from_request(&request, b"reply-data".to_vec());
-        let key = original.routing_key();
-        let headers = response_to_nats_headers(&original);
-
-        let recovered = from_nats_headers(&key, &headers)
-            .expect("should produce Response headers")
-            .assemble(original.payload.clone());
-
-        if let ObservableMessage::Response(m) = &recovered {
-            assert_eq!(m.id, original.id);
-            assert_eq!(m.submission, original.submission);
-            assert_eq!(m.session, original.session);
-            assert_eq!(m.agent_id, original.agent_id);
-            assert_eq!(m.service, original.service);
-            assert_eq!(m.operation, original.operation);
-            assert_eq!(m.sequence, original.sequence);
-            assert_eq!(m.correlation_id, original.correlation_id);
-            assert_eq!(m.status_code, original.status_code);
-            assert_eq!(m.payload, original.payload);
-        } else {
-            panic!("expected Response, got {recovered:?}");
-        }
     }
 
     // ========================================================================
