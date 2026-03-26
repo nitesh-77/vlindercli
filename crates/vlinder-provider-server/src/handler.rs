@@ -9,7 +9,7 @@ use std::sync::{Arc, RwLock};
 use vlinder_core::domain::{
     AgentName, BranchId, DagNodeId, DataMessageKind, DataRoutingKey, DelegateDiagnostics,
     DelegateMessage, MessageId, MessageQueue, Nonce, ProviderRoute, Registry, RequestDiagnostics,
-    RequestMessageV2, RoutingKey, RuntimeDiagnostics, SequenceCounter, SessionId, SubmissionId,
+    RequestMessage, RoutingKey, RuntimeDiagnostics, SequenceCounter, SessionId, SubmissionId,
 };
 
 /// Handles data-plane logic for a single invoke.
@@ -87,7 +87,7 @@ impl InvokeHandler {
             },
         };
 
-        let msg = RequestMessageV2 {
+        let msg = RequestMessage {
             id: MessageId::new(),
             dag_id: DagNodeId::root(),
             state: self.state.read().unwrap().clone(),
@@ -96,7 +96,7 @@ impl InvokeHandler {
             checkpoint,
         };
 
-        match self.queue.call_service_v2(key, msg) {
+        match self.queue.call_service(key, msg) {
             Ok(response) => {
                 if let Some(ref new_state) = response.state {
                     *self.state.write().unwrap() = Some(new_state.clone());

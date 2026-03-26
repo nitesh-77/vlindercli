@@ -588,7 +588,7 @@ fn run_dag_git_worker(config: &Config, shutdown: &AtomicBool) {
                     }
                 } else if let Some(key) = request_parse_subject(&subject) {
                     if let Ok(request_msg) =
-                        serde_json::from_slice::<vlinder_core::domain::RequestMessageV2>(&payload)
+                        serde_json::from_slice::<vlinder_core::domain::RequestMessage>(&payload)
                     {
                         git_worker.on_request(&key, &request_msg, created_at);
                     } else {
@@ -599,7 +599,7 @@ fn run_dag_git_worker(config: &Config, shutdown: &AtomicBool) {
                     }
                 } else if let Some(key) = response_parse_subject(&subject) {
                     if let Ok(response_msg) =
-                        serde_json::from_slice::<vlinder_core::domain::ResponseMessageV2>(&payload)
+                        serde_json::from_slice::<vlinder_core::domain::ResponseMessage>(&payload)
                     {
                         git_worker.on_response(&key, &response_msg, created_at);
                     } else {

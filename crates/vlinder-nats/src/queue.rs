@@ -22,7 +22,7 @@ use vlinder_core::domain::{
     Acknowledgement, AgentName, BranchId, CompleteMessage, DagNodeId, DataMessageKind,
     DataRoutingKey, DelegateDiagnostics, DelegateMessage, DelegateReplyMessage, HarnessType,
     InvokeMessage, MessageId, MessageQueue, Nonce, Operation, QueueError, RepairMessage,
-    RequestDiagnostics, RequestMessageV2, ResponseMessageV2, RoutingKey, RoutingKind,
+    RequestDiagnostics, RequestMessage, ResponseMessage, RoutingKey, RoutingKind,
     RuntimeDiagnostics, RuntimeType, Sequence, ServiceBackend, ServiceDiagnostics, ServiceType,
     SessionId, SubmissionId,
 };
@@ -317,11 +317,7 @@ impl MessageQueue for NatsQueue {
         })
     }
 
-    fn send_request_v2(
-        &self,
-        key: DataRoutingKey,
-        msg: RequestMessageV2,
-    ) -> Result<(), QueueError> {
+    fn send_request(&self, key: DataRoutingKey, msg: RequestMessage) -> Result<(), QueueError> {
         let DataMessageKind::Request {
             agent,
             service,
@@ -361,11 +357,11 @@ impl MessageQueue for NatsQueue {
         })
     }
 
-    fn receive_request_v2(
+    fn receive_request(
         &self,
         service: ServiceBackend,
         operation: Operation,
-    ) -> Result<(DataRoutingKey, RequestMessageV2, Acknowledgement), QueueError> {
+    ) -> Result<(DataRoutingKey, RequestMessage, Acknowledgement), QueueError> {
         let filter = request_filter(service, operation);
 
         self.inner.runtime.block_on(async {
@@ -376,18 +372,14 @@ impl MessageQueue for NatsQueue {
                 QueueError::ReceiveFailed(format!("invalid request subject: {subject}"))
             })?;
 
-            let msg: RequestMessageV2 = serde_json::from_slice(&js_msg.payload)
+            let msg: RequestMessage = serde_json::from_slice(&js_msg.payload)
                 .map_err(|e| QueueError::ReceiveFailed(format!("deserialize request: {e}")))?;
 
             Ok((key, msg, ack_fn))
         })
     }
 
-    fn send_response_v2(
-        &self,
-        key: DataRoutingKey,
-        msg: ResponseMessageV2,
-    ) -> Result<(), QueueError> {
+    fn send_response(&self, key: DataRoutingKey, msg: ResponseMessage) -> Result<(), QueueError> {
         let DataMessageKind::Response {
             agent,
             service,
@@ -427,13 +419,13 @@ impl MessageQueue for NatsQueue {
         })
     }
 
-    fn receive_response_v2(
+    fn receive_response(
         &self,
         submission: &SubmissionId,
         service: ServiceBackend,
         operation: Operation,
         sequence: Sequence,
-    ) -> Result<(DataRoutingKey, ResponseMessageV2, Acknowledgement), QueueError> {
+    ) -> Result<(DataRoutingKey, ResponseMessage, Acknowledgement), QueueError> {
         let filter = response_filter(submission, service, operation, sequence);
 
         self.inner.runtime.block_on(async {
@@ -444,7 +436,7 @@ impl MessageQueue for NatsQueue {
                 QueueError::ReceiveFailed(format!("invalid response subject: {subject}"))
             })?;
 
-            let msg: ResponseMessageV2 = serde_json::from_slice(&js_msg.payload)
+            let msg: ResponseMessage = serde_json::from_slice(&js_msg.payload)
                 .map_err(|e| QueueError::ReceiveFailed(format!("deserialize response: {e}")))?;
 
             Ok((key, msg, ack_fn))

@@ -13,7 +13,7 @@ use super::identity::{DagNodeId, MessageId};
 /// operation, sequence) and protocol version. This struct carries the domain
 /// data that goes in the NATS payload.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ResponseMessageV2 {
+pub struct ResponseMessage {
     pub id: MessageId,
     pub dag_id: DagNodeId,
     pub correlation_id: MessageId,
@@ -33,7 +33,7 @@ mod tests {
 
     #[test]
     fn response_v2_json_round_trip() {
-        let msg = ResponseMessageV2 {
+        let msg = ResponseMessage {
             id: MessageId::from("msg-1".to_string()),
             dag_id: DagNodeId::root(),
             correlation_id: MessageId::from("req-1".to_string()),
@@ -50,13 +50,13 @@ mod tests {
             checkpoint: None,
         };
         let json = serde_json::to_string(&msg).unwrap();
-        let back: ResponseMessageV2 = serde_json::from_str(&json).unwrap();
+        let back: ResponseMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(back, msg);
     }
 
     #[test]
     fn response_v2_payload_is_base64() {
-        let msg = ResponseMessageV2 {
+        let msg = ResponseMessage {
             id: MessageId::from("msg-1".to_string()),
             dag_id: DagNodeId::root(),
             correlation_id: MessageId::from("req-1".to_string()),

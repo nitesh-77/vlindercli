@@ -16,7 +16,7 @@ use std::sync::{Arc, RwLock};
 use vlinder_core::domain::Registry;
 use vlinder_core::domain::{
     DagNodeId, DataMessageKind, DataRoutingKey, MessageId, MessageQueue, Operation,
-    ResponseMessageV2, ServiceBackend, ServiceDiagnostics,
+    ResponseMessage, ServiceBackend, ServiceDiagnostics,
 };
 
 use crate::state_store::{hash_snapshot, hash_state_commit, hash_value, SqliteStateStore};
@@ -205,7 +205,7 @@ impl KvWorker {
     }
 
     fn try_get_v2(&self) -> bool {
-        match self.queue.receive_request_v2(self.service, Operation::Get) {
+        match self.queue.receive_request(self.service, Operation::Get) {
             Ok((key, msg, ack)) => {
                 let (agent, session) = extract_agent_session(&key);
                 let start = std::time::Instant::now();
@@ -220,7 +220,7 @@ impl KvWorker {
                     duration_ms,
                 );
                 let response_key = response_key_from_request(&key);
-                let response = ResponseMessageV2 {
+                let response = ResponseMessage {
                     id: MessageId::new(),
                     dag_id: DagNodeId::root(),
                     correlation_id: msg.id,
@@ -230,7 +230,7 @@ impl KvWorker {
                     status_code: 200,
                     checkpoint: msg.checkpoint,
                 };
-                let _ = self.queue.send_response_v2(response_key, response);
+                let _ = self.queue.send_response(response_key, response);
                 let _ = ack();
                 true
             }
@@ -239,7 +239,7 @@ impl KvWorker {
     }
 
     fn try_put_v2(&self) -> bool {
-        match self.queue.receive_request_v2(self.service, Operation::Put) {
+        match self.queue.receive_request(self.service, Operation::Put) {
             Ok((key, msg, ack)) => {
                 let (agent, session) = extract_agent_session(&key);
                 let start = std::time::Instant::now();
@@ -254,7 +254,7 @@ impl KvWorker {
                     duration_ms,
                 );
                 let response_key = response_key_from_request(&key);
-                let response = ResponseMessageV2 {
+                let response = ResponseMessage {
                     id: MessageId::new(),
                     dag_id: DagNodeId::root(),
                     correlation_id: msg.id,
@@ -264,7 +264,7 @@ impl KvWorker {
                     status_code: 200,
                     checkpoint: msg.checkpoint,
                 };
-                let _ = self.queue.send_response_v2(response_key, response);
+                let _ = self.queue.send_response(response_key, response);
                 let _ = ack();
                 true
             }
@@ -273,7 +273,7 @@ impl KvWorker {
     }
 
     fn try_list_v2(&self) -> bool {
-        match self.queue.receive_request_v2(self.service, Operation::List) {
+        match self.queue.receive_request(self.service, Operation::List) {
             Ok((key, msg, ack)) => {
                 let (agent, session) = extract_agent_session(&key);
                 let start = std::time::Instant::now();
@@ -288,7 +288,7 @@ impl KvWorker {
                     duration_ms,
                 );
                 let response_key = response_key_from_request(&key);
-                let response = ResponseMessageV2 {
+                let response = ResponseMessage {
                     id: MessageId::new(),
                     dag_id: DagNodeId::root(),
                     correlation_id: msg.id,
@@ -298,7 +298,7 @@ impl KvWorker {
                     status_code: 200,
                     checkpoint: msg.checkpoint,
                 };
-                let _ = self.queue.send_response_v2(response_key, response);
+                let _ = self.queue.send_response(response_key, response);
                 let _ = ack();
                 true
             }
@@ -307,10 +307,7 @@ impl KvWorker {
     }
 
     fn try_delete_v2(&self) -> bool {
-        match self
-            .queue
-            .receive_request_v2(self.service, Operation::Delete)
-        {
+        match self.queue.receive_request(self.service, Operation::Delete) {
             Ok((key, msg, ack)) => {
                 let (agent, session) = extract_agent_session(&key);
                 let start = std::time::Instant::now();
@@ -324,7 +321,7 @@ impl KvWorker {
                     duration_ms,
                 );
                 let response_key = response_key_from_request(&key);
-                let response = ResponseMessageV2 {
+                let response = ResponseMessage {
                     id: MessageId::new(),
                     dag_id: DagNodeId::root(),
                     correlation_id: msg.id,
@@ -334,7 +331,7 @@ impl KvWorker {
                     status_code: 200,
                     checkpoint: msg.checkpoint,
                 };
-                let _ = self.queue.send_response_v2(response_key, response);
+                let _ = self.queue.send_response(response_key, response);
                 let _ = ack();
                 true
             }
@@ -591,7 +588,7 @@ mod tests {
     use vlinder_core::domain::SecretStore;
     use vlinder_core::domain::{Agent, AgentName, Registry};
     use vlinder_core::domain::{
-        BranchId, ObjectStorageType, Operation, RequestDiagnostics, RequestMessageV2, Sequence,
+        BranchId, ObjectStorageType, Operation, RequestDiagnostics, RequestMessage, Sequence,
         ServiceBackend, SessionId, SubmissionId,
     };
     use vlinder_core::queue::InMemoryQueue;
@@ -653,8 +650,8 @@ mod tests {
         }
     }
 
-    fn make_request_msg(payload: Vec<u8>, state: Option<String>) -> RequestMessageV2 {
-        RequestMessageV2 {
+    fn make_request_msg(payload: Vec<u8>, state: Option<String>) -> RequestMessage {
+        RequestMessage {
             id: MessageId::new(),
             dag_id: DagNodeId::root(),
             state,
@@ -701,10 +698,10 @@ mod tests {
         );
         let put_msg = make_request_msg(serde_json::to_vec(&put_payload).unwrap(), None);
 
-        queue.send_request_v2(put_key, put_msg).unwrap();
+        queue.send_request(put_key, put_msg).unwrap();
         assert!(handler.tick());
         let (_key, response, ack) = queue
-            .receive_response_v2(&submission, service, Operation::Put, Sequence::first())
+            .receive_response(&submission, service, Operation::Put, Sequence::first())
             .unwrap();
         assert_eq!(response.payload.as_slice(), b"ok");
         ack().unwrap();
@@ -721,10 +718,10 @@ mod tests {
         );
         let get_msg = make_request_msg(serde_json::to_vec(&get_payload).unwrap(), None);
 
-        queue.send_request_v2(get_key, get_msg).unwrap();
+        queue.send_request(get_key, get_msg).unwrap();
         assert!(handler.tick());
         let (_key, response, ack) = queue
-            .receive_response_v2(&submission, service, Operation::Get, Sequence::from(2))
+            .receive_response(&submission, service, Operation::Get, Sequence::from(2))
             .unwrap();
         assert_eq!(response.payload.as_slice(), b"hello world");
         ack().unwrap();
@@ -769,11 +766,11 @@ mod tests {
             Some(String::new()), // root state via envelope
         );
 
-        queue.send_request_v2(put_key, put_msg).unwrap();
+        queue.send_request(put_key, put_msg).unwrap();
         assert!(handler.tick());
 
         let (_key, response, ack) = queue
-            .receive_response_v2(&submission, service, Operation::Put, Sequence::first())
+            .receive_response(&submission, service, Operation::Put, Sequence::first())
             .unwrap();
         ack().unwrap();
 
@@ -819,10 +816,10 @@ mod tests {
             Sequence::first(),
         );
         let msg1 = make_request_msg(serde_json::to_vec(&put1).unwrap(), Some(String::new()));
-        queue.send_request_v2(key1, msg1).unwrap();
+        queue.send_request(key1, msg1).unwrap();
         handler.tick();
         let (_key, resp1, ack) = queue
-            .receive_response_v2(&submission, service, Operation::Put, Sequence::first())
+            .receive_response(&submission, service, Operation::Put, Sequence::first())
             .unwrap();
         ack().unwrap();
         let state1: serde_json::Value = serde_json::from_slice(resp1.payload.as_slice()).unwrap();
@@ -842,10 +839,10 @@ mod tests {
             serde_json::to_vec(&put2).unwrap(),
             Some(hash1.clone()), // chain from previous state via envelope
         );
-        queue.send_request_v2(key2, msg2).unwrap();
+        queue.send_request(key2, msg2).unwrap();
         handler.tick();
         let (_key, resp2, ack) = queue
-            .receive_response_v2(&submission, service, Operation::Put, Sequence::from(2))
+            .receive_response(&submission, service, Operation::Put, Sequence::from(2))
             .unwrap();
         ack().unwrap();
         let state2: serde_json::Value = serde_json::from_slice(resp2.payload.as_slice()).unwrap();
@@ -868,10 +865,10 @@ mod tests {
             serde_json::to_vec(&get).unwrap(),
             Some(hash2.clone()), // state via envelope
         );
-        queue.send_request_v2(get_key, get_msg).unwrap();
+        queue.send_request(get_key, get_msg).unwrap();
         handler.tick();
         let (_key, resp, ack) = queue
-            .receive_response_v2(&submission, service, Operation::Get, Sequence::from(3))
+            .receive_response(&submission, service, Operation::Get, Sequence::from(3))
             .unwrap();
         ack().unwrap();
         assert_eq!(resp.payload.as_slice(), b"aaa");
@@ -911,10 +908,10 @@ mod tests {
             serde_json::to_vec(&serde_json::json!({"path": "/a.txt", "content": "aaa"})).unwrap(),
             Some(String::new()),
         );
-        queue.send_request_v2(key1, msg1).unwrap();
+        queue.send_request(key1, msg1).unwrap();
         handler.tick();
         let (_key, resp1, ack) = queue
-            .receive_response_v2(&submission, service, Operation::Put, Sequence::first())
+            .receive_response(&submission, service, Operation::Put, Sequence::first())
             .unwrap();
         ack().unwrap();
         let state1: serde_json::Value = serde_json::from_slice(resp1.payload.as_slice()).unwrap();
@@ -933,10 +930,10 @@ mod tests {
             serde_json::to_vec(&serde_json::json!({"path": "/b.txt", "content": "bbb"})).unwrap(),
             Some(hash1.clone()),
         );
-        queue.send_request_v2(key2, msg2).unwrap();
+        queue.send_request(key2, msg2).unwrap();
         handler.tick();
         let (_key, resp2, ack) = queue
-            .receive_response_v2(&submission, service, Operation::Put, Sequence::from(2))
+            .receive_response(&submission, service, Operation::Put, Sequence::from(2))
             .unwrap();
         ack().unwrap();
         let state2: serde_json::Value = serde_json::from_slice(resp2.payload.as_slice()).unwrap();
@@ -955,10 +952,10 @@ mod tests {
             serde_json::to_vec(&serde_json::json!({"path": "/"})).unwrap(),
             Some(hash2),
         );
-        queue.send_request_v2(list_key2, list_msg2).unwrap();
+        queue.send_request(list_key2, list_msg2).unwrap();
         handler.tick();
         let (_key, resp, ack) = queue
-            .receive_response_v2(&submission, service, Operation::List, Sequence::from(3))
+            .receive_response(&submission, service, Operation::List, Sequence::from(3))
             .unwrap();
         ack().unwrap();
         let files: Vec<String> = serde_json::from_slice(resp.payload.as_slice()).unwrap();
@@ -977,10 +974,10 @@ mod tests {
             serde_json::to_vec(&serde_json::json!({"path": "/"})).unwrap(),
             Some(hash1),
         );
-        queue.send_request_v2(list_key1, list_msg1).unwrap();
+        queue.send_request(list_key1, list_msg1).unwrap();
         handler.tick();
         let (_key, resp, ack) = queue
-            .receive_response_v2(&submission, service, Operation::List, Sequence::from(4))
+            .receive_response(&submission, service, Operation::List, Sequence::from(4))
             .unwrap();
         ack().unwrap();
         let files: Vec<String> = serde_json::from_slice(resp.payload.as_slice()).unwrap();
@@ -1019,10 +1016,10 @@ mod tests {
             Sequence::first(),
         );
         let put_msg = make_request_msg(serde_json::to_vec(&put_payload).unwrap(), None);
-        queue.send_request_v2(put_key, put_msg).unwrap();
+        queue.send_request(put_key, put_msg).unwrap();
         handler.tick();
         let (_key, _resp, ack) = queue
-            .receive_response_v2(&submission, service, Operation::Put, Sequence::first())
+            .receive_response(&submission, service, Operation::Put, Sequence::first())
             .unwrap();
         ack().unwrap();
 
@@ -1040,10 +1037,10 @@ mod tests {
             serde_json::to_vec(&get_payload).unwrap(),
             Some("hash123".to_string()),
         );
-        queue.send_request_v2(get_key, get_msg).unwrap();
+        queue.send_request(get_key, get_msg).unwrap();
         handler.tick();
         let (_key, response, ack) = queue
-            .receive_response_v2(&submission, service, Operation::Get, Sequence::from(2))
+            .receive_response(&submission, service, Operation::Get, Sequence::from(2))
             .unwrap();
         ack().unwrap();
 

@@ -3,7 +3,7 @@
 use crate::domain::{
     Acknowledgement, AgentName, CompleteMessage, DataMessageKind, DataRoutingKey, DelegateMessage,
     DelegateReplyMessage, ForkMessage, HarnessType, InvokeMessage, MessageQueue, ObservableMessage,
-    ObservableMessageV2, Operation, QueueError, RepairMessage, RequestMessageV2, ResponseMessageV2,
+    ObservableMessageV2, Operation, QueueError, RepairMessage, RequestMessage, ResponseMessage,
     RoutingKey, RoutingKind, Sequence, ServiceBackend, SubmissionId,
 };
 #[cfg(test)]
@@ -117,11 +117,7 @@ impl MessageQueue for InMemoryQueue {
         Err(QueueError::Timeout)
     }
 
-    fn send_request_v2(
-        &self,
-        key: DataRoutingKey,
-        msg: RequestMessageV2,
-    ) -> Result<(), QueueError> {
+    fn send_request(&self, key: DataRoutingKey, msg: RequestMessage) -> Result<(), QueueError> {
         let v2 = ObservableMessageV2::RequestV2 {
             key: key.clone(),
             msg,
@@ -134,11 +130,11 @@ impl MessageQueue for InMemoryQueue {
         Ok(())
     }
 
-    fn receive_request_v2(
+    fn receive_request(
         &self,
         service: ServiceBackend,
         operation: Operation,
-    ) -> Result<(DataRoutingKey, RequestMessageV2, Acknowledgement), QueueError> {
+    ) -> Result<(DataRoutingKey, RequestMessage, Acknowledgement), QueueError> {
         let mut data = self
             .data_queues
             .lock()
@@ -164,11 +160,7 @@ impl MessageQueue for InMemoryQueue {
         Err(QueueError::Timeout)
     }
 
-    fn send_response_v2(
-        &self,
-        key: DataRoutingKey,
-        msg: ResponseMessageV2,
-    ) -> Result<(), QueueError> {
+    fn send_response(&self, key: DataRoutingKey, msg: ResponseMessage) -> Result<(), QueueError> {
         let v2 = ObservableMessageV2::ResponseV2 {
             key: key.clone(),
             msg,
@@ -181,13 +173,13 @@ impl MessageQueue for InMemoryQueue {
         Ok(())
     }
 
-    fn receive_response_v2(
+    fn receive_response(
         &self,
         submission: &SubmissionId,
         service: ServiceBackend,
         operation: Operation,
         sequence: Sequence,
-    ) -> Result<(DataRoutingKey, ResponseMessageV2, Acknowledgement), QueueError> {
+    ) -> Result<(DataRoutingKey, ResponseMessage, Acknowledgement), QueueError> {
         let mut data = self
             .data_queues
             .lock()

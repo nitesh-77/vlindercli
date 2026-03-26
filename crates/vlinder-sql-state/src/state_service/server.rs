@@ -568,7 +568,7 @@ impl StateService for StateServiceServer {
                 }
             });
 
-        let msg = vlinder_core::domain::RequestMessageV2 {
+        let msg = vlinder_core::domain::RequestMessage {
             id: vlinder_core::domain::MessageId::from(req.message_id),
             dag_id: dag_id.clone(),
             state: req.state,
@@ -638,7 +638,7 @@ impl StateService for StateServiceServer {
                 )
             });
 
-        let msg = vlinder_core::domain::ResponseMessageV2 {
+        let msg = vlinder_core::domain::ResponseMessage {
             id: vlinder_core::domain::MessageId::from(req.message_id),
             dag_id: dag_id.clone(),
             correlation_id: vlinder_core::domain::MessageId::from(req.correlation_id),

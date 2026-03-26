@@ -207,7 +207,7 @@ pub trait DagWorker: Send {
     fn on_request(
         &mut self,
         _key: &super::DataRoutingKey,
-        _msg: &super::RequestMessageV2,
+        _msg: &super::RequestMessage,
         _created_at: DateTime<Utc>,
     ) {
     }
@@ -216,7 +216,7 @@ pub trait DagWorker: Send {
     fn on_response(
         &mut self,
         _key: &super::DataRoutingKey,
-        _msg: &super::ResponseMessageV2,
+        _msg: &super::ResponseMessage,
         _created_at: DateTime<Utc>,
     ) {
     }
@@ -287,7 +287,7 @@ pub trait DagStore: Send + Sync {
         service: super::ServiceBackend,
         operation: super::Operation,
         sequence: super::Sequence,
-        msg: &super::RequestMessageV2,
+        msg: &super::RequestMessage,
     ) -> Result<(), String> {
         let _ = (
             dag_id, parent_id, created_at, state, session, submission, branch, agent, service,
@@ -311,7 +311,7 @@ pub trait DagStore: Send + Sync {
         service: super::ServiceBackend,
         operation: super::Operation,
         sequence: super::Sequence,
-        msg: &super::ResponseMessageV2,
+        msg: &super::ResponseMessage,
     ) -> Result<(), String> {
         let _ = (
             dag_id, parent_id, created_at, state, session, submission, branch, agent, service,
@@ -384,7 +384,7 @@ pub trait DagStore: Send + Sync {
     fn get_request_node(
         &self,
         dag_hash: &super::DagNodeId,
-    ) -> Result<Option<super::RequestMessageV2>, String> {
+    ) -> Result<Option<super::RequestMessage>, String> {
         let _ = dag_hash;
         Ok(None)
     }
@@ -393,7 +393,7 @@ pub trait DagStore: Send + Sync {
     fn get_response_node(
         &self,
         dag_hash: &super::DagNodeId,
-    ) -> Result<Option<super::ResponseMessageV2>, String> {
+    ) -> Result<Option<super::ResponseMessage>, String> {
         let _ = dag_hash;
         Ok(None)
     }
@@ -541,7 +541,7 @@ impl DagStore for InMemoryDagStore {
         _service: super::ServiceBackend,
         _operation: super::Operation,
         _sequence: super::Sequence,
-        _msg: &super::RequestMessageV2,
+        _msg: &super::RequestMessage,
     ) -> Result<(), String> {
         let node = DagNode {
             id: dag_id.clone(),
@@ -572,7 +572,7 @@ impl DagStore for InMemoryDagStore {
         _service: super::ServiceBackend,
         _operation: super::Operation,
         _sequence: super::Sequence,
-        _msg: &super::ResponseMessageV2,
+        _msg: &super::ResponseMessage,
     ) -> Result<(), String> {
         let node = DagNode {
             id: dag_id.clone(),

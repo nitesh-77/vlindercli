@@ -10,7 +10,7 @@ use std::sync::{Arc, RwLock};
 use vlinder_core::domain::Registry;
 use vlinder_core::domain::{
     DagNodeId, DataMessageKind, DataRoutingKey, MessageId, MessageQueue, Operation,
-    ResponseMessageV2, ServiceBackend, ServiceDiagnostics,
+    ResponseMessage, ServiceBackend, ServiceDiagnostics,
 };
 
 use crate::storage::SqliteVectorStorage;
@@ -115,10 +115,7 @@ impl SqliteVecWorker {
     }
 
     fn try_store_v2(&self) -> bool {
-        match self
-            .queue
-            .receive_request_v2(self.service, Operation::Store)
-        {
+        match self.queue.receive_request(self.service, Operation::Store) {
             Ok((key, msg, ack)) => {
                 let agent = extract_agent(&key);
                 let start = std::time::Instant::now();
@@ -132,7 +129,7 @@ impl SqliteVecWorker {
                     duration_ms,
                 );
                 let response_key = response_key_from_request(&key);
-                let response = ResponseMessageV2 {
+                let response = ResponseMessage {
                     id: MessageId::new(),
                     dag_id: DagNodeId::root(),
                     correlation_id: msg.id,
@@ -142,7 +139,7 @@ impl SqliteVecWorker {
                     status_code: 200,
                     checkpoint: msg.checkpoint,
                 };
-                let _ = self.queue.send_response_v2(response_key, response);
+                let _ = self.queue.send_response(response_key, response);
                 let _ = ack();
                 true
             }
@@ -151,10 +148,7 @@ impl SqliteVecWorker {
     }
 
     fn try_search_v2(&self) -> bool {
-        match self
-            .queue
-            .receive_request_v2(self.service, Operation::Search)
-        {
+        match self.queue.receive_request(self.service, Operation::Search) {
             Ok((key, msg, ack)) => {
                 let agent = extract_agent(&key);
                 let start = std::time::Instant::now();
@@ -168,7 +162,7 @@ impl SqliteVecWorker {
                     duration_ms,
                 );
                 let response_key = response_key_from_request(&key);
-                let response = ResponseMessageV2 {
+                let response = ResponseMessage {
                     id: MessageId::new(),
                     dag_id: DagNodeId::root(),
                     correlation_id: msg.id,
@@ -178,7 +172,7 @@ impl SqliteVecWorker {
                     status_code: 200,
                     checkpoint: msg.checkpoint,
                 };
-                let _ = self.queue.send_response_v2(response_key, response);
+                let _ = self.queue.send_response(response_key, response);
                 let _ = ack();
                 true
             }
@@ -187,10 +181,7 @@ impl SqliteVecWorker {
     }
 
     fn try_delete_v2(&self) -> bool {
-        match self
-            .queue
-            .receive_request_v2(self.service, Operation::Delete)
-        {
+        match self.queue.receive_request(self.service, Operation::Delete) {
             Ok((key, msg, ack)) => {
                 let agent = extract_agent(&key);
                 let start = std::time::Instant::now();
@@ -204,7 +195,7 @@ impl SqliteVecWorker {
                     duration_ms,
                 );
                 let response_key = response_key_from_request(&key);
-                let response = ResponseMessageV2 {
+                let response = ResponseMessage {
                     id: MessageId::new(),
                     dag_id: DagNodeId::root(),
                     correlation_id: msg.id,
@@ -214,7 +205,7 @@ impl SqliteVecWorker {
                     status_code: 200,
                     checkpoint: msg.checkpoint,
                 };
-                let _ = self.queue.send_response_v2(response_key, response);
+                let _ = self.queue.send_response(response_key, response);
                 let _ = ack();
                 true
             }
@@ -298,7 +289,7 @@ mod tests {
     use vlinder_core::domain::SecretStore;
     use vlinder_core::domain::{Agent, AgentName, Registry};
     use vlinder_core::domain::{
-        BranchId, Operation, RequestDiagnostics, RequestMessageV2, Sequence, ServiceBackend,
+        BranchId, Operation, RequestDiagnostics, RequestMessage, Sequence, ServiceBackend,
         SessionId, SubmissionId, VectorStorageType,
     };
     use vlinder_core::queue::InMemoryQueue;
@@ -359,8 +350,8 @@ mod tests {
         }
     }
 
-    fn make_request_msg(payload: Vec<u8>, state: Option<String>) -> RequestMessageV2 {
-        RequestMessageV2 {
+    fn make_request_msg(payload: Vec<u8>, state: Option<String>) -> RequestMessage {
+        RequestMessage {
             id: MessageId::new(),
             dag_id: DagNodeId::root(),
             state,
@@ -408,10 +399,10 @@ mod tests {
             serde_json::to_vec(&store_payload).unwrap(),
             Some("state-vec".to_string()),
         );
-        queue.send_request_v2(store_key, store_msg).unwrap();
+        queue.send_request(store_key, store_msg).unwrap();
         handler.tick();
         let (_key, store_resp, ack) = queue
-            .receive_response_v2(&submission, service, Operation::Store, Sequence::first())
+            .receive_response(&submission, service, Operation::Store, Sequence::first())
             .unwrap();
         ack().unwrap();
         assert_eq!(
@@ -435,10 +426,10 @@ mod tests {
             serde_json::to_vec(&search_payload).unwrap(),
             Some("state-vec2".to_string()),
         );
-        queue.send_request_v2(search_key, search_msg).unwrap();
+        queue.send_request(search_key, search_msg).unwrap();
         handler.tick();
         let (_key, search_resp, ack) = queue
-            .receive_response_v2(&submission, service, Operation::Search, Sequence::from(2))
+            .receive_response(&submission, service, Operation::Search, Sequence::from(2))
             .unwrap();
         ack().unwrap();
         assert_eq!(
@@ -484,10 +475,10 @@ mod tests {
         );
         let store_msg = make_request_msg(serde_json::to_vec(&store_payload).unwrap(), None);
 
-        queue.send_request_v2(store_key, store_msg).unwrap();
+        queue.send_request(store_key, store_msg).unwrap();
         assert!(handler.tick());
         let (_key, response, ack) = queue
-            .receive_response_v2(&submission, service, Operation::Store, Sequence::first())
+            .receive_response(&submission, service, Operation::Store, Sequence::first())
             .unwrap();
         assert_eq!(response.payload.as_slice(), b"ok");
         ack().unwrap();
@@ -505,10 +496,10 @@ mod tests {
         );
         let search_msg = make_request_msg(serde_json::to_vec(&search_payload).unwrap(), None);
 
-        queue.send_request_v2(search_key, search_msg).unwrap();
+        queue.send_request(search_key, search_msg).unwrap();
         assert!(handler.tick());
         let (_key, response, ack) = queue
-            .receive_response_v2(&submission, service, Operation::Search, Sequence::from(2))
+            .receive_response(&submission, service, Operation::Search, Sequence::from(2))
             .unwrap();
         let results: Vec<serde_json::Value> =
             serde_json::from_slice(response.payload.as_slice()).unwrap();

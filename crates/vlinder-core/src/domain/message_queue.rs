@@ -12,7 +12,7 @@
 use super::{
     AgentName, CompleteMessage, DataMessageKind, DataRoutingKey, DelegateMessage,
     DelegateReplyMessage, ForkMessage, HarnessType, InvokeMessage, Operation, PromoteMessage,
-    RepairMessage, RequestMessageV2, ResourceId, ResponseMessageV2, RoutingKey, Sequence,
+    RepairMessage, RequestMessage, ResourceId, ResponseMessage, RoutingKey, Sequence,
     ServiceBackend, SubmissionId,
 };
 use std::fmt;
@@ -67,22 +67,18 @@ pub trait MessageQueue {
     // -------------------------------------------------------------------------
 
     /// Send a request on the data plane (ADR 121).
-    fn send_request_v2(
-        &self,
-        _key: DataRoutingKey,
-        _msg: RequestMessageV2,
-    ) -> Result<(), QueueError> {
+    fn send_request(&self, _key: DataRoutingKey, _msg: RequestMessage) -> Result<(), QueueError> {
         Err(QueueError::SendFailed(
             "send_request_v2 not implemented".into(),
         ))
     }
 
     /// Receive a request from the data plane (ADR 121).
-    fn receive_request_v2(
+    fn receive_request(
         &self,
         _service: ServiceBackend,
         _operation: Operation,
-    ) -> Result<(DataRoutingKey, RequestMessageV2, Acknowledgement), QueueError> {
+    ) -> Result<(DataRoutingKey, RequestMessage, Acknowledgement), QueueError> {
         Err(QueueError::Timeout)
     }
 
@@ -91,24 +87,20 @@ pub trait MessageQueue {
     // -------------------------------------------------------------------------
 
     /// Send a response on the data plane (ADR 121).
-    fn send_response_v2(
-        &self,
-        _key: DataRoutingKey,
-        _msg: ResponseMessageV2,
-    ) -> Result<(), QueueError> {
+    fn send_response(&self, _key: DataRoutingKey, _msg: ResponseMessage) -> Result<(), QueueError> {
         Err(QueueError::SendFailed(
             "send_response_v2 not implemented".into(),
         ))
     }
 
     /// Receive a response from the data plane (ADR 121).
-    fn receive_response_v2(
+    fn receive_response(
         &self,
         _submission: &SubmissionId,
         _service: ServiceBackend,
         _operation: Operation,
         _sequence: Sequence,
-    ) -> Result<(DataRoutingKey, ResponseMessageV2, Acknowledgement), QueueError> {
+    ) -> Result<(DataRoutingKey, ResponseMessage, Acknowledgement), QueueError> {
         Err(QueueError::Timeout)
     }
 
@@ -196,11 +188,11 @@ pub trait MessageQueue {
     ///
     /// Data-plane variant of `call_service`. Routing key carries session/branch/submission/
     /// service/operation/sequence; payload is `RequestMessageV2`.
-    fn call_service_v2(
+    fn call_service(
         &self,
         key: DataRoutingKey,
-        msg: RequestMessageV2,
-    ) -> Result<ResponseMessageV2, QueueError> {
+        msg: RequestMessage,
+    ) -> Result<ResponseMessage, QueueError> {
         let DataMessageKind::Request {
             service,
             operation,
@@ -214,9 +206,9 @@ pub trait MessageQueue {
         };
         let submission = key.submission.clone();
         send_and_wait(
-            || self.send_request_v2(key, msg),
+            || self.send_request(key, msg),
             || {
-                self.receive_response_v2(&submission, service, operation, sequence)
+                self.receive_response(&submission, service, operation, sequence)
                     .map(|(_key, msg, ack)| (msg, ack))
             },
         )

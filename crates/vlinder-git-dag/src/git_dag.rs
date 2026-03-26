@@ -1032,7 +1032,7 @@ impl DagWorker for GitDagWorker {
     fn on_request(
         &mut self,
         key: &DataRoutingKey,
-        request: &vlinder_core::domain::RequestMessageV2,
+        request: &vlinder_core::domain::RequestMessage,
         created_at: DateTime<Utc>,
     ) {
         let DataMessageKind::Request {
@@ -1140,7 +1140,7 @@ impl DagWorker for GitDagWorker {
     fn on_response(
         &mut self,
         key: &DataRoutingKey,
-        response: &vlinder_core::domain::ResponseMessageV2,
+        response: &vlinder_core::domain::ResponseMessage,
         created_at: DateTime<Utc>,
     ) {
         let DataMessageKind::Response {

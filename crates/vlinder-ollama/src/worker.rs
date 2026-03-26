@@ -8,7 +8,7 @@ use std::time::Instant;
 use async_openai::types::chat::{CreateChatCompletionRequest, CreateChatCompletionResponse};
 use vlinder_core::domain::{
     DagNodeId, DataMessageKind, DataRoutingKey, EmbeddingBackendType, InferenceBackendType,
-    MessageId, MessageQueue, Operation, RequestMessageV2, ResponseMessageV2, ServiceBackend,
+    MessageId, MessageQueue, Operation, RequestMessage, ResponseMessage, ServiceBackend,
     ServiceDiagnostics, ServiceMetrics, ServiceType,
 };
 
@@ -61,14 +61,14 @@ impl OllamaWorker {
         for op in [Operation::Run, Operation::Chat, Operation::Generate] {
             if let Ok((key, msg, ack)) = self
                 .queue
-                .receive_request_v2(ServiceBackend::Infer(InferenceBackendType::Ollama), op)
+                .receive_request(ServiceBackend::Infer(InferenceBackendType::Ollama), op)
             {
                 self.process_v2(&key, msg, ack, op);
                 return true;
             }
         }
 
-        if let Ok((key, msg, ack)) = self.queue.receive_request_v2(
+        if let Ok((key, msg, ack)) = self.queue.receive_request(
             ServiceBackend::Embed(EmbeddingBackendType::Ollama),
             Operation::Run,
         ) {
@@ -82,7 +82,7 @@ impl OllamaWorker {
     fn process_v2(
         &self,
         key: &DataRoutingKey,
-        msg: RequestMessageV2,
+        msg: RequestMessage,
         ack: Box<dyn FnOnce() -> Result<(), vlinder_core::domain::QueueError> + Send>,
         operation: Operation,
     ) {
@@ -110,7 +110,7 @@ impl OllamaWorker {
         };
 
         let response_key = response_key_from_request(key);
-        let response = ResponseMessageV2 {
+        let response = ResponseMessage {
             id: MessageId::new(),
             dag_id: DagNodeId::root(),
             correlation_id: msg.id,
@@ -120,14 +120,14 @@ impl OllamaWorker {
             status_code,
             checkpoint: msg.checkpoint,
         };
-        let _ = self.queue.send_response_v2(response_key, response);
+        let _ = self.queue.send_response(response_key, response);
         let _ = ack();
     }
 
     fn process_embed_v2(
         &self,
         key: &DataRoutingKey,
-        msg: RequestMessageV2,
+        msg: RequestMessage,
         ack: Box<dyn FnOnce() -> Result<(), vlinder_core::domain::QueueError> + Send>,
     ) {
         let start = Instant::now();
@@ -148,7 +148,7 @@ impl OllamaWorker {
         };
 
         let response_key = response_key_from_request(key);
-        let response = ResponseMessageV2 {
+        let response = ResponseMessage {
             id: MessageId::new(),
             dag_id: DagNodeId::root(),
             correlation_id: msg.id,
@@ -158,7 +158,7 @@ impl OllamaWorker {
             status_code,
             checkpoint: msg.checkpoint,
         };
-        let _ = self.queue.send_response_v2(response_key, response);
+        let _ = self.queue.send_response(response_key, response);
         let _ = ack();
     }
 
@@ -357,7 +357,7 @@ mod tests {
     use super::*;
     use vlinder_core::domain::{
         AgentName, BranchId, EmbeddingBackendType, InferenceBackendType, RequestDiagnostics,
-        RequestMessageV2, Sequence, ServiceBackend, SessionId, SubmissionId,
+        RequestMessage, Sequence, ServiceBackend, SessionId, SubmissionId,
     };
     use vlinder_core::queue::InMemoryQueue;
 
@@ -396,7 +396,7 @@ mod tests {
                 sequence,
             },
         };
-        let msg = RequestMessageV2 {
+        let msg = RequestMessage {
             id: MessageId::new(),
             dag_id: DagNodeId::root(),
             state,
@@ -404,7 +404,7 @@ mod tests {
             payload,
             checkpoint: None,
         };
-        queue.send_request_v2(key, msg).unwrap();
+        queue.send_request(key, msg).unwrap();
         (submission, service, operation, sequence)
     }
 
@@ -428,7 +428,7 @@ mod tests {
                 sequence,
             },
         };
-        let msg = RequestMessageV2 {
+        let msg = RequestMessage {
             id: MessageId::new(),
             dag_id: DagNodeId::root(),
             state,
@@ -436,7 +436,7 @@ mod tests {
             payload,
             checkpoint: None,
         };
-        queue.send_request_v2(key, msg).unwrap();
+        queue.send_request(key, msg).unwrap();
         (submission, service, operation, sequence)
     }
 
@@ -455,7 +455,7 @@ mod tests {
             send_infer_request(&queue, Operation::Run, b"not json".to_vec(), None);
         assert!(worker.tick());
 
-        let (_key, response, ack) = queue.receive_response_v2(&sub, svc, op, seq).unwrap();
+        let (_key, response, ack) = queue.receive_response(&sub, svc, op, seq).unwrap();
         assert_eq!(response.status_code, 400);
         ack().unwrap();
     }
@@ -477,7 +477,7 @@ mod tests {
         );
         assert!(worker.tick());
 
-        let (_key, response, ack) = queue.receive_response_v2(&sub, svc, op, seq).unwrap();
+        let (_key, response, ack) = queue.receive_response(&sub, svc, op, seq).unwrap();
         assert_eq!(response.state, Some("xyz".to_string()));
         ack().unwrap();
     }
@@ -499,7 +499,7 @@ mod tests {
         );
         assert!(worker.tick());
 
-        let (_key, response, ack) = queue.receive_response_v2(&sub, svc, op, seq).unwrap();
+        let (_key, response, ack) = queue.receive_response(&sub, svc, op, seq).unwrap();
         assert_eq!(response.status_code, 500);
         ack().unwrap();
     }
@@ -515,7 +515,7 @@ mod tests {
             send_infer_request(&queue, Operation::Chat, b"not json".to_vec(), None);
         assert!(worker.tick());
 
-        let (_key, response, ack) = queue.receive_response_v2(&sub, svc, op, seq).unwrap();
+        let (_key, response, ack) = queue.receive_response(&sub, svc, op, seq).unwrap();
         assert_eq!(response.status_code, 400);
         ack().unwrap();
     }
@@ -537,7 +537,7 @@ mod tests {
         );
         assert!(worker.tick());
 
-        let (_key, response, ack) = queue.receive_response_v2(&sub, svc, op, seq).unwrap();
+        let (_key, response, ack) = queue.receive_response(&sub, svc, op, seq).unwrap();
         assert_eq!(response.state, Some("abc".to_string()));
         ack().unwrap();
     }
@@ -559,7 +559,7 @@ mod tests {
         );
         assert!(worker.tick());
 
-        let (_key, response, ack) = queue.receive_response_v2(&sub, svc, op, seq).unwrap();
+        let (_key, response, ack) = queue.receive_response(&sub, svc, op, seq).unwrap();
         assert_eq!(response.status_code, 500);
         ack().unwrap();
     }
@@ -575,7 +575,7 @@ mod tests {
             send_infer_request(&queue, Operation::Generate, b"not json".to_vec(), None);
         assert!(worker.tick());
 
-        let (_key, response, ack) = queue.receive_response_v2(&sub, svc, op, seq).unwrap();
+        let (_key, response, ack) = queue.receive_response(&sub, svc, op, seq).unwrap();
         assert_eq!(response.status_code, 400);
         ack().unwrap();
     }
@@ -597,7 +597,7 @@ mod tests {
         );
         assert!(worker.tick());
 
-        let (_key, response, ack) = queue.receive_response_v2(&sub, svc, op, seq).unwrap();
+        let (_key, response, ack) = queue.receive_response(&sub, svc, op, seq).unwrap();
         assert_eq!(response.state, Some("def".to_string()));
         ack().unwrap();
     }
@@ -619,7 +619,7 @@ mod tests {
         );
         assert!(worker.tick());
 
-        let (_key, response, ack) = queue.receive_response_v2(&sub, svc, op, seq).unwrap();
+        let (_key, response, ack) = queue.receive_response(&sub, svc, op, seq).unwrap();
         assert_eq!(response.status_code, 500);
         ack().unwrap();
     }
@@ -634,7 +634,7 @@ mod tests {
         let (sub, svc, op, seq) = send_embed_request(&queue, b"not json".to_vec(), None);
         assert!(worker.tick());
 
-        let (_key, response, ack) = queue.receive_response_v2(&sub, svc, op, seq).unwrap();
+        let (_key, response, ack) = queue.receive_response(&sub, svc, op, seq).unwrap();
         assert_eq!(response.status_code, 400);
         ack().unwrap();
     }
@@ -655,7 +655,7 @@ mod tests {
         );
         assert!(worker.tick());
 
-        let (_key, response, ack) = queue.receive_response_v2(&sub, svc, op, seq).unwrap();
+        let (_key, response, ack) = queue.receive_response(&sub, svc, op, seq).unwrap();
         assert_eq!(response.state, Some("embed-state".to_string()));
         ack().unwrap();
     }
@@ -673,7 +673,7 @@ mod tests {
             send_embed_request(&queue, serde_json::to_vec(&body).unwrap(), None);
         assert!(worker.tick());
 
-        let (_key, response, ack) = queue.receive_response_v2(&sub, svc, op, seq).unwrap();
+        let (_key, response, ack) = queue.receive_response(&sub, svc, op, seq).unwrap();
         assert_eq!(response.status_code, 500);
         ack().unwrap();
     }

@@ -203,7 +203,7 @@ impl RecordingQueue {
         }
     }
     /// Record a DAG node for a v2 request message (data-plane path).
-    fn record_request_v2(&self, key: &DataRoutingKey, msg: &crate::domain::RequestMessageV2) {
+    fn record_request_v2(&self, key: &DataRoutingKey, msg: &crate::domain::RequestMessage) {
         let branch_id = key.branch;
 
         let parent_node = self
@@ -269,7 +269,7 @@ impl RecordingQueue {
     }
 
     /// Record a DAG node for a v2 response message (data-plane path).
-    fn record_response_v2(&self, key: &DataRoutingKey, msg: &crate::domain::ResponseMessageV2) {
+    fn record_response_v2(&self, key: &DataRoutingKey, msg: &crate::domain::ResponseMessage) {
         let branch_id = key.branch;
 
         let parent_node = self
@@ -359,22 +359,22 @@ impl MessageQueue for RecordingQueue {
         self.inner.send_complete(key, msg)
     }
 
-    fn send_request_v2(
+    fn send_request(
         &self,
         key: DataRoutingKey,
-        msg: crate::domain::RequestMessageV2,
+        msg: crate::domain::RequestMessage,
     ) -> Result<(), QueueError> {
         self.record_request_v2(&key, &msg);
-        self.inner.send_request_v2(key, msg)
+        self.inner.send_request(key, msg)
     }
 
-    fn send_response_v2(
+    fn send_response(
         &self,
         key: DataRoutingKey,
-        msg: crate::domain::ResponseMessageV2,
+        msg: crate::domain::ResponseMessage,
     ) -> Result<(), QueueError> {
         self.record_response_v2(&key, &msg);
-        self.inner.send_response_v2(key, msg)
+        self.inner.send_response(key, msg)
     }
 
     fn send_delegate(&self, msg: DelegateMessage) -> Result<(), QueueError> {
@@ -403,22 +403,22 @@ impl MessageQueue for RecordingQueue {
         self.inner.receive_complete(submission, harness)
     }
 
-    fn receive_request_v2(
+    fn receive_request(
         &self,
         service: crate::domain::ServiceBackend,
         operation: crate::domain::Operation,
     ) -> Result<
         (
             DataRoutingKey,
-            crate::domain::RequestMessageV2,
+            crate::domain::RequestMessage,
             Acknowledgement,
         ),
         QueueError,
     > {
-        self.inner.receive_request_v2(service, operation)
+        self.inner.receive_request(service, operation)
     }
 
-    fn receive_response_v2(
+    fn receive_response(
         &self,
         submission: &SubmissionId,
         service: crate::domain::ServiceBackend,
@@ -427,13 +427,13 @@ impl MessageQueue for RecordingQueue {
     ) -> Result<
         (
             DataRoutingKey,
-            crate::domain::ResponseMessageV2,
+            crate::domain::ResponseMessage,
             Acknowledgement,
         ),
         QueueError,
     > {
         self.inner
-            .receive_response_v2(submission, service, operation, sequence)
+            .receive_response(submission, service, operation, sequence)
     }
 
     // -------------------------------------------------------------------------

@@ -51,8 +51,8 @@ pub use observable::{MessageDetails, ObservableMessage, ObservableMessageHeaders
 pub use observable_v2::ObservableMessageV2;
 pub use promote::PromoteMessage;
 pub use repair::RepairMessage;
-pub use request::RequestMessageV2;
-pub use response::ResponseMessageV2;
+pub use request::RequestMessage;
+pub use response::ResponseMessage;
 pub use session_start::SessionStartMessage;
 
 /// Protocol version stamped on every message at construction time.

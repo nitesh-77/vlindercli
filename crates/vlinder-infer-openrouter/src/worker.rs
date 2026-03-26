@@ -7,8 +7,8 @@ use std::time::Instant;
 use async_openai::types::chat::{CreateChatCompletionRequest, CreateChatCompletionResponse};
 use vlinder_core::domain::{
     DagNodeId, DataMessageKind, DataRoutingKey, InferenceBackendType, MessageId, MessageQueue,
-    Operation, RequestMessageV2, ResponseMessageV2, ServiceBackend, ServiceDiagnostics,
-    ServiceMetrics, ServiceType,
+    Operation, RequestMessage, ResponseMessage, ServiceBackend, ServiceDiagnostics, ServiceMetrics,
+    ServiceType,
 };
 
 /// Handler result: the raw HTTP response + extracted metrics.
@@ -58,7 +58,7 @@ impl OpenRouterWorker {
 
     /// Process one message if available. Returns true if a message was processed.
     pub fn tick(&self) -> bool {
-        if let Ok((key, msg, ack)) = self.queue.receive_request_v2(
+        if let Ok((key, msg, ack)) = self.queue.receive_request(
             ServiceBackend::Infer(InferenceBackendType::OpenRouter),
             Operation::Run,
         ) {
@@ -72,7 +72,7 @@ impl OpenRouterWorker {
     fn process_v2(
         &self,
         key: &DataRoutingKey,
-        msg: RequestMessageV2,
+        msg: RequestMessage,
         ack: Box<dyn FnOnce() -> Result<(), vlinder_core::domain::QueueError> + Send>,
     ) {
         let start = Instant::now();
@@ -93,7 +93,7 @@ impl OpenRouterWorker {
         };
 
         let response_key = response_key_from_request(key);
-        let response = ResponseMessageV2 {
+        let response = ResponseMessage {
             id: MessageId::new(),
             dag_id: DagNodeId::root(),
             correlation_id: msg.id,
@@ -103,7 +103,7 @@ impl OpenRouterWorker {
             status_code,
             checkpoint: msg.checkpoint,
         };
-        let _ = self.queue.send_response_v2(response_key, response);
+        let _ = self.queue.send_response(response_key, response);
         let _ = ack();
     }
 
@@ -203,8 +203,8 @@ fn openai_error_json(message: &str, error_type: &str) -> Vec<u8> {
 mod tests {
     use super::*;
     use vlinder_core::domain::{
-        AgentName, BranchId, InferenceBackendType, RequestDiagnostics, RequestMessageV2,
-        ResponseMessageV2, Sequence, ServiceBackend, SessionId, SubmissionId,
+        AgentName, BranchId, InferenceBackendType, RequestDiagnostics, RequestMessage,
+        ResponseMessage, Sequence, ServiceBackend, SessionId, SubmissionId,
     };
     use vlinder_core::queue::InMemoryQueue;
 
@@ -241,7 +241,7 @@ mod tests {
                 sequence,
             },
         };
-        let msg = RequestMessageV2 {
+        let msg = RequestMessage {
             id: MessageId::new(),
             dag_id: DagNodeId::root(),
             state,
@@ -249,13 +249,13 @@ mod tests {
             payload,
             checkpoint: None,
         };
-        queue.send_request_v2(key, msg).unwrap();
+        queue.send_request(key, msg).unwrap();
         (submission, service, operation, sequence)
     }
 
     /// Unwrap the `WireResponse` envelope from a response payload, returning
     /// the HTTP status and body for assertions.
-    fn unwrap_wire(response: &ResponseMessageV2) -> (u16, Vec<u8>) {
+    fn unwrap_wire(response: &ResponseMessage) -> (u16, Vec<u8>) {
         if let Ok(wire) =
             serde_json::from_slice::<vlinder_core::domain::wire::WireResponse>(&response.payload)
         {
@@ -277,7 +277,7 @@ mod tests {
         let (sub, svc, op, seq) = send_request(&queue, b"not json".to_vec(), None);
         assert!(worker.tick());
 
-        let (_key, response, ack) = queue.receive_response_v2(&sub, svc, op, seq).unwrap();
+        let (_key, response, ack) = queue.receive_response(&sub, svc, op, seq).unwrap();
         let (status, body) = unwrap_wire(&response);
         assert_eq!(status, 400);
         let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
@@ -306,7 +306,7 @@ mod tests {
         );
         assert!(worker.tick());
 
-        let (_key, response, ack) = queue.receive_response_v2(&sub, svc, op, seq).unwrap();
+        let (_key, response, ack) = queue.receive_response(&sub, svc, op, seq).unwrap();
         assert_eq!(
             response.state,
             Some("xyz".to_string()),
@@ -331,7 +331,7 @@ mod tests {
         let (sub, svc, op, seq) = send_request(&queue, serde_json::to_vec(&body).unwrap(), None);
         assert!(worker.tick());
 
-        let (_key, response, ack) = queue.receive_response_v2(&sub, svc, op, seq).unwrap();
+        let (_key, response, ack) = queue.receive_response(&sub, svc, op, seq).unwrap();
         let (status, body) = unwrap_wire(&response);
         assert_eq!(status, 500);
         let body: serde_json::Value = serde_json::from_slice(&body).unwrap();

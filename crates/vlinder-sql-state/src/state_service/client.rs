@@ -349,7 +349,7 @@ impl DagStore for GrpcStateClient {
     fn get_request_node(
         &self,
         dag_hash: &DagNodeId,
-    ) -> Result<Option<vlinder_core::domain::RequestMessageV2>, String> {
+    ) -> Result<Option<vlinder_core::domain::RequestMessage>, String> {
         let request = proto::GetRequestNodeRequest {
             dag_hash: dag_hash.to_string(),
         };
@@ -371,7 +371,7 @@ impl DagStore for GrpcStateClient {
                             received_at_ms: 0,
                         }
                     });
-                Ok(Some(vlinder_core::domain::RequestMessageV2 {
+                Ok(Some(vlinder_core::domain::RequestMessage {
                     id: vlinder_core::domain::MessageId::from(n.message_id),
                     dag_id: vlinder_core::domain::DagNodeId::from(n.dag_hash),
                     state: n.state,
@@ -387,7 +387,7 @@ impl DagStore for GrpcStateClient {
     fn get_response_node(
         &self,
         dag_hash: &DagNodeId,
-    ) -> Result<Option<vlinder_core::domain::ResponseMessageV2>, String> {
+    ) -> Result<Option<vlinder_core::domain::ResponseMessage>, String> {
         let request = proto::GetResponseNodeRequest {
             dag_hash: dag_hash.to_string(),
         };
@@ -410,7 +410,7 @@ impl DagStore for GrpcStateClient {
                             0,
                         )
                     });
-                Ok(Some(vlinder_core::domain::ResponseMessageV2 {
+                Ok(Some(vlinder_core::domain::ResponseMessage {
                     id: vlinder_core::domain::MessageId::from(n.message_id),
                     dag_id: vlinder_core::domain::DagNodeId::from(n.dag_hash),
                     correlation_id: vlinder_core::domain::MessageId::from(n.correlation_id),
@@ -439,7 +439,7 @@ impl DagStore for GrpcStateClient {
         service: vlinder_core::domain::ServiceBackend,
         operation: vlinder_core::domain::Operation,
         sequence: vlinder_core::domain::Sequence,
-        msg: &vlinder_core::domain::RequestMessageV2,
+        msg: &vlinder_core::domain::RequestMessage,
     ) -> Result<(), String> {
         let snapshot_json =
             serde_json::to_string(state).map_err(|e| format!("serialize snapshot: {e}"))?;
@@ -491,7 +491,7 @@ impl DagStore for GrpcStateClient {
         service: vlinder_core::domain::ServiceBackend,
         operation: vlinder_core::domain::Operation,
         sequence: vlinder_core::domain::Sequence,
-        msg: &vlinder_core::domain::ResponseMessageV2,
+        msg: &vlinder_core::domain::ResponseMessage,
     ) -> Result<(), String> {
         let snapshot_json =
             serde_json::to_string(state).map_err(|e| format!("serialize snapshot: {e}"))?;

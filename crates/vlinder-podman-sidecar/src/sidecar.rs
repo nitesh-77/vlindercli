@@ -82,7 +82,7 @@ impl Sidecar {
 
             // Poll for service responses first (durable mode).
             if let Some(session) = durable_session.take() {
-                match self.dispatch.queue.receive_response_v2(
+                match self.dispatch.queue.receive_response(
                     &session.submission,
                     session.pending_service,
                     session.pending_operation,

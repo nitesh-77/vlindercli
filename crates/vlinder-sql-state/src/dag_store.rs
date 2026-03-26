@@ -541,7 +541,7 @@ impl DagStore for SqliteDagStore {
         service: vlinder_core::domain::ServiceBackend,
         operation: vlinder_core::domain::Operation,
         sequence: vlinder_core::domain::Sequence,
-        msg: &vlinder_core::domain::RequestMessageV2,
+        msg: &vlinder_core::domain::RequestMessage,
     ) -> Result<(), String> {
         let conn = self.conn.lock().expect("db connection lock poisoned");
         let snapshot_json =
@@ -611,7 +611,7 @@ impl DagStore for SqliteDagStore {
         service: vlinder_core::domain::ServiceBackend,
         operation: vlinder_core::domain::Operation,
         sequence: vlinder_core::domain::Sequence,
-        msg: &vlinder_core::domain::ResponseMessageV2,
+        msg: &vlinder_core::domain::ResponseMessage,
     ) -> Result<(), String> {
         let conn = self.conn.lock().expect("db connection lock poisoned");
         let snapshot_json =
@@ -1017,7 +1017,7 @@ impl DagStore for SqliteDagStore {
     fn get_request_node(
         &self,
         dag_hash: &DagNodeId,
-    ) -> Result<Option<vlinder_core::domain::RequestMessageV2>, String> {
+    ) -> Result<Option<vlinder_core::domain::RequestMessage>, String> {
         let conn = self.conn.lock().expect("db connection lock poisoned");
         let mut stmt = conn
             .prepare(
@@ -1045,7 +1045,7 @@ impl DagStore for SqliteDagStore {
                         }
                     });
 
-                Ok(vlinder_core::domain::RequestMessageV2 {
+                Ok(vlinder_core::domain::RequestMessage {
                     id: vlinder_core::domain::MessageId::from(message_id),
                     dag_id: dag_hash.clone(),
                     state,
@@ -1063,7 +1063,7 @@ impl DagStore for SqliteDagStore {
     fn get_response_node(
         &self,
         dag_hash: &DagNodeId,
-    ) -> Result<Option<vlinder_core::domain::ResponseMessageV2>, String> {
+    ) -> Result<Option<vlinder_core::domain::ResponseMessage>, String> {
         let conn = self.conn.lock().expect("db connection lock poisoned");
         let mut stmt = conn
             .prepare(
@@ -1094,7 +1094,7 @@ impl DagStore for SqliteDagStore {
                         )
                     });
 
-                Ok(vlinder_core::domain::ResponseMessageV2 {
+                Ok(vlinder_core::domain::ResponseMessage {
                     id: vlinder_core::domain::MessageId::from(message_id),
                     dag_id: dag_hash.clone(),
                     correlation_id: vlinder_core::domain::MessageId::from(correlation_id),

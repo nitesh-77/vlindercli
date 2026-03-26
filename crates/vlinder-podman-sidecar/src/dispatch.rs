@@ -15,8 +15,8 @@ use vlinder_core::domain::{
     AgentName, BranchId, CompleteMessage, ContainerId, DagNodeId, DataMessageKind, DataRoutingKey,
     DelegateReplyMessage, HarnessType, HealthWindow, HttpMethod, ImageDigest, ImageRef, MessageId,
     MessageQueue, Operation, ProviderHost, ProviderRoute, Registry, RepairMessage,
-    RequestDiagnostics, RequestMessageV2, ResponseMessageV2, RoutingKey, RuntimeDiagnostics,
-    Sequence, SequenceCounter, ServiceBackend, SessionId, SubmissionId,
+    RequestDiagnostics, RequestMessage, ResponseMessage, RoutingKey, RuntimeDiagnostics, Sequence,
+    SequenceCounter, ServiceBackend, SessionId, SubmissionId,
 };
 
 use vlinder_provider_server::handler::InvokeHandler;
@@ -230,7 +230,7 @@ pub fn handle_invoke(
 pub fn handle_service_response(
     ctx: &DispatchContext,
     session: DurableSession,
-    response: &ResponseMessageV2,
+    response: &ResponseMessage,
 ) -> Result<InvokeOutcome, String> {
     let mut trace = TraceLog::new();
 
@@ -365,7 +365,7 @@ pub fn handle_repair(
             sequence: repair.sequence,
         },
     };
-    let request = RequestMessageV2 {
+    let request = RequestMessage {
         id: MessageId::new(),
         dag_id: DagNodeId::root(),
         state: repair.state.clone(),
@@ -382,7 +382,7 @@ pub fn handle_repair(
     ));
 
     ctx.queue
-        .send_request_v2(request_key, request.clone())
+        .send_request(request_key, request.clone())
         .map_err(|e| format!("Failed to send repair request: {e}"))?;
 
     let sequence = SequenceCounter::new();
@@ -500,7 +500,7 @@ fn handle_action(
                     sequence: seq,
                 },
             };
-            let request = RequestMessageV2 {
+            let request = RequestMessage {
                 id: MessageId::new(),
                 dag_id: DagNodeId::root(),
                 state: None,
@@ -517,7 +517,7 @@ fn handle_action(
             ));
 
             ctx.queue
-                .send_request_v2(request_key, request.clone())
+                .send_request(request_key, request.clone())
                 .map_err(|e| format!("Failed to send request: {e}"))?;
 
             Ok(InvokeOutcome::Pending(Box::new(DurableSession {
