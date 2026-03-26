@@ -254,7 +254,7 @@ impl MessageQueue for InMemoryQueue {
         typed
             .entry(reply_key.clone())
             .or_default()
-            .push_back(ObservableMessage::Complete(msg));
+            .push_back(ObservableMessage::DelegateReply(msg));
         Ok(())
     }
 
@@ -265,7 +265,7 @@ impl MessageQueue for InMemoryQueue {
         let mut typed = self.typed_queues.lock().unwrap();
 
         if let Some(queue) = typed.get_mut(reply_key) {
-            if let Some(ObservableMessage::Complete(msg)) = queue.front() {
+            if let Some(ObservableMessage::DelegateReply(msg)) = queue.front() {
                 let msg = msg.clone();
                 queue.pop_front();
                 return Ok((msg, Box::new(|| Ok(()))));

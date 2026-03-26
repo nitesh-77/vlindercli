@@ -301,7 +301,7 @@ fn insert_typed_node(conn: &Connection, node: &DagNode) -> Result<(), rusqlite::
     };
 
     match msg {
-        ObservableMessage::Complete(m) => {
+        ObservableMessage::DelegateReply(m) => {
             let diag = serde_json::to_vec(&m.diagnostics).unwrap_or_default();
             conn.execute(
                 "INSERT OR IGNORE INTO complete_nodes (dag_hash, agent, harness, message_id, state, diagnostics, payload)

@@ -2112,7 +2112,7 @@ mod tests {
             .expect("should produce Complete headers")
             .assemble(original.payload.clone());
 
-        if let ObservableMessage::Complete(m) = &recovered {
+        if let ObservableMessage::DelegateReply(m) = &recovered {
             assert_eq!(m.id, original.id);
             assert_eq!(m.submission, original.submission);
             assert_eq!(m.session, original.session);

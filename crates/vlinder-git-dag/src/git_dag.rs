@@ -210,7 +210,7 @@ impl GitDagWorker {
 
         // Type-specific fields + diagnostics
         match msg {
-            ObservableMessage::Complete(m) => {
+            ObservableMessage::DelegateReply(m) => {
                 self.insert_field(&mut tb, "type", "complete")?;
                 self.insert_field(&mut tb, "agent_id", m.agent_id.as_str())?;
                 self.insert_field(&mut tb, "harness", m.harness.as_str())?;
@@ -1250,7 +1250,7 @@ impl DagWorker for GitDagWorker {
 /// Extract (from, to, `type_str`) from an `ObservableMessage` for commit metadata.
 fn message_routing(msg: &ObservableMessage) -> (String, String, &'static str) {
     match msg {
-        ObservableMessage::Complete(m) => (
+        ObservableMessage::DelegateReply(m) => (
             m.agent_id.to_string(),
             m.harness.as_str().to_string(),
             "complete",
@@ -1271,7 +1271,7 @@ fn message_routing(msg: &ObservableMessage) -> (String, String, &'static str) {
 /// Extract the agent name for registry lookup.
 fn message_agent_name(msg: &ObservableMessage) -> String {
     match msg {
-        ObservableMessage::Complete(m) => m.agent_id.to_string(),
+        ObservableMessage::DelegateReply(m) => m.agent_id.to_string(),
         ObservableMessage::Delegate(m) => m.target.to_string(),
         ObservableMessage::Repair(m) => m.agent_name.to_string(),
         ObservableMessage::Fork(m) => m.agent_name.to_string(),
@@ -1282,7 +1282,7 @@ fn message_agent_name(msg: &ObservableMessage) -> String {
 /// Extract state from the message if present.
 fn message_state(msg: &ObservableMessage) -> Option<&str> {
     match msg {
-        ObservableMessage::Complete(m) => m.state.as_deref(),
+        ObservableMessage::DelegateReply(m) => m.state.as_deref(),
         ObservableMessage::Delegate(m) => m.state.as_deref(),
         ObservableMessage::Repair(m) => m.state.as_deref(),
         ObservableMessage::Fork(_) | ObservableMessage::Promote(_) => None,
@@ -1324,7 +1324,7 @@ mod tests {
             RuntimeDiagnostics::placeholder(0),
         );
         let created_at = DateTime::from_timestamp(epoch_secs, 0).unwrap();
-        (ObservableMessage::Complete(msg), created_at)
+        (ObservableMessage::DelegateReply(msg), created_at)
     }
 
     fn test_complete(payload: &[u8], epoch_secs: i64) -> (ObservableMessage, DateTime<Utc>) {
@@ -1339,7 +1339,7 @@ mod tests {
             RuntimeDiagnostics::placeholder(100),
         );
         let created_at = DateTime::from_timestamp(epoch_secs, 0).unwrap();
-        (ObservableMessage::Complete(msg), created_at)
+        (ObservableMessage::DelegateReply(msg), created_at)
     }
 
     fn test_delegate(payload: &[u8], epoch_secs: i64) -> (ObservableMessage, DateTime<Utc>) {
@@ -1497,7 +1497,7 @@ mod tests {
             RuntimeDiagnostics::placeholder(100),
         );
         let ts2 = DateTime::from_timestamp(1001, 0).unwrap();
-        worker.on_observable_message(&ObservableMessage::Complete(complete), ts2);
+        worker.on_observable_message(&ObservableMessage::DelegateReply(complete), ts2);
 
         let session = git(
             tmp.path(),
@@ -1604,7 +1604,7 @@ mod tests {
                 health: None,
             },
         );
-        let msg = ObservableMessage::Complete(msg_inner);
+        let msg = ObservableMessage::DelegateReply(msg_inner);
         let ts = DateTime::from_timestamp(1003, 0).unwrap();
 
         worker.on_observable_message(&msg, ts);
@@ -1654,7 +1654,7 @@ mod tests {
             Some("abc123state".to_string()),
             RuntimeDiagnostics::placeholder(0),
         );
-        let msg = ObservableMessage::Complete(complete);
+        let msg = ObservableMessage::DelegateReply(complete);
         let ts = DateTime::from_timestamp(1000, 0).unwrap();
 
         worker.on_observable_message(&msg, ts);
@@ -1759,7 +1759,7 @@ mod tests {
             RuntimeDiagnostics::placeholder(0),
         );
         let created_at = DateTime::from_timestamp(epoch_secs, 0).unwrap();
-        (ObservableMessage::Complete(msg), created_at)
+        (ObservableMessage::DelegateReply(msg), created_at)
     }
 
     #[test]

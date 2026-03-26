@@ -121,7 +121,7 @@ mod tests {
 
         assert_eq!(observable.id(), &id);
         assert_eq!(observable.submission(), &submission);
-        assert!(matches!(observable, ObservableMessage::Complete(_)));
+        assert!(matches!(observable, ObservableMessage::DelegateReply(_)));
     }
 
     #[test]

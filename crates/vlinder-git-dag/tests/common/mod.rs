@@ -139,5 +139,5 @@ pub fn make_complete(
         RuntimeDiagnostics::placeholder(100),
     );
     let created_at = DateTime::from_timestamp(epoch_secs, 0).unwrap();
-    (ObservableMessage::Complete(msg), created_at)
+    (ObservableMessage::DelegateReply(msg), created_at)
 }
