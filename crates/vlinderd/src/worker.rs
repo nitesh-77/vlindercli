@@ -499,8 +499,8 @@ fn run_dag_git_worker(config: &Config, shutdown: &AtomicBool) {
     use vlinder_core::domain::DagWorker;
     use vlinder_git_dag::GitDagWorker;
     use vlinder_nats::{
-        complete_parse_subject, from_nats_headers, invoke_parse_subject, subject_to_routing_key,
-        NatsQueue,
+        complete_parse_subject, from_nats_headers, invoke_parse_subject, request_parse_subject,
+        response_parse_subject, subject_to_routing_key, NatsQueue,
     };
 
     let nats = NatsQueue::connect(&config.queue.nats_config()).expect("Failed to connect to NATS");
@@ -584,6 +584,28 @@ fn run_dag_git_worker(config: &Config, shutdown: &AtomicBool) {
                         tracing::warn!(
                             subject = subject.as_str(),
                             "DAG git: failed to deserialize CompleteMessage"
+                        );
+                    }
+                } else if let Some(key) = request_parse_subject(&subject) {
+                    if let Ok(request_msg) =
+                        serde_json::from_slice::<vlinder_core::domain::RequestMessageV2>(&payload)
+                    {
+                        git_worker.on_request(&key, &request_msg, created_at);
+                    } else {
+                        tracing::warn!(
+                            subject = subject.as_str(),
+                            "DAG git: failed to deserialize RequestMessageV2"
+                        );
+                    }
+                } else if let Some(key) = response_parse_subject(&subject) {
+                    if let Ok(response_msg) =
+                        serde_json::from_slice::<vlinder_core::domain::ResponseMessageV2>(&payload)
+                    {
+                        git_worker.on_response(&key, &response_msg, created_at);
+                    } else {
+                        tracing::warn!(
+                            subject = subject.as_str(),
+                            "DAG git: failed to deserialize ResponseMessageV2"
                         );
                     }
                 } else if let Some(key) = invoke_parse_subject(&subject) {
