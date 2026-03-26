@@ -202,6 +202,138 @@ impl RecordingQueue {
             tracing::warn!(error = %id, "Failed to record complete node: {e}");
         }
     }
+    /// Record a DAG node for a v2 request message (data-plane path).
+    fn record_request_v2(&self, key: &DataRoutingKey, msg: &crate::domain::RequestMessageV2) {
+        let branch_id = key.branch;
+
+        let parent_node = self
+            .store
+            .latest_node_on_branch(branch_id, None)
+            .unwrap_or_else(|e| {
+                tracing::warn!(error = %e, branch = branch_id.as_i64(), "Failed to query latest node on branch");
+                None
+            });
+
+        let parent_id = parent_node
+            .as_ref()
+            .map_or_else(DagNodeId::root, |n| n.id.clone());
+        let parent_state = parent_node
+            .as_ref()
+            .map(|n| &n.state)
+            .cloned()
+            .unwrap_or_else(Snapshot::empty);
+
+        let diagnostics_json = serde_json::to_vec(&msg.diagnostics).unwrap_or_default();
+        let id = hash_dag_node(
+            &msg.payload,
+            &parent_id,
+            &MessageType::Request,
+            &diagnostics_json,
+            &key.session,
+        );
+
+        let state = match &msg.state {
+            Some(s) if !s.is_empty() => {
+                parent_state.with_state(Instance::from("kv"), StateHash::from(s.clone()))
+            }
+            _ => parent_state,
+        };
+
+        let crate::domain::DataMessageKind::Request {
+            agent,
+            service,
+            operation,
+            sequence,
+        } = &key.kind
+        else {
+            tracing::error!("record_request_v2 called with non-Request key");
+            return;
+        };
+
+        if let Err(e) = self.store.insert_request_node(
+            &id,
+            &parent_id,
+            Utc::now(),
+            &state,
+            &key.session,
+            &key.submission,
+            key.branch,
+            agent,
+            *service,
+            *operation,
+            *sequence,
+            msg,
+        ) {
+            tracing::warn!(error = %id, "Failed to record request node: {e}");
+        }
+    }
+
+    /// Record a DAG node for a v2 response message (data-plane path).
+    fn record_response_v2(&self, key: &DataRoutingKey, msg: &crate::domain::ResponseMessageV2) {
+        let branch_id = key.branch;
+
+        let parent_node = self
+            .store
+            .latest_node_on_branch(branch_id, None)
+            .unwrap_or_else(|e| {
+                tracing::warn!(error = %e, branch = branch_id.as_i64(), "Failed to query latest node on branch");
+                None
+            });
+
+        let parent_id = parent_node
+            .as_ref()
+            .map_or_else(DagNodeId::root, |n| n.id.clone());
+        let parent_state = parent_node
+            .as_ref()
+            .map(|n| &n.state)
+            .cloned()
+            .unwrap_or_else(Snapshot::empty);
+
+        let diagnostics_json = serde_json::to_vec(&msg.diagnostics).unwrap_or_default();
+        let id = hash_dag_node(
+            &msg.payload,
+            &parent_id,
+            &MessageType::Response,
+            &diagnostics_json,
+            &key.session,
+        );
+
+        let state = match &msg.state {
+            Some(s) if !s.is_empty() => {
+                parent_state.with_state(Instance::from("kv"), StateHash::from(s.clone()))
+            }
+            _ => parent_state,
+        };
+
+        let crate::domain::DataMessageKind::Response {
+            agent,
+            service,
+            operation,
+            sequence,
+        } = &key.kind
+        else {
+            tracing::error!("record_response_v2 called with non-Response key");
+            return;
+        };
+
+        if let Err(e) = self.store.insert_response_node(
+            &id,
+            &parent_id,
+            Utc::now(),
+            &state,
+            &key.session,
+            &key.submission,
+            key.branch,
+            agent,
+            *service,
+            *operation,
+            *sequence,
+            msg,
+        ) {
+            tracing::warn!(error = %id, "Failed to record response node: {e}");
+        }
+    }
+
     /// Record a DAG node for a request message.
     fn record_request(&self, msg: &RequestMessage) {
         let branch_id = msg.branch;
@@ -372,7 +504,7 @@ impl MessageQueue for RecordingQueue {
         key: DataRoutingKey,
         msg: crate::domain::RequestMessageV2,
     ) -> Result<(), QueueError> {
-        // TODO: record_request_v2 when recording queue switches to data-plane path
+        self.record_request_v2(&key, &msg);
         self.inner.send_request_v2(key, msg)
     }
 
@@ -381,6 +513,7 @@ impl MessageQueue for RecordingQueue {
         key: DataRoutingKey,
         msg: crate::domain::ResponseMessageV2,
     ) -> Result<(), QueueError> {
+        self.record_response_v2(&key, &msg);
         self.inner.send_response_v2(key, msg)
     }
 
