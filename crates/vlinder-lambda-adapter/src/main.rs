@@ -271,7 +271,6 @@ fn handle_invocation(
     let state = std::sync::Arc::new(std::sync::RwLock::new(initial_state));
     let handler = InvokeHandler::new(
         queue.clone(),
-        registry.clone(),
         key.branch,
         key.submission.clone(),
         key.session.clone(),

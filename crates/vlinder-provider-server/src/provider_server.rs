@@ -55,13 +55,11 @@ impl ProviderServer {
             })
             .collect();
 
-        let runtime_host = format!("runtime.vlinder.local:{port}");
-
         let shutdown_signal = Arc::new(AtomicBool::new(false));
         let should_stop = Arc::clone(&shutdown_signal);
 
         let thread = std::thread::spawn(move || {
-            request_loop(should_stop, server, hosts, handler, runtime_host);
+            request_loop(should_stop, server, hosts, handler);
         });
 
         Self {
@@ -92,8 +90,7 @@ fn request_loop(
     should_stop: Arc<AtomicBool>,
     server: tiny_http::Server,
     hosts: Vec<ProviderHost>,
-    mut handler: InvokeHandler,
-    runtime_host: String,
+    handler: InvokeHandler,
 ) {
     while !should_stop.load(Ordering::Relaxed) {
         match server.recv_timeout(Duration::from_millis(100)) {
@@ -112,14 +109,11 @@ fn request_loop(
 
                 let checkpoint = extract_checkpoint(&request);
 
-                let (status, response_body) = if host == runtime_host {
-                    handler.handle_runtime(&method.to_string(), &path, &body)
-                } else {
+                let (status, response_body) =
                     match match_route(&hosts, &method, &host, &path, &body) {
                         Ok(route) => handler.forward_provider(route, body, checkpoint),
                         Err(err) => err,
-                    }
-                };
+                    };
 
                 tracing::info!(
                     event = "provider_server.request_done",

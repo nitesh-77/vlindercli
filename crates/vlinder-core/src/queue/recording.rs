@@ -14,9 +14,8 @@ use chrono::Utc;
 use crate::domain::workers::dag::build_dag_node;
 use crate::domain::{
     hash_dag_node, Acknowledgement, CompleteMessage, DagNodeId, DagStore, DataRoutingKey,
-    DelegateMessage, DelegateReplyMessage, ForkMessage, Instance, InvokeMessage, MessageQueue,
-    MessageType, ObservableMessage, PromoteMessage, QueueError, RepairMessage, Snapshot, StateHash,
-    SubmissionId,
+    ForkMessage, Instance, InvokeMessage, MessageQueue, MessageType, ObservableMessage,
+    PromoteMessage, QueueError, RepairMessage, Snapshot, StateHash, SubmissionId,
 };
 
 /// A `MessageQueue` decorator that synchronously records DAG nodes on send.
@@ -377,20 +376,6 @@ impl MessageQueue for RecordingQueue {
         self.inner.send_response(key, msg)
     }
 
-    fn send_delegate(&self, msg: DelegateMessage) -> Result<(), QueueError> {
-        self.record(&msg.clone().into());
-        self.inner.send_delegate(msg)
-    }
-
-    fn send_delegate_reply(
-        &self,
-        msg: DelegateReplyMessage,
-        reply_key: &crate::domain::RoutingKey,
-    ) -> Result<(), QueueError> {
-        self.record(&msg.clone().into());
-        self.inner.send_delegate_reply(msg, reply_key)
-    }
-
     // -------------------------------------------------------------------------
     // Receive methods — delegate straight through
     // -------------------------------------------------------------------------
@@ -434,24 +419,6 @@ impl MessageQueue for RecordingQueue {
     > {
         self.inner
             .receive_response(submission, service, operation, sequence)
-    }
-
-    // -------------------------------------------------------------------------
-    // Delegation methods — delegate straight through
-    // -------------------------------------------------------------------------
-
-    fn receive_delegate(
-        &self,
-        target: &crate::domain::AgentName,
-    ) -> Result<(DelegateMessage, Acknowledgement), QueueError> {
-        self.inner.receive_delegate(target)
-    }
-
-    fn receive_delegate_reply(
-        &self,
-        reply_key: &crate::domain::RoutingKey,
-    ) -> Result<(DelegateReplyMessage, Acknowledgement), QueueError> {
-        self.inner.receive_delegate_reply(reply_key)
     }
 
     // -------------------------------------------------------------------------
@@ -579,9 +546,9 @@ impl MessageQueue for RecordingQueue {
 mod tests {
     use super::*;
     use crate::domain::{
-        AgentName, BranchId, DagNode, DataMessageKind, DataRoutingKey, DelegateDiagnostics,
-        HarnessType, InMemoryDagStore, InvokeDiagnostics, InvokeMessage, MessageId, MessageType,
-        Nonce, RuntimeDiagnostics, RuntimeType, SessionId, SubmissionId,
+        AgentName, BranchId, DagNode, DataMessageKind, DataRoutingKey, HarnessType,
+        InMemoryDagStore, InvokeDiagnostics, InvokeMessage, MessageId, MessageType,
+        RuntimeDiagnostics, RuntimeType, SessionId, SubmissionId,
     };
     use crate::queue::InMemoryQueue;
 
@@ -653,22 +620,6 @@ mod tests {
         (key, msg)
     }
 
-    fn test_delegate() -> DelegateMessage {
-        DelegateMessage::new(
-            BranchId::from(1),
-            test_submission(),
-            test_session(),
-            AgentName::new("echo"),
-            AgentName::new("summarizer"),
-            b"delegate this".to_vec(),
-            Nonce::new("test-nonce"),
-            None,
-            DelegateDiagnostics {
-                runtime: RuntimeDiagnostics::placeholder(0),
-            },
-        )
-    }
-
     #[test]
     fn send_invoke_records_dag_node() {
         let store = test_store();
@@ -698,21 +649,6 @@ mod tests {
         let nodes = store.get_session_nodes(&sid).unwrap();
         assert_eq!(nodes.len(), 1);
         assert_eq!(nodes[0].message_type(), MessageType::Complete);
-    }
-
-    #[test]
-    fn send_delegate_records_dag_node() {
-        let store = test_store();
-        let queue = test_queue(Arc::clone(&store));
-
-        let msg = test_delegate();
-        let sid = msg.session.clone();
-
-        queue.send_delegate(msg).unwrap();
-
-        let nodes = store.get_session_nodes(&sid).unwrap();
-        assert_eq!(nodes.len(), 1);
-        assert_eq!(nodes[0].message_type(), MessageType::Delegate);
     }
 
     #[test]

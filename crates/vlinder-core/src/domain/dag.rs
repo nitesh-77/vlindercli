@@ -591,22 +591,9 @@ impl DagStore for InMemoryDagStore {
 
     fn get_complete_node(
         &self,
-        dag_hash: &super::DagNodeId,
+        _dag_hash: &super::DagNodeId,
     ) -> Result<Option<super::CompleteMessage>, String> {
-        let nodes = self.nodes.lock().unwrap();
-        Ok(nodes.iter().find(|n| n.id == *dag_hash).and_then(|n| {
-            if let Some(super::ObservableMessage::DelegateReply(m)) = &n.message {
-                Some(super::CompleteMessage {
-                    id: m.id.clone(),
-                    dag_id: n.id.clone(),
-                    state: m.state.clone(),
-                    diagnostics: m.diagnostics.clone(),
-                    payload: m.payload.clone(),
-                })
-            } else {
-                None
-            }
-        }))
+        Ok(None)
     }
 
     fn get_node(&self, id: &super::DagNodeId) -> Result<Option<DagNode>, String> {

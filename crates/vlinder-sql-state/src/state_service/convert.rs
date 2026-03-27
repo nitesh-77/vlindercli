@@ -243,22 +243,29 @@ mod tests {
     use chrono::Utc;
     use vlinder_core::domain::workers::dag::build_dag_node;
     use vlinder_core::domain::{
-        AgentName, BranchId, DagNodeId, DelegateReplyMessage, HarnessType, RuntimeDiagnostics,
-        SessionId, Snapshot, SubmissionId,
+        AgentName, BranchId, DagNodeId, HarnessType, Operation, RepairMessage, Sequence,
+        ServiceBackend, SessionId, Snapshot, SubmissionId,
     };
 
-    fn sample_dag_node() -> DagNode {
-        let msg: ObservableMessage = DelegateReplyMessage::new(
+    fn sample_repair(state: Option<String>) -> ObservableMessage {
+        ObservableMessage::Repair(RepairMessage::new(
             BranchId::from(1),
             SubmissionId::from("sub-001".to_string()),
             SessionId::new(),
             AgentName::new("agent-echo"),
             HarnessType::Cli,
+            DagNodeId::from("parent456".to_string()),
+            "on_error".to_string(),
+            ServiceBackend::Kv(vlinder_core::domain::ObjectStorageType::Sqlite),
+            Operation::Get,
+            Sequence::first(),
             b"hello".to_vec(),
-            Some("state-hash-abc".to_string()),
-            RuntimeDiagnostics::placeholder(0),
-        )
-        .into();
+            state,
+        ))
+    }
+
+    fn sample_dag_node() -> DagNode {
+        let msg = sample_repair(Some("state-hash-abc".to_string()));
         build_dag_node(
             &msg,
             &DagNodeId::from("parent456".to_string()),
@@ -287,17 +294,7 @@ mod tests {
 
     #[test]
     fn dag_node_without_state_round_trips() {
-        let msg: ObservableMessage = DelegateReplyMessage::new(
-            BranchId::from(1),
-            SubmissionId::from("sub-001".to_string()),
-            SessionId::new(),
-            AgentName::new("agent-echo"),
-            HarnessType::Cli,
-            b"hello".to_vec(),
-            None,
-            RuntimeDiagnostics::placeholder(0),
-        )
-        .into();
+        let msg = sample_repair(None);
         let node = build_dag_node(&msg, &DagNodeId::root(), &Snapshot::empty());
 
         let proto_node: proto::DagNode = node.clone().into();

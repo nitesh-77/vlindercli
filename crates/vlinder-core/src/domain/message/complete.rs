@@ -3,71 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::super::diagnostics::RuntimeDiagnostics;
-use super::super::routing_key::{AgentName, RoutingKey, RoutingKind};
-use super::identity::{BranchId, DagNodeId, HarnessType, MessageId, SessionId, SubmissionId};
-use super::PROTOCOL_VERSION;
-
-/// Complete message: Runtime → Harness
-///
-/// Signals that a submission has finished.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct DelegateReplyMessage {
-    pub id: MessageId,
-    pub protocol_version: String,
-    pub branch: BranchId,
-    pub submission: SubmissionId,
-    pub session: SessionId,
-    pub agent_id: AgentName,
-    pub harness: HarnessType,
-    #[serde(skip)]
-    pub payload: Vec<u8>,
-    /// Final state hash after this invocation (ADR 055).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub state: Option<String>,
-    /// Diagnostics from the runtime (ADR 071).
-    #[serde(skip)]
-    pub diagnostics: RuntimeDiagnostics,
-}
-
-impl DelegateReplyMessage {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        branch: BranchId,
-        submission: SubmissionId,
-        session: SessionId,
-        agent_id: AgentName,
-        harness: HarnessType,
-        payload: Vec<u8>,
-        state: Option<String>,
-        diagnostics: RuntimeDiagnostics,
-    ) -> Self {
-        Self {
-            id: MessageId::new(),
-            protocol_version: PROTOCOL_VERSION.to_string(),
-            branch,
-            submission,
-            session,
-            agent_id,
-            harness,
-            payload,
-            state,
-            diagnostics,
-        }
-    }
-
-    /// Produce the routing key for this message (ADR 096 §4).
-    pub fn routing_key(&self) -> RoutingKey {
-        RoutingKey {
-            session: self.session.clone(),
-            branch: self.branch,
-            submission: self.submission.clone(),
-            kind: RoutingKind::Complete {
-                agent: self.agent_id.clone(),
-                harness: self.harness,
-            },
-        }
-    }
-}
+use super::identity::{DagNodeId, MessageId};
 
 /// Data-plane complete payload — everything NOT in the subject (ADR 121).
 ///

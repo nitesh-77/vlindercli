@@ -20,11 +20,10 @@ use std::str::FromStr;
 
 use vlinder_core::domain::{
     Acknowledgement, AgentName, BranchId, CompleteMessage, DagNodeId, DataMessageKind,
-    DataRoutingKey, DelegateDiagnostics, DelegateMessage, DelegateReplyMessage, HarnessType,
-    InvokeMessage, MessageId, MessageQueue, Nonce, Operation, QueueError, RepairMessage,
-    RequestDiagnostics, RequestMessage, ResponseMessage, RoutingKey, RoutingKind,
-    RuntimeDiagnostics, RuntimeType, Sequence, ServiceBackend, ServiceDiagnostics, ServiceType,
-    SessionId, SubmissionId,
+    DataRoutingKey, HarnessType, InvokeMessage, MessageId, MessageQueue, Nonce, Operation,
+    QueueError, RepairMessage, RequestDiagnostics, RequestMessage, ResponseMessage, RoutingKey,
+    RoutingKind, RuntimeDiagnostics, RuntimeType, Sequence, ServiceBackend, ServiceDiagnostics,
+    ServiceType, SessionId, SubmissionId,
 };
 
 /// NATS queue with `JetStream` durability.
@@ -440,157 +439,6 @@ impl MessageQueue for NatsQueue {
                 .map_err(|e| QueueError::ReceiveFailed(format!("deserialize response: {e}")))?;
 
             Ok((key, msg, ack_fn))
-        })
-    }
-
-    fn send_delegate(&self, msg: DelegateMessage) -> Result<(), QueueError> {
-        let subject = routing_key_to_subject(&msg.routing_key());
-
-        self.inner.runtime.block_on(async {
-            let mut headers = async_nats::HeaderMap::new();
-            headers.insert("msg-id", msg.id.as_str());
-            headers.insert("protocol-version", msg.protocol_version.as_str());
-            headers.insert("branch-id", msg.branch.to_string());
-            headers.insert("submission-id", msg.submission.as_str());
-            headers.insert("session-id", msg.session.as_str());
-            headers.insert("caller-agent", msg.caller.as_str());
-            headers.insert("target-agent", msg.target.as_str());
-            headers.insert("nonce", msg.nonce.as_str());
-            if let Some(ref state) = msg.state {
-                headers.insert("state", state.as_str());
-            }
-            if let Ok(diag_json) = serde_json::to_string(&msg.diagnostics) {
-                headers.insert("diagnostics", diag_json.as_str());
-            }
-
-            self.inner
-                .jetstream
-                .publish_with_headers(subject, headers, msg.payload.into())
-                .await
-                .map_err(|e| QueueError::SendFailed(e.to_string()))?
-                .await
-                .map_err(|e| QueueError::SendFailed(e.to_string()))?;
-
-            Ok(())
-        })
-    }
-
-    fn receive_delegate(
-        &self,
-        target: &AgentName,
-    ) -> Result<(DelegateMessage, Acknowledgement), QueueError> {
-        let filter = format!("vlinder.*.*.*.delegate.*.{}", target.as_str());
-
-        self.inner.runtime.block_on(async {
-            let (js_msg, ack_fn) = self.fetch_one(&filter).await?;
-
-            let headers = js_msg
-                .headers
-                .as_ref()
-                .ok_or_else(|| QueueError::ReceiveFailed("missing headers".to_string()))?;
-
-            let diagnostics = get_header(headers, "diagnostics")
-                .ok()
-                .and_then(|s| serde_json::from_str(&s).ok())
-                .unwrap_or_else(|| DelegateDiagnostics {
-                    runtime: RuntimeDiagnostics::placeholder(0),
-                });
-
-            let msg = DelegateMessage {
-                id: MessageId::from(get_header(headers, "msg-id")?),
-                protocol_version: get_header(headers, "protocol-version").unwrap_or_default(),
-                branch: get_header(headers, "branch-id")
-                    .ok()
-                    .and_then(|s| s.parse::<i64>().ok())
-                    .map_or(BranchId::from(1), BranchId::from),
-                submission: SubmissionId::from(get_header(headers, "submission-id")?),
-                session: SessionId::try_from(get_header(headers, "session-id")?)
-                    .map_err(QueueError::ReceiveFailed)?,
-                caller: AgentName::new(get_header(headers, "caller-agent")?),
-                target: AgentName::new(get_header(headers, "target-agent")?),
-                payload: js_msg.payload.to_vec(),
-                nonce: Nonce::new(get_header(headers, "nonce")?),
-                state: get_header(headers, "state").ok(),
-                diagnostics,
-            };
-
-            Ok((msg, ack_fn))
-        })
-    }
-
-    fn send_delegate_reply(
-        &self,
-        msg: DelegateReplyMessage,
-        reply_key: &RoutingKey,
-    ) -> Result<(), QueueError> {
-        let subject = routing_key_to_subject(reply_key);
-
-        self.inner.runtime.block_on(async {
-            let mut headers = async_nats::HeaderMap::new();
-            headers.insert("msg-id", msg.id.as_str());
-            headers.insert("protocol-version", msg.protocol_version.as_str());
-            headers.insert("branch-id", msg.branch.to_string());
-            headers.insert("submission-id", msg.submission.as_str());
-            headers.insert("session-id", msg.session.as_str());
-            headers.insert("agent-id", msg.agent_id.as_str());
-            headers.insert("harness", msg.harness.as_str());
-            if let Some(ref state) = msg.state {
-                headers.insert("state", state.as_str());
-            }
-            if let Ok(diag_json) = serde_json::to_string(&msg.diagnostics) {
-                headers.insert("diagnostics", diag_json.as_str());
-            }
-
-            self.inner
-                .jetstream
-                .publish_with_headers(subject, headers, msg.payload.into())
-                .await
-                .map_err(|e| QueueError::SendFailed(e.to_string()))?
-                .await
-                .map_err(|e| QueueError::SendFailed(e.to_string()))?;
-
-            Ok(())
-        })
-    }
-
-    fn receive_delegate_reply(
-        &self,
-        reply_key: &RoutingKey,
-    ) -> Result<(DelegateReplyMessage, Acknowledgement), QueueError> {
-        let filter = routing_key_to_subject(reply_key);
-
-        self.inner.runtime.block_on(async {
-            let (js_msg, ack_fn) = self.fetch_one(&filter).await?;
-
-            let headers = js_msg
-                .headers
-                .as_ref()
-                .ok_or_else(|| QueueError::ReceiveFailed("missing headers".to_string()))?;
-
-            let diagnostics = get_header(headers, "diagnostics")
-                .ok()
-                .and_then(|s| serde_json::from_str(&s).ok())
-                .unwrap_or_else(|| RuntimeDiagnostics::placeholder(0));
-
-            let msg = DelegateReplyMessage {
-                id: MessageId::from(get_header(headers, "msg-id")?),
-                protocol_version: get_header(headers, "protocol-version").unwrap_or_default(),
-                branch: get_header(headers, "branch-id")
-                    .ok()
-                    .and_then(|s| s.parse::<i64>().ok())
-                    .map_or(BranchId::from(1), BranchId::from),
-                submission: SubmissionId::from(get_header(headers, "submission-id")?),
-                session: SessionId::try_from(get_header(headers, "session-id")?)
-                    .map_err(QueueError::ReceiveFailed)?,
-                agent_id: AgentName::new(get_header(headers, "agent-id")?),
-                harness: HarnessType::from_str(&get_header(headers, "harness")?)
-                    .map_err(|_| QueueError::ReceiveFailed("unknown harness type".to_string()))?,
-                payload: js_msg.payload.to_vec(),
-                state: get_header(headers, "state").ok(),
-                diagnostics,
-            };
-
-            Ok((msg, ack_fn))
         })
     }
 
@@ -1140,37 +988,6 @@ pub fn subject_to_routing_key(subject: &str) -> Option<RoutingKey> {
     })
 }
 
-/// Serialize a `CompleteMessage` into NATS headers (sans payload).
-pub fn complete_to_nats_headers(msg: &DelegateReplyMessage) -> HashMap<String, String> {
-    let mut h = HashMap::new();
-    h.insert("msg-id".to_string(), msg.id.as_str().to_string());
-    h.insert("protocol-version".to_string(), msg.protocol_version.clone());
-    h.insert("session-id".to_string(), msg.session.as_str().to_string());
-    if let Some(ref state) = msg.state {
-        h.insert("state".to_string(), state.clone());
-    }
-    if let Ok(diag_json) = serde_json::to_string(&msg.diagnostics) {
-        h.insert("diagnostics".to_string(), diag_json);
-    }
-    h
-}
-
-/// Serialize a `DelegateMessage` into NATS headers (sans payload).
-pub fn delegate_to_nats_headers(msg: &DelegateMessage) -> HashMap<String, String> {
-    let mut h = HashMap::new();
-    h.insert("msg-id".to_string(), msg.id.as_str().to_string());
-    h.insert("protocol-version".to_string(), msg.protocol_version.clone());
-    h.insert("session-id".to_string(), msg.session.as_str().to_string());
-    h.insert("nonce".to_string(), msg.nonce.as_str().to_string());
-    if let Some(ref state) = msg.state {
-        h.insert("state".to_string(), state.clone());
-    }
-    if let Ok(diag_json) = serde_json::to_string(&msg.diagnostics) {
-        h.insert("diagnostics".to_string(), diag_json);
-    }
-    h
-}
-
 /// Serialize a `RepairMessage` into NATS headers (sans payload).
 #[allow(dead_code)]
 pub fn repair_to_nats_headers(msg: &RepairMessage) -> HashMap<String, String> {
@@ -1249,17 +1066,9 @@ pub fn from_nats_headers<S: BuildHasher>(
                 .unwrap_or_else(|| RuntimeDiagnostics::placeholder(0));
             Some(MessageDetails::Complete { diagnostics })
         }
-        RoutingKind::Delegate { .. } => {
-            let diagnostics = headers
-                .get("diagnostics")
-                .and_then(|s| serde_json::from_str(s).ok())
-                .unwrap_or_else(|| DelegateDiagnostics {
-                    runtime: RuntimeDiagnostics::placeholder(0),
-                });
-            let nonce = Nonce::new(headers.get("nonce")?.clone());
-            Some(MessageDetails::Delegate { diagnostics, nonce })
-        }
-        RoutingKind::Invoke { .. } | RoutingKind::DelegateReply { .. } => None,
+        RoutingKind::Delegate { .. }
+        | RoutingKind::Invoke { .. }
+        | RoutingKind::DelegateReply { .. } => None,
         RoutingKind::Repair { .. } => {
             let dag_parent = DagNodeId::from(headers.get("dag-parent").cloned()?);
             let checkpoint = headers.get("checkpoint").cloned()?;
@@ -1434,51 +1243,6 @@ mod tests {
             routing_key_to_subject(&key),
             format!(
                 "vlinder.{}.{}.{}.complete.echo.web",
-                session(),
-                timeline(),
-                submission()
-            ),
-        );
-    }
-
-    #[test]
-    fn delegate_subject_format() {
-        let key = RoutingKey {
-            session: session(),
-            branch: timeline(),
-            submission: submission(),
-            kind: RoutingKind::Delegate {
-                caller: agent(),
-                target: agent_alt(),
-            },
-        };
-        assert_eq!(
-            routing_key_to_subject(&key),
-            format!(
-                "vlinder.{}.{}.{}.delegate.echo.pensieve",
-                session(),
-                timeline(),
-                submission()
-            ),
-        );
-    }
-
-    #[test]
-    fn delegate_reply_subject_format() {
-        let key = RoutingKey {
-            session: session(),
-            branch: timeline(),
-            submission: submission(),
-            kind: RoutingKind::DelegateReply {
-                caller: agent(),
-                target: agent_alt(),
-                nonce: Nonce::new("abc123"),
-            },
-        };
-        assert_eq!(
-            routing_key_to_subject(&key),
-            format!(
-                "vlinder.{}.{}.{}.delegate-reply.echo.pensieve.abc123",
                 session(),
                 timeline(),
                 submission()
@@ -1808,77 +1572,6 @@ mod tests {
         assert_injective(&a, &b);
     }
 
-    #[test]
-    fn delegate_injective_by_caller() {
-        let a = RoutingKey {
-            session: session(),
-            branch: timeline(),
-            submission: submission(),
-            kind: RoutingKind::Delegate {
-                caller: agent(),
-                target: agent_alt(),
-            },
-        };
-        let b = RoutingKey {
-            session: session(),
-            branch: timeline(),
-            submission: submission(),
-            kind: RoutingKind::Delegate {
-                caller: agent_alt(),
-                target: agent_alt(),
-            },
-        };
-        assert_injective(&a, &b);
-    }
-
-    #[test]
-    fn delegate_injective_by_target() {
-        let a = RoutingKey {
-            session: session(),
-            branch: timeline(),
-            submission: submission(),
-            kind: RoutingKind::Delegate {
-                caller: agent(),
-                target: agent_alt(),
-            },
-        };
-        let b = RoutingKey {
-            session: session(),
-            branch: timeline(),
-            submission: submission(),
-            kind: RoutingKind::Delegate {
-                caller: agent(),
-                target: AgentName::new("fact-checker"),
-            },
-        };
-        assert_injective(&a, &b);
-    }
-
-    #[test]
-    fn delegate_reply_injective_by_nonce() {
-        let a = RoutingKey {
-            session: session(),
-            branch: timeline(),
-            submission: submission(),
-            kind: RoutingKind::DelegateReply {
-                caller: agent(),
-                target: agent_alt(),
-                nonce: Nonce::new("nonce-1"),
-            },
-        };
-        let b = RoutingKey {
-            session: session(),
-            branch: timeline(),
-            submission: submission(),
-            kind: RoutingKind::DelegateReply {
-                caller: agent(),
-                target: agent_alt(),
-                nonce: Nonce::new("nonce-2"),
-            },
-        };
-        assert_injective(&a, &b);
-    }
-
     // ========================================================================
     // Cross-variant injectivity — different message types never collide
     // ========================================================================
@@ -1932,30 +1625,6 @@ mod tests {
             },
         };
         assert_injective(&request, &response);
-    }
-
-    #[test]
-    fn delegate_and_delegate_reply_subjects_differ() {
-        let delegate = RoutingKey {
-            session: session(),
-            branch: timeline(),
-            submission: submission(),
-            kind: RoutingKind::Delegate {
-                caller: agent(),
-                target: agent_alt(),
-            },
-        };
-        let reply = RoutingKey {
-            session: session(),
-            branch: timeline(),
-            submission: submission(),
-            kind: RoutingKind::DelegateReply {
-                caller: agent(),
-                target: agent_alt(),
-                nonce: Nonce::new("n"),
-            },
-        };
-        assert_injective(&delegate, &reply);
     }
 
     // ========================================================================
@@ -2027,33 +1696,6 @@ mod tests {
     }
 
     #[test]
-    fn delegate_round_trips() {
-        assert_round_trips(&RoutingKey {
-            session: session(),
-            branch: timeline(),
-            submission: submission(),
-            kind: RoutingKind::Delegate {
-                caller: agent(),
-                target: agent_alt(),
-            },
-        });
-    }
-
-    #[test]
-    fn delegate_reply_round_trips() {
-        assert_round_trips(&RoutingKey {
-            session: session(),
-            branch: timeline(),
-            submission: submission(),
-            kind: RoutingKind::DelegateReply {
-                caller: agent(),
-                target: agent_alt(),
-                nonce: Nonce::new("abc123"),
-            },
-        });
-    }
-
-    #[test]
     fn subject_to_routing_key_rejects_garbage() {
         assert!(subject_to_routing_key("not-a-subject").is_none());
         assert!(subject_to_routing_key("").is_none());
@@ -2071,101 +1713,6 @@ mod tests {
 
     // Invoke header tests removed — invoke uses the data-plane subject
     // format (ADR 121), not the header-based v1 pipeline.
-
-    #[test]
-    fn from_nats_headers_delegate_reply_returns_none() {
-        let key = RoutingKey {
-            session: session(),
-            branch: timeline(),
-            submission: submission(),
-            kind: RoutingKind::DelegateReply {
-                caller: agent(),
-                target: agent_alt(),
-                nonce: Nonce::new("n"),
-            },
-        };
-        assert!(from_nats_headers(&key, &HashMap::new()).is_none());
-    }
-
-    // ========================================================================
-    // Complete header round-trip
-    // ========================================================================
-
-    #[test]
-    fn complete_headers_round_trip() {
-        use vlinder_core::domain::ObservableMessage;
-
-        let original = DelegateReplyMessage::new(
-            timeline(),
-            submission(),
-            SessionId::try_from("d4761d76-dee4-4ebf-9df4-43b52efa4f78".to_string()).unwrap(),
-            agent(),
-            HarnessType::Grpc,
-            b"done".to_vec(),
-            Some("state-z".to_string()),
-            RuntimeDiagnostics::placeholder(0),
-        );
-        let key = original.routing_key();
-        let headers = complete_to_nats_headers(&original);
-
-        let recovered = from_nats_headers(&key, &headers)
-            .expect("should produce Complete headers")
-            .assemble(original.payload.clone());
-
-        if let ObservableMessage::DelegateReply(m) = &recovered {
-            assert_eq!(m.id, original.id);
-            assert_eq!(m.submission, original.submission);
-            assert_eq!(m.session, original.session);
-            assert_eq!(m.agent_id, original.agent_id);
-            assert_eq!(m.harness, original.harness);
-            assert_eq!(m.payload, original.payload);
-            assert_eq!(m.state, original.state);
-        } else {
-            panic!("expected Complete, got {recovered:?}");
-        }
-    }
-
-    // ========================================================================
-    // Delegate header round-trip
-    // ========================================================================
-
-    #[test]
-    fn delegate_headers_round_trip() {
-        use vlinder_core::domain::ObservableMessage;
-
-        let original = DelegateMessage::new(
-            timeline(),
-            submission(),
-            SessionId::try_from("d4761d76-dee4-4ebf-9df4-43b52efa4f78".to_string()).unwrap(),
-            agent(),
-            agent_alt(),
-            b"task-data".to_vec(),
-            Nonce::new("nonce-42"),
-            None,
-            DelegateDiagnostics {
-                runtime: RuntimeDiagnostics::placeholder(0),
-            },
-        );
-        let key = original.routing_key();
-        let headers = delegate_to_nats_headers(&original);
-
-        let recovered = from_nats_headers(&key, &headers)
-            .expect("should produce Delegate headers")
-            .assemble(original.payload.clone());
-
-        if let ObservableMessage::Delegate(m) = &recovered {
-            assert_eq!(m.id, original.id);
-            assert_eq!(m.submission, original.submission);
-            assert_eq!(m.session, original.session);
-            assert_eq!(m.caller, original.caller);
-            assert_eq!(m.target, original.target);
-            assert_eq!(m.nonce, original.nonce);
-            assert_eq!(m.payload, original.payload);
-            assert_eq!(m.state, original.state);
-        } else {
-            panic!("expected Delegate, got {recovered:?}");
-        }
-    }
 
     // ========================================================================
     // Invoke subject format (ADR 121)

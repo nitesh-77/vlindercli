@@ -210,35 +210,6 @@ impl GitDagWorker {
 
         // Type-specific fields + diagnostics
         match msg {
-            ObservableMessage::DelegateReply(m) => {
-                self.insert_field(&mut tb, "type", "complete")?;
-                self.insert_field(&mut tb, "agent_id", m.agent_id.as_str())?;
-                self.insert_field(&mut tb, "harness", m.harness.as_str())?;
-                if let Some(ref state) = m.state {
-                    self.insert_field(&mut tb, "state", state)?;
-                }
-                self.insert_diagnostics_toml(&mut tb, &m.diagnostics)?;
-                if !m.diagnostics.stderr.is_empty() {
-                    let oid = self.write_blob(&m.diagnostics.stderr)?;
-                    tb.insert("stderr", oid, FileMode::Blob.into())
-                        .map_err(|e| format!("insert stderr failed: {e}"))?;
-                }
-            }
-            ObservableMessage::Delegate(m) => {
-                self.insert_field(&mut tb, "type", "delegate")?;
-                self.insert_field(&mut tb, "caller_agent", m.caller.as_str())?;
-                self.insert_field(&mut tb, "target_agent", m.target.as_str())?;
-                self.insert_field(&mut tb, "nonce", m.nonce.as_str())?;
-                if let Some(ref state) = m.state {
-                    self.insert_field(&mut tb, "state", state)?;
-                }
-                self.insert_diagnostics_toml(&mut tb, &m.diagnostics)?;
-                if !m.diagnostics.runtime.stderr.is_empty() {
-                    let oid = self.write_blob(&m.diagnostics.runtime.stderr)?;
-                    tb.insert("stderr", oid, FileMode::Blob.into())
-                        .map_err(|e| format!("insert stderr failed: {e}"))?;
-                }
-            }
             ObservableMessage::Repair(m) => {
                 self.insert_field(&mut tb, "type", "repair")?;
                 self.insert_field(&mut tb, "agent_id", m.agent_name.as_str())?;
@@ -1250,12 +1221,6 @@ impl DagWorker for GitDagWorker {
 /// Extract (from, to, `type_str`) from an `ObservableMessage` for commit metadata.
 fn message_routing(msg: &ObservableMessage) -> (String, String, &'static str) {
     match msg {
-        ObservableMessage::DelegateReply(m) => (
-            m.agent_id.to_string(),
-            m.harness.as_str().to_string(),
-            "complete",
-        ),
-        ObservableMessage::Delegate(m) => (m.caller.to_string(), m.target.to_string(), "delegate"),
         ObservableMessage::Repair(m) => (
             m.harness.as_str().to_string(),
             m.agent_name.to_string(),
@@ -1271,8 +1236,6 @@ fn message_routing(msg: &ObservableMessage) -> (String, String, &'static str) {
 /// Extract the agent name for registry lookup.
 fn message_agent_name(msg: &ObservableMessage) -> String {
     match msg {
-        ObservableMessage::DelegateReply(m) => m.agent_id.to_string(),
-        ObservableMessage::Delegate(m) => m.target.to_string(),
         ObservableMessage::Repair(m) => m.agent_name.to_string(),
         ObservableMessage::Fork(m) => m.agent_name.to_string(),
         ObservableMessage::Promote(m) => m.agent_name.to_string(),
@@ -1282,8 +1245,6 @@ fn message_agent_name(msg: &ObservableMessage) -> String {
 /// Extract state from the message if present.
 fn message_state(msg: &ObservableMessage) -> Option<&str> {
     match msg {
-        ObservableMessage::DelegateReply(m) => m.state.as_deref(),
-        ObservableMessage::Delegate(m) => m.state.as_deref(),
         ObservableMessage::Repair(m) => m.state.as_deref(),
         ObservableMessage::Fork(_) | ObservableMessage::Promote(_) => None,
     }
@@ -1302,62 +1263,43 @@ mod tests {
     use super::*;
     use std::process::Command;
     use vlinder_core::domain::{
-        Agent, AgentName, BranchId, ContainerId, DagNodeId, DelegateDiagnostics, DelegateMessage,
-        DelegateReplyMessage, HarnessType, InMemoryRegistry, InMemorySecretStore, Nonce,
-        ObservableMessage, RuntimeDiagnostics, RuntimeInfo, RuntimeType, SecretStore, SessionId,
-        Snapshot, SubmissionId,
+        Agent, AgentName, BranchId, CompleteMessage, ContainerId, DagNodeId, DataMessageKind,
+        DataRoutingKey, HarnessType, InMemoryRegistry, InMemorySecretStore, InvokeDiagnostics,
+        InvokeMessage, MessageId, RuntimeDiagnostics, RuntimeInfo, RuntimeType, SecretStore,
+        SessionId, SubmissionId,
     };
 
     fn test_agent_id() -> AgentName {
         AgentName::new("support-agent")
     }
 
-    fn test_invoke(payload: &[u8], epoch_secs: i64) -> (ObservableMessage, DateTime<Utc>) {
-        let msg = DelegateReplyMessage::new(
-            BranchId::from(1),
-            SubmissionId::from("sub-1".to_string()),
-            SessionId::try_from(SESSION.to_string()).unwrap(),
-            test_agent_id(),
-            HarnessType::Cli,
-            payload.to_vec(),
-            None,
-            RuntimeDiagnostics::placeholder(0),
-        );
-        let created_at = DateTime::from_timestamp(epoch_secs, 0).unwrap();
-        (ObservableMessage::DelegateReply(msg), created_at)
-    }
-
-    fn test_complete(payload: &[u8], epoch_secs: i64) -> (ObservableMessage, DateTime<Utc>) {
-        let msg = DelegateReplyMessage::new(
-            BranchId::from(1),
-            SubmissionId::from("sub-1".to_string()),
-            SessionId::try_from(SESSION.to_string()).unwrap(),
-            test_agent_id(),
-            HarnessType::Cli,
-            payload.to_vec(),
-            None,
-            RuntimeDiagnostics::placeholder(100),
-        );
-        let created_at = DateTime::from_timestamp(epoch_secs, 0).unwrap();
-        (ObservableMessage::DelegateReply(msg), created_at)
-    }
-
-    fn test_delegate(payload: &[u8], epoch_secs: i64) -> (ObservableMessage, DateTime<Utc>) {
-        let msg = DelegateMessage::new(
-            BranchId::from(1),
-            SubmissionId::from("sub-1".to_string()),
-            SessionId::try_from(SESSION.to_string()).unwrap(),
-            AgentName::new("coordinator"),
-            AgentName::new("summarizer"),
-            payload.to_vec(),
-            Nonce::new("nonce-1"),
-            None,
-            DelegateDiagnostics {
-                runtime: RuntimeDiagnostics::placeholder(50),
+    fn test_complete_key(session: &str) -> DataRoutingKey {
+        DataRoutingKey {
+            session: SessionId::try_from(session.to_string()).unwrap(),
+            branch: BranchId::from(1),
+            submission: SubmissionId::from("sub-1".to_string()),
+            kind: DataMessageKind::Complete {
+                agent: test_agent_id(),
+                harness: HarnessType::Cli,
             },
-        );
-        let created_at = DateTime::from_timestamp(epoch_secs, 0).unwrap();
-        (ObservableMessage::Delegate(msg), created_at)
+        }
+    }
+
+    fn test_complete_msg(payload: &[u8]) -> CompleteMessage {
+        CompleteMessage {
+            id: MessageId::new(),
+            dag_id: DagNodeId::root(),
+            state: None,
+            diagnostics: RuntimeDiagnostics::placeholder(0),
+            payload: payload.to_vec(),
+        }
+    }
+
+    fn send_complete(worker: &mut GitDagWorker, payload: &[u8], epoch_secs: i64) {
+        let key = test_complete_key(SESSION);
+        let msg = test_complete_msg(payload);
+        let ts = DateTime::from_timestamp(epoch_secs, 0).unwrap();
+        worker.on_complete(&key, &msg, ts);
     }
 
     fn test_worker() -> (GitDagWorker, tempfile::TempDir) {
@@ -1444,11 +1386,9 @@ mod tests {
     #[test]
     fn commit_advances_main() {
         let (mut worker, tmp) = test_worker();
-        let (msg, ts) = test_invoke(b"hello", 1000);
+        send_complete(&mut worker, b"hello", 1000);
 
-        worker.on_observable_message(&msg, ts);
-
-        // main should have 2 commits: initial + invoke
+        // main should have 2 commits: initial + complete
         let count = git(tmp.path(), &["rev-list", "--count", "main"]).unwrap();
         assert_eq!(count, "2");
     }
@@ -1456,9 +1396,7 @@ mod tests {
     #[test]
     fn commit_message_first_line() {
         let (mut worker, tmp) = test_worker();
-        let (msg, ts) = test_invoke(b"payload", 1000);
-
-        worker.on_observable_message(&msg, ts);
+        send_complete(&mut worker, b"payload", 1000);
 
         let subject = git(tmp.path(), &["log", "-1", "--format=%s", "main"]).unwrap();
         assert_eq!(subject, "complete: support-agent \u{2192} cli");
@@ -1467,9 +1405,7 @@ mod tests {
     #[test]
     fn commit_message_trailers() {
         let (mut worker, tmp) = test_worker();
-        let (msg, ts) = test_invoke(b"payload", 1000);
-
-        worker.on_observable_message(&msg, ts);
+        send_complete(&mut worker, b"payload", 1000);
 
         let body = git(tmp.path(), &["log", "-1", "--format=%b", "main"]).unwrap();
         assert!(
@@ -1482,22 +1418,18 @@ mod tests {
     #[test]
     fn complete_trailers_readable_by_timeline() {
         let (mut worker, tmp) = test_worker();
+        send_complete(&mut worker, b"question", 1000);
 
-        let (invoke, ts1) = test_invoke(b"question", 1000);
-        worker.on_observable_message(&invoke, ts1);
-
-        let complete = DelegateReplyMessage::new(
-            BranchId::from(1),
-            SubmissionId::from("sub-1".to_string()),
-            SessionId::try_from(SESSION.to_string()).unwrap(),
-            test_agent_id(),
-            HarnessType::Cli,
-            b"answer".to_vec(),
-            Some("state-abc123".to_string()),
-            RuntimeDiagnostics::placeholder(100),
-        );
+        let key = test_complete_key(SESSION);
+        let complete = CompleteMessage {
+            id: MessageId::new(),
+            dag_id: DagNodeId::root(),
+            state: Some("state-abc123".to_string()),
+            diagnostics: RuntimeDiagnostics::placeholder(100),
+            payload: b"answer".to_vec(),
+        };
         let ts2 = DateTime::from_timestamp(1001, 0).unwrap();
-        worker.on_observable_message(&ObservableMessage::DelegateReply(complete), ts2);
+        worker.on_complete(&key, &complete, ts2);
 
         let session = git(
             tmp.path(),
@@ -1527,9 +1459,7 @@ mod tests {
     #[test]
     fn author_is_message_sender() {
         let (mut worker, tmp) = test_worker();
-        let (msg, ts) = test_invoke(b"data", 1000);
-
-        worker.on_observable_message(&msg, ts);
+        send_complete(&mut worker, b"data", 1000);
 
         let author = git(tmp.path(), &["log", "-1", "--format=%an <%ae>", "main"]).unwrap();
         assert_eq!(author, "support-agent <support-agent@registry.local:9000>");
@@ -1538,9 +1468,7 @@ mod tests {
     #[test]
     fn committer_is_platform() {
         let (mut worker, tmp) = test_worker();
-        let (msg, ts) = test_invoke(b"data", 1000);
-
-        worker.on_observable_message(&msg, ts);
+        send_complete(&mut worker, b"data", 1000);
 
         let committer = git(tmp.path(), &["log", "-1", "--format=%cn <%ce>", "main"]).unwrap();
         assert_eq!(committer, "vlinder <vlinder@localhost>");
@@ -1549,9 +1477,7 @@ mod tests {
     #[test]
     fn author_date_matches_node() {
         let (mut worker, tmp) = test_worker();
-        let (msg, ts) = test_invoke(b"data", 1_700_000_000);
-
-        worker.on_observable_message(&msg, ts);
+        send_complete(&mut worker, b"data", 1_700_000_000);
 
         let date = git(tmp.path(), &["log", "-1", "--format=%at", "main"]).unwrap();
         assert_eq!(date, "1700000000");
@@ -1562,9 +1488,7 @@ mod tests {
     #[test]
     fn invoke_directory_has_per_field_files() {
         let (mut worker, tmp) = test_worker();
-        let (msg, ts) = test_invoke(b"my-payload", 1000);
-
-        worker.on_observable_message(&msg, ts);
+        send_complete(&mut worker, b"my-payload", 1000);
 
         let dir = "001-support-agent-complete";
         let show = |field: &str| show_session_file(tmp.path(), dir, field);
@@ -1582,17 +1506,14 @@ mod tests {
     }
 
     #[test]
-    fn complete_directory_has_harness_and_stderr() {
+    fn complete_directory_has_harness_and_diagnostics() {
         let (mut worker, tmp) = test_worker();
-        let msg_inner = DelegateReplyMessage::new(
-            BranchId::from(1),
-            SubmissionId::from("sub-1".to_string()),
-            SessionId::try_from(SESSION.to_string()).unwrap(),
-            test_agent_id(),
-            HarnessType::Cli,
-            b"done".to_vec(),
-            None,
-            RuntimeDiagnostics {
+        let key = test_complete_key(SESSION);
+        let complete = CompleteMessage {
+            id: MessageId::new(),
+            dag_id: DagNodeId::root(),
+            state: None,
+            diagnostics: RuntimeDiagnostics {
                 stderr: b"WARN: something".to_vec(),
                 runtime: RuntimeInfo::Container {
                     engine_version: "5.3.1".to_string(),
@@ -1603,61 +1524,39 @@ mod tests {
                 duration_ms: 2300,
                 health: None,
             },
-        );
-        let msg = ObservableMessage::DelegateReply(msg_inner);
+            payload: b"done".to_vec(),
+        };
         let ts = DateTime::from_timestamp(1003, 0).unwrap();
-
-        worker.on_observable_message(&msg, ts);
+        worker.on_complete(&key, &complete, ts);
 
         let dir = "001-support-agent-complete";
         let show = |field: &str| show_session_file(tmp.path(), dir, field);
 
         assert_eq!(show("type").unwrap(), "complete");
         assert_eq!(show("harness").unwrap(), "cli");
-        assert_eq!(show("stderr").unwrap(), "WARN: something");
         let diag = show("diagnostics.toml").unwrap();
         assert!(diag.contains("duration_ms"), "diag: {diag}");
+        // stderr is #[serde(skip)] on RuntimeDiagnostics, so it never
+        // appears in the TOML serialization.
         assert!(
             !diag.contains("stderr"),
-            "stderr should be stripped from diagnostics: {diag}"
+            "stderr should not be in diagnostics TOML: {diag}"
         );
-    }
-
-    #[test]
-    fn delegate_directory_has_caller_target_reply() {
-        let (mut worker, tmp) = test_worker();
-        let (msg, ts) = test_delegate(b"delegate-payload", 1004);
-
-        worker.on_observable_message(&msg, ts);
-
-        // Delegate agent is "summarizer" (target), so folder is summarizer/<session>/
-        let dir = "001-coordinator-delegate";
-        let path = format!("main:summarizer/{SESSION}/{dir}");
-        let show = |field: &str| git(tmp.path(), &["show", &format!("{path}/{field}")]);
-
-        assert_eq!(show("type").unwrap(), "delegate");
-        assert_eq!(show("caller_agent").unwrap(), "coordinator");
-        assert_eq!(show("target_agent").unwrap(), "summarizer");
-        assert_eq!(show("nonce").unwrap(), "nonce-1");
     }
 
     #[test]
     fn state_file_present_when_state_set() {
         let (mut worker, tmp) = test_worker();
-        let complete = DelegateReplyMessage::new(
-            BranchId::from(1),
-            SubmissionId::from("sub-1".to_string()),
-            SessionId::try_from(SESSION.to_string()).unwrap(),
-            test_agent_id(),
-            HarnessType::Cli,
-            b"hello".to_vec(),
-            Some("abc123state".to_string()),
-            RuntimeDiagnostics::placeholder(0),
-        );
-        let msg = ObservableMessage::DelegateReply(complete);
+        let key = test_complete_key(SESSION);
+        let complete = CompleteMessage {
+            id: MessageId::new(),
+            dag_id: DagNodeId::root(),
+            state: Some("abc123state".to_string()),
+            diagnostics: RuntimeDiagnostics::placeholder(0),
+            payload: b"hello".to_vec(),
+        };
         let ts = DateTime::from_timestamp(1000, 0).unwrap();
-
-        worker.on_observable_message(&msg, ts);
+        worker.on_complete(&key, &complete, ts);
 
         let state = show_session_file(tmp.path(), "001-support-agent-complete", "state").unwrap();
         assert_eq!(state, "abc123state");
@@ -1666,9 +1565,7 @@ mod tests {
     #[test]
     fn state_file_absent_when_no_state() {
         let (mut worker, tmp) = test_worker();
-        let (msg, ts) = test_invoke(b"hello", 1000);
-
-        worker.on_observable_message(&msg, ts);
+        send_complete(&mut worker, b"hello", 1000);
 
         let result = show_session_file(tmp.path(), "001-support-agent-complete", "state");
         assert!(result.is_err(), "should not have state file when None");
@@ -1677,9 +1574,16 @@ mod tests {
     #[test]
     fn stderr_file_absent_when_empty() {
         let (mut worker, tmp) = test_worker();
-        let (msg, ts) = test_complete(b"done", 1000);
-
-        worker.on_observable_message(&msg, ts);
+        let key = test_complete_key(SESSION);
+        let msg = CompleteMessage {
+            id: MessageId::new(),
+            dag_id: DagNodeId::root(),
+            state: None,
+            diagnostics: RuntimeDiagnostics::placeholder(100),
+            payload: b"done".to_vec(),
+        };
+        let ts = DateTime::from_timestamp(1000, 0).unwrap();
+        worker.on_complete(&key, &msg, ts);
 
         let result = show_session_file(tmp.path(), "001-support-agent-complete", "stderr");
         assert!(result.is_err(), "should not have stderr when empty");
@@ -1692,8 +1596,7 @@ mod tests {
         let (mut worker, tmp) = test_worker();
         let initial = git(tmp.path(), &["rev-parse", "main"]).unwrap();
 
-        let (msg, ts) = test_invoke(b"first", 1000);
-        worker.on_observable_message(&msg, ts);
+        send_complete(&mut worker, b"first", 1000);
 
         let parent = git(tmp.path(), &["log", "-1", "--format=%P", "main"]).unwrap();
         assert_eq!(
@@ -1707,9 +1610,7 @@ mod tests {
     #[test]
     fn commit_tree_contains_agent_toml_when_registry_available() {
         let (mut worker, tmp, _registry) = test_worker_with_registry();
-        let (msg, ts) = test_invoke(b"hello", 1000);
-
-        worker.on_observable_message(&msg, ts);
+        send_complete(&mut worker, b"hello", 1000);
 
         let content = git(tmp.path(), &["show", "main:agent.toml"]).unwrap();
         assert!(content.contains("support-agent"), "agent.toml: {content}");
@@ -1718,9 +1619,7 @@ mod tests {
     #[test]
     fn commit_tree_contains_platform_toml() {
         let (mut worker, tmp, _registry) = test_worker_with_registry();
-        let (msg, ts) = test_invoke(b"hello", 1000);
-
-        worker.on_observable_message(&msg, ts);
+        send_complete(&mut worker, b"hello", 1000);
 
         let content = git(tmp.path(), &["show", "main:platform.toml"]).unwrap();
         assert!(content.contains("version"), "platform.toml: {content}");
@@ -1743,34 +1642,24 @@ mod tests {
 
     // --- Session folder isolation tests (ADR 114) ---
 
-    fn test_invoke_session(
+    fn send_complete_for_session(
+        worker: &mut GitDagWorker,
         payload: &[u8],
         epoch_secs: i64,
         session: &str,
-    ) -> (ObservableMessage, DateTime<Utc>) {
-        let msg = DelegateReplyMessage::new(
-            BranchId::from(1),
-            SubmissionId::from("sub-1".to_string()),
-            SessionId::try_from(session.to_string()).unwrap(),
-            test_agent_id(),
-            HarnessType::Cli,
-            payload.to_vec(),
-            None,
-            RuntimeDiagnostics::placeholder(0),
-        );
-        let created_at = DateTime::from_timestamp(epoch_secs, 0).unwrap();
-        (ObservableMessage::DelegateReply(msg), created_at)
+    ) {
+        let key = test_complete_key(session);
+        let msg = test_complete_msg(payload);
+        let ts = DateTime::from_timestamp(epoch_secs, 0).unwrap();
+        worker.on_complete(&key, &msg, ts);
     }
 
     #[test]
     fn sessions_share_main_branch() {
         let (mut worker, tmp) = test_worker();
 
-        let (m1, t1) = test_invoke_session(b"sess1", 1000, SESSION);
-        worker.on_observable_message(&m1, t1);
-
-        let (m2, t2) = test_invoke_session(b"sess2", 1001, SESSION2);
-        worker.on_observable_message(&m2, t2);
+        send_complete_for_session(&mut worker, b"sess1", 1000, SESSION);
+        send_complete_for_session(&mut worker, b"sess2", 1001, SESSION2);
 
         // Both commits on main, 3 total (initial + 2 messages)
         let count = git(tmp.path(), &["rev-list", "--count", "main"]).unwrap();
@@ -1788,11 +1677,8 @@ mod tests {
     fn sessions_isolated_by_folder() {
         let (mut worker, tmp) = test_worker();
 
-        let (m1, t1) = test_invoke_session(b"sess1-msg", 1000, SESSION);
-        worker.on_observable_message(&m1, t1);
-
-        let (m2, t2) = test_invoke_session(b"sess2-msg", 1001, SESSION2);
-        worker.on_observable_message(&m2, t2);
+        send_complete_for_session(&mut worker, b"sess1-msg", 1000, SESSION);
+        send_complete_for_session(&mut worker, b"sess2-msg", 1001, SESSION2);
 
         // Each session has its own folder under the agent
         let ls = git(
@@ -1828,9 +1714,7 @@ mod tests {
     #[test]
     fn active_file_points_to_main() {
         let (mut worker, tmp) = test_worker();
-
-        let (msg, ts) = test_invoke(b"q", 1000);
-        worker.on_observable_message(&msg, ts);
+        send_complete(&mut worker, b"q", 1000);
 
         let active = git(
             tmp.path(),
@@ -1843,9 +1727,7 @@ mod tests {
     #[test]
     fn working_tree_has_folder_structure() {
         let (mut worker, tmp) = test_worker();
-        let (msg, ts) = test_invoke(b"browsable", 1000);
-
-        worker.on_observable_message(&msg, ts);
+        send_complete(&mut worker, b"browsable", 1000);
 
         // Working tree should have the agent/session/message folder structure
         let msg_dir = tmp
@@ -1874,20 +1756,24 @@ mod tests {
     #[test]
     fn message_subtree_contains_canonical_hash() {
         let (mut worker, tmp) = test_worker();
-        let (msg, ts) = test_invoke(b"my-payload", 1000);
+        let key = test_complete_key(SESSION);
+        let msg = test_complete_msg(b"my-payload");
 
-        let expected_node = vlinder_core::domain::workers::dag::build_dag_node(
-            &msg,
+        let expected_hash = vlinder_core::domain::hash_dag_node(
+            &msg.payload,
             &DagNodeId::root(),
-            &Snapshot::empty(),
+            &vlinder_core::domain::MessageType::Complete,
+            &serde_json::to_vec(&msg.diagnostics).unwrap_or_default(),
+            &key.session,
         );
 
-        worker.on_observable_message(&msg, ts);
+        let ts = DateTime::from_timestamp(1000, 0).unwrap();
+        worker.on_complete(&key, &msg, ts);
 
         let hash = show_session_file(tmp.path(), "001-support-agent-complete", "hash").unwrap();
         assert_eq!(
             hash,
-            expected_node.id.to_string(),
+            expected_hash.to_string(),
             "hash file should contain canonical hash"
         );
     }
@@ -1921,9 +1807,8 @@ mod tests {
     fn fork_creates_git_branch() {
         let (mut worker, tmp) = test_worker();
 
-        // Send an invoke so there's a commit on main
-        let (m1, t1) = test_invoke(b"hello", 1000);
-        worker.on_observable_message(&m1, t1);
+        // Send a complete so there's a commit on main
+        send_complete(&mut worker, b"hello", 1000);
 
         // Send a fork message
         let (fork, ft) = test_fork("support-agent", "repair-branch", "fake-hash", 1001);
@@ -1941,8 +1826,7 @@ mod tests {
     fn fork_branch_points_to_fork_commit() {
         let (mut worker, tmp) = test_worker();
 
-        let (m1, t1) = test_invoke(b"hello", 1000);
-        worker.on_observable_message(&m1, t1);
+        send_complete(&mut worker, b"hello", 1000);
 
         let (fork, ft) = test_fork("support-agent", "my-fork", "fake-hash", 1001);
         worker.on_observable_message(&fork, ft);
@@ -1958,8 +1842,7 @@ mod tests {
     fn fork_creates_timeline_index_file() {
         let (mut worker, tmp) = test_worker();
 
-        let (m1, t1) = test_invoke(b"hello", 1000);
-        worker.on_observable_message(&m1, t1);
+        send_complete(&mut worker, b"hello", 1000);
 
         let (fork, ft) = test_fork("support-agent", "repair-branch", "fake-hash", 1001);
         worker.on_observable_message(&fork, ft);
@@ -1983,10 +1866,6 @@ mod tests {
     }
 
     // --- Invoke tests ---
-
-    use vlinder_core::domain::{
-        DataMessageKind, DataRoutingKey, InvokeDiagnostics, InvokeMessage, MessageId,
-    };
 
     fn test_data_invoke(
         payload: &[u8],
@@ -2077,8 +1956,10 @@ mod tests {
         worker.on_invoke(&key, &invoke, t1);
 
         // Complete
-        let (complete, t2) = test_complete(b"answer", 1001);
-        worker.on_observable_message(&complete, t2);
+        let complete_key = test_complete_key(SESSION);
+        let complete_msg = test_complete_msg(b"answer");
+        let t2 = DateTime::from_timestamp(1001, 0).unwrap();
+        worker.on_complete(&complete_key, &complete_msg, t2);
 
         let count = git(tmp.path(), &["rev-list", "--count", "main"]).unwrap();
         assert_eq!(count, "3"); // initial + invoke + complete

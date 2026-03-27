@@ -7,7 +7,7 @@
 use std::time::Duration;
 
 use vlinder_core::domain::{
-    AgentName, ContainerId, DataMessageKind, HarnessType, HealthWindow, ImageDigest, ImageRef,
+    AgentName, ContainerId, DataMessageKind, HealthWindow, ImageDigest, ImageRef,
 };
 
 use vlinder_provider_server::factory;
@@ -147,7 +147,6 @@ impl Sidecar {
                     *harness,
                     invoke.payload,
                     invoke.state,
-                    None,
                 ) {
                     Ok(InvokeOutcome::Done) => {}
                     Ok(InvokeOutcome::Pending(session)) => {
@@ -159,43 +158,6 @@ impl Sidecar {
                             error = %e,
                             agent = %self.agent_name,
                             "Dispatch failed"
-                        );
-                        break;
-                    }
-                }
-            } else if let Ok((delegate, ack)) = self.dispatch.queue.receive_delegate(&agent_id) {
-                let _ = ack();
-                tracing::info!(
-                    event = "delegation.received",
-                    sha = %delegate.submission,
-                    session = %delegate.session,
-                    agent = %self.agent_name,
-                    caller = %delegate.caller,
-                    "Dispatching delegated work"
-                );
-                let reply_key = Some(delegate.reply_routing_key());
-                match dispatch::handle_invoke(
-                    &self.dispatch,
-                    &mut self.health,
-                    delegate.branch,
-                    delegate.submission.clone(),
-                    delegate.session.clone(),
-                    AgentName::new(&self.agent_name),
-                    HarnessType::Cli,
-                    delegate.payload.clone(),
-                    None,
-                    reply_key.as_ref(),
-                ) {
-                    Ok(InvokeOutcome::Done) => {}
-                    Ok(InvokeOutcome::Pending(session)) => {
-                        durable_session = Some(*session);
-                    }
-                    Err(e) => {
-                        tracing::error!(
-                            event = "delegation.error",
-                            error = %e,
-                            agent = %self.agent_name,
-                            "Delegation dispatch failed"
                         );
                         break;
                     }

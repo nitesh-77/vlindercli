@@ -1,13 +1,13 @@
 //! In-memory queue implementation.
 
-use crate::domain::{
-    Acknowledgement, AgentName, CompleteMessage, DataMessageKind, DataRoutingKey, DelegateMessage,
-    DelegateReplyMessage, ForkMessage, HarnessType, InvokeMessage, MessageQueue, ObservableMessage,
-    ObservableMessageV2, Operation, QueueError, RepairMessage, RequestMessage, ResponseMessage,
-    RoutingKey, RoutingKind, Sequence, ServiceBackend, SubmissionId,
-};
 #[cfg(test)]
-use crate::domain::{DelegateDiagnostics, InvokeDiagnostics, RuntimeDiagnostics};
+use crate::domain::InvokeDiagnostics;
+use crate::domain::{
+    Acknowledgement, AgentName, CompleteMessage, DataMessageKind, DataRoutingKey, ForkMessage,
+    HarnessType, InvokeMessage, MessageQueue, ObservableMessage, ObservableMessageV2, Operation,
+    QueueError, RepairMessage, RequestMessage, ResponseMessage, RoutingKey, RoutingKind, Sequence,
+    ServiceBackend, SubmissionId,
+};
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
@@ -209,72 +209,6 @@ impl MessageQueue for InMemoryQueue {
         Err(QueueError::Timeout)
     }
 
-    fn send_delegate(&self, msg: DelegateMessage) -> Result<(), QueueError> {
-        let key = msg.routing_key();
-        let mut typed = self.typed_queues.lock().unwrap();
-        typed
-            .entry(key)
-            .or_default()
-            .push_back(ObservableMessage::Delegate(msg));
-        Ok(())
-    }
-
-    fn receive_delegate(
-        &self,
-        target: &AgentName,
-    ) -> Result<(DelegateMessage, Acknowledgement), QueueError> {
-        let mut typed = self.typed_queues.lock().unwrap();
-
-        for (key, queue) in typed.iter_mut() {
-            let matches = match key {
-                RoutingKey {
-                    kind: RoutingKind::Delegate { target: ref t, .. },
-                    ..
-                } => t == target,
-                _ => false,
-            };
-            if matches {
-                if let Some(ObservableMessage::Delegate(msg)) = queue.front() {
-                    let msg = msg.clone();
-                    queue.pop_front();
-                    return Ok((msg, Box::new(|| Ok(()))));
-                }
-            }
-        }
-
-        Err(QueueError::Timeout)
-    }
-
-    fn send_delegate_reply(
-        &self,
-        msg: DelegateReplyMessage,
-        reply_key: &RoutingKey,
-    ) -> Result<(), QueueError> {
-        let mut typed = self.typed_queues.lock().unwrap();
-        typed
-            .entry(reply_key.clone())
-            .or_default()
-            .push_back(ObservableMessage::DelegateReply(msg));
-        Ok(())
-    }
-
-    fn receive_delegate_reply(
-        &self,
-        reply_key: &RoutingKey,
-    ) -> Result<(DelegateReplyMessage, Acknowledgement), QueueError> {
-        let mut typed = self.typed_queues.lock().unwrap();
-
-        if let Some(queue) = typed.get_mut(reply_key) {
-            if let Some(ObservableMessage::DelegateReply(msg)) = queue.front() {
-                let msg = msg.clone();
-                queue.pop_front();
-                return Ok((msg, Box::new(|| Ok(()))));
-            }
-        }
-
-        Err(QueueError::Timeout)
-    }
-
     fn send_repair(&self, msg: RepairMessage) -> Result<(), QueueError> {
         let key = msg.routing_key();
         let mut typed = self.typed_queues.lock().unwrap();
@@ -340,8 +274,8 @@ impl MessageQueue for InMemoryQueue {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::RuntimeType;
     use crate::domain::{BranchId, DagNodeId, MessageId, SessionId, SubmissionId};
-    use crate::domain::{Nonce, RoutingKind, RuntimeType};
 
     fn test_agent_id() -> AgentName {
         AgentName::new("echo-agent")
@@ -438,145 +372,6 @@ mod tests {
             recv_key.kind,
             DataMessageKind::Invoke { ref agent, harness: HarnessType::Web, .. } if *agent == agent_id
         ));
-    }
-
-    // ========================================================================
-    // Delegation tests (ADR 056)
-    // ========================================================================
-
-    #[test]
-    fn receive_delegate_returns_typed_message() {
-        let queue = InMemoryQueue::new();
-        let nonce = Nonce::new("test-nonce");
-
-        let delegate = DelegateMessage::new(
-            BranchId::from(1),
-            test_submission(),
-            SessionId::new(),
-            AgentName::new("coordinator"),
-            AgentName::new("summarizer"),
-            b"payload".to_vec(),
-            nonce.clone(),
-            None,
-            DelegateDiagnostics {
-                runtime: RuntimeDiagnostics::placeholder(0),
-            },
-        );
-        let original_id = delegate.id.clone();
-
-        queue.send_delegate(delegate).unwrap();
-
-        let (received, ack) = queue
-            .receive_delegate(&AgentName::new("summarizer"))
-            .unwrap();
-
-        assert_eq!(received.id, original_id);
-        assert_eq!(received.caller, AgentName::new("coordinator"));
-        assert_eq!(received.target, AgentName::new("summarizer"));
-        assert_eq!(received.payload, b"payload");
-        assert_eq!(received.nonce, nonce);
-
-        ack().unwrap();
-    }
-
-    #[test]
-    fn receive_delegate_times_out_for_wrong_target() {
-        let queue = InMemoryQueue::new();
-
-        let delegate = DelegateMessage::new(
-            BranchId::from(1),
-            test_submission(),
-            SessionId::new(),
-            AgentName::new("coordinator"),
-            AgentName::new("summarizer"),
-            b"payload".to_vec(),
-            Nonce::generate(),
-            None,
-            DelegateDiagnostics {
-                runtime: RuntimeDiagnostics::placeholder(0),
-            },
-        );
-
-        queue.send_delegate(delegate).unwrap();
-
-        let result = queue.receive_delegate(&AgentName::new("fact-checker"));
-        assert!(matches!(result, Err(QueueError::Timeout)));
-    }
-
-    #[test]
-    fn send_and_receive_delegate_reply() {
-        let queue = InMemoryQueue::new();
-
-        // Build a reply routing key (as if from a DelegateMessage)
-        let reply_key = RoutingKey {
-            session: SessionId::new(),
-            branch: BranchId::from(1),
-            submission: test_submission(),
-            kind: RoutingKind::DelegateReply {
-                caller: AgentName::new("coordinator"),
-                target: AgentName::new("summarizer"),
-                nonce: Nonce::new("abc123"),
-            },
-        };
-
-        let complete = DelegateReplyMessage::new(
-            BranchId::from(1),
-            test_submission(),
-            SessionId::new(),
-            test_agent_id(),
-            HarnessType::Cli,
-            b"result".to_vec(),
-            None,
-            RuntimeDiagnostics::placeholder(0),
-        );
-
-        queue.send_delegate_reply(complete, &reply_key).unwrap();
-
-        let (received, ack) = queue.receive_delegate_reply(&reply_key).unwrap();
-        assert_eq!(received.payload, b"result");
-        ack().unwrap();
-    }
-
-    #[test]
-    fn receive_delegate_reply_times_out_for_wrong_nonce() {
-        let queue = InMemoryQueue::new();
-
-        let reply_key_a = RoutingKey {
-            session: SessionId::new(),
-            branch: BranchId::from(1),
-            submission: test_submission(),
-            kind: RoutingKind::DelegateReply {
-                caller: AgentName::new("coordinator"),
-                target: AgentName::new("summarizer"),
-                nonce: Nonce::new("nonce-a"),
-            },
-        };
-        let reply_key_b = RoutingKey {
-            session: SessionId::new(),
-            branch: BranchId::from(1),
-            submission: test_submission(),
-            kind: RoutingKind::DelegateReply {
-                caller: AgentName::new("coordinator"),
-                target: AgentName::new("summarizer"),
-                nonce: Nonce::new("nonce-b"),
-            },
-        };
-
-        let complete = DelegateReplyMessage::new(
-            BranchId::from(1),
-            test_submission(),
-            SessionId::new(),
-            test_agent_id(),
-            HarnessType::Cli,
-            b"result".to_vec(),
-            None,
-            RuntimeDiagnostics::placeholder(0),
-        );
-
-        queue.send_delegate_reply(complete, &reply_key_a).unwrap();
-
-        let result = queue.receive_delegate_reply(&reply_key_b);
-        assert!(matches!(result, Err(QueueError::Timeout)));
     }
 
     // ========================================================================

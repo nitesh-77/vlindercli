@@ -9,9 +9,9 @@ use std::process::Command;
 use chrono::{DateTime, Utc};
 
 use vlinder_core::domain::{
-    AgentName, BranchId, DagNodeId, DataMessageKind, DataRoutingKey, DelegateReplyMessage,
-    HarnessType, InvokeDiagnostics, InvokeMessage, MessageId, ObservableMessage,
-    RuntimeDiagnostics, RuntimeType, SessionId, SubmissionId,
+    AgentName, BranchId, CompleteMessage, DagNodeId, DataMessageKind, DataRoutingKey, HarnessType,
+    InvokeDiagnostics, InvokeMessage, MessageId, RuntimeDiagnostics, RuntimeType, SessionId,
+    SubmissionId,
 };
 use vlinder_git_dag::GitDagWorker;
 
@@ -120,24 +120,30 @@ pub fn make_invoke(
     (key, msg, created_at)
 }
 
-/// Create a complete message with the given payload and state.
+/// Create a complete message (data-plane) with the given payload and state.
 pub fn make_complete(
     session: &str,
     submission: &str,
     payload: &[u8],
     state: Option<String>,
     epoch_secs: i64,
-) -> (ObservableMessage, DateTime<Utc>) {
-    let msg = DelegateReplyMessage::new(
-        BranchId::from(1),
-        SubmissionId::from(submission.to_string()),
-        SessionId::try_from(session.to_string()).unwrap(),
-        test_agent_id(),
-        HarnessType::Cli,
-        payload.to_vec(),
+) -> (DataRoutingKey, CompleteMessage, DateTime<Utc>) {
+    let key = DataRoutingKey {
+        session: SessionId::try_from(session.to_string()).unwrap(),
+        branch: BranchId::from(1),
+        submission: SubmissionId::from(submission.to_string()),
+        kind: DataMessageKind::Complete {
+            agent: test_agent_id(),
+            harness: HarnessType::Cli,
+        },
+    };
+    let msg = CompleteMessage {
+        id: MessageId::new(),
+        dag_id: DagNodeId::root(),
         state,
-        RuntimeDiagnostics::placeholder(100),
-    );
+        diagnostics: RuntimeDiagnostics::placeholder(100),
+        payload: payload.to_vec(),
+    };
     let created_at = DateTime::from_timestamp(epoch_secs, 0).unwrap();
-    (ObservableMessage::DelegateReply(msg), created_at)
+    (key, msg, created_at)
 }

@@ -35,14 +35,14 @@ fn checkout_shows_trailers_and_state() {
     );
     worker.on_invoke(&key, &invoke, t1);
 
-    let (complete, t2) = make_complete(
+    let (ckey, complete, t2) = make_complete(
         "d4761d76-dee4-4ebf-9df4-43b52efa4f78",
         "sub-1",
         b"answer",
         Some("state-abc123".to_string()),
         1001,
     );
-    worker.on_observable_message(&complete, t2);
+    worker.on_complete(&ckey, &complete, t2);
 
     // HEAD is the complete commit — should have all three trailers
     let head = read_head_sha(&conv_dir).expect("HEAD should exist");
@@ -100,14 +100,14 @@ fn promote_moves_main_and_labels_old() {
         1000,
     );
     worker.on_invoke(&key, &invoke, t1);
-    let (complete, t2) = make_complete(
+    let (ckey, complete, t2) = make_complete(
         "d4761d76-dee4-4ebf-9df4-43b52efa4f78",
         "sub-1",
         b"a",
         Some("state-1".to_string()),
         1001,
     );
-    worker.on_observable_message(&complete, t2);
+    worker.on_complete(&ckey, &complete, t2);
 
     // Record original main SHA
     let original_main = git(&conv_dir, &["rev-parse", "main"]).expect("main should exist");
@@ -166,14 +166,14 @@ fn fork_creates_independent_branch() {
         1000,
     );
     worker.on_invoke(&key, &invoke, t1);
-    let (complete, t2) = make_complete(
+    let (ckey, complete, t2) = make_complete(
         "d4761d76-dee4-4ebf-9df4-43b52efa4f78",
         "sub-1",
         b"original-answer",
         Some("state-1".to_string()),
         1001,
     );
-    worker.on_observable_message(&complete, t2);
+    worker.on_complete(&ckey, &complete, t2);
 
     // Main should have 2 commits
     let main_count = git(&conv_dir, &["rev-list", "--count", "main"]).unwrap();
@@ -192,14 +192,14 @@ fn fork_creates_independent_branch() {
     // Write a new complete on the repair branch (different answer)
     // Re-open the worker on the repair branch
     let mut repair_worker = GitDagWorker::open(&conv_dir, "test.local:9000", None).unwrap();
-    let (alt_complete, t3) = make_complete(
+    let (alt_ckey, alt_complete, t3) = make_complete(
         "d4761d76-dee4-4ebf-9df4-43b52efa4f78",
         "sub-1",
         b"repaired-answer",
         Some("state-2".to_string()),
         1002,
     );
-    repair_worker.on_observable_message(&alt_complete, t3);
+    repair_worker.on_complete(&alt_ckey, &alt_complete, t3);
 
     // Verify: repair-test has 2 commits (invoke + alt_complete)
     let repair_count = git(&conv_dir, &["rev-list", "--count", "repair-test"]).unwrap();
@@ -245,14 +245,14 @@ fn checkout_then_promote_full_workflow() {
     );
     worker.on_invoke(&key1, &invoke1, t1);
 
-    let (complete1, t2) = make_complete(
+    let (ckey1, complete1, t2) = make_complete(
         "d4761d76-dee4-4ebf-9df4-43b52efa4f78",
         "sub-1",
         b"turn-1-answer",
         Some("state-after-turn-1".to_string()),
         1001,
     );
-    worker.on_observable_message(&complete1, t2);
+    worker.on_complete(&ckey1, &complete1, t2);
 
     let (key2, invoke2, t3) = make_invoke(
         "d4761d76-dee4-4ebf-9df4-43b52efa4f78",
@@ -263,14 +263,14 @@ fn checkout_then_promote_full_workflow() {
     );
     worker.on_invoke(&key2, &invoke2, t3);
 
-    let (complete2, t4) = make_complete(
+    let (ckey2, complete2, t4) = make_complete(
         "d4761d76-dee4-4ebf-9df4-43b52efa4f78",
         "sub-2",
         b"turn-2-answer",
         Some("state-after-turn-2".to_string()),
         1003,
     );
-    worker.on_observable_message(&complete2, t4);
+    worker.on_complete(&ckey2, &complete2, t4);
 
     // Verify: main has 4 commits
     let main_count = git(&conv_dir, &["rev-list", "--count", "main"]).unwrap();
@@ -299,14 +299,14 @@ fn checkout_then_promote_full_workflow() {
 
     // Write a new alternative complete (different answer for turn 1)
     let mut repair_worker = GitDagWorker::open(&conv_dir, "test.local:9000", None).unwrap();
-    let (alt_complete, t5) = make_complete(
+    let (alt_ckey, alt_complete, t5) = make_complete(
         "d4761d76-dee4-4ebf-9df4-43b52efa4f78",
         "sub-1",
         b"turn-1-repaired-answer",
         Some("state-repaired".to_string()),
         1004,
     );
-    repair_worker.on_observable_message(&alt_complete, t5);
+    repair_worker.on_complete(&alt_ckey, &alt_complete, t5);
 
     // Verify: repair-branch has 3 commits (invoke1 + complete1 + alt_complete)
     let repair_count = git(&conv_dir, &["rev-list", "--count", "repair-branch"]).unwrap();

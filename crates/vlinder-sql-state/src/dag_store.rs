@@ -301,22 +301,6 @@ fn insert_typed_node(conn: &Connection, node: &DagNode) -> Result<(), rusqlite::
     };
 
     match msg {
-        ObservableMessage::DelegateReply(m) => {
-            let diag = serde_json::to_vec(&m.diagnostics).unwrap_or_default();
-            conn.execute(
-                "INSERT OR IGNORE INTO complete_nodes (dag_hash, agent, harness, message_id, state, diagnostics, payload)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                rusqlite::params![hash, m.agent_id.as_str(), m.harness.as_str(), m.id.as_str(), m.state.as_deref(), diag, &m.payload],
-            )?;
-        }
-        ObservableMessage::Delegate(m) => {
-            let diag = serde_json::to_vec(&m.diagnostics).unwrap_or_default();
-            conn.execute(
-                "INSERT OR IGNORE INTO delegate_nodes (dag_hash, caller, target, nonce, message_id, state, diagnostics, payload)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                rusqlite::params![hash, m.caller.as_str(), m.target.as_str(), m.nonce.as_str(), m.id.as_str(), m.state.as_deref(), diag, &m.payload],
-            )?;
-        }
         ObservableMessage::Repair(m) => {
             conn.execute(
                 "INSERT OR IGNORE INTO repair_nodes (dag_hash, agent, harness, service, operation, sequence, message_id, dag_parent, checkpoint, state, payload)
@@ -1287,8 +1271,8 @@ mod tests {
     use super::*;
     use vlinder_core::domain::workers::dag::build_dag_node;
     use vlinder_core::domain::{
-        AgentName, BranchId, DelegateDiagnostics, DelegateMessage, DelegateReplyMessage,
-        HarnessType, Nonce, RuntimeDiagnostics, Snapshot, SubmissionId,
+        AgentName, BranchId, HarnessType, Operation, RepairMessage, Sequence, ServiceBackend,
+        Snapshot, SubmissionId,
     };
 
     fn test_store() -> SqliteDagStore {
@@ -1304,53 +1288,27 @@ mod tests {
         SubmissionId::from("sub-1".to_string())
     }
 
-    fn make_invoke(payload: &[u8], state: Option<String>) -> ObservableMessage {
-        DelegateReplyMessage::new(
+    /// Build a test `ObservableMessage` using `RepairMessage`.
+    fn make_repair(payload: &[u8], session: SessionId) -> ObservableMessage {
+        ObservableMessage::Repair(RepairMessage::new(
             BranchId::from(1),
             sub(),
-            sess(),
+            session,
             AgentName::new("agent-a"),
             HarnessType::Cli,
+            DagNodeId::root(),
+            "on_error".to_string(),
+            ServiceBackend::Kv(vlinder_core::domain::ObjectStorageType::Sqlite),
+            Operation::Get,
+            Sequence::first(),
             payload.to_vec(),
-            state,
-            RuntimeDiagnostics::placeholder(0),
-        )
-        .into()
-    }
-
-    fn make_complete(payload: &[u8], state: Option<String>) -> ObservableMessage {
-        DelegateReplyMessage::new(
-            BranchId::from(1),
-            sub(),
-            sess(),
-            AgentName::new("agent-a"),
-            HarnessType::Cli,
-            payload.to_vec(),
-            state,
-            RuntimeDiagnostics::placeholder(0),
-        )
-        .into()
-    }
-
-    fn make_delegate(payload: &[u8]) -> ObservableMessage {
-        DelegateMessage::new(
-            BranchId::from(1),
-            sub(),
-            sess(),
-            AgentName::new("coordinator"),
-            AgentName::new("summarizer"),
-            payload.to_vec(),
-            Nonce::new("nonce-1"),
             None,
-            DelegateDiagnostics {
-                runtime: RuntimeDiagnostics::placeholder(0),
-            },
-        )
-        .into()
+        ))
     }
 
+    /// Build a test `DagNode` with a valid message.
     fn test_node(payload: &[u8], parent: &DagNodeId) -> DagNode {
-        let msg = make_invoke(payload, None);
+        let msg = make_repair(payload, sess());
         build_dag_node(&msg, parent, &Snapshot::empty())
     }
 
@@ -1364,22 +1322,6 @@ mod tests {
 
         assert_eq!(retrieved.id, node.id);
         assert_eq!(retrieved.parent_id, node.parent_id);
-        assert_eq!(retrieved.message, node.message);
-    }
-
-    #[test]
-    fn round_trip_preserves_all_fields() {
-        let store = test_store();
-        let msg = make_delegate(b"delegate this");
-        let node = build_dag_node(&msg, &DagNodeId::root(), &Snapshot::empty());
-
-        store.insert_node(&node).unwrap();
-        let retrieved = store.get_node(&node.id).unwrap().unwrap();
-
-        assert_eq!(retrieved.message_type(), MessageType::Delegate);
-        let (from, to) = retrieved.message.as_ref().unwrap().sender_receiver();
-        assert_eq!(from, "coordinator");
-        assert_eq!(to, "summarizer");
     }
 
     #[test]
@@ -1411,11 +1353,8 @@ mod tests {
 
         let parent = test_node(b"parent", &DagNodeId::root());
 
-        let mut child = build_dag_node(
-            &make_complete(b"child", None),
-            &parent.id,
-            &Snapshot::empty(),
-        );
+        let child_msg = make_repair(b"child", sess());
+        let mut child = build_dag_node(&child_msg, &parent.id, &Snapshot::empty());
         child.created_at = chrono::TimeZone::with_ymd_and_hms(&Utc, 2025, 1, 1, 0, 1, 0).unwrap();
 
         store.insert_node(&parent).unwrap();
@@ -1440,30 +1379,10 @@ mod tests {
         let sess2 =
             SessionId::try_from("e2660cff-33d6-4428-acca-2d297dcc1cad".to_string()).unwrap();
 
-        let msg_a: ObservableMessage = DelegateReplyMessage::new(
-            BranchId::from(1),
-            sub(),
-            sess1.clone(),
-            AgentName::new("agent-a"),
-            HarnessType::Cli,
-            b"a".to_vec(),
-            None,
-            RuntimeDiagnostics::placeholder(0),
-        )
-        .into();
+        let msg_a = make_repair(b"a", sess1.clone());
         let node_a = build_dag_node(&msg_a, &DagNodeId::root(), &Snapshot::empty());
 
-        let msg_b: ObservableMessage = DelegateReplyMessage::new(
-            BranchId::from(1),
-            sub(),
-            sess2.clone(),
-            AgentName::new("agent-b"),
-            HarnessType::Cli,
-            b"b".to_vec(),
-            None,
-            RuntimeDiagnostics::placeholder(0),
-        )
-        .into();
+        let msg_b = make_repair(b"b", sess2.clone());
         let node_b = build_dag_node(&msg_b, &DagNodeId::root(), &Snapshot::empty());
 
         store.insert_node(&node_a).unwrap();
@@ -1544,15 +1463,14 @@ mod tests {
     fn latest_node_on_branch_returns_most_recent() {
         let store = test_store();
 
-        let invoke = make_invoke(b"first", None);
-        let node1 = build_dag_node(&invoke, &DagNodeId::root(), &Snapshot::empty());
+        let node1 = test_node(b"first", &DagNodeId::root());
         store.insert_node(&node1).unwrap();
 
-        let complete = make_complete(b"response", None);
-        let node2 = build_dag_node(&complete, &node1.id, &Snapshot::empty());
+        let msg2 = make_repair(b"response", sess());
+        let node2 = build_dag_node(&msg2, &node1.id, &Snapshot::empty());
         store.insert_node(&node2).unwrap();
 
-        // No filter — returns the most recent (complete)
+        // No filter — returns the most recent
         let latest = store
             .latest_node_on_branch(BranchId::from(1), None)
             .unwrap()

@@ -13,10 +13,10 @@ use std::time::Instant;
 
 use vlinder_core::domain::{
     AgentName, BranchId, CompleteMessage, ContainerId, DagNodeId, DataMessageKind, DataRoutingKey,
-    DelegateReplyMessage, HarnessType, HealthWindow, HttpMethod, ImageDigest, ImageRef, MessageId,
-    MessageQueue, Operation, ProviderHost, ProviderRoute, Registry, RepairMessage,
-    RequestDiagnostics, RequestMessage, ResponseMessage, RoutingKey, RuntimeDiagnostics, Sequence,
-    SequenceCounter, ServiceBackend, SessionId, SubmissionId,
+    HarnessType, HealthWindow, HttpMethod, ImageDigest, ImageRef, MessageId, MessageQueue,
+    Operation, ProviderHost, ProviderRoute, Registry, RepairMessage, RequestDiagnostics,
+    RequestMessage, ResponseMessage, RuntimeDiagnostics, Sequence, SequenceCounter, ServiceBackend,
+    SessionId, SubmissionId,
 };
 
 use vlinder_provider_server::handler::InvokeHandler;
@@ -44,7 +44,6 @@ pub struct DurableSession {
     pub session: SessionId,
     pub agent_id: AgentName,
     pub harness: HarnessType,
-    pub reply_key: Option<RoutingKey>,
     pub hosts: Vec<ProviderHost>,
     pub sequence: SequenceCounter,
     pub pending_service: ServiceBackend,
@@ -73,7 +72,6 @@ pub fn handle_invoke(
     harness: HarnessType,
     payload: Vec<u8>,
     initial_state: Option<String>,
-    reply_key: Option<&RoutingKey>,
 ) -> Result<InvokeOutcome, String> {
     let started_at = Instant::now();
     let mut trace = TraceLog::new();
@@ -94,7 +92,6 @@ pub fn handle_invoke(
     let state = std::sync::Arc::new(std::sync::RwLock::new(resolved_state));
     let handler = InvokeHandler::new(
         ctx.queue.clone(),
-        ctx.registry.clone(),
         branch,
         submission.clone(),
         session.clone(),
@@ -148,7 +145,6 @@ pub fn handle_invoke(
                     session,
                     agent_id,
                     harness,
-                    reply_key,
                     checkpoint_hosts,
                     sequence,
                     started_at,
@@ -167,7 +163,8 @@ pub fn handle_invoke(
                     ctx.image_digest.as_ref(),
                 );
                 trace.log("Sending complete");
-                let complete = DelegateReplyMessage::new(
+                send_complete(
+                    &ctx.queue,
                     branch,
                     submission,
                     session,
@@ -177,7 +174,6 @@ pub fn handle_invoke(
                     final_state,
                     diagnostics,
                 );
-                send_reply(&ctx.queue, complete, reply_key);
                 Ok(InvokeOutcome::Done)
             }
         }
@@ -192,7 +188,8 @@ pub fn handle_invoke(
                 reason = %err_body,
                 "Agent container returned an error"
             );
-            let complete = DelegateReplyMessage::new(
+            send_complete(
+                &ctx.queue,
                 branch,
                 submission,
                 session,
@@ -202,13 +199,13 @@ pub fn handle_invoke(
                 None,
                 RuntimeDiagnostics::placeholder(0),
             );
-            send_reply(&ctx.queue, complete, reply_key);
             Err(format!("Agent returned error: {err_body}"))
         }
         Err(e) => {
             let msg = format!("Request to agent failed: {e}");
             tracing::warn!(event = "container.unreachable", error = %msg);
-            let complete = DelegateReplyMessage::new(
+            send_complete(
+                &ctx.queue,
                 branch,
                 submission,
                 session,
@@ -218,7 +215,6 @@ pub fn handle_invoke(
                 None,
                 RuntimeDiagnostics::placeholder(0),
             );
-            send_reply(&ctx.queue, complete, reply_key);
             Err(msg)
         }
     }
@@ -289,7 +285,6 @@ pub fn handle_service_response(
                 session.session,
                 session.agent_id,
                 session.harness,
-                session.reply_key.as_ref(),
                 session.hosts,
                 session.sequence,
                 session.started_at,
@@ -298,7 +293,8 @@ pub fn handle_service_response(
         Err(e) => {
             let msg = format!("Callback to agent failed: {e}");
             trace.log(&msg);
-            let complete = DelegateReplyMessage::new(
+            send_complete(
+                &ctx.queue,
                 session.branch,
                 session.submission,
                 session.session,
@@ -308,7 +304,6 @@ pub fn handle_service_response(
                 None,
                 RuntimeDiagnostics::placeholder(0),
             );
-            send_reply(&ctx.queue, complete, session.reply_key.as_ref());
             Err(msg)
         }
     }
@@ -397,7 +392,6 @@ pub fn handle_repair(
         session: repair.session.clone(),
         agent_id: repair.agent_name.clone(),
         harness: repair.harness,
-        reply_key: None,
         hosts,
         sequence,
         pending_service: repair.service,
@@ -417,7 +411,6 @@ fn handle_action(
     session: SessionId,
     agent_id: AgentName,
     harness: HarnessType,
-    reply_key: Option<&RoutingKey>,
     hosts: Vec<ProviderHost>,
     sequence: SequenceCounter,
     started_at: Instant,
@@ -445,7 +438,8 @@ fn handle_action(
                 payload.len(),
                 started_at.elapsed().as_millis()
             ));
-            let complete = DelegateReplyMessage::new(
+            send_complete(
+                &ctx.queue,
                 branch,
                 submission,
                 session,
@@ -455,7 +449,6 @@ fn handle_action(
                 None,
                 RuntimeDiagnostics::placeholder(0),
             );
-            send_reply(&ctx.queue, complete, reply_key);
             Ok(InvokeOutcome::Done)
         }
         "call" => {
@@ -526,7 +519,6 @@ fn handle_action(
                 session,
                 agent_id,
                 harness,
-                reply_key: reply_key.cloned(),
                 hosts,
                 sequence,
                 pending_service: route_service,
@@ -539,37 +531,37 @@ fn handle_action(
     }
 }
 
-/// Route a `CompleteMessage` to the correct destination.
-fn send_reply(
+/// Send a `CompleteMessage` on the data plane.
+#[allow(clippy::too_many_arguments)]
+fn send_complete(
     queue: &Arc<dyn MessageQueue + Send + Sync>,
-    complete: DelegateReplyMessage,
-    reply_key: Option<&RoutingKey>,
+    branch: BranchId,
+    submission: SubmissionId,
+    session: SessionId,
+    agent_id: AgentName,
+    harness: HarnessType,
+    payload: Vec<u8>,
+    state: Option<String>,
+    diagnostics: RuntimeDiagnostics,
 ) {
-    let result = if let Some(key) = reply_key {
-        // Delegate reply — still v1 path
-        queue.send_delegate_reply(complete, key)
-    } else {
-        // Normal complete — data plane
-        let key = DataRoutingKey {
-            session: complete.session.clone(),
-            branch: complete.branch,
-            submission: complete.submission.clone(),
-            kind: DataMessageKind::Complete {
-                agent: complete.agent_id.clone(),
-                harness: complete.harness,
-            },
-        };
-        let msg = CompleteMessage {
-            id: complete.id,
-            dag_id: DagNodeId::root(),
-            state: complete.state,
-            diagnostics: complete.diagnostics,
-            payload: complete.payload,
-        };
-        queue.send_complete(key, msg)
+    let key = DataRoutingKey {
+        session,
+        branch,
+        submission,
+        kind: DataMessageKind::Complete {
+            agent: agent_id,
+            harness,
+        },
     };
-    if let Err(e) = result {
-        tracing::error!(error = %e, "Failed to send reply");
+    let msg = CompleteMessage {
+        id: MessageId::new(),
+        dag_id: DagNodeId::root(),
+        state,
+        diagnostics,
+        payload,
+    };
+    if let Err(e) = queue.send_complete(key, msg) {
+        tracing::error!(error = %e, "Failed to send complete");
     }
 }
 

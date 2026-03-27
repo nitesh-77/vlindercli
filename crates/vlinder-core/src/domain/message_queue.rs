@@ -10,10 +10,9 @@
 //! `AckFn` acknowledges successful processing.
 
 use super::{
-    AgentName, CompleteMessage, DataMessageKind, DataRoutingKey, DelegateMessage,
-    DelegateReplyMessage, ForkMessage, HarnessType, InvokeMessage, Operation, PromoteMessage,
-    RepairMessage, RequestMessage, ResourceId, ResponseMessage, RoutingKey, Sequence,
-    ServiceBackend, SubmissionId,
+    AgentName, CompleteMessage, DataMessageKind, DataRoutingKey, ForkMessage, HarnessType,
+    InvokeMessage, Operation, PromoteMessage, RepairMessage, RequestMessage, ResourceId,
+    ResponseMessage, Sequence, ServiceBackend, SubmissionId,
 };
 use std::fmt;
 
@@ -103,37 +102,6 @@ pub trait MessageQueue {
     ) -> Result<(DataRoutingKey, ResponseMessage, Acknowledgement), QueueError> {
         Err(QueueError::Timeout)
     }
-
-    // -------------------------------------------------------------------------
-    // Delegation methods (ADR 056, ADR 096 §7)
-    // -------------------------------------------------------------------------
-
-    /// Send a `DelegateMessage` (Agent → Agent via runtime).
-    fn send_delegate(&self, msg: DelegateMessage) -> Result<(), QueueError>;
-
-    /// Receive a `DelegateMessage` for a target agent.
-    fn receive_delegate(
-        &self,
-        target: &AgentName,
-    ) -> Result<(DelegateMessage, Acknowledgement), QueueError>;
-
-    /// Send a `CompleteMessage` as a delegation reply (ADR 096 §7).
-    ///
-    /// Routes via `RoutingKey::DelegateReply` — the nonce ensures uniqueness
-    /// when the same caller delegates to the same target multiple times.
-    fn send_delegate_reply(
-        &self,
-        msg: DelegateReplyMessage,
-        reply_key: &RoutingKey,
-    ) -> Result<(), QueueError>;
-
-    /// Receive a delegation reply (ADR 096 §7).
-    ///
-    /// Polls for a `CompleteMessage` at the given `DelegateReply` routing key.
-    fn receive_delegate_reply(
-        &self,
-        reply_key: &RoutingKey,
-    ) -> Result<(DelegateReplyMessage, Acknowledgement), QueueError>;
 
     // -------------------------------------------------------------------------
     // Repair methods (ADR 113)
