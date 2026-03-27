@@ -264,6 +264,7 @@ mod tests {
             Command::Fleet {
                 cmd: fleet::FleetCommand::Run {
                     name: "my-fleet".to_string(),
+                    prompt: None,
                 }
             }
         );

@@ -20,6 +20,9 @@ pub enum FleetCommand {
     Run {
         /// Fleet name
         name: String,
+        /// Single message to send (non-interactive, prints response and exits)
+        #[arg(short, long)]
+        prompt: Option<String>,
     },
     /// Create a new fleet from a template
     New {
@@ -31,7 +34,7 @@ pub enum FleetCommand {
 pub fn execute(cmd: FleetCommand) {
     match cmd {
         FleetCommand::Deploy { path } => deploy(path),
-        FleetCommand::Run { name } => run(&name),
+        FleetCommand::Run { name, prompt } => run(&name, prompt.as_deref()),
         FleetCommand::New { name } => scaffold(&name),
     }
 }
@@ -169,7 +172,7 @@ fn deploy_fleet_models(fleet_dir: &Path, registry: &dyn Registry) -> Vec<String>
     deployed
 }
 
-pub fn run(name: &str) {
+pub fn run(name: &str, prompt: Option<&str>) {
     let config = CliConfig::load();
     let registry = connect_registry(&config);
 
@@ -197,8 +200,7 @@ pub fn run(name: &str) {
         fleet.name, entry_agent_name
     );
 
-    // Run REPL with synchronous run_agent (ADR 092)
-    repl::run(|input| {
+    let invoke = |input: &str| -> String {
         let enriched_input = format!("{fleet_context}\n\n{input}");
         match harness.run_agent(
             &entry_agent_id,
@@ -212,7 +214,13 @@ pub fn run(name: &str) {
             Ok(result) => result,
             Err(e) => format!("[error] {e}"),
         }
-    });
+    };
+
+    if let Some(message) = prompt {
+        println!("{}", invoke(message));
+    } else {
+        repl::run(invoke);
+    }
 }
 
 /// Build a fleet context string from registered agents.
