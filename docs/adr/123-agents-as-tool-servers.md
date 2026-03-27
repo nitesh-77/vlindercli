@@ -4,14 +4,14 @@
 
 ## Context
 
-The current agent contract is a black box: the harness sends a payload to `/invoke`, the agent does whatever it wants internally, and returns a response. The harness has no visibility into what the agent *can* do, only what it *did* (via the DAG).
+The current agent contract is a black box: the harness sends a payload to `/invoke`, the agent does whatever it wants internally, and returns a response. This is the most natural programming paradigm — any web app (Django, Express, FastAPI) runs as an agent with zero modification. The platform swaps infrastructure (MySQL → Dolt, direct API → *.vlinder.local) and records everything in the DAG. Full observability.
 
-This limits:
+The tradeoff is time travel granularity. Fork/replay works at invoke/complete boundaries — you can't fork mid-execution to see what would have happened if a service call returned differently. For many agents this is fine. For agents that need finer control:
 
-- **Time travel granularity** — fork/replay only works at invoke/complete boundaries. You can't fork mid-execution to see what would have happened if a service call returned differently.
-- **Fleet composition** — delegation is a special mechanism, not a natural composition of capabilities.
-- **Human-in-the-loop** — requires custom implementation per agent, not a platform feature.
-- **Discoverability** — no way to know what an agent can do without reading its code.
+- **Time travel granularity** — fork/replay at every tool call, not just invoke/complete
+- **Fleet composition** — delegation as natural composition of capabilities, not a special mechanism
+- **Human-in-the-loop** — a platform feature, not a per-agent implementation
+- **Discoverability** — tool catalogs expose what an agent can do
 
 ### Observation: tool calls are the universal primitive
 
@@ -57,7 +57,8 @@ This means:
 - Fork from any step, at any depth of delegation
 - Replay with substitution — swap any tool call's response
 - Deterministic replay — re-drive execution from the DAG alone
-- Full observability — every decision, every side effect, structured
+
+Note: observability is the same in both paradigms — every message hits the DAG regardless. What changes is the granularity of time travel: where you can fork and replay.
 
 ### 4. Human-in-the-loop is a tool call
 
@@ -110,16 +111,24 @@ This means:
 - One routing mechanism (not data-plane + service-plane)
 - One recording format in the DAG
 
-### 9. One message pair: call / result
+### 9. Two paradigms, one platform
 
-If every interaction is a tool call, the fundamental message pair is:
+The natural paradigm (typed messages) and the step-based paradigm (call/result) co-exist. The choice is the agent author's.
+
+**Natural paradigm:** Invoke/Complete/Request/Response. Drop a web app in a container. Time travel at invoke/complete boundaries. Most ergonomic — no vlinder-specific code.
+
+**Step-based paradigm:** The agent yields after each tool call. The harness drives execution. Time travel at every step. Less ergonomic, finer-grained control.
+
+Both are equally observable. The difference is where you can fork and replay.
+
+The step-based paradigm uses one message pair:
 
 - **Call**: "I want to invoke this tool with these args"
 - **Result**: "Here's what came back"
 
-The current six message types collapse:
+The existing typed messages map naturally:
 
-| Current | In the tool model |
+| Typed message | Step-based equivalent |
 |---|---|
 | Invoke (harness → agent) | Call (harness → agent's root tool) |
 | Complete (agent → harness) | Result (agent → harness) |
@@ -129,7 +138,7 @@ The current six message types collapse:
 | DelegateReply (agent → agent) | Result (agent → agent) |
 | HITL (agent → human) | Call (agent → human approval tool) |
 
-The `DataMessageKind` becomes `Call { caller, target, tool, sequence }` and `Result { caller, target, tool, sequence }`. The target type (agent, service, human) is just metadata on the tool definition, not a routing distinction.
+The delegation mechanism (Delegate/DelegateReply) is the foundation — it already implements the call/result pattern with nonce-based correlation. The step-based paradigm generalises this to all interactions.
 
 ## Open Questions
 
@@ -147,10 +156,11 @@ Is the LLM the caller (selecting tools) or a tool (the agent calls it)? Both pat
 
 ## Consequences
 
-- Any stateless HTTP app with an OpenAPI spec gets time travel for free
-- Developers write normal web apps — no vlinder-specific SDK required
+- The natural paradigm stays — any web app gets time travel at invoke/complete granularity with zero code changes
+- The step-based paradigm adds finer-grained time travel for agents that opt in
+- Both paradigms share the same DAG, same observability, same platform infrastructure
 - MCP compatibility attracts the AI developer ecosystem
 - Fleet composition is tool composition — no special delegation mechanism
 - HITL is a platform feature, not a per-agent implementation
 - External integrations follow the same pattern as built-in services
-- The DAG becomes a typed sequence of tool calls, not opaque message blobs
+- Delegation (Delegate/DelegateReply) is the primitive that the step-based paradigm builds on
