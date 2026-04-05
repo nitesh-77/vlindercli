@@ -105,6 +105,28 @@ pub fn execute(cmd: AgentCommand) {
     }
 }
 
+/// Resolve the manifest file path from the user-provided path.
+/// If the path points to a .toml file, use it directly.
+/// If it's a directory, append `agent.toml`.
+fn resolve_manifest_path(path: &Path) -> PathBuf {
+    if path.extension().is_some_and(|ext| ext == "toml") {
+        path.to_path_buf()
+    } else {
+        path.join("agent.toml")
+    }
+}
+
+/// Resolve the agent directory for model discovery.
+/// If the path is a file, use its parent directory.
+/// If it's a directory, use it directly.
+fn resolve_agent_dir(path: &Path) -> PathBuf {
+    if path.is_file() {
+        path.parent().expect("file has no parent").to_path_buf()
+    } else {
+        path.to_path_buf()
+    }
+}
+
 fn deploy(path: Option<PathBuf>) {
     let config = CliConfig::load();
     let agent_path =
@@ -120,7 +142,7 @@ fn deploy(path: Option<PathBuf>) {
         std::process::exit(1);
     });
 
-    let manifest_path = absolute_path.join("agent.toml");
+    let manifest_path = resolve_manifest_path(&absolute_path);
     let manifest = AgentManifest::load(&manifest_path).unwrap_or_else(|e| {
         eprintln!("Failed to load agent manifest: {e:?}");
         std::process::exit(1);
@@ -129,7 +151,8 @@ fn deploy(path: Option<PathBuf>) {
     let agent_name = manifest.name.clone();
 
     // Auto-deploy models (still synchronous via Registry trait)
-    match auto_deploy_models(&absolute_path, &manifest, &client) {
+    let agent_dir = resolve_agent_dir(&absolute_path);
+    match auto_deploy_models(&agent_dir, &manifest, &client) {
         Ok(deployed) => {
             for name in &deployed {
                 println!("  Model: {name} (auto-deployed)");
@@ -829,5 +852,37 @@ mod tests {
         let result = auto_deploy_models(dir.path(), &manifest, &*registry);
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn resolve_manifest_path_with_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = super::resolve_manifest_path(dir.path());
+        assert_eq!(result, dir.path().join("agent.toml"));
+    }
+
+    #[test]
+    fn resolve_manifest_path_with_toml_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("agent.lambda.toml");
+        std::fs::write(&file, "").unwrap();
+        let result = super::resolve_manifest_path(&file);
+        assert_eq!(result, file);
+    }
+
+    #[test]
+    fn resolve_agent_dir_from_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = super::resolve_agent_dir(dir.path());
+        assert_eq!(result, dir.path());
+    }
+
+    #[test]
+    fn resolve_agent_dir_from_toml_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("agent.podman.toml");
+        std::fs::write(&file, "").unwrap();
+        let result = super::resolve_agent_dir(&file);
+        assert_eq!(result, dir.path());
     }
 }
