@@ -372,8 +372,27 @@ fn run_agent_container_worker(config: &Config, shutdown: &AtomicBool) {
         secret_addr: config.distributed.secret_addr.clone(),
     };
 
-    let mut runtime = ContainerRuntime::new(&podman_config, registry, repo)
-        .expect("Failed to create container runtime");
+    let podman: Box<dyn vlinder_podman_runtime::PodmanClient> = if let Some(path) =
+        vlinder_podman_runtime::resolve_socket(&config.runtime.podman_socket)
+    {
+        tracing::info!(event = "podman.socket", path = %path.display(), "Using Podman socket API");
+        Box::new(vlinder_podman_runtime::PodmanApiClient::new(&path))
+    } else {
+        tracing::info!(event = "podman.cli", "Using Podman CLI");
+        Box::new(vlinder_podman_runtime::PodmanCliClient)
+    };
+
+    let engine_version = podman.engine_version();
+    if let Some(ref v) = engine_version {
+        tracing::info!(event = "podman.detected", version = %v, "Podman engine detected");
+    } else {
+        tracing::warn!(
+            event = "podman.not_found",
+            "Podman not detected — container runtime degraded"
+        );
+    }
+
+    let mut runtime = ContainerRuntime::new(&podman_config, registry, repo, podman);
 
     tracing::info!("Container agent worker ready");
 

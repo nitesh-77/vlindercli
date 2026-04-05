@@ -17,11 +17,7 @@ use vlinder_core::domain::{
 };
 
 use crate::config::PodmanRuntimeConfig;
-use crate::podman_api::PodmanApiClient;
-use crate::podman_cli::PodmanCliClient;
-use crate::podman_client::{
-    remove_s3_credentials, resolve_socket, write_s3_credentials, PodmanClient, RunTarget,
-};
+use crate::podman_client::{remove_s3_credentials, write_s3_credentials, PodmanClient, RunTarget};
 
 /// Image resolution policy for container agents (ADR 073).
 ///
@@ -66,44 +62,21 @@ pub struct ContainerRuntime {
 }
 
 impl ContainerRuntime {
-    /// Create a new runtime, connecting to the registry and detecting Podman.
-    ///
-    /// Selects socket API or CLI based on the `podman_socket` config value (ADR 077).
-    /// The registry is passed in — the caller is responsible for creating it.
     pub fn new(
         config: &PodmanRuntimeConfig,
         registry: Arc<dyn Registry>,
         repo: Arc<dyn RegistryRepository>,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
+        podman: Box<dyn PodmanClient>,
+    ) -> Self {
         let registry_id = ResourceId::new(&config.registry_addr);
         let id = ResourceId::new(format!(
             "{}/runtimes/{}",
             registry_id.as_str(),
             RuntimeType::Container.as_str()
         ));
-
         let image_policy = ImagePolicy::from_config(&config.image_policy);
-        let podman: Box<dyn PodmanClient> = if let Some(path) =
-            resolve_socket(&config.podman_socket)
-        {
-            tracing::info!(event = "podman.socket", path = %path.display(), "Using Podman socket API");
-            Box::new(PodmanApiClient::new(&path))
-        } else {
-            tracing::info!(event = "podman.cli", "Using Podman CLI");
-            Box::new(PodmanCliClient)
-        };
-
-        let engine_version = podman.engine_version();
-        if let Some(ref v) = engine_version {
-            tracing::info!(event = "podman.detected", version = %v, "Podman engine detected");
-        } else {
-            tracing::warn!(
-                event = "podman.not_found",
-                "Podman not detected — container runtime degraded"
-            );
-        }
         tracing::info!(event = "runtime.image_policy", policy = ?image_policy, "Container image policy");
-        Ok(Self {
+        Self {
             id,
             registry,
             repo,
@@ -111,7 +84,7 @@ impl ContainerRuntime {
             config: config.clone(),
             image_policy,
             podman,
-        })
+        }
     }
 
     /// Access the registry (test-only, for integration test setup).
@@ -470,35 +443,33 @@ impl ContainerRuntime {
 
             match status {
                 // Deploying: start pod, transition to Live or Failed
-                Some(AgentStatus::Deploying) if !self.pods.contains_key(&agent.name) => {
-                    match self.start(&agent.name, agent) {
-                        Ok(()) => {
-                            let live = AgentState::registered(AgentName::new(&agent.name))
-                                .transition(AgentStatus::Live, None);
-                            if let Err(e) = self.repo.append_agent_state(&live) {
-                                tracing::warn!(error = %e, "Failed to set Live state");
-                            }
-                            tracing::info!(
-                                event = "pod.deployed",
-                                agent = %agent.name,
-                                "Agent provisioned: Live"
-                            );
+                Some(AgentStatus::Deploying) => match self.start(&agent.name, agent) {
+                    Ok(()) => {
+                        let live = AgentState::registered(AgentName::new(&agent.name))
+                            .transition(AgentStatus::Live, None);
+                        if let Err(e) = self.repo.append_agent_state(&live) {
+                            tracing::warn!(error = %e, "Failed to set Live state");
                         }
-                        Err(e) => {
-                            let failed = AgentState::registered(AgentName::new(&agent.name))
-                                .transition(AgentStatus::Failed, Some(e.clone()));
-                            if let Err(e2) = self.repo.append_agent_state(&failed) {
-                                tracing::warn!(error = %e2, "Failed to set Failed state");
-                            }
-                            tracing::error!(
-                                event = "pod.start_failed",
-                                agent = %agent.name,
-                                error = %e,
-                                "Failed to start pod"
-                            );
-                        }
+                        tracing::info!(
+                            event = "pod.deployed",
+                            agent = %agent.name,
+                            "Agent provisioned: Live"
+                        );
                     }
-                }
+                    Err(e) => {
+                        let failed = AgentState::registered(AgentName::new(&agent.name))
+                            .transition(AgentStatus::Failed, Some(e.clone()));
+                        if let Err(e2) = self.repo.append_agent_state(&failed) {
+                            tracing::warn!(error = %e2, "Failed to set Failed state");
+                        }
+                        tracing::error!(
+                            event = "pod.start_failed",
+                            agent = %agent.name,
+                            error = %e,
+                            "Failed to start pod"
+                        );
+                    }
+                },
 
                 // Deleting: tear down pod, delete from registry, transition to Deleted
                 Some(AgentStatus::Deleting) => {
@@ -593,6 +564,49 @@ mod tests {
         Arc::new(vlinder_core::domain::InMemoryDagStore::new())
     }
 
+    use crate::podman_client::{PodmanError, RunTarget};
+    use vlinder_core::domain::{ContainerId, ImageDigest};
+
+    struct MockPodmanClient;
+
+    impl PodmanClient for MockPodmanClient {
+        fn engine_version(&self) -> Option<semver::Version> {
+            Some(semver::Version::new(5, 0, 0))
+        }
+        fn image_digest(&self, _: &ImageRef) -> Option<ImageDigest> {
+            None
+        }
+        fn pod_create(&self, _: &str, _: &[String]) -> Result<PodId, PodmanError> {
+            Ok(PodId::new("mock-pod"))
+        }
+        fn container_in_pod(
+            &self,
+            _: RunTarget<'_>,
+            _: &PodId,
+            _: &[(&str, &str)],
+            _: &[(&str, &str)],
+        ) -> Result<ContainerId, PodmanError> {
+            Ok(ContainerId::new("mock-container"))
+        }
+        fn volume_create(&self, _: &str, _: &str, _: &[(&str, &str)]) -> Result<(), PodmanError> {
+            Ok(())
+        }
+        fn volume_rm(&self, _: &str) {}
+        fn pod_start(&self, _: &PodId) -> Result<(), PodmanError> {
+            Ok(())
+        }
+        fn pod_stop_and_remove(&self, _: &PodId, _: u32) {}
+    }
+
+    fn test_runtime() -> ContainerRuntime {
+        ContainerRuntime::new(
+            &test_config(),
+            test_registry(),
+            test_repo(),
+            Box::new(MockPodmanClient),
+        )
+    }
+
     #[test]
     fn image_policy_from_config_pinned() {
         assert_eq!(ImagePolicy::from_config("pinned"), ImagePolicy::Pinned);
@@ -636,9 +650,7 @@ mod tests {
 
     #[test]
     fn runtime_id_format() {
-        let config = test_config();
-        let registry = test_registry();
-        let runtime = ContainerRuntime::new(&config, registry, test_repo()).unwrap();
+        let runtime = test_runtime();
 
         assert_eq!(
             runtime.id().as_str(),
@@ -649,9 +661,7 @@ mod tests {
 
     #[test]
     fn tick_returns_false_when_no_agents() {
-        let config = test_config();
-        let registry = test_registry();
-        let mut runtime = ContainerRuntime::new(&config, registry, test_repo()).unwrap();
+        let mut runtime = test_runtime();
 
         assert!(!runtime.tick());
     }
@@ -678,5 +688,51 @@ mod tests {
     fn mount_volume_name_format() {
         let name = format!("vlinder-mount-{}-{}", "support", "knowledge");
         assert_eq!(name, "vlinder-mount-support-knowledge");
+    }
+
+    #[test]
+    fn redeploy_transitions_existing_agent_to_live() {
+        use vlinder_core::domain::{
+            AgentManifest, AgentName, AgentState, AgentStatus, RequirementsConfig,
+        };
+
+        let mut runtime = test_runtime();
+
+        let manifest = AgentManifest {
+            name: "my-agent".to_string(),
+            description: "test agent".to_string(),
+            source: None,
+            runtime: "container".to_string(),
+            executable: "localhost/my-image:latest".to_string(),
+            requirements: RequirementsConfig {
+                models: HashMap::new(),
+                services: HashMap::new(),
+                mounts: HashMap::new(),
+            },
+            prompts: None,
+            object_storage: None,
+            vector_storage: None,
+        };
+        runtime.registry().register_runtime(RuntimeType::Container);
+        runtime.registry().register_manifest(manifest).unwrap();
+
+        // First deploy: tick should start the pod and transition to Live
+        let name = AgentName::new("my-agent");
+        let deploying =
+            AgentState::registered(name.clone()).transition(AgentStatus::Deploying, None);
+        runtime.repo.append_agent_state(&deploying).unwrap();
+
+        runtime.tick();
+        let state = runtime.repo.get_agent_state("my-agent").unwrap().unwrap();
+        assert_eq!(state.status, AgentStatus::Live);
+
+        // Re-deploy: set back to Deploying
+        let redeploying = AgentState::registered(name).transition(AgentStatus::Deploying, None);
+        runtime.repo.append_agent_state(&redeploying).unwrap();
+
+        // Second tick should transition back to Live (not get stuck)
+        runtime.tick();
+        let state = runtime.repo.get_agent_state("my-agent").unwrap().unwrap();
+        assert_eq!(state.status, AgentStatus::Live);
     }
 }

@@ -19,12 +19,12 @@ const API_BASE: &str = "http://localhost/v5.0.0/libpod";
 ///
 /// Talks to the libpod REST API over a Unix socket. The socket path is
 /// resolved by `resolve_socket()` in `podman.rs` (ADR 077).
-pub(crate) struct PodmanApiClient {
+pub struct PodmanApiClient {
     agent: ureq::Agent,
 }
 
 impl PodmanApiClient {
-    pub(crate) fn new(socket_path: &Path) -> Self {
+    pub fn new(socket_path: &Path) -> Self {
         Self {
             agent: unix_agent(socket_path),
         }

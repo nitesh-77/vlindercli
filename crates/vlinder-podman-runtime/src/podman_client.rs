@@ -13,7 +13,7 @@ use vlinder_core::domain::{ContainerId, ImageDigest, ImageRef, PodId};
 
 /// Podman operation failure.
 #[derive(Debug)]
-pub(crate) enum PodmanError {
+pub enum PodmanError {
     /// Container or pod create/start failed.
     Run(String),
 }
@@ -32,7 +32,7 @@ impl fmt::Display for PodmanError {
 ///
 /// Mutable policy uses the image ref (tag-based, picks up rebuilds).
 /// Pinned policy uses the content-addressed digest (deterministic bytes).
-pub(crate) enum RunTarget<'a> {
+pub enum RunTarget<'a> {
     /// Tag-based image reference (e.g., `localhost/echo:latest`).
     Ref(&'a ImageRef),
     /// Content-addressed digest (e.g., `sha256:abc123...`).
@@ -55,7 +55,7 @@ impl RunTarget<'_> {
 ///
 /// Pod-oriented: create pods, add containers to them, start/stop pods.
 /// The trait is object-safe so `ContainerRuntime` can hold a `Box<dyn PodmanClient>`.
-pub(crate) trait PodmanClient: Send {
+pub trait PodmanClient: Send {
     /// Engine version (e.g. 4.9.3).  None if Podman is unavailable.
     fn engine_version(&self) -> Option<semver::Version>;
 
@@ -191,7 +191,7 @@ pub(crate) fn remove_s3_credentials(name: &str) {
 /// - `"disabled"` → None (force CLI mode)
 /// - `"auto"` → probe standard paths in order, return first that exists
 /// - anything else → treat as explicit path
-pub(crate) fn resolve_socket(configured: &str) -> Option<std::path::PathBuf> {
+pub fn resolve_socket(configured: &str) -> Option<std::path::PathBuf> {
     match configured {
         "disabled" => None,
         "auto" => probe_socket_paths(),

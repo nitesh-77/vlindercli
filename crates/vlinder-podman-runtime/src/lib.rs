@@ -11,4 +11,7 @@ mod pool;
 mod unix_transport;
 
 pub use config::PodmanRuntimeConfig;
+pub use podman_api::PodmanApiClient;
+pub use podman_cli::PodmanCliClient;
+pub use podman_client::{resolve_socket, PodmanClient};
 pub use pool::ContainerRuntime;

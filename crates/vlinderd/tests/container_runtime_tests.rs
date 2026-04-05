@@ -30,7 +30,15 @@ fn container_runtime_executes_echo_agent() {
         state_addr: config.distributed.state_addr.clone(),
         secret_addr: config.distributed.secret_addr.clone(),
     };
-    let mut runtime = ContainerRuntime::new(&podman_config, registry.clone()).unwrap();
+    let podman: Box<dyn vlinder_podman_runtime::PodmanClient> =
+        if let Some(path) = vlinder_podman_runtime::resolve_socket(&config.runtime.podman_socket) {
+            Box::new(vlinder_podman_runtime::PodmanApiClient::new(&path))
+        } else {
+            Box::new(vlinder_podman_runtime::PodmanCliClient)
+        };
+    let repo: std::sync::Arc<dyn vlinder_core::domain::RegistryRepository> =
+        std::sync::Arc::new(vlinder_core::domain::InMemoryDagStore::new());
+    let mut runtime = ContainerRuntime::new(&podman_config, registry.clone(), repo, podman);
 
     // Use the injected registry and a queue from config for test setup.
     // The sidecar creates its own queue — requires shared infra (NATS) to work.
