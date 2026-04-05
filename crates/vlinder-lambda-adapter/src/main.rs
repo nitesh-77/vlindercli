@@ -18,19 +18,17 @@
 
 mod adapter;
 mod config;
+mod lambda_runtime_queue;
 
-use std::io::Read;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use vlinder_core::domain::{MessageQueue, Registry};
+use vlinder_core::domain::{MessageQueue, QueueError};
 
+use vlinder_provider_server::dispatch as shared;
 use vlinder_provider_server::factory;
-use vlinder_provider_server::handler::InvokeHandler;
-use vlinder_provider_server::hosts::build_hosts;
-use vlinder_provider_server::provider_server::ProviderServer;
 
-use adapter::{build_error_body, build_lambda_diagnostics, deserialize_invoke};
+use adapter::build_lambda_diagnostics;
 use config::AdapterConfig;
 
 fn main() {
@@ -57,9 +55,6 @@ fn main() {
         "Lambda adapter configuration loaded"
     );
 
-    // Register as a Lambda extension immediately — must happen before
-    // Lambda's init phase timeout (10s). The registration thread blocks
-    // on event/next forever, keeping the extension alive.
     register_extension(&config.runtime_api);
 
     let nats_config = factory::resolve_nats_config(config.secret_url.as_deref(), &config.nats_url);
@@ -88,17 +83,73 @@ fn main() {
     };
 
     let http = ureq::Agent::new();
-
     if let Err(e) = wait_for_agent(&http, config.agent_port) {
         tracing::error!(error = %e, "Agent did not become ready");
         std::process::exit(1);
     }
 
-    tracing::info!(event = "adapter.started", agent = %config.agent, "Entering Runtime API loop");
+    let lambda_queue: Arc<dyn MessageQueue + Send + Sync> = Arc::new(
+        lambda_runtime_queue::LambdaRuntimeQueue::new(queue, &config.runtime_api),
+    );
 
-    if let Err(e) = runtime_api_loop(&config, &http, &queue, &registry) {
-        tracing::error!(error = %e, "Runtime API loop exited with error");
-        std::process::exit(1);
+    tracing::info!(event = "adapter.started", agent = %config.agent, "Entering dispatch loop");
+    dispatch_loop(&config.agent, config.agent_port, &lambda_queue, &registry);
+}
+
+/// Receive invokes from the Lambda Runtime API, dispatch to agent, send complete.
+fn dispatch_loop(
+    function_name: &str,
+    agent_port: u16,
+    queue: &Arc<dyn MessageQueue + Send + Sync>,
+    registry: &Arc<dyn vlinder_core::domain::Registry>,
+) {
+    let agent_id = vlinder_core::domain::AgentName::new(function_name);
+    loop {
+        match queue.receive_invoke(&agent_id) {
+            Ok((key, invoke, ack)) => {
+                let vlinder_core::domain::DataMessageKind::Invoke { ref agent, .. } = key.kind
+                else {
+                    continue;
+                };
+
+                match shared::dispatch_invoke(queue, registry, agent_port, &key, &invoke) {
+                    Ok(result) => {
+                        let region = std::env::var("AWS_REGION")
+                            .or_else(|_| std::env::var("AWS_DEFAULT_REGION"))
+                            .unwrap_or_else(|_| "unknown".to_string());
+                        let diagnostics =
+                            build_lambda_diagnostics(function_name, &region, result.duration_ms);
+                        shared::send_complete(
+                            queue.as_ref(),
+                            &key,
+                            agent,
+                            result.output,
+                            result.state,
+                            diagnostics,
+                        );
+                    }
+                    Err(e) => {
+                        tracing::error!(error = %e, "Dispatch failed");
+                        shared::send_complete(
+                            queue.as_ref(),
+                            &key,
+                            agent,
+                            format!("[error] {e}").into_bytes(),
+                            None,
+                            vlinder_core::domain::RuntimeDiagnostics::placeholder(0),
+                        );
+                    }
+                }
+                if let Err(e) = ack() {
+                    tracing::error!(error = %e, "Failed to ack invocation");
+                }
+            }
+            Err(QueueError::Timeout) => {}
+            Err(e) => {
+                tracing::error!(error = %e, "receive_invoke failed");
+                std::process::exit(1);
+            }
+        }
     }
 }
 
@@ -168,172 +219,4 @@ fn wait_for_agent(http: &ureq::Agent, port: u16) -> Result<(), String> {
         }
         std::thread::sleep(Duration::from_millis(100));
     }
-}
-
-/// Main loop: poll Lambda Runtime API, dispatch to agent, respond.
-fn runtime_api_loop(
-    config: &AdapterConfig,
-    http: &ureq::Agent,
-    queue: &Arc<dyn MessageQueue + Send + Sync>,
-    registry: &Arc<dyn Registry>,
-) -> Result<(), String> {
-    let next_url = format!(
-        "http://{}/2018-06-01/runtime/invocation/next",
-        config.runtime_api,
-    );
-
-    loop {
-        // Block until Lambda dispatches an invocation.
-        let response = http
-            .get(&next_url)
-            .call()
-            .map_err(|e| format!("GET invocation/next failed: {e}"))?;
-
-        let request_id = response
-            .header("Lambda-Runtime-Aws-Request-Id")
-            .unwrap_or("unknown")
-            .to_string();
-
-        let mut body = Vec::new();
-        response
-            .into_reader()
-            .read_to_end(&mut body)
-            .map_err(|e| format!("failed to read invocation body: {e}"))?;
-
-        tracing::info!(
-            event = "adapter.invocation",
-            request_id = %request_id,
-            body_bytes = body.len(),
-            "Received Lambda invocation"
-        );
-
-        match handle_invocation(config, http, queue, registry, &request_id, &body) {
-            Ok(output) => {
-                let response_url = format!(
-                    "http://{}/2018-06-01/runtime/invocation/{}/response",
-                    config.runtime_api, request_id,
-                );
-                http.post(&response_url)
-                    .send_bytes(&output)
-                    .map_err(|e| format!("POST invocation response failed: {e}"))?;
-            }
-            Err(e) => {
-                tracing::error!(
-                    event = "adapter.invocation_error",
-                    request_id = %request_id,
-                    error = %e,
-                    "Invocation failed"
-                );
-                let error_url = format!(
-                    "http://{}/2018-06-01/runtime/invocation/{}/error",
-                    config.runtime_api, request_id,
-                );
-                let _ = http
-                    .post(&error_url)
-                    .send_bytes(build_error_body(&e).as_bytes());
-            }
-        }
-    }
-}
-
-/// Handle a single Lambda invocation.
-///
-/// The invocation body is a JSON-serialized `LambdaInvokePayload` (sent by the daemon).
-/// We deserialize it, start a `ProviderServer`, POST the payload to the agent,
-/// build diagnostics, send complete to NATS, and return the agent's output.
-fn handle_invocation(
-    config: &AdapterConfig,
-    http: &ureq::Agent,
-    queue: &Arc<dyn MessageQueue + Send + Sync>,
-    registry: &Arc<dyn Registry>,
-    request_id: &str,
-    body: &[u8],
-) -> Result<Vec<u8>, String> {
-    let payload = deserialize_invoke(body)?;
-    let key = payload.key;
-    let invoke_msg = payload.msg;
-    let started_at = Instant::now();
-
-    // Extract routing from key
-    let vlinder_core::domain::DataMessageKind::Invoke { agent, harness, .. } = &key.kind else {
-        return Err("expected Invoke".into());
-    };
-    let agent_name = agent.as_str().to_string();
-    let harness = *harness;
-
-    // Look up agent for provider host table and initial state.
-    let agent = registry
-        .get_agent_by_name(&agent_name)
-        .ok_or_else(|| format!("agent '{agent_name}' not found in registry"))?;
-    let hosts = build_hosts(&agent);
-    let initial_state = if agent.object_storage.is_some() {
-        Some(invoke_msg.state.clone().unwrap_or_default())
-    } else {
-        None
-    };
-
-    // Spawn provider server — drops when this function returns.
-    let state = std::sync::Arc::new(std::sync::RwLock::new(initial_state));
-    let handler = InvokeHandler::new(
-        queue.clone(),
-        key.branch,
-        key.submission.clone(),
-        key.session.clone(),
-        vlinder_core::domain::AgentName::new(&agent_name),
-        std::sync::Arc::clone(&state),
-    );
-    let provider_server = ProviderServer::start(handler, hosts, state, 3544);
-
-    // POST payload to agent on localhost.
-    let agent_url = format!("http://127.0.0.1:{}/invoke", config.agent_port);
-    let agent_response = http
-        .post(&agent_url)
-        .send_bytes(&invoke_msg.payload)
-        .map_err(|e| format!("POST to agent failed: {e}"))?;
-
-    let mut output = Vec::new();
-    agent_response
-        .into_reader()
-        .read_to_end(&mut output)
-        .map_err(|e| format!("failed to read agent response: {e}"))?;
-
-    let final_state = provider_server.final_state();
-    let duration_ms = u64::try_from(started_at.elapsed().as_millis()).unwrap_or(u64::MAX);
-
-    // Determine region from env (set by Lambda service).
-    let region = std::env::var("AWS_REGION")
-        .or_else(|_| std::env::var("AWS_DEFAULT_REGION"))
-        .unwrap_or_else(|_| "unknown".to_string());
-
-    let diagnostics = build_lambda_diagnostics(&config.agent, &region, duration_ms);
-    let complete_key = vlinder_core::domain::DataRoutingKey {
-        session: key.session.clone(),
-        branch: key.branch,
-        submission: key.submission.clone(),
-        kind: vlinder_core::domain::DataMessageKind::Complete {
-            agent: vlinder_core::domain::AgentName::new(&agent_name),
-            harness,
-        },
-    };
-    let complete = vlinder_core::domain::CompleteMessage {
-        id: vlinder_core::domain::MessageId::new(),
-        dag_id: vlinder_core::domain::DagNodeId::root(),
-        state: final_state,
-        diagnostics,
-        payload: output.clone(),
-    };
-
-    queue
-        .send_complete(complete_key, complete)
-        .map_err(|e| format!("failed to send complete to NATS: {e}"))?;
-
-    tracing::info!(
-        event = "adapter.invocation_complete",
-        request_id = %request_id,
-        duration_ms = duration_ms,
-        output_bytes = output.len(),
-        "Invocation complete"
-    );
-
-    Ok(output)
 }
