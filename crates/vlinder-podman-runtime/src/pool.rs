@@ -690,20 +690,17 @@ mod tests {
         assert_eq!(name, "vlinder-mount-support-knowledge");
     }
 
-    #[test]
-    fn redeploy_transitions_existing_agent_to_live() {
-        use vlinder_core::domain::{
-            AgentManifest, AgentName, AgentState, AgentStatus, RequirementsConfig,
-        };
+    use vlinder_core::domain::{
+        AgentManifest, AgentName, AgentState, AgentStatus, RequirementsConfig,
+    };
 
-        let mut runtime = test_runtime();
-
+    fn register_test_agent(runtime: &mut ContainerRuntime, name: &str) {
         let manifest = AgentManifest {
-            name: "my-agent".to_string(),
+            name: name.to_string(),
             description: "test agent".to_string(),
             source: None,
             runtime: "container".to_string(),
-            executable: "localhost/my-image:latest".to_string(),
+            executable: format!("localhost/{name}:latest"),
             requirements: RequirementsConfig {
                 models: HashMap::new(),
                 services: HashMap::new(),
@@ -715,24 +712,126 @@ mod tests {
         };
         runtime.registry().register_runtime(RuntimeType::Container);
         runtime.registry().register_manifest(manifest).unwrap();
+    }
 
-        // First deploy: tick should start the pod and transition to Live
-        let name = AgentName::new("my-agent");
-        let deploying =
-            AgentState::registered(name.clone()).transition(AgentStatus::Deploying, None);
-        runtime.repo.append_agent_state(&deploying).unwrap();
+    fn set_agent_status(runtime: &ContainerRuntime, name: &str, status: AgentStatus) {
+        let state = AgentState::registered(AgentName::new(name)).transition(status, None);
+        runtime.repo.append_agent_state(&state).unwrap();
+    }
+
+    fn get_agent_status(runtime: &ContainerRuntime, name: &str) -> AgentStatus {
+        runtime.repo.get_agent_state(name).unwrap().unwrap().status
+    }
+
+    #[test]
+    fn deploy_transitions_to_live() {
+        let mut runtime = test_runtime();
+        register_test_agent(&mut runtime, "my-agent");
+        set_agent_status(&runtime, "my-agent", AgentStatus::Deploying);
 
         runtime.tick();
-        let state = runtime.repo.get_agent_state("my-agent").unwrap().unwrap();
-        assert_eq!(state.status, AgentStatus::Live);
+        assert_eq!(get_agent_status(&runtime, "my-agent"), AgentStatus::Live);
+    }
+
+    #[test]
+    fn redeploy_transitions_existing_agent_to_live() {
+        let mut runtime = test_runtime();
+        register_test_agent(&mut runtime, "my-agent");
+        set_agent_status(&runtime, "my-agent", AgentStatus::Deploying);
+
+        runtime.tick();
+        assert_eq!(get_agent_status(&runtime, "my-agent"), AgentStatus::Live);
 
         // Re-deploy: set back to Deploying
-        let redeploying = AgentState::registered(name).transition(AgentStatus::Deploying, None);
-        runtime.repo.append_agent_state(&redeploying).unwrap();
+        set_agent_status(&runtime, "my-agent", AgentStatus::Deploying);
 
-        // Second tick should transition back to Live (not get stuck)
         runtime.tick();
-        let state = runtime.repo.get_agent_state("my-agent").unwrap().unwrap();
-        assert_eq!(state.status, AgentStatus::Live);
+        assert_eq!(get_agent_status(&runtime, "my-agent"), AgentStatus::Live);
+    }
+
+    #[test]
+    fn delete_transitions_to_deleted() {
+        let mut runtime = test_runtime();
+        register_test_agent(&mut runtime, "my-agent");
+        set_agent_status(&runtime, "my-agent", AgentStatus::Deploying);
+
+        // Deploy first
+        runtime.tick();
+        assert_eq!(get_agent_status(&runtime, "my-agent"), AgentStatus::Live);
+
+        // Delete
+        set_agent_status(&runtime, "my-agent", AgentStatus::Deleting);
+        runtime.tick();
+        assert_eq!(get_agent_status(&runtime, "my-agent"), AgentStatus::Deleted);
+    }
+
+    #[test]
+    fn failed_start_transitions_to_failed() {
+        use crate::podman_client::PodmanError;
+
+        struct FailingPodmanClient;
+        impl PodmanClient for FailingPodmanClient {
+            fn engine_version(&self) -> Option<semver::Version> {
+                Some(semver::Version::new(5, 0, 0))
+            }
+            fn image_digest(&self, _: &ImageRef) -> Option<ImageDigest> {
+                None
+            }
+            fn pod_create(&self, _: &str, _: &[String]) -> Result<PodId, PodmanError> {
+                Err(PodmanError::Run("simulated failure".into()))
+            }
+            fn container_in_pod(
+                &self,
+                _: RunTarget<'_>,
+                _: &PodId,
+                _: &[(&str, &str)],
+                _: &[(&str, &str)],
+            ) -> Result<ContainerId, PodmanError> {
+                Ok(ContainerId::new("x"))
+            }
+            fn volume_create(
+                &self,
+                _: &str,
+                _: &str,
+                _: &[(&str, &str)],
+            ) -> Result<(), PodmanError> {
+                Ok(())
+            }
+            fn volume_rm(&self, _: &str) {}
+            fn pod_start(&self, _: &PodId) -> Result<(), PodmanError> {
+                Ok(())
+            }
+            fn pod_stop_and_remove(&self, _: &PodId, _: u32) {}
+        }
+
+        let mut runtime = ContainerRuntime::new(
+            &test_config(),
+            test_registry(),
+            test_repo(),
+            Box::new(FailingPodmanClient),
+        );
+        register_test_agent(&mut runtime, "my-agent");
+        set_agent_status(&runtime, "my-agent", AgentStatus::Deploying);
+
+        runtime.tick();
+        assert_eq!(get_agent_status(&runtime, "my-agent"), AgentStatus::Failed);
+    }
+
+    #[test]
+    fn orphan_pod_is_removed() {
+        let mut runtime = test_runtime();
+        register_test_agent(&mut runtime, "my-agent");
+        set_agent_status(&runtime, "my-agent", AgentStatus::Deploying);
+
+        // Deploy
+        runtime.tick();
+        assert!(runtime.pods.contains_key("my-agent"));
+
+        // Remove from registry (simulate external deletion)
+        runtime.registry().delete_agent("my-agent").unwrap();
+
+        // Tick should clean up the orphaned pod
+        runtime.tick();
+        assert!(!runtime.pods.contains_key("my-agent"));
     }
 }
